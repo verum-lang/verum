@@ -967,6 +967,178 @@ public fn sum_squared_error_axis<T: Numeric>(
     @vbc(TENSOR_REDUCE, square_diff(pred, target).data, ReduceOp.Sum, axis)
 }
 
+// Smooth L1 loss (Huber loss with delta=1): quadratic for small
+// errors, linear for large. Used in object-detection regression.
+// #74 Tier B — `0.5 * d^2` for `|d| <= delta`, else
+// `delta * (|d| - 0.5 * delta)` where `d = pred - target`.
+// Composes `sub` + `tensor_abs` + `square` + element-wise
+// `where_tensor` + `mean`.
+public fn huber_loss<T: Numeric>(
+    pred: &DynTensor<T>,
+    target: &DynTensor<T>,
+    delta: T,
+) -> T {
+    let d = sub(pred, target);
+    let abs_d = tensor_abs(&d);
+    let half = mul_scalar(&square(&d), (0.5 as Float) as T);
+    let linear_term = sub_scalar(&abs_d, (0.5 as Float) as T * delta);
+    let linear = mul_scalar(&linear_term, delta);
+    let mask = le(&abs_d, &full_like(&abs_d, delta));
+    mean(&where_tensor(&mask, &half, &linear))
+}
+
+// Smooth-L1 loss with delta=1.
+// #74 Tier B — convenience wrapper for the canonical
+// detection-paper choice.
+public fn smooth_l1_loss<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> T {
+    huber_loss(pred, target, 1 as T)
+}
+
+// Cosine-similarity loss: `1 - cosine_similarity(a, b)`.
+// #74 Tier B — drives embeddings to alignment when used as a loss.
+// Composes the existing `cosine_similarity` for the scalar
+// arithmetic; the result is in [0, 2] (0 = perfectly aligned,
+// 2 = anti-aligned).
+public fn cosine_similarity_loss<T: Numeric>(
+    a: &DynTensor<T>,
+    b: &DynTensor<T>,
+) -> T {
+    (1 as T) - cosine_similarity(a, b)
+}
+
+// =============================================================================
+// Classification metrics (#74 Tier B)
+// =============================================================================
+
+// Element-wise accuracy: `mean(pred == target)`.
+// #74 Tier B — computes the fraction of matching elements. Both
+// inputs must be the same shape; output is a scalar Float in
+// [0, 1]. Composes `eq` + cast-to-numeric + `mean`.
+public fn accuracy<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> Float {
+    let mask = eq(pred, target);
+    let counts: DynTensor<USize> = mask.cast();
+    (sum(&counts) as Float) / (pred.numel() as Float)
+}
+
+// Top-k accuracy for one-hot / categorical targets.
+// #74 Tier B — `pred` is a [N, C] tensor of scores; `target` is
+// a [N] tensor of class indices. Returns the fraction of rows
+// where the target index is among the top-k predictions.
+// Composes `tensor_topk` + `eq` (per-row) + `any` + `mean`.
+public fn top_k_accuracy<T: Numeric>(
+    pred: &DynTensor<T>,
+    target: &DynTensor<USize>,
+    k: USize,
+) -> Float {
+    assert(pred.rank() == 2, "top_k_accuracy requires [N, C] pred");
+    assert(target.rank() == 1, "top_k_accuracy requires [N] target");
+    let topk = @vbc(TENSOR_TOPK, pred.data, k, -1 as ISize);
+    // topk is the indices tensor [N, k]
+    let target_2d = unsqueeze(target, 1);
+    let matches = eq(&topk, &target_2d);  // [N, k]
+    // any(axis=-1) → [N], then mean → scalar
+    let row_any: DynTensor<Bool> = @vbc(TENSOR_REDUCE, matches.data, ReduceOp.Any, -1 as ISize);
+    let counts: DynTensor<USize> = row_any.cast();
+    (sum(&counts) as Float) / (target.numel() as Float)
+}
+
+// True positives (TP): count of (pred_positive AND target_positive).
+// #74 Tier B — building block for precision / recall / F1.
+public fn true_positives<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> USize {
+    let zeros = full_like(pred, 0 as T);
+    let pp = gt(pred, &zeros);     // pred > 0
+    let tp = gt(target, &zeros);   // target > 0
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tp.data, BinaryOp.And);
+    let counts: DynTensor<USize> = both.cast();
+    sum(&counts)
+}
+
+// False positives: pred_positive AND NOT target_positive.
+public fn false_positives<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> USize {
+    let zeros_p = full_like(pred, 0 as T);
+    let zeros_t = full_like(target, 0 as T);
+    let pp = gt(pred, &zeros_p);
+    let tn = le(target, &zeros_t);
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pp.data, tn.data, BinaryOp.And);
+    let counts: DynTensor<USize> = both.cast();
+    sum(&counts)
+}
+
+// False negatives: NOT pred_positive AND target_positive.
+public fn false_negatives<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> USize {
+    let zeros_p = full_like(pred, 0 as T);
+    let zeros_t = full_like(target, 0 as T);
+    let pn = le(pred, &zeros_p);
+    let tp = gt(target, &zeros_t);
+    let both: DynTensor<Bool> = @vbc(TENSOR_BINOP, pn.data, tp.data, BinaryOp.And);
+    let counts: DynTensor<USize> = both.cast();
+    sum(&counts)
+}
+
+// Precision: TP / (TP + FP). Returns 0 when the denominator is 0
+// (no positive predictions); callers can pre-check via TP+FP if
+// the distinction matters for their pipeline.
+// #74 Tier B — composes the TP / FP helpers above.
+public fn precision<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> Float {
+    let tp = true_positives(pred, target);
+    let fp = false_positives(pred, target);
+    let denom = tp + fp;
+    if denom == 0 { 0.0 } else { (tp as Float) / (denom as Float) }
+}
+
+// Recall: TP / (TP + FN). Returns 0 when the denominator is 0
+// (no actual positives).
+public fn recall<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> Float {
+    let tp = true_positives(pred, target);
+    let fn_count = false_negatives(pred, target);
+    let denom = tp + fn_count;
+    if denom == 0 { 0.0 } else { (tp as Float) / (denom as Float) }
+}
+
+// F1 score: harmonic mean of precision and recall.
+// #74 Tier B — `2 * P * R / (P + R)`. Returns 0 when both P and
+// R are 0 (which happens when there are no true positives at
+// all — the model agreed with target on the negative class only).
+public fn f1_score<T: Numeric>(pred: &DynTensor<T>, target: &DynTensor<T>) -> Float {
+    let p = precision(pred, target);
+    let r = recall(pred, target);
+    if p + r == 0.0 { 0.0 } else { 2.0 * p * r / (p + r) }
+}
+
+// =============================================================================
+// Random sampling helpers (#74 Tier B)
+// =============================================================================
+
+// Bernoulli sampling: returns a tensor of 0/1 values with each
+// element being 1 with probability `p`.
+// #74 Tier B — composes `rand` (uniform [0,1)) + comparison
+// vs. threshold. The probabilistic semantics depend on the
+// `rand` primitive's RNG; for deterministic / seeded sampling
+// callers should plumb their own seed through `rand`'s thread-
+// local state (TENSOR_RAND honours the `VERUM_RAND_SEED` env
+// var when set).
+public fn bernoulli<T: Numeric>(shape: &[USize], p: Float) -> DynTensor<T> {
+    let u = rand<T>(shape);
+    let threshold = full_like(&u, p as T);
+    let mask = lt(&u, &threshold);
+    { let res: DynTensor<T> = mask.cast(); res }
+}
+
+// Categorical sample by argmax over softmax-of-logits + Gumbel
+// noise (Gumbel-max trick). Returns class indices [N].
+// #74 Tier B — for `logits: [N, C]`, samples one class per row
+// approximately ∝ softmax(logits). Composes `rand` (uniform) +
+// `tensor_log` twice (Gumbel = -log(-log(U))) + `add` +
+// `argmax_axis`.
+public fn categorical_sample<T: Numeric>(logits: &DynTensor<T>) -> DynTensor<USize> {
+    let u = rand<T>(logits.shape());
+    // Gumbel(0, 1) = -log(-log(U)).
+    let neg_log_u = neg(&tensor_log(&u));
+    let gumbel = neg(&tensor_log(&neg_log_u));
+    let perturbed = add(logits, &gumbel);
+    argmax_axis(&perturbed, -1)
+}
+
 // Weighted mean: `sum(x * weights) / sum(weights)`.
 // #74 Tier B — composes `mul` + `sum` + scalar division.
 // `weights` must broadcast with `x`. The denominator is the
@@ -1433,7 +1605,7 @@ public fn count_nonzero<T: Numeric>(x: &DynTensor<T>) -> USize {
     let zeros = full_like(x, 0 as T);
     let mask = ne(x, &zeros);
     // bool tensor → numeric via cast; sum gives the count.
-    let counts = cast(&mask, dtype_of::<USize>());
+    let counts: DynTensor<USize> = mask.cast();
     sum(&counts)
 }
 
@@ -1865,6 +2037,28 @@ public fn stack<T: Numeric>(tensors: &[&DynTensor<T>], axis: ISize) -> DynTensor
         .collect();
     let refs: List<&DynTensor<T>> = expanded.iter().collect();
     cat(&refs, axis)
+}
+
+// Stack tensors row-wise (axis 0). NumPy-style alias.
+// #74 Tier B — `cat(tensors, 0)`. Inputs are concatenated along
+// axis 0; for 1-D tensors callers may prefer `vstack` (which
+// promotes 1-D inputs to row vectors first).
+public fn vstack<T: Numeric>(tensors: &[&DynTensor<T>]) -> DynTensor<T> {
+    cat(tensors, 0)
+}
+
+// Stack tensors column-wise (axis 1).
+// #74 Tier B — `cat(tensors, 1)`.
+public fn hstack<T: Numeric>(tensors: &[&DynTensor<T>]) -> DynTensor<T> {
+    cat(tensors, 1)
+}
+
+// Stack tensors along the depth axis (axis 2). Aliases NumPy's
+// `dstack`. Useful for image / volume processing where the
+// depth axis is the channel.
+// #74 Tier B — `cat(tensors, 2)`.
+public fn dstack<T: Numeric>(tensors: &[&DynTensor<T>]) -> DynTensor<T> {
+    cat(tensors, 2)
 }
 
 // Split tensor into chunks along axis
