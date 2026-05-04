@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: database, postgres, spindle, codec, numeric
+// @timeout: 30000
+//
+// Type-check exercise for the PG NUMERIC binary codec.
+// Validates that:
+//
+//   * `decode_numeric(&ArenaSlice) -> Result<PgNumeric, DbError>` is
+//     callable with the canonical signature.
+//   * `PgNumeric.to_text(&self) -> Text` produces a Text value.
+//   * `PgNumeric.{is_nan,is_pos_inf,is_neg_inf,is_negative,is_zero}`
+//     return Bool.
+//   * `encode_numeric_from_int(buf, arena, i64) -> Bool` is callable.
+//   * `PG_NUMERIC_{POS,NEG,NAN,PINF,NINF}` constants visible.
+//   * `supports_binary(PG_TYPE_NUMERIC)` returns true.
+
+mount core.*;
+mount collections.List;
+mount core.database.common.error.DbError;
+mount core.database.common.types.{ArenaSlice, ArenaWireBuf};
+mount core.database.common.arena.SpindleArena;
+mount core.database.postgres.wire.codec.{
+    PgNumeric,
+    decode_numeric,
+    encode_numeric_from_int,
+    supports_binary,
+    PG_TYPE_NUMERIC,
+    PG_NUMERIC_POS, PG_NUMERIC_NEG,
+    PG_NUMERIC_NAN, PG_NUMERIC_PINF, PG_NUMERIC_NINF,
+};
+
+fn check_decode_signature(slice: &ArenaSlice) -> Result<PgNumeric, DbError> {
+    decode_numeric(slice)
+}
+
+fn check_text_render(n: &PgNumeric) -> Text {
+    n.to_text()
+}
+
+fn check_predicates(n: &PgNumeric) -> Bool {
+    n.is_nan()
+        || n.is_pos_inf()
+        || n.is_neg_inf()
+        || n.is_negative()
+        || n.is_zero()
+}
+
+fn check_encode(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, value: Int) -> Bool {
+    encode_numeric_from_int(buf, arena, value)
+}
+
+fn check_constants() {
+    assert(PG_NUMERIC_POS  == 0x0000);
+    assert(PG_NUMERIC_NEG  == 0x4000);
+    assert(PG_NUMERIC_NAN  == 0xC000);
+    assert(PG_NUMERIC_PINF == 0xD000);
+    assert(PG_NUMERIC_NINF == 0xF000);
+    assert(supports_binary(PG_TYPE_NUMERIC));
+}
+
+fn main() {
+    check_constants();
+}
