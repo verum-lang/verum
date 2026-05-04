@@ -4825,10 +4825,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::instruction::get_or_declare_internal_strtod(self.context, module)
     }
 
+    /// Materialize `verum_internal_f64_to_decimal` (libc-free
+    /// f64 → ASCII decimal writer) via `instruction.rs::
+    /// get_or_declare_internal_f64_to_decimal`. Same bridge pattern
+    /// as the i64-to-decimal and strtod bridges — emits FULL body
+    /// on first call; idempotent thereafter. Replaces the
+    /// `snprintf(buf, _, "%g", value)` call in
+    /// `emit_verum_float_to_text` (T-DEFER-AOT-NO-LIBC float-format
+    /// half).
+    fn get_or_declare_internal_f64_to_decimal(
+        &self,
+        module: &Module<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        super::instruction::get_or_declare_internal_f64_to_decimal(self.context, module)
+    }
+
     /// verum_float_to_text(value: f64) -> i64 (returns Text object pointer as i64)
     ///
-
-    /// Converts float to Text using snprintf(buf, 64, "%g", value).
+    /// **Libc-free** (T-DEFER-AOT-NO-LIBC float-format half):
+    /// converts f64 → Text via `verum_internal_f64_to_decimal`
+    /// (open-coded LLVM IR — see `instruction.rs`). Replaces the
+    /// previous `snprintf(buf, 64, "%g", value)` call. The new
+    /// emitter writes ASCII decimal digits directly into a stack
+    /// buffer with no libc dependency. V0 boundary: no scientific
+    /// notation, |value| > i64::MAX saturates, |value| < 1e-6
+    /// rounds to integer; documented in instruction.rs above the
+    /// helper.
     fn emit_verum_float_to_text(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_float_to_text") {
             if f.count_basic_blocks() > 0 {
@@ -4839,7 +4861,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let f64_type = ctx.f64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[f64_type.into()], false);
         let func = module
@@ -4855,52 +4876,51 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_internal("missing param 0")?
             .into_float_value();
 
-        // Stack buffer for snprintf
-        let buf_size: u64 = 64;
+        // Stack buffer for our libc-free formatter.  The helper
+        // writes at most "-9223372036854775808.999999" + slack ≈
+        // 28 bytes; 32 leaves room without burning stack.
+        let buf_size: u64 = 32;
         let buf = builder
             .build_array_alloca(ctx.i8_type(), i64_type.const_int(buf_size, false), "buf")
             .or_llvm_err()?;
 
-        // snprintf(buf, 64, "%g", value)
-        let snprintf_fn = self.get_or_declare_snprintf(module);
-        let fmt = builder
-            .build_global_string_ptr("%g", "float_fmt")
-            .or_llvm_err()?;
-        let written = builder
-            .build_call(
-                snprintf_fn,
-                &[
-                    buf.into(),
-                    i64_type.const_int(buf_size, false).into(),
-                    fmt.as_pointer_value().into(),
-                    value.into(),
-                ],
-                "written",
-            )
+        // verum_internal_f64_to_decimal(buf, value) -> i64 length.
+        // Emitted as full-bodied internal-linkage helper at first
+        // call; subsequent calls re-use the same emit.
+        let f64_to_dec = self.get_or_declare_internal_f64_to_decimal(module);
+        let len = builder
+            .build_call(f64_to_dec, &[buf.into(), value.into()], "len")
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .or_internal("call returned void")?
             .into_int_value();
 
-        let len = builder
-            .build_int_s_extend(written, i64_type, "len")
-            .or_llvm_err()?;
-
-        // Allocate new buffer: malloc(len + 1)
+        // Allocate new buffer: malloc(len + 1) for NUL terminator
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
         let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
 
-        // memcpy(new_buf, buf, len + 1)
+        // memcpy(new_buf, buf, len) — only the digit bytes; NUL
+        // gets stamped explicitly below (helper does NOT NUL-stamp).
         let memcpy_fn = self.get_or_declare_memcpy(module);
         builder
             .build_call(
                 memcpy_fn,
-                &[new_buf.into(), buf.into(), len_plus1.into()],
+                &[new_buf.into(), buf.into(), len.into()],
                 "",
             )
+            .or_llvm_err()?;
+
+        // Stamp NUL at new_buf[len].
+        let nul_p = unsafe {
+            builder
+                .build_gep(ctx.i8_type(), new_buf, &[len], "nul_p")
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(nul_p, ctx.i8_type().const_zero())
             .or_llvm_err()?;
 
         // Allocate Text object

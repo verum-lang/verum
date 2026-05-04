@@ -972,6 +972,374 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     func
 }
 
+/// Get or declare a libc-free `f64 → ASCII decimal` writer.
+///
+/// **Libc-free** (T-DEFER-AOT-NO-LIBC float-format half):
+/// open-coded f64 → decimal-bytes emission as
+/// `verum_internal_f64_to_decimal` (internal-linkage). Replaces
+/// `snprintf(buf, _, "%g", value)` for the float-formatting
+/// path used by `verum_float_to_text` (Text.from_float).
+///
+/// Signature: `(buf: ptr, value: f64) -> i64`
+///   * Caller supplies `buf` — must hold at least 32 bytes
+///     (`-9223372036854775808.999999` = 28 chars + slack).
+///   * Returns: number of bytes written. No NUL terminator.
+///
+/// V0 algorithm:
+///
+///   1. Bit-pattern check via bitcast f64 → i64:
+///      - `(bits & 0x7FF0000000000000) == 0x7FF0000000000000`
+///        ⇒ NaN or ±Inf:
+///        - mantissa-bits == 0   ⇒ ±Inf — write "Inf" / "-Inf"
+///        - mantissa-bits != 0   ⇒ NaN — write "NaN"
+///   2. Special-case ±0 ⇒ write "0".
+///   3. Sign extract via bit-shift; absolute value via `fabs`-
+///      style flip-mantissa-and-exponent (mask 0x7FFF…).
+///   4. Integer part via `fptosi` (truncate-toward-zero into i64).
+///      For |value| ≥ i64::MAX the cast saturates — V0 emits
+///      whatever fptosi returns; consumer should special-case if
+///      they need that range. Documented in the V0 boundary.
+///   5. Format integer part via `verum_internal_i64_to_decimal`
+///      (already shipped at 3a111f8e).
+///   6. Fractional part = `abs_v - sitofp(int_part)`. Multiply
+///      by `1e6`, cast to i64, format as 6-digit zero-padded
+///      decimal. Strip trailing zeros for cleanliness.
+///   7. Return total length.
+///
+/// V0 boundary (explicit):
+///   * No scientific notation (V1 = Grisu/Ryū-grade).
+///   * |value| > i64::MAX ≈ 9.2e18 ⇒ integer part saturates
+///     (caller of Text.from_float on huge values gets a
+///     truncated representation).
+///   * |value| < 1e-6 ⇒ fractional rounds to 0, output is just
+///     the integer part (typically `"0"`).
+///   * No round-half-to-even bit-perfect rounding.
+///   * Special values: ±Inf → "Inf"/"-Inf"; NaN → "NaN"; ±0 → "0".
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+pub(crate) fn get_or_declare_internal_f64_to_decimal<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_f64_to_decimal";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let f64_type = llvm_ctx.f64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i64_type.fn_type(&[ptr_type.into(), f64_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    // Forward-declare the i64-to-decimal helper we're going to
+    // call for the integer part + fractional digits.
+    let i64_to_dec = get_or_declare_internal_i64_to_decimal(llvm_ctx, module);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let check_nan_inf = llvm_ctx.append_basic_block(func, "check_nan_inf");
+    let is_nan = llvm_ctx.append_basic_block(func, "is_nan");
+    let nan_write = llvm_ctx.append_basic_block(func, "nan_write");
+    let is_inf = llvm_ctx.append_basic_block(func, "is_inf");
+    let inf_neg = llvm_ctx.append_basic_block(func, "inf_neg");
+    let inf_pos = llvm_ctx.append_basic_block(func, "inf_pos");
+    let finite = llvm_ctx.append_basic_block(func, "finite");
+    let zero_branch = llvm_ctx.append_basic_block(func, "zero");
+    let nonzero = llvm_ctx.append_basic_block(func, "nonzero");
+    let after_sign = llvm_ctx.append_basic_block(func, "after_sign");
+    let format_int = llvm_ctx.append_basic_block(func, "format_int");
+    let check_frac = llvm_ctx.append_basic_block(func, "check_frac");
+    let format_frac = llvm_ctx.append_basic_block(func, "format_frac");
+    let pad_loop = llvm_ctx.append_basic_block(func, "pad_loop");
+    let pad_advance = llvm_ctx.append_basic_block(func, "pad_advance");
+    let after_pad = llvm_ctx.append_basic_block(func, "after_pad");
+    let strip_loop = llvm_ctx.append_basic_block(func, "strip_loop");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+
+    let buf_param = func.get_first_param().expect("buf").into_pointer_value();
+    let val_param = func.get_nth_param(1).expect("value").into_float_value();
+
+    let zero_i64 = i64_type.const_zero();
+    let one_i64 = i64_type.const_int(1, false);
+    let six_i64 = i64_type.const_int(6, false);
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+    let dot_ch = i8_type.const_int(b'.' as u64, false);
+    let minus_ch = i8_type.const_int(b'-' as u64, false);
+    let zero_f64 = f64_type.const_float(0.0);
+    let abs_mask = i64_type.const_int(0x7FFF_FFFF_FFFF_FFFF_u64, false);
+    let exp_mask = i64_type.const_int(0x7FF0_0000_0000_0000_u64, false);
+    let mant_mask = i64_type.const_int(0x000F_FFFF_FFFF_FFFF_u64, false);
+    let one_e6 = f64_type.const_float(1_000_000.0);
+
+    // entry → check_nan_inf
+    builder.position_at_end(entry);
+    builder.build_unconditional_branch(check_nan_inf).expect("→ chk");
+
+    // check_nan_inf: bits = bitcast(value, i64); exp = bits & 0x7FF…0
+    builder.position_at_end(check_nan_inf);
+    let bits = builder
+        .build_bit_cast(val_param, i64_type, "bits")
+        .expect("bitcast")
+        .into_int_value();
+    let exp_field = builder
+        .build_and(bits, exp_mask, "exp_field")
+        .expect("exp&");
+    let is_special = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, exp_field, exp_mask, "is_special")
+        .expect("special");
+    builder.build_conditional_branch(is_special, is_nan, finite).expect("special br");
+
+    // is_nan branch: differentiate NaN from Inf via mantissa-bits.
+    //   * mantissa == 0  ⇒ ±Inf (continue to is_inf)
+    //   * mantissa != 0  ⇒ NaN (jump to nan_write)
+    builder.position_at_end(is_nan);
+    let mant_field = builder.build_and(bits, mant_mask, "mant_field").expect("mant&");
+    let is_zero_mant = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, mant_field, zero_i64, "mant=0")
+        .expect("mant zero");
+    builder.build_conditional_branch(is_zero_mant, is_inf, nan_write).expect("nan/inf br");
+
+    // nan_write: write "NaN" → return 3.  Direct return (no
+    // detour through return_val) — keeps the phi for return_val
+    // free of a NaN incoming arc.
+    builder.position_at_end(nan_write);
+    let nan_chars = [b'N', b'a', b'N'];
+    write_literal(&builder, i8_type, buf_param, zero_i64, &nan_chars);
+    builder.build_return(Some(&i64_type.const_int(3, false))).expect("ret 3 NaN");
+
+    // is_inf: differentiate ±Inf via sign bit.
+    builder.position_at_end(is_inf);
+    let sign_bit = builder
+        .build_right_shift(bits, i64_type.const_int(63, false), false, "sign_bit")
+        .expect("shr");
+    let is_neg_sign = builder
+        .build_int_compare(verum_llvm::IntPredicate::NE, sign_bit, zero_i64, "is_neg_sign")
+        .expect("is_neg");
+    builder.build_conditional_branch(is_neg_sign, inf_neg, inf_pos).expect("inf br");
+
+    // inf_pos: write "Inf" → return 3.
+    builder.position_at_end(inf_pos);
+    let pos_chars = [b'I', b'n', b'f'];
+    write_literal(&builder, i8_type, buf_param, zero_i64, &pos_chars);
+    builder.build_return(Some(&i64_type.const_int(3, false))).expect("ret 3");
+
+    // inf_neg: write "-Inf" → return 4.
+    builder.position_at_end(inf_neg);
+    let neg_chars = [b'-', b'I', b'n', b'f'];
+    write_literal(&builder, i8_type, buf_param, zero_i64, &neg_chars);
+    builder.build_return(Some(&i64_type.const_int(4, false))).expect("ret 4");
+
+    // finite: check for ±0
+    builder.position_at_end(finite);
+    let abs_bits = builder.build_and(bits, abs_mask, "abs_bits").expect("abs&");
+    let is_zero = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, abs_bits, zero_i64, "is_zero")
+        .expect("is_zero");
+    builder.build_conditional_branch(is_zero, zero_branch, nonzero).expect("zero br");
+
+    // zero: write "0" → return 1.
+    builder.position_at_end(zero_branch);
+    builder.build_store(buf_param, zero_ch).expect("store 0");
+    builder.build_return(Some(&one_i64)).expect("ret 1");
+
+    // nonzero: extract sign + abs value
+    builder.position_at_end(nonzero);
+    let is_neg = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, bits, zero_i64, "is_neg")
+        .expect("is_neg");
+    // Write '-' if negative; track len_so_far accordingly.
+    let prefix_buf_p = unsafe {
+        builder.build_gep(i8_type, buf_param, &[zero_i64], "prefix_p").expect("prefix gep")
+    };
+    builder.build_store(prefix_buf_p, minus_ch).expect("store -");
+    // (We unconditionally wrote '-' at offset 0; if !is_neg we'll
+    // overwrite by computing offsets relative to len_offset.)
+    let len_offset = builder
+        .build_select(is_neg, one_i64, zero_i64, "len_offset")
+        .expect("len_off sel")
+        .into_int_value();
+    // Reconstruct abs value: bitcast(abs_bits, f64)
+    let abs_val = builder
+        .build_bit_cast(abs_bits, f64_type, "abs_val")
+        .expect("abs bitcast")
+        .into_float_value();
+    builder.build_unconditional_branch(after_sign).expect("→ after_sign");
+
+    // after_sign: integer part via fptosi
+    builder.position_at_end(after_sign);
+    let int_part = builder
+        .build_float_to_signed_int(abs_val, i64_type, "int_part")
+        .expect("fptosi");
+    builder.build_unconditional_branch(format_int).expect("→ format_int");
+
+    // format_int: call verum_internal_i64_to_decimal(buf+len_offset, int_part)
+    builder.position_at_end(format_int);
+    let int_buf_p = unsafe {
+        builder.build_gep(i8_type, buf_param, &[len_offset], "int_buf").expect("int gep")
+    };
+    let int_len = builder
+        .build_call(i64_to_dec, &[int_buf_p.into(), int_part.into()], "int_len")
+        .expect("call i64_to_dec")
+        .try_as_basic_value()
+        .expect_basic("call result")
+        .into_int_value();
+    let len_after_int = builder.build_int_add(len_offset, int_len, "len_after_int").expect("len+");
+    builder.build_unconditional_branch(check_frac).expect("→ check_frac");
+
+    // check_frac: compute frac_part = abs_v - sitofp(int_part).
+    //             If frac_part > 0.0 → format_frac; else → return.
+    builder.position_at_end(check_frac);
+    let int_f = builder
+        .build_signed_int_to_float(int_part, f64_type, "int_f")
+        .expect("sitofp");
+    let frac_part = builder
+        .build_float_sub(abs_val, int_f, "frac_part")
+        .expect("frac sub");
+    let has_frac = builder
+        .build_float_compare(verum_llvm::FloatPredicate::OGT, frac_part, zero_f64, "has_frac")
+        .expect("has_frac");
+    builder.build_conditional_branch(has_frac, format_frac, return_val).expect("frac br");
+
+    // format_frac: write '.' then 6-digit frac
+    builder.position_at_end(format_frac);
+    let dot_p = unsafe {
+        builder.build_gep(i8_type, buf_param, &[len_after_int], "dot_p").expect("dot gep")
+    };
+    builder.build_store(dot_p, dot_ch).expect("store .");
+    let len_after_dot = builder.build_int_add(len_after_int, one_i64, "len_after_dot").expect("len+1");
+
+    // Compute frac_scaled = (frac_part * 1e6) as i64
+    let frac_scaled_f = builder.build_float_mul(frac_part, one_e6, "frac_scaled_f").expect("mul");
+    let frac_i64 = builder
+        .build_float_to_signed_int(frac_scaled_f, i64_type, "frac_i64")
+        .expect("fptosi");
+
+    // Now write 6 digits with leading zeros. Algorithm:
+    // For digit_idx in [5..=0]: digit = (frac_i64 / 10^digit_idx) % 10;
+    // write digit; emit at position len_after_dot + (5 - digit_idx).
+    //
+    // Simpler loop: iterate divisor from 100000 down to 1; emit (n / divisor) % 10.
+    // Implement as a 6-iteration unrolled-via-loop: PHI(divisor, i)
+    // where i tracks the byte offset.
+    builder.build_unconditional_branch(pad_loop).expect("→ pad_loop");
+
+    // pad_loop: PHI(divisor, byte_offset). while divisor >= 1: emit; advance.
+    builder.position_at_end(pad_loop);
+    let div_phi = builder.build_phi(i64_type, "div").expect("div phi");
+    let off_phi = builder.build_phi(i64_type, "off").expect("off phi");
+    div_phi.add_incoming(&[(&i64_type.const_int(100_000, false), format_frac)]);
+    off_phi.add_incoming(&[(&len_after_dot, format_frac)]);
+    let div_v = div_phi.as_basic_value().into_int_value();
+    let off_v = off_phi.as_basic_value().into_int_value();
+    let cont = builder
+        .build_int_compare(verum_llvm::IntPredicate::SGE, div_v, one_i64, "cont")
+        .expect("cont");
+    builder.build_conditional_branch(cont, pad_advance, after_pad).expect("pad br");
+
+    // pad_advance: digit = (frac_i64 / div) % 10; buf[off] = '0' + digit;
+    //              div /= 10; off++
+    builder.position_at_end(pad_advance);
+    let quot = builder.build_int_signed_div(frac_i64, div_v, "quot").expect("div");
+    let digit = builder.build_int_signed_rem(quot, i64_type.const_int(10, false), "digit").expect("rem");
+    let digit_i8 = builder.build_int_truncate(digit, i8_type, "digit_i8").expect("trunc");
+    let digit_ch = builder.build_int_add(digit_i8, zero_ch, "digit_ch").expect("digit_ch");
+    let pos_p = unsafe {
+        builder.build_gep(i8_type, buf_param, &[off_v], "pos_p").expect("pos gep")
+    };
+    builder.build_store(pos_p, digit_ch).expect("store digit");
+    let div_next = builder.build_int_signed_div(div_v, i64_type.const_int(10, false), "div_next").expect("div10");
+    let off_next = builder.build_int_add(off_v, one_i64, "off_next").expect("off++");
+    builder.build_unconditional_branch(pad_loop).expect("loop");
+    div_phi.add_incoming(&[(&div_next, pad_advance)]);
+    off_phi.add_incoming(&[(&off_next, pad_advance)]);
+
+    // after_pad: strip trailing zeros. PHI(end_off). while end_off > len_after_dot+1
+    //            and buf[end_off-1] == '0': end_off--.
+    //            (Keep at least one digit after the dot.)
+    builder.position_at_end(after_pad);
+    let end_after_pad = builder
+        .build_int_add(len_after_dot, six_i64, "end_after_pad")
+        .expect("len+6");
+    builder.build_unconditional_branch(strip_loop).expect("→ strip");
+
+    builder.position_at_end(strip_loop);
+    let end_phi = builder.build_phi(i64_type, "end").expect("end phi");
+    end_phi.add_incoming(&[(&end_after_pad, after_pad)]);
+    let end_v = end_phi.as_basic_value().into_int_value();
+    let min_end = builder
+        .build_int_add(len_after_dot, one_i64, "min_end")
+        .expect("min_end");
+    let can_strip = builder
+        .build_int_compare(verum_llvm::IntPredicate::SGT, end_v, min_end, "can_strip")
+        .expect("can_strip");
+    let last_off = builder.build_int_sub(end_v, one_i64, "last_off").expect("end-1");
+    let last_p = unsafe {
+        builder.build_gep(i8_type, buf_param, &[last_off], "last_p").expect("last gep")
+    };
+    let last_c = builder.build_load(i8_type, last_p, "last_c").expect("last ld").into_int_value();
+    let is_zero_ch = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, last_c, zero_ch, "is_zero_ch")
+        .expect("is_zero_ch");
+    let should_strip = builder.build_and(can_strip, is_zero_ch, "should_strip").expect("and");
+    let strip_done = llvm_ctx.append_basic_block(func, "strip_done");
+    builder.build_conditional_branch(should_strip, strip_loop, strip_done).expect("strip br");
+    end_phi.add_incoming(&[(&last_off, strip_loop)]);
+
+    builder.position_at_end(strip_done);
+    builder.build_unconditional_branch(return_val).expect("→ ret");
+
+    // return_val: PHI(len) merging two finite-path tails:
+    //   * check_frac false-path — no fractional digits to emit ⇒
+    //     len = len_after_int
+    //   * strip_done — fractional digits emitted, trailing zeros
+    //     stripped ⇒ len = end_v
+    //
+    // Special-case branches (zero, inf_pos, inf_neg, nan_write)
+    // all return directly without flowing into return_val.
+    builder.position_at_end(return_val);
+    let ret_phi = builder.build_phi(i64_type, "ret_len").expect("ret phi");
+    ret_phi.add_incoming(&[
+        (&len_after_int, check_frac),
+        (&end_v, strip_done),
+    ]);
+    let ret_len = ret_phi.as_basic_value().into_int_value();
+    builder.build_return(Some(&ret_len)).expect("ret len");
+
+    func
+}
+
+/// Helper: write a fixed ASCII literal at `buf + offset`. Used by
+/// special-case branches (NaN / Inf / -Inf). Infallible-by-design;
+/// any LLVM-builder failure here is a programmer error and panics
+/// (matches the `.expect(...)` style of the surrounding f64-format
+/// emitter — IR-construction is total under correct usage).
+fn write_literal<'ctx>(
+    builder: &verum_llvm::builder::Builder<'ctx>,
+    i8_type: verum_llvm::types::IntType<'ctx>,
+    buf: verum_llvm::values::PointerValue<'ctx>,
+    base_offset: verum_llvm::values::IntValue<'ctx>,
+    chars: &[u8],
+) {
+    let i64_type = base_offset.get_type();
+    for (i, &c) in chars.iter().enumerate() {
+        let off = i64_type.const_int(i as u64, false);
+        let abs_off = builder
+            .build_int_add(base_offset, off, "lit_off")
+            .expect("lit_off");
+        let p = unsafe {
+            builder
+                .build_gep(i8_type, buf, &[abs_off], "lit_p")
+                .expect("lit_p")
+        };
+        let ch = i8_type.const_int(c as u64, false);
+        builder.build_store(p, ch).expect("lit_store");
+    }
+}
+
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
 
