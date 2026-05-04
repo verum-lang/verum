@@ -86,6 +86,9 @@ public mount .connection.{
 };
 public mount .typed_row.{
     TypedRow, rows_typed,
+    expect_arity as typed_row_expect_arity,
+    slice_one as typed_row_slice_one,
+    decode_field as typed_row_decode_field,
 };
 public mount .composite_registry.{
     CompositeFieldDef, CompositeSchema, CompositeRegistry,

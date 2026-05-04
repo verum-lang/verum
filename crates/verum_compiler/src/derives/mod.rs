@@ -53,6 +53,7 @@ pub mod error;
 pub mod partial_eq;
 pub mod serialize;
 pub mod shell_render;
+pub mod typed_row;
 
 mod common;
 
@@ -73,6 +74,7 @@ pub use display::DeriveDisplay;
 pub use error::DeriveError as DeriveErrorMacro;
 pub use partial_eq::DerivePartialEq;
 pub use serialize::DeriveSerialize;
+pub use typed_row::DeriveTypedRow;
 
 /// Result type for derive operations
 pub type DeriveResult<T> = Result<T, DeriveError>;
@@ -106,6 +108,9 @@ impl DeriveRegistry {
             "ShellRender",
             Box::new(self::shell_render::DeriveShellRender),
         );
+        // TypedRow — auto-generate `core.database.postgres.typed_row.TypedRow`
+        // impl for record / newtype types.
+        registry.register("TypedRow", Box::new(DeriveTypedRow));
 
         registry
     }
@@ -299,6 +304,8 @@ mod tests {
         assert!(registry.get("Error").is_some());
         // Builder derive for fluent construction
         assert!(registry.get("Builder").is_some());
+        // TypedRow derive for postgres typed-row protocol
+        assert!(registry.get("TypedRow").is_some());
 
         // Unknown derives should return None
         assert!(registry.get("Unknown").is_none());

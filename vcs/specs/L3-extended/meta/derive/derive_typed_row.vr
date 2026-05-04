@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, typed_row, database
+
+/// Auto-generated TypedRow impl for record + newtype types.
+///
+/// `@derive(TypedRow)` closes the V1 follow-up declared in
+/// `core/database/postgres/typed_row.vr` line 27. Generated code
+/// dispatches per-field through
+/// `core.database.postgres.typed_row.decode_field`, which the
+/// language's stmt-cache absorbs (no per-field allocation surge).
+
+mount core.database.postgres.{TypedRow};
+mount core.database.postgres.wire.typed.TypedValue;
+
+// ============================================================
+// RECORD TYPES
+// ============================================================
+
+@derive(TypedRow)
+type User is {
+    id: Int,
+    name: Text,
+    age: Int,
+};
+
+@derive(TypedRow)
+type Account is {
+    id: Int,
+    balance: Float,
+    is_active: Bool,
+};
+
+// Nullable fields via Maybe<T> — the existing
+// `implement<T: TypedRow> TypedRow for Maybe<T>` in typed_row.vr
+// covers the Maybe<Int> here transparently.
+@derive(TypedRow)
+type Profile is {
+    user_id: Int,
+    bio: Maybe<Text>,
+    score: Maybe<Float>,
+};
+
+// ============================================================
+// NEWTYPE
+// ============================================================
+
+@derive(TypedRow)
+type UserId is (Int);
+
+@derive(TypedRow)
+type Email is (Text);
+
+// ============================================================
+// USAGE — types instantiated to prove the impl is wired
+// ============================================================
+
+fn smoke() {
+    let u = User { id: 1, name: "alice".clone(), age: 30 };
+    let a = Account { id: 1, balance: 100.0, is_active: true };
+    let p = Profile { user_id: 1, bio: None, score: Some(0.5) };
+    let uid = UserId(42);
+    let em  = Email("a@b.c".clone());
+}
+
+fn main() {
+    smoke();
+}
