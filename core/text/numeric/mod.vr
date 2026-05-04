@@ -19,9 +19,11 @@
 //                    Same semantics, but coefficient is BigInt (no
 //                    i64 cap).  Use when intermediate values may
 //                    overflow i64 even if final fits.
-//
-// Future modules (V1+):
-//   * `rational` — exact-rational arithmetic over BigInt.
+//   * `rational`   — exact-rational arithmetic (numerator /
+//                    denominator, both BigInt; canonical reduced
+//                    form via Euclidean GCD).  Use when arithmetic
+//                    must NEVER lose precision (1/3 + 1/3 + 1/3 == 1
+//                    holds exactly).
 //
 // =============================================================================
 
@@ -30,6 +32,7 @@ module core.text.numeric;
 public module decimal;
 public module bigint;
 public module bigdecimal;
+public module rational;
 
 public mount .decimal.{
     Decimal, DecimalError,
@@ -46,4 +49,8 @@ public mount .bigdecimal.{
     BigDecimal, BigDecimalError,
     MAX_SCALE_BIG,
     parse_bigdecimal,
+};
+public mount .rational.{
+    Rational, RationalError,
+    parse_rational,
 };
