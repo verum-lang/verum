@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, hash
+
+/// `@derive(Hash)` — auto-generated impl of
+/// `core.base.protocols.Hash` for record / newtype / sum types.
+///
+/// Closes the gap left by `@derive(PartialEq)` shipping without a
+/// matching `@derive(Hash)`. HashMap / HashSet keys want both;
+/// after this commit `@derive(PartialEq, Hash)` is the
+/// conventional pair for value-equality types.
+///
+/// Sum-type variants prefix the per-field hash chain with a
+/// 1-byte discriminator — preserves the
+/// `a == b ⟹ hash(a) == hash(b)` invariant for equal-shape
+/// variants of different identity.
+
+// ============================================================
+// RECORD
+// ============================================================
+
+@derive(Hash)
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+@derive(Hash)
+type User is {
+    id: Int,
+    name: Text,
+    age: Int,
+};
+
+// ============================================================
+// SUM TYPE — unit + tuple + record variants mixed
+// ============================================================
+
+@derive(Hash)
+type Status is
+    | Active
+    | Pending(Int)
+    | Tagged { code: Int, label: Text };
+
+// ============================================================
+// NEWTYPE
+// ============================================================
+
+@derive(Hash)
+type UserId is (Int);
+
+// ============================================================
+// GENERIC — auto-emits `where T: Hash`
+// ============================================================
+
+@derive(Hash)
+type Container<T> is {
+    id: Int,
+    val: T,
+};
+
+// ============================================================
+// USAGE — instantiate to prove the impl is wired
+// ============================================================
+
+fn smoke() {
+    let p = Point { x: 1, y: 2 };
+    let u = User { id: 1, name: "alice".clone(), age: 30 };
+    let s_active   = Status.Active;
+    let s_pending  = Status.Pending(42);
+    let s_tagged   = Status.Tagged { code: 1, label: "x".clone() };
+    let uid        = UserId(7);
+    let c: Container<Int> = Container { id: 1, val: 42 };
+}
+
+fn main() {
+    smoke();
+}
