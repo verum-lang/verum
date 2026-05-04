@@ -1791,3 +1791,103 @@ fn main() {
     let result = codegen.compile_module(&module);
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 }
+
+/// Lenient panic-stub: when a function fails bug-class compilation, the
+/// codegen emits a Panic-bodied stub with the function's pre-registered
+/// `FunctionId` instead of silently dropping the descriptor.  Lets
+/// dispatch (suffix-and-args, qualified-path, function-pointer load)
+/// keep finding the function; only an actual call execution panics
+/// — and with the original codegen error message inline, not the
+/// opaque `FunctionNotFound` from before.
+///
+/// The test exercises end-to-end module finalisation with one healthy
+/// function and one bug-class failure (an undefined-function call) —
+/// the stubbed function must land in the final module with a Panic-
+/// bodied bytecode block, the healthy one must stay untouched, and
+/// finalisation must succeed without dropping anything.
+#[test]
+fn lenient_compile_failure_emits_panic_stub() {
+    // `does_not_exist` is referenced but never declared.  This
+    // raises `UndefinedFunction` which `skip_class()` classifies as
+    // BugClass — exactly the path the auto-stub replaces.
+    let source = r#"
+fn known_good() -> Int { 1 }
+
+fn broken_fn() -> Int {
+    does_not_exist()
+}
+
+fn main() -> Int { known_good() }
+"#;
+    let mut parser = Parser::new(source);
+    let module = parser.parse_module().expect("parse");
+
+    // Validation is opt-in (`with_validation()`).  Enabling it here
+    // doubles as a regression check for the validator's
+    // byte-offset-vs-count bound on bytecode `StringId` references.
+    let config = CodegenConfig::new("lenient_panic_stub_test").with_validation();
+    let mut codegen = VbcCodegen::with_config(config);
+
+    // Mirror the stdlib bootstrap path: initialize, collect
+    // declarations + register everything, then drive the lenient
+    // body-compile entry.  `broken_fn` will raise UndefinedFunction
+    // mid-body; the auto-stub takes over from there.
+    codegen.initialize();
+    codegen
+        .collect_non_protocol_declarations(&module)
+        .expect("collect");
+    codegen
+        .compile_module_items_lenient(&module)
+        .expect("lenient compile must succeed even with bug-class failures");
+
+    let vbc_module = codegen
+        .finalize_module()
+        .expect("finalize");
+
+    // The broken function must NOT have been silently dropped — its
+    // descriptor lands in the module with a stub body.
+    let broken_descriptor = vbc_module
+        .functions
+        .iter()
+        .find(|f| {
+            vbc_module
+                .strings
+                .get(f.name)
+                .map(|s| s == "broken_fn")
+                .unwrap_or(false)
+        })
+        .expect("broken_fn descriptor must be present in the module — the auto-stub replaces the silent drop");
+
+    // The stub body must contain a Panic instruction (the user-
+    // facing diagnostic on call) followed by RetV.
+    let bytecode_offset = broken_descriptor.bytecode_offset as usize;
+    let bytecode_length = broken_descriptor.bytecode_length as usize;
+    assert!(
+        bytecode_length > 0,
+        "broken_fn must have a non-empty stub body, got 0 bytes"
+    );
+    let body_bytes = &vbc_module.bytecode[bytecode_offset..bytecode_offset + bytecode_length];
+    let decoded = crate::bytecode::decode_instructions(body_bytes)
+        .expect("stub body must decode cleanly");
+    assert!(
+        decoded
+            .iter()
+            .any(|instr| matches!(instr, crate::Instruction::Panic { .. })),
+        "stub body must include a Panic instruction; got {:?}",
+        decoded
+    );
+
+    // The known-good function must still be present and untouched
+    // — the auto-stub path must never fire for healthy code.
+    let known_good = vbc_module.functions.iter().find(|f| {
+        vbc_module
+            .strings
+            .get(f.name)
+            .map(|s| s == "known_good")
+            .unwrap_or(false)
+    });
+    assert!(
+        known_good.is_some(),
+        "known_good must still be in the module"
+    );
+}

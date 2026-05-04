@@ -401,7 +401,17 @@ impl<'a> Validator<'a> {
         // walk doesn't need to repeatedly index `self.module`.
         let function_count = self.module.functions.len() as u32;
         let constant_count = self.module.constants.len() as u32;
-        let string_count = self.module.strings.len() as u32;
+        // `StringId` is a byte offset into the serialised string table,
+        // not a sequential index — `intern()` returns
+        // `StringId(next_offset)` and `next_offset += 4 + s.len()`.
+        // The valid bound is therefore the byte-offset cap
+        // (`serialized_size()`), not the unique-string count
+        // (`strings.len()`).  Pre-fix the validator compared every
+        // bytecode `StringId` to `len()` and rejected anything past a
+        // few bytes of strings, which fired the moment any module
+        // emitted a Panic / CallM / Assert with a non-trivial
+        // message-string offset.
+        let string_count = self.module.strings.serialized_size();
         let type_count = self.module.types.len() as u32;
 
         for func_desc in &self.module.functions {
