@@ -895,6 +895,72 @@ public fn div_scalar<T: Numeric>(x: &DynTensor<T>, scalar: T) -> DynTensor<T> {
     div(x, &full_like(x, scalar))
 }
 
+// Subtract scalar from tensor.
+// #74 Tier B — Verum-language composition. No direct VBC primitive
+// is needed; reuses the existing `sub` binop with a scalar-broadcast.
+public fn sub_scalar<T: Numeric>(x: &DynTensor<T>, scalar: T) -> DynTensor<T> {
+    sub(x, &full_like(x, scalar))
+}
+
+// Subtract tensor from scalar (returns `scalar - x`).
+// #74 Tier B — useful complement to `sub_scalar` for the asymmetric
+// case (e.g. computing `1.0 - p` for a probability tensor).
+public fn rsub_scalar<T: Numeric>(scalar: T, x: &DynTensor<T>) -> DynTensor<T> {
+    sub(&full_like(x, scalar), x)
+}
+
+// Linear interpolation: `a + t * (b - a)`.
+// #74 Tier B — Verum-language composition over `add` / `sub` / `mul_scalar`.
+// `t == 0` returns `a`, `t == 1` returns `b`, intermediate `t` blends.
+// Tensor shapes must be broadcastable; output shape follows the
+// broadcasting rules of the underlying binops.
+public fn lerp<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>, t: T) -> DynTensor<T> {
+    let diff = sub(b, a);
+    let scaled = mul_scalar(&diff, t);
+    add(a, &scaled)
+}
+
+// Variance of all elements (population variance, divides by N).
+// #74 Tier B — Verum-language composition: `mean((x - mean(x))^2)`.
+// Note: returns the population variance (denominator N) to match
+// `mean`'s convention; pass through `mul_scalar(_, n / (n-1))` at
+// the call site for the sample-variance form.
+public fn variance<T: Numeric>(x: &DynTensor<T>) -> T {
+    let mu = mean(x);
+    let centered = sub_scalar(x, mu);
+    let squared = mul(&centered, &centered);
+    mean(&squared)
+}
+
+// Standard deviation of all elements (square root of variance).
+// #74 Tier B — Verum-language composition.
+public fn std_dev<T: Numeric>(x: &DynTensor<T>) -> T {
+    let v: Float = variance(x) as Float;
+    sqrt(v) as T
+}
+
+// Variance along axis (population variance).
+// #74 Tier B — Verum-language composition over `mean_axis` /
+// broadcasting `sub` / `mul`. Result tensor has the same shape as
+// `x` with the reduced axis removed (matches `mean_axis`).
+public fn variance_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    let mu = mean_axis(x, axis);
+    // mean_axis collapsed `axis` so `mu` has rank one less than `x`.
+    // The subsequent `sub(x, &mu)` relies on the JIT/CPU broadcast
+    // path to expand `mu` back across the reduced axis (#105 5e+3
+    // mid-axis broadcast covers this exact pattern).
+    let centered = sub(x, &mu);
+    let squared = mul(&centered, &centered);
+    mean_axis(&squared, axis)
+}
+
+// Standard deviation along axis.
+// #74 Tier B — Verum-language composition. Element-wise sqrt over
+// `variance_axis(...)`.
+public fn std_dev_axis<T: Numeric>(x: &DynTensor<T>, axis: ISize) -> DynTensor<T> {
+    tensor_sqrt(&variance_axis(x, axis))
+}
+
 // Comparison operations
 
 // Element-wise equality
