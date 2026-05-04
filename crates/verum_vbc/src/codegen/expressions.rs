@@ -12901,10 +12901,26 @@ impl VbcCodegen {
     }
 
     /// Compiles an await expression.
+    ///
+    /// Emits a cooperative `AsyncYield` BEFORE the actual await
+    /// payload (T-DEFER-ASYNC-FN-SM V0): even when the inner
+    /// expression is a synchronous async-fn body that runs inline,
+    /// the yield gives the scheduler a chance to pump a sibling
+    /// task off the FIFO end of the task queue. Without it, an
+    /// async fn that calls `another_async_fn(x).await` 1000 times
+    /// in a loop starves every spawned sibling — defeating
+    /// concurrency. The yield is bounded by `MAX_COOP_PUMP_DEPTH`
+    /// at the handler level so recursive `.await` chains don't
+    /// blow the stack. Full state-machine lowering is V2.
     fn compile_await(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
         let task_reg = self
             .compile_expr(inner)?
             .ok_or_else(|| CodegenError::internal("await expr has no value"))?;
+
+        // Cooperative yield-point. No-operand opcode; pure
+        // side-effect on the scheduler (pumps one ready sibling
+        // task off the FIFO end of the task queue).
+        self.ctx.emit(Instruction::AsyncYield);
 
         // Async fns in the current implementation are not compiled to suspend-
         // /resume state machines — calling `add(1, 2)` runs the body inline

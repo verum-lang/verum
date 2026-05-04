@@ -811,7 +811,7 @@ pub fn io_wait_writable(fd: i64, timeout_ms: i64) -> i64 {
 /// Maximum nested cooperative-pump depth before degrading to a
 /// plain (OS-thread-blocking) reactor wait.  16 is generous —
 /// real Verum task graphs rarely nest beyond 3-4 levels of await.
-const MAX_COOP_PUMP_DEPTH: u32 = 16;
+pub(crate) const MAX_COOP_PUMP_DEPTH: u32 = 16;
 
 /// One slice of the cooperative wait — the per-iteration kernel
 /// wait latency.  Short enough that a freshly-arrived ready task
@@ -910,7 +910,7 @@ fn coop_wait(
 /// LIFO end would just re-park it.  Pumping from the FIFO end
 /// drains older sibling tasks that have been waiting longer —
 /// fair-share + minimum-latency interleave.
-fn pump_one_ready_task(state: &mut crate::interpreter::state::InterpreterState) -> bool {
+pub(crate) fn pump_one_ready_task(state: &mut crate::interpreter::state::InterpreterState) -> bool {
     let next_ready_id = state.tasks.steal_ready();
     if let Some(tid) = next_ready_id {
         // Errors from the pumped task should NOT propagate up to
