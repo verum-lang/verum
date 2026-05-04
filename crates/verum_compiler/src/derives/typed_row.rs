@@ -122,7 +122,18 @@ impl DeriveMacro for DeriveTypedRow {
         };
 
         let method = self.create_from_typed_row_method(ctx, body, span);
-        Ok(ctx.generate_impl("TypedRow", List::from(vec![method]), span))
+        // `generate_impl_with_field_bounds` auto-emits
+        // `where T: TypedRow` for every type-param T appearing in
+        // any field. Without it, generic records like
+        // `type Container<T> is { val: T }` would generate a body
+        // that calls `decode_field<T>` with no `T: TypedRow`
+        // proof, failing type resolution. The bound is no-op for
+        // non-generic types (bypasses the where clause emission).
+        Ok(ctx.generate_impl_with_field_bounds(
+            "TypedRow",
+            List::from(vec![method]),
+            span,
+        ))
     }
 
     fn doc_comment(&self) -> &'static str {
@@ -571,6 +582,95 @@ mod tests {
                 assert_eq!(kind.as_str(), "enum");
             }
             other => panic!("expected UnsupportedTypeKind, got {:?}", other),
+        }
+    }
+
+    /// Generic record `Foo<T> { val: T }` should auto-emit
+    /// `where T: TypedRow` on the impl. We verify by inspecting
+    /// the generated impl's generic_where_clause.
+    #[test]
+    fn generic_record_emits_field_bound() {
+        use verum_ast::ty::{GenericParam, GenericParamKind, TypeBoundKind, WherePredicateKind};
+
+        let span = Span::default();
+        let t_param = GenericParam {
+            kind: GenericParamKind::Type {
+                name: Ident::new("T", span),
+                bounds: List::new(),
+                default: Maybe::None,
+            },
+            is_implicit: false,
+            span,
+        };
+        let val_field = RecordField {
+            attributes: List::new(),
+            visibility: Visibility::Public,
+            name: Ident::new("val", span),
+            ty: Type::new(
+                TypeKind::Path(Path::single(Ident::new("T", span))),
+                span,
+            ),
+            default_value: Maybe::None,
+            bit_spec: Maybe::None,
+            span,
+        };
+        let decl = TypeDecl {
+            visibility: Visibility::Public,
+            name: Ident::new("Container", span),
+            generics: List::from(vec![t_param]),
+            attributes: List::new(),
+            body: TypeDeclBody::Record(List::from(vec![val_field])),
+            resource_modifier: None,
+            generic_where_clause: None,
+            meta_where_clause: None,
+            span,
+        };
+        let ctx = DeriveContext::from_type_decl(&decl, span).unwrap();
+        let item = DeriveTypedRow.expand(&ctx).unwrap();
+        let impl_decl = match item.kind {
+            verum_ast::decl::ItemKind::Impl(i) => i,
+            other => panic!("expected Impl, got {:?}", other),
+        };
+        let where_clause = match impl_decl.generic_where_clause {
+            Maybe::Some(wc) => wc,
+            Maybe::None => panic!("expected auto-emitted where clause"),
+        };
+        assert_eq!(where_clause.predicates.len(), 1, "one predicate per used T");
+        let pred = where_clause.predicates.iter().next().unwrap();
+        match &pred.kind {
+            WherePredicateKind::Type { ty, bounds } => {
+                if let TypeKind::Path(p) = &ty.kind {
+                    assert_eq!(p.last_segment_name(), "T");
+                } else {
+                    panic!("expected Path type in predicate");
+                }
+                assert_eq!(bounds.len(), 1);
+                let b = bounds.iter().next().unwrap();
+                if let TypeBoundKind::Protocol(p) = &b.kind {
+                    assert_eq!(p.last_segment_name(), "TypedRow");
+                } else {
+                    panic!("expected Protocol bound");
+                }
+            }
+            other => panic!("expected Type predicate, got {:?}", other),
+        }
+    }
+
+    /// Non-generic record gets no auto where-clause — the
+    /// optimisation that the bound inference is no-op on
+    /// `generics.is_empty()` shapes.
+    #[test]
+    fn non_generic_record_no_where_clause() {
+        let decl = make_record_decl("Plain", vec![("a", "Int")]);
+        let ctx = DeriveContext::from_type_decl(&decl, Span::default()).unwrap();
+        let item = DeriveTypedRow.expand(&ctx).unwrap();
+        let impl_decl = match item.kind {
+            verum_ast::decl::ItemKind::Impl(i) => i,
+            other => panic!("expected Impl, got {:?}", other),
+        };
+        match impl_decl.generic_where_clause {
+            Maybe::None => {} // expected
+            Maybe::Some(wc) => panic!("non-generic shouldn't emit where, got {} predicates", wc.predicates.len()),
         }
     }
 

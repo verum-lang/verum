@@ -53,6 +53,23 @@ type UserId is (Int);
 type Email is (Text);
 
 // ============================================================
+// GENERIC RECORD — bound inference auto-emits `where T: TypedRow`
+// (the field `val: T` is enough to register T as bound-required).
+// ============================================================
+
+@derive(TypedRow)
+type Container<T> is {
+    id: Int,
+    val: T,
+};
+
+@derive(TypedRow)
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+// ============================================================
 // USAGE — types instantiated to prove the impl is wired
 // ============================================================
 
@@ -62,6 +79,9 @@ fn smoke() {
     let p = Profile { user_id: 1, bio: None, score: Some(0.5) };
     let uid = UserId(42);
     let em  = Email("a@b.c".clone());
+    // Generic record instantiated with a bound-satisfying T.
+    let c: Container<Int> = Container { id: 1, val: 42 };
+    let q: Pair<Int, Text> = Pair { first: 1, second: "x".clone() };
 }
 
 fn main() {
