@@ -2974,13 +2974,22 @@ impl VbcCodegen {
                     // of being completely silent.
                     let fname = func.name.name.as_str();
                     let class = e.skip_class();
+                    let err_text = format!("{}", e);
                     tracing::warn!(
                         "[lenient] SKIP top-level fn {} ({}): {} — runtime calls \
-                         will panic with `FunctionNotFound`",
+                         will panic with the same message via auto-stub",
                         fname,
                         class.label(),
                         e
                     );
+                    // Replace the dropped function with a panic-stub
+                    // body so typed dispatch keeps finding it.  Only
+                    // actual calls hit the panic; pattern matching,
+                    // function-pointer references, and qualified-path
+                    // resolution all keep working.  See
+                    // `emit_lenient_panic_stub` doc for the full
+                    // rationale.
+                    self.emit_lenient_panic_stub(func, None, &err_text);
                     if let Some(undef) = e.undefined_function_name() {
                         let undef_owned = undef.to_string();
                         let near: Vec<String> = self
@@ -3120,19 +3129,31 @@ impl VbcCodegen {
                             let fname = func.name.name.as_str();
                             let ty = type_name.as_deref().unwrap_or("?");
                             let class = e.skip_class();
+                            let err_text = format!("{}", e);
                             tracing::warn!(
                                 "[lenient] SKIP {}.{} ({}): {} — runtime calls to \
-                                 this method will panic 'method '{}.{}' not found \
-                                 on value'.  Add the missing dependency to the \
+                                 this method will panic with the same message via \
+                                 auto-stub.  Add the missing dependency to the \
                                  caller's mount list or fix the cross-module \
                                  reference in {} stdlib.",
                                 ty,
                                 fname,
                                 class.label(),
                                 e,
-                                ty,
-                                fname,
                                 ty
+                            );
+                            // Auto-stub: replace the dropped body
+                            // with a Panic instruction so dispatch
+                            // (CallM by suffix-and-args, qualified
+                            // path resolution, function-pointer load)
+                            // keeps finding the method.  Pattern
+                            // matching against variants of the
+                            // carrier type is unaffected — the panic
+                            // only fires on actual call execution.
+                            self.emit_lenient_panic_stub(
+                                func,
+                                type_name.as_deref(),
+                                &err_text,
                             );
                             // For debugging stdlib hygiene: dump near-matches
                             // from the ctx.functions table so the user can
@@ -9581,6 +9602,143 @@ impl VbcCodegen {
         Ok(())
     }
 
+    /// Emits a panic-stub body for a function whose real body failed
+    /// bug-class lenient codegen.  The stub re-uses the function's
+    /// pre-registered `FunctionId`, name, params, and return type, so
+    /// typed dispatch (CallM / Call / qualified-path lookup) finds it
+    /// like any other function.  The body is two instructions:
+    ///
+    /// ```text
+    /// Panic <message_id>      ;; carries the original codegen error
+    /// RetV                    ;; never reached, but keeps bytecode valid
+    /// ```
+    ///
+    /// This replaces the prior silent-drop behaviour where the
+    /// function disappeared entirely from the module and runtime calls
+    /// produced an opaque `FunctionNotFound`.  With the stub:
+    ///
+    /// * Pattern matching against variants of the carrier type still
+    ///   works (variant constructor stays callable; the method stub
+    ///   only fires on actual call).
+    /// * Function-pointer references resolve cleanly.
+    /// * Cross-module lookups (qualified-path resolution, suffix-and-
+    ///   args dispatch) succeed with the stub's id.
+    /// * Only an actual call panics — and with the original codegen
+    ///   error message inline, not `FunctionNotFound`.
+    ///
+    /// Any failure inside the stub emitter degrades to a no-op return:
+    /// the function stays dropped, matching the prior behaviour.
+    /// This must NOT make the build worse for anything that compiled
+    /// before.
+    fn emit_lenient_panic_stub(
+        &mut self,
+        func: &FunctionDecl,
+        impl_type_name: Option<&str>,
+        error_message: &str,
+    ) {
+        let base_name = func.name.name.to_string();
+        let lookup_name = if let Some(t) = impl_type_name {
+            format!("{}.{}", t, base_name)
+        } else {
+            base_name.clone()
+        };
+
+        // Reuse the same lookup discipline as compile_function so the
+        // stub binds to the same FunctionId.  If the function was
+        // never registered (collect_declarations failed), skip — the
+        // pre-existing drop semantics applies.
+        let param_count = func.params.len();
+        let func_info = match self
+            .ctx
+            .lookup_function_with_arity(&lookup_name, param_count)
+            .cloned()
+        {
+            Some(info) => info,
+            None => return,
+        };
+
+        let params_with_mutability: Vec<(String, bool)> = func
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                self.extract_param_name_and_mutable(p)
+                    .unwrap_or_else(|| (format!("_arg{}", i), false))
+            })
+            .collect();
+
+        // Fresh function block — `begin_function` clears every
+        // function-scoped buffer (instructions, registers, labels,
+        // type-tracking, etc.) so leftover state from the failed
+        // compile_function call cannot poison the stub.
+        self.ctx.begin_function(
+            &lookup_name,
+            &params_with_mutability,
+            func_info.return_type.clone(),
+        );
+
+        // Intern the diagnostic message once.  Format mirrors what the
+        // [lenient] SKIP warning prints so users see the same string
+        // both at build time (warn) and at runtime (panic).
+        let panic_message = format!(
+            "[lenient] {} compiled to panic-stub: {}",
+            lookup_name, error_message
+        );
+        let message_id = self.intern_string(&panic_message);
+
+        self.ctx.emit(crate::Instruction::Panic { message_id });
+        // Trailing RetV is unreachable but keeps the bytecode valid
+        // for any decoder that walks past Panic.  ensure_return
+        // observes `instructions.last()` and skips when the function
+        // already terminates with Ret/RetV — Panic isn't recognised
+        // as terminal there, so emit explicitly.
+        self.ctx.emit(crate::Instruction::RetV);
+
+        let (instructions, register_count) = self.ctx.end_function();
+
+        // Build the descriptor.  Mirrors the compile_function
+        // descriptor-building block at the same call shape — same
+        // name_id, same FunctionId, same params, same return_type, +
+        // generator/async/context flags from the registered info.
+        let name_id = StringId(self.intern_string(&lookup_name));
+        let mut descriptor = FunctionDescriptor::new(name_id);
+        descriptor.id = func_info.id;
+        descriptor.register_count = register_count;
+        descriptor.locals_count = params_with_mutability.len() as u16;
+        if let Some(ref ret_type) = func_info.return_type {
+            descriptor.return_type = ret_type.clone();
+        }
+        for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
+            let type_ref = if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
+                self.ast_type_to_type_ref(ty)
+            } else {
+                TypeRef::Concrete(TypeId::UNIT)
+            };
+            let param_name_id = StringId(self.intern_string(param_name));
+            descriptor.params.push(ParamDescriptor {
+                name: param_name_id,
+                type_ref,
+                is_mut: *is_mut,
+                default: None,
+            });
+        }
+        if func_info.is_generator {
+            descriptor.is_generator = true;
+            descriptor.properties |= crate::types::PropertySet::GENERATOR;
+            descriptor.yield_type = func_info.yield_type.clone();
+        }
+        if func_info.is_async {
+            descriptor.properties |= crate::types::PropertySet::ASYNC;
+        }
+        for ctx_name in &func_info.contexts {
+            let ctx_id = self.intern_context_name(ctx_name);
+            descriptor.contexts.push(crate::types::ContextRef(ctx_id));
+        }
+
+        let vbc_func = VbcFunction::new(descriptor, instructions);
+        self.push_function_dedup(vbc_func);
+    }
+
     /// Compiles a block.
     fn compile_block(&mut self, block: &Block) -> CodegenResult<Option<Reg>> {
         self.ctx.enter_scope();
@@ -10538,6 +10696,18 @@ impl VbcCodegen {
         }
         module.field_id_to_name = id_to_name;
         module.type_field_layouts = self.type_field_layouts.clone();
+
+        // Sync header table-counts with the populated module sections.
+        // The validator's `validate_header` step compares
+        // `header.<table>_count` to `module.<table>.len()` and rejects
+        // any mismatch.  Without this sync, every non-empty
+        // codegen-built module fails opt-in validation purely on
+        // header-vs-section drift — orthogonal to the actual bytecode
+        // structure.  Mirrors what `serialize::write_module` computes
+        // implicitly at write-time.
+        module.header.type_table_count = module.types.len() as u32;
+        module.header.function_table_count = module.functions.len() as u32;
+        module.header.constant_pool_count = module.constants.len() as u32;
 
         Ok(module)
     }
