@@ -54,7 +54,12 @@ mount core.text.numeric.bigint.{BigInt, parse_bigint};
 public type ModularError is
       ZeroModulus
     | NoInverse           { reason: Text }
-    | NegativeExponent    { reason: Text };
+    | NegativeExponent    { reason: Text }
+    | LengthMismatch      { residues_len: Int, moduli_len: Int }
+    | EmptyInput          { what: Text }
+    | NotCoprime          { reason: Text }
+    | NotQuadraticResidue { reason: Text }
+    | NotPrime            { reason: Text };
 
 // =============================================================================
 // GCD / LCM / Extended Euclidean
@@ -313,6 +318,273 @@ public fn is_probable_prime(n: &BigInt, witnesses: &List<BigInt>) -> Bool {
         wi = wi + 1;
     }
     true
+}
+
+// =============================================================================
+// Chinese Remainder Theorem
+// =============================================================================
+
+/// Solve the system of congruences:
+///   x ≡ residues[i] (mod moduli[i])  for every i
+///
+/// Returns the unique `x ∈ [0, M)` where `M = ∏ moduli[i]`,
+/// provided the moduli are pairwise coprime.  If any pair shares a
+/// common factor, returns `NotCoprime` (the system has either no
+/// solution or a non-unique one — the constructive CRT can't
+/// distinguish them without more work).
+///
+/// Algorithm (textbook constructive CRT):
+///   1. Let `M = ∏ moduli`.
+///   2. For each i:
+///        Mi = M / moduli[i]
+///        yi = mod_inverse(Mi, moduli[i])
+///   3. Result `x = (∑ residues[i] × Mi × yi) mod M`.
+///
+/// Common use: RSA-CRT decryption.  Knowing the message mod p and
+/// mod q (the two RSA primes), CRT recovers it mod n=p*q in ~4×
+/// less work than a direct mod-n exponentiation.
+///
+/// Errors:
+///   * `LengthMismatch`  — residues.len ≠ moduli.len.
+///   * `EmptyInput`      — both lists empty.
+///   * `ZeroModulus`     — any modulus is zero.
+///   * `NotCoprime`      — moduli not pairwise coprime (gcd ≠ 1
+///                         between some Mi and moduli[i]).
+public fn crt(
+    residues: &List<BigInt>,
+    moduli: &List<BigInt>,
+) -> Result<BigInt, ModularError> {
+    let n = residues.len() as Int;
+    let nm = moduli.len() as Int;
+    if n != nm {
+        return Err(ModularError.LengthMismatch {
+            residues_len: n,
+            moduli_len: nm,
+        });
+    }
+    if n == 0 {
+        return Err(ModularError.EmptyInput { what: "crt".clone() });
+    }
+
+    // Compute M = ∏ moduli; reject any zero modulus.
+    let mut m_prod = BigInt.one();
+    let mut k: Int = 0;
+    while k < n {
+        if moduli[k].is_zero() { return Err(ModularError.ZeroModulus); }
+        m_prod = m_prod.mul(&moduli[k]);
+        k = k + 1;
+    }
+
+    // Sum residues[i] × Mi × yi where Mi = M / moduli[i] and yi =
+    // mod_inverse(Mi, moduli[i]).  Reduce sum into [0, M) at the end.
+    let mut acc = BigInt.zero();
+    let mut i: Int = 0;
+    while i < n {
+        let mi = match m_prod.div(&moduli[i]) {
+            Ok(v)  => v,
+            Err(_) => return Err(ModularError.ZeroModulus),  // unreachable
+        };
+        let yi = match mod_inverse(&mi, &moduli[i]) {
+            Ok(v)  => v,
+            Err(ModularError.NoInverse { reason: r }) =>
+                return Err(ModularError.NotCoprime {
+                    reason: f"crt: moduli not pairwise coprime ({r})",
+                }),
+            Err(e) => return Err(e),
+        };
+        // Reduce residues[i] into [0, moduli[i]) before combining
+        // so the final pos_mod reduces a smaller magnitude.
+        let ri = pos_mod(&residues[i], &moduli[i]);
+        let term = ri.mul(&mi).mul(&yi);
+        acc = acc.add(&term);
+        i = i + 1;
+    }
+    Ok(pos_mod(&acc, &m_prod))
+}
+
+/// Two-modulus convenience wrapper.  Solves `x ≡ a1 (mod n1)` and
+/// `x ≡ a2 (mod n2)` for a unique `x ∈ [0, n1 × n2)`, provided
+/// `gcd(n1, n2) = 1`.  Same error taxonomy as `crt`.
+public fn crt2(
+    a1: &BigInt, n1: &BigInt,
+    a2: &BigInt, n2: &BigInt,
+) -> Result<BigInt, ModularError> {
+    let mut residues: List<BigInt> = List.with_capacity(2);
+    residues.push(clone_bigint(a1));
+    residues.push(clone_bigint(a2));
+    let mut moduli: List<BigInt> = List.with_capacity(2);
+    moduli.push(clone_bigint(n1));
+    moduli.push(clone_bigint(n2));
+    crt(&residues, &moduli)
+}
+
+// =============================================================================
+// Tonelli-Shanks — modular square root
+// =============================================================================
+
+/// Compute `x` such that `x² ≡ a (mod p)`, where `p` is an ODD
+/// PRIME.  Tonelli-Shanks algorithm.  Returns the smaller of the
+/// two roots (the other is `p - x`).
+///
+/// Common use: elliptic-curve point decompression.  Given a
+/// compressed EC point `(x, sign_bit)`, recover `y` as the modular
+/// square root of `x³ + ax + b (mod p)`; the sign_bit picks
+/// between `y` and `p - y`.
+///
+/// Caller MUST ensure `p` is prime.  Tonelli-Shanks doesn't verify
+/// primality (that would defeat the perf benefit); use
+/// `is_probable_prime(p, witnesses)` first if uncertain.
+///
+/// Errors:
+///   * `NotPrime`              — `p < 3` or even (immediate
+///                               structural rejection without a
+///                               full primality test).
+///   * `NotQuadraticResidue`   — `a` is not a square mod p.
+///                               Detected via Euler's criterion:
+///                               `a^((p-1)/2) ≢ 1 (mod p)`.
+///
+/// Algorithm sketch:
+///   1. Special-case `a ≡ 0 (mod p)` ⇒ x = 0.
+///   2. Special-case `p ≡ 3 (mod 4)` ⇒ x = a^((p+1)/4) mod p
+///      (closed form, no loop).
+///   3. General case: write `p - 1 = q × 2^s` with q odd.  Find a
+///      quadratic non-residue z by linear search (small witness
+///      typically suffices).  Initialise:
+///        m = s, c = z^q mod p, t = a^q mod p, r = a^((q+1)/2) mod p.
+///      Loop: while t ≠ 1, find smallest i with t^(2^i) ≡ 1, then
+///      b = c^(2^(m-i-1)) mod p, m = i, c = b² mod p, t = t × b² mod p,
+///      r = r × b mod p.  When t = 1, r is the root.
+public fn mod_sqrt(a: &BigInt, p: &BigInt) -> Result<BigInt, ModularError> {
+    let two = BigInt.from_int(2);
+    let one = BigInt.one();
+
+    // Structural prime checks (cheap).
+    if p.lt(&BigInt.from_int(3)) {
+        return Err(ModularError.NotPrime {
+            reason: f"mod_sqrt requires p ≥ 3, got {p.to_text()}",
+        });
+    }
+    if p.is_even() {
+        return Err(ModularError.NotPrime {
+            reason: f"mod_sqrt requires odd prime p, got even {p.to_text()}",
+        });
+    }
+
+    let a_mod = pos_mod(a, p);
+    if a_mod.is_zero() { return Ok(BigInt.zero()); }
+
+    // Euler's criterion: a is a QR iff a^((p-1)/2) ≡ 1 (mod p).
+    let p_minus_one = p.sub(&one);
+    let half = match p_minus_one.div(&two) {
+        Ok(v)  => v,
+        Err(_) => return Err(ModularError.ZeroModulus),
+    };
+    let euler = mod_pow(&a_mod, &half, p)?;
+    if !euler.eq(&one) {
+        return Err(ModularError.NotQuadraticResidue {
+            reason: f"a={a_mod.to_text()} is not a quadratic residue mod p={p.to_text()}",
+        });
+    }
+
+    // Fast path: p ≡ 3 (mod 4) ⇒ root is a^((p+1)/4) mod p.
+    let four = BigInt.from_int(4);
+    let p_mod_4 = pos_mod(p, &four);
+    if p_mod_4.eq(&BigInt.from_int(3)) {
+        let p_plus_one = p.add(&one);
+        let exp = match p_plus_one.div(&four) {
+            Ok(v)  => v,
+            Err(_) => return Err(ModularError.ZeroModulus),
+        };
+        return mod_pow(&a_mod, &exp, p);
+    }
+
+    // General Tonelli-Shanks.  Write p-1 = q × 2^s with q odd.
+    let mut q = clone_bigint(&p_minus_one);
+    let mut s: Int = 0;
+    while q.is_even() {
+        q = match q.div(&two) {
+            Ok(v)  => v,
+            Err(_) => return Err(ModularError.ZeroModulus),
+        };
+        s = s + 1;
+    }
+
+    // Find a quadratic non-residue z by linear search starting at 2.
+    // In practice z is small (< 100 for almost all primes).
+    let mut z = BigInt.from_int(2);
+    let max_z = BigInt.from_int(10000);  // V0 cap — pathological if exceeded
+    let mut found = false;
+    while z.lt(p) && z.lt(&max_z) {
+        let zp = mod_pow(&z, &half, p)?;
+        if zp.eq(&p_minus_one) {
+            found = true;
+            break;
+        }
+        z = z.add(&one);
+    }
+    if !found {
+        return Err(ModularError.NotPrime {
+            reason: f"mod_sqrt: failed to find quadratic non-residue mod {p.to_text()} within [2, 10000); p likely composite or pathologically large",
+        });
+    }
+
+    // Initialise loop variables.
+    let mut m: Int = s;
+    let mut c = mod_pow(&z, &q, p)?;
+    let mut t = mod_pow(&a_mod, &q, p)?;
+    let mut r = {
+        let q_plus_1 = q.add(&one);
+        let half_q = match q_plus_1.div(&two) {
+            Ok(v)  => v,
+            Err(_) => return Err(ModularError.ZeroModulus),
+        };
+        mod_pow(&a_mod, &half_q, p)?
+    };
+
+    // Main loop: while t ≠ 1, find smallest i ∈ (0, m) with
+    // t^(2^i) ≡ 1, then update (m, c, t, r) accordingly.
+    let mut iter_cap: Int = 1024;  // V0 safety net for runaway loops
+    while !t.eq(&one) && iter_cap > 0 {
+        // Find smallest i with t^(2^i) = 1.
+        let mut i: Int = 0;
+        let mut t_squared = clone_bigint(&t);
+        while !t_squared.eq(&one) && i < m {
+            i = i + 1;
+            let sq = t_squared.mul(&t_squared);
+            t_squared = pos_mod(&sq, p);
+        }
+        if i == m {
+            // Should not happen for a true quadratic residue.
+            return Err(ModularError.NotQuadraticResidue {
+                reason: f"mod_sqrt: Tonelli-Shanks loop diverged for a={a_mod.to_text()}, p={p.to_text()}",
+            });
+        }
+
+        // b = c^(2^(m - i - 1)) mod p
+        let mut b = clone_bigint(&c);
+        let mut j: Int = 0;
+        let exp_count = m - i - 1;
+        while j < exp_count {
+            let sq = b.mul(&b);
+            b = pos_mod(&sq, p);
+            j = j + 1;
+        }
+
+        // Update.
+        let b_squared = pos_mod(&b.mul(&b), p);
+        m = i;
+        c = clone_bigint(&b_squared);
+        t = pos_mod(&t.mul(&b_squared), p);
+        r = pos_mod(&r.mul(&b), p);
+
+        iter_cap = iter_cap - 1;
+    }
+    if iter_cap <= 0 {
+        return Err(ModularError.NotQuadraticResidue {
+            reason: f"mod_sqrt: Tonelli-Shanks iteration cap reached for a={a_mod.to_text()}, p={p.to_text()}",
+        });
+    }
+    Ok(r)
 }
 
 // =============================================================================
