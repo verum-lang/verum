@@ -1069,6 +1069,47 @@ ecosystems. Win is enormous.
 5. **Tiered partitioning vs everything-or-nothing?** → tiered. `minimal`
    for embedded targets, `default` for desktop, `full` for audit servers.
 
+## Implementation status (2026-05-04)
+
+Phases landed in current session:
+
+* **Phase 1** ✅ committed `458659e5`
+  — `verum_compiler::stdlib_classifier` + `verum audit --stdlib-layers`
+  CLI subflag. Baseline: 2 413 modules → 1 731 runtime / 42 proof / 0
+  meta / 109 mixed / 528 empty / 3 parse errors. Drives the
+  per-item-layer decision below.
+* **Phase 3** ✅ committed `8bc9ea9d`
+  — `verum_vbc::cfg_key` + extended `VbcModule` with `cfg_keys`,
+  `function_variants`, `theorems`, `framework_provenance`,
+  `discharge_receipts`. `resolve_bytecode_region(fn_id, &cfg_key)` is
+  the canonical loader entry; backward-compat verified by 1098/1098
+  passing tests with empty extension vectors on legacy modules.
+* **Phase 2** ❌ dropped
+  — Phase 1 measurement showed file-level layer split is impractical
+  given `core/math/*` natural co-location. Layers are encoded at
+  item level inside the archive instead.
+
+Phases pending:
+
+| # | Subject | Notes |
+|---|---------|-------|
+| 4 | `cargo xtask precompile-stdlib` pipeline | Reuses existing `CompilationPipeline::compile_core`. Adds: post-pass populating new `theorems` / `framework_provenance` tables, multi-variant codegen for cfg-conditional functions (running codegen N times — once per platform — and merging into multi-variant entries), deterministic ID assignment so host/cross builds produce byte-identical archive. Emits versioned `.vbca` v2 with layered sections. **Estimate: 3-5 days.** |
+| 5 | `embedded_stdlib_vbc.rs` + `build.rs` hook | Replaces `embedded_stdlib.rs` (source archive) with VBC-archive embedding. `build.rs` invokes Phase 4 if the embedded artefact is missing or stale (stdlib content hash drift). Feature flags: `minimal` / `default` / `full`. **Estimate: 1 day.** |
+| 6 | Runtime path switch in `compile_ast_to_vbc` | Replaces source-driven `collect_imported_stdlib_modules + per-module codegen` with `archive.materialize(&CfgKey::for_triple(triple)) + user-only codegen + linker.merge`. Hot path goes from ~25 min to <50 ms. Keeps `VERUM_NO_PRECOMPILED_STDLIB=1` dev-mode escape hatch. **Estimate: 2 days.** |
+| 7 | Cross-compile via archive variant pick | One-line change once Phase 6 lands — same archive, different `CfgKey::for_triple(target)`. Validation: build for darwin/linux/windows × x86_64/aarch64 from the same binary. **Estimate: 1 day.** |
+| 8 | Verify-ladder + proof-archive lazy-load | `--verify formal` deserialises `theorems` + `discharge_receipts` sections, kernel-rechecks against cert-store, caches replay results per (binary, theorem). **Estimate: 2-3 days.** |
+| 9 | Meta-archive lazy-load | `@meta` / `@const` / `@derive` evaluators in lazy section, populated on first stdlib meta invocation. **Estimate: 1 day.** |
+| 11 | `.vbca` format spec freeze | Document the v2 archive on-disk layout as a stable contract for registry build workers and out-of-tree clients. **Estimate: 1 day.** |
+| 12 | `cargo xtask precompile-cog` | Same pipeline as Phase 4 but scoped to a single cog. Reuses 100% of Phase 4 code. **Estimate: 1-2 days.** |
+| 13 | Registry server-side build worker | After cog upload, registry runs precompile-cog for each supported compiler version, signs, publishes `.vbca` next to source tarball. **Registry-repo work, not main repo. Estimate: 3-5 days.** |
+| 14 | Client `cog_resolver` — prefer `.vbca` | `verum_modules::cog_resolver` first GETs the precompiled artefact, signature-verifies, links via archive merge; falls back to source on miss. **Estimate: 2 days.** |
+| 15 | Reproducibility checker `verum cog reproduce` | Local rebuild from source, byte-compare to registry artefact. Detects tampering. **Estimate: 1 day.** |
+
+Total compiler-side remaining: ~15-20 days. Critical path for the
+**stdlib cold-start fix** is Phases 4 → 5 → 6 (~6-8 days). After that
+the cold start is <50 ms; subsequent phases extend the format to
+proofs / meta / cogs without disturbing the perf result.
+
 ## Decision points the user must approve
 
 Before I start writing code:
