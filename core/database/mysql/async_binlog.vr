@@ -34,11 +34,18 @@
 //
 // Sync binlog.vr canonical / unchanged.
 //
+// V1 surface (this commit + earlier):
+//   * COM_REGISTER_SLAVE wired through `BinlogConfig.register_slave`
+//     (sync impl in connection.vr; async constructor honours the
+//     setting on first wire setup).
+//   * Async TableMapCache lifecycle — see
+//     `core.database.mysql.async_binlog_consumer::AsyncMysqlBinlogConsumer`
+//     (attach_table_map_cache wraps an open AsyncMysqlBinlogStream
+//     with an internally-managed cache + typed BinlogChange
+//     surface).
+//
 // OUT of V0:
-//   * COM_REGISTER_SLAVE (semi-sync replication).
 //   * Rate-limit watchdog (per-table or per-event-type).
-//   * Async TableMapCache lifecycle — caller pairs ROW events
-//     with cached TABLE_MAP by hand (or via a non-actor utility).
 // =============================================================================
 
 @arch_module(

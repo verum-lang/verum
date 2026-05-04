@@ -47,6 +47,7 @@ public module async_typed_database;
 public module binlog;
 public module binlog_rows;
 public module async_binlog;
+public module async_binlog_consumer;
 public module typed_row;
 public module json_binary;
 public module async_load_data;
@@ -188,6 +189,13 @@ public mount .async_binlog.{
     MbaEvent, MbaTerminated, MbaClosed,
     connect_binlog_async,
     DEFAULT_EVENT_CAPACITY,
+};
+public mount .async_binlog_consumer.{
+    AsyncMysqlBinlogConsumer, BinlogChange,
+    BcTableMap, BcRowsDecoded, BcRowsRaw, BcOther,
+    BcTerminated as BinlogChangeTerminated,
+    BcClosed as BinlogChangeClosed,
+    attach_table_map_cache,
 };
 public mount .typed_row.{
     MysqlTypedRow, rows_typed_my,
