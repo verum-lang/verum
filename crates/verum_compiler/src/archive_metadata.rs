@@ -257,14 +257,25 @@ fn register_module_metadata(
                 TypeDescriptorKind::Opaque
             }
             TypeKind::Alias => {
-                // Alias target → bare type-name string.  The
-                // unifier-side resolver re-parses this back into
-                // structural form via
-                // `parse_descriptor_type_string`.
+                // Build a TypeParamId → param-name map from the
+                // alias's own type_params so the rendered target
+                // string preserves source-level param names
+                // (`Result<T, StreamError>` rather than
+                // `Result<__generic_0, StreamError>`).
+                let mut param_id_to_name: HashMap<u16, String> = HashMap::new();
+                for tp in ty.type_params.iter() {
+                    if let Some(n) = module.strings.get(tp.name) {
+                        param_id_to_name.insert(tp.id.0, n.to_string());
+                    }
+                }
                 let target = ty
                     .alias_target
                     .as_ref()
-                    .map(|t| Text::from(type_ref_to_text(t, &type_id_to_name)))
+                    .map(|t| Text::from(type_ref_to_text_with_params(
+                        t,
+                        &type_id_to_name,
+                        &param_id_to_name,
+                    )))
                     .unwrap_or_default();
                 TypeDescriptorKind::Alias { target }
             }
@@ -435,6 +446,21 @@ fn type_ref_to_text(
     ty: &TypeRef,
     type_id_to_name: &HashMap<u32, String>,
 ) -> String {
+    type_ref_to_text_with_params(ty, type_id_to_name, &HashMap::new())
+}
+
+/// Like `type_ref_to_text` but maps `TypeRef::Generic(idx)` back to
+/// a meaningful parameter name (`T`, `E`, `K`, `V`, …) instead of
+/// the opaque `__generic_{idx}` placeholder.  Required for alias
+/// targets so `type IoResult<T> is Result<T, StreamError>;` lands
+/// in CoreMetadata as `"Result<T, StreamError>"` — parseable by the
+/// typechecker's structural parser — instead of the un-parseable
+/// `"Result<__generic_0, StreamError>"`.
+fn type_ref_to_text_with_params(
+    ty: &TypeRef,
+    type_id_to_name: &HashMap<u32, String>,
+    param_id_to_name: &HashMap<u16, String>,
+) -> String {
     match ty {
         TypeRef::Concrete(tid) => {
             if let Some(name) = builtin_type_name(tid) {
@@ -445,7 +471,15 @@ fn type_ref_to_text(
                 .cloned()
                 .unwrap_or_else(|| format!("__opaque_type_{}", tid.0))
         }
-        TypeRef::Generic(pid) => format!("__generic_{}", pid.0),
+        TypeRef::Generic(pid) => {
+            // Look up the param's source-level name (T, E, …) via
+            // the caller's param_id_to_name; fall back to the
+            // opaque placeholder if no mapping is available.
+            param_id_to_name
+                .get(&pid.0)
+                .cloned()
+                .unwrap_or_else(|| format!("__generic_{}", pid.0))
+        }
         TypeRef::Instantiated { base, args } => {
             let base_name = builtin_type_name(base)
                 .map(|n| n.to_string())
@@ -453,7 +487,7 @@ fn type_ref_to_text(
                 .unwrap_or_else(|| format!("__opaque_type_{}", base.0));
             let arg_strings: Vec<String> = args
                 .iter()
-                .map(|a| type_ref_to_text(a, type_id_to_name))
+                .map(|a| type_ref_to_text_with_params(a, type_id_to_name, param_id_to_name))
                 .collect();
             if arg_strings.is_empty() {
                 base_name
@@ -468,16 +502,16 @@ fn type_ref_to_text(
         } => {
             let p: Vec<String> = params
                 .iter()
-                .map(|t| type_ref_to_text(t, type_id_to_name))
+                .map(|t| type_ref_to_text_with_params(t, type_id_to_name, param_id_to_name))
                 .collect();
             format!(
                 "fn({}) -> {}",
                 p.join(", "),
-                type_ref_to_text(return_type, type_id_to_name)
+                type_ref_to_text_with_params(return_type, type_id_to_name, param_id_to_name)
             )
         }
         TypeRef::Reference { inner, .. } => {
-            format!("&{}", type_ref_to_text(inner, type_id_to_name))
+            format!("&{}", type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name))
         }
         _ => "__opaque_typeref".to_string(),
     }
@@ -491,6 +525,14 @@ fn builtin_type_name(tid: &verum_vbc::types::TypeId) -> Option<&'static str> {
         TypeId::INT => Some("Int"),
         TypeId::FLOAT => Some("Float"),
         TypeId::TEXT => Some("Text"),
+        TypeId::NEVER => Some("Never"),
+        TypeId::CHAR => Some("Char"),
+        TypeId::LIST => Some("List"),
+        TypeId::MAP => Some("Map"),
+        TypeId::MAYBE => Some("Maybe"),
+        TypeId::RESULT => Some("Result"),
+        // PTR (TypeId::14) intentionally NOT named — VBC uses it
+        // as a generic carrier for "unknown / opaque" type refs.
         _ => None,
     }
 }

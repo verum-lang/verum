@@ -67,6 +67,14 @@ impl TypeId {
     pub const PTR: TypeId = TypeId(14);
     /// Reserved.
     pub const RESERVED: TypeId = TypeId(15);
+    /// Unicode codepoint (scalar value, 32 bits).  Distinct from
+    /// `INT` so the typechecker can preserve `Char` semantics
+    /// through method signatures (`Text.push(c: Char)`,
+    /// `s.chars()`, …) — VBC pre-fix stored Char as Int and the
+    /// alias info was lost in archive descriptors.
+    pub const CHAR: TypeId = TypeId(16);
+    /// Single byte (8-bit unsigned, alias for U8).
+    pub const BYTE: TypeId = TypeId(6);
 
     // ========================================================================
     // Type Aliases (for semantic clarity)
@@ -89,7 +97,7 @@ impl TypeId {
     pub const USIZE: TypeId = TypeId(14);
 
     /// First user-defined type ID.
-    pub const FIRST_USER: u32 = 16;
+    pub const FIRST_USER: u32 = 17;
 
     // ========================================================================
     // Well-Known Meta System Type IDs (256-511)
@@ -915,7 +923,8 @@ mod tests {
 
     #[test]
     fn test_type_id_first_user() {
-        assert_eq!(TypeId::FIRST_USER, 16);
+        assert_eq!(TypeId::FIRST_USER, 17);
+        assert_eq!(TypeId::CHAR.0, 16);
     }
 
     #[test]

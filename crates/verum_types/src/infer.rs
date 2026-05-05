@@ -1372,6 +1372,34 @@ impl TypeChecker {
             Maybe::None => return,
         };
         self.register_stdlib_constructors_from_metadata(&metadata);
+
+        // Unconditionally register every type alias from metadata
+        // into the unifier's alias registry.  Aliases are cheap
+        // (single TypeRef payload + param-name list) and a user
+        // script may reference an alias indirectly through a
+        // function's return type without ever naming the alias
+        // directly — `fs_metadata(p) -> IoResult<Metadata>` returns
+        // IoResult but the user code never writes "IoResult".  The
+        // alias needs to be in the registry by the time pattern
+        // matching expands the type.
+        for (alias_name, td) in metadata.types.iter() {
+            if let crate::core_metadata::TypeDescriptorKind::Alias { target } = &td.kind {
+                let target_ty = parse_descriptor_type_string(target.as_str());
+                self.ctx
+                    .define_alias(alias_name.clone(), target_ty.clone());
+                self.unifier
+                    .register_type_alias(alias_name.clone(), target_ty);
+                let param_names: List<Text> = td
+                    .generic_params
+                    .iter()
+                    .map(|gp| gp.name.clone())
+                    .collect();
+                if !param_names.is_empty() {
+                    self.unifier
+                        .register_type_alias_params(alias_name.clone(), param_names);
+                }
+            }
+        }
     }
 
     /// Register a single stdlib type from `core_metadata` if it's
@@ -13609,6 +13637,17 @@ impl TypeChecker {
                         },
                         args: List::new(),
                     })
+                } else if let Some(ctor_ty) = self.try_resolve_variant_constructor(name) {
+                    // Variant constructor used at value-position
+                    // (`Ok(x)`, `Err(e)`, `Some(v)` …).  The
+                    // env-lookup above missed because stdlib
+                    // variant constructors aren't registered as
+                    // env values — pattern matching uses
+                    // `inductive_constructors` registry instead.
+                    // Mirror that for value-position by building a
+                    // `fn(payload) -> Variant<freshvars>`
+                    // constructor type from the registry.
+                    Ok(ctor_ty)
                 } else if self.stdlib_single_file_mode {
                     Ok(Type::Unknown)
                 } else {
@@ -43615,6 +43654,67 @@ impl TypeChecker {
     /// Try to build a variant type from inductive constructors.
     /// STDLIB-AGNOSTIC: This enables pattern matching on generic types like Maybe<T>
     /// when the variant info is stored in inductive_constructors rather than as Type::Variant.
+    /// Resolve a bare name as a variant constructor at
+    /// value-position.  Consults `variant_constructor_parents` to
+    /// find the parent variant type, then builds a `fn(payload) ->
+    /// Variant<freshvars>` constructor type from the registered
+    /// `inductive_constructors`.
+    ///
+    /// **Stdlib-agnostic**: no hardcoded constructor names.  Works
+    /// for any variant whose parent type was registered via
+    /// `register_inductive_type` / `register_variant_signature_for_lazy`,
+    /// stdlib or user-defined.
+    fn try_resolve_variant_constructor(&self, name: &str) -> Option<Type> {
+        let ctor_text = verum_common::Text::from(name);
+        let parents = self.variant_constructor_parents.get(&ctor_text)?;
+        // Pick the first registered parent (first-wins discipline,
+        // mirrors `register_variant_type_name_first_wins`).
+        let parent_name = parents.first()?.clone();
+        let constructors = match self.ctx.get_constructors(&parent_name) {
+            Maybe::Some(c) => c.clone(),
+            Maybe::None => return None,
+        };
+        // Find this constructor's args.
+        let ctor = constructors.iter().find(|c| c.name == ctor_text)?;
+        // Build fresh type variables for the parent's generic
+        // parameters so the constructor instantiation is open
+        // (caller's expected type drives unification).
+        let generics_count = self
+            .type_generics_count
+            .get(&parent_name)
+            .copied()
+            .unwrap_or(0);
+        let fresh_args: List<Type> = (0..generics_count)
+            .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
+            .collect();
+        let return_type = if generics_count == 0 {
+            Type::Named {
+                path: Self::text_to_path(&parent_name),
+                args: List::new(),
+            }
+        } else {
+            Type::Generic {
+                name: parent_name,
+                args: fresh_args.clone(),
+            }
+        };
+        // Constructor argument types — the registry's
+        // `InductiveConstructor.args` may contain Type::Var
+        // placeholders that should map to the parent's fresh args
+        // positionally.  For simple cases (`Ok(T)` → `Ok` has one
+        // arg `T`) this works directly; for more complex
+        // signatures the typechecker's existing substitute_type_params
+        // handles refinement at unify time.
+        let params: List<Type> = ctor.args.iter().map(|a| a.as_ref().clone()).collect();
+        if params.is_empty() {
+            // Unit-position variant (None, Less, …) — return the
+            // constructed value directly, not a function.
+            Some(return_type)
+        } else {
+            Some(Type::function(params, return_type))
+        }
+    }
+
     fn try_build_variant_from_constructors(
         &self,
         name: &str,

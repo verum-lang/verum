@@ -7648,6 +7648,20 @@ impl VbcCodegen {
         type_decl: &verum_ast::decl::TypeDecl,
     ) -> CodegenResult<()> {
         let type_name = type_decl.name.name.to_string();
+        if std::env::var("VERUM_TRACE_RTC").is_ok() && (type_name == "IoResult" || type_name == "IoError" || type_name == "Metadata") {
+            eprintln!("[RTC] type_name={} body_kind={}", type_name, match &type_decl.body {
+                TypeDeclBody::Alias(_) => "Alias",
+                TypeDeclBody::Variant(_) => "Variant",
+                TypeDeclBody::Record(_) => "Record",
+                TypeDeclBody::Newtype(_) => "Newtype",
+                TypeDeclBody::Tuple(_) => "Tuple",
+                TypeDeclBody::Unit => "Unit",
+                TypeDeclBody::Protocol(_) => "Protocol",
+                TypeDeclBody::Inductive(_) => "Inductive",
+                TypeDeclBody::Coinductive(_) => "Coinductive",
+                _ => "OTHER",
+            });
+        }
 
         match &type_decl.body {
             // Variant types: register each variant as a constructor
@@ -8224,10 +8238,38 @@ impl VbcCodegen {
                 // typechecker's pattern matcher saw `IoResult<X>`
                 // as a bare opaque Type::Generic with no resolution
                 // path back to Result.
-                let type_id = TypeId(self.next_type_id);
-                self.next_type_id = self.next_type_id.saturating_add(1);
+                // Use pre-allocated TypeId from collect_all_declarations
+                // when present (avoids id collision with the
+                // placeholder pre-pass).  Falls back to a fresh
+                // user-id otherwise.
+                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
+                    existing
+                } else {
+                    let tid = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(type_name.clone(), tid);
+                    tid
+                };
                 let name_id = StringId(self.intern_string(&type_name));
-                let target_ref = self.ast_type_to_type_ref(target_type);
+                // Build generic_param_map from type_decl.generics so
+                // alias targets reference T/E/etc. as
+                // `TypeRef::Generic(idx)` rather than degrading to
+                // `TypeRef::Concrete(PTR)` via the unknown-name
+                // fallback.  Without this, `type IoResult<T> is
+                // Result<T, StreamError>;` lost T → became
+                // `Result<PTR, StreamError>` and the typechecker's
+                // alias expansion produced `Result<PTR, …>` at
+                // every IoResult<X> site.
+                let mut generic_param_map: std::collections::HashMap<String, u16> =
+                    std::collections::HashMap::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        generic_param_map.insert(gname.name.to_string(), idx as u16);
+                    }
+                }
+                let target_ref = self.resolve_field_type_ref(target_type, &generic_param_map);
+                if std::env::var("VERUM_TRACE_RTC").is_ok() && type_name == "IoResult" {
+                    eprintln!("[RTC-emit] IoResult id={} target_ref={:?}", type_id.0, target_ref);
+                }
                 // Generic params (T, K, V, …) on the alias signature.
                 let mut alias_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
                     smallvec::SmallVec::new();
@@ -8258,7 +8300,6 @@ impl VbcCodegen {
                     visibility: crate::types::Visibility::Public,
                     alias_target: Some(target_ref),
                 };
-                self.type_name_to_id.insert(type_name.clone(), type_id);
                 self.push_type_dedupe(type_desc);
             }
 
@@ -8965,6 +9006,37 @@ impl VbcCodegen {
         generic_param_map: &std::collections::HashMap<String, u16>,
     ) -> TypeRef {
         use verum_ast::ty::{PathSegment, TypeKind};
+        // Generic instantiation: recurse into args with the same map
+        // so nested type-param references (`Result<T, E>` from
+        // `type IoResult<T> is Result<T, StreamError>;`) preserve
+        // T → TypeRef::Generic(0) instead of degrading to
+        // TypeRef::Concrete(PTR) via the un-aware fallback.
+        if let TypeKind::Generic { base, args } = &ty.kind {
+            let base_ref = self.resolve_field_type_ref(base, generic_param_map);
+            if let TypeRef::Concrete(base_id) = base_ref {
+                let arg_refs: Vec<TypeRef> = args
+                    .iter()
+                    .filter_map(|arg| {
+                        if let verum_ast::ty::GenericArg::Type(inner_ty) = arg {
+                            Some(self.resolve_field_type_ref(inner_ty, generic_param_map))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                return TypeRef::Instantiated {
+                    base: base_id,
+                    args: arg_refs,
+                };
+            }
+            return base_ref;
+        }
+        if let TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } = &ty.kind
+        {
+            return self.resolve_field_type_ref(inner, generic_param_map);
+        }
         // Check if the type is a simple path that matches a generic param
         if let TypeKind::Path(path) = &ty.kind {
             let type_name = path
@@ -9095,7 +9167,7 @@ impl VbcCodegen {
                 // Capability restrictions are compile-time only; unwrap to base type
                 self.ast_type_to_type_ref(base)
             }
-            TypeKind::Char => TypeRef::Concrete(TypeId::INT), // Char is stored as Int
+            TypeKind::Char => TypeRef::Concrete(TypeId::CHAR),
             TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
                 let elem_ref = self.ast_type_to_type_ref(element);
                 if let TypeRef::Concrete(base_id) = elem_ref {
@@ -10664,6 +10736,18 @@ impl VbcCodegen {
                     if let Some(mapped) = string_id_map.get(f.name.0 as usize) {
                         f.name = *mapped;
                     }
+                }
+            }
+            // Remap generic type-parameter names from codegen
+            // string index to module StringId.  Pre-fix the param
+            // names stayed as codegen-time indices, so the runtime's
+            // `module.strings.get(tp.name)` returned garbage —
+            // archive_metadata then emitted aliases like
+            // `IoResult` with `generic_params=[""]` instead of
+            // `[T]`, breaking positional substitution at use sites.
+            for tp in remapped_ty.type_params.iter_mut() {
+                if let Some(mapped) = string_id_map.get(tp.name.0 as usize) {
+                    tp.name = *mapped;
                 }
             }
             // Remap drop_fn from sparse ID to contiguous 0-based ID
