@@ -22,7 +22,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.export.value.{
-    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob,
+    ExportValue, EvNull, EvInteger, EvReal, EvText, EvBlob,
     render_sql_literal, quote_sql_text,
 };
 
@@ -47,10 +47,10 @@ public fn dump_format_name(f: &DumpFormat) -> Text {
 public type RowDump is {
     table: Text,
     columns: List<Text>,
-    values: List<SqlValue>,
+    values: List<ExportValue>,
 }
 
-public fn row_dump(table: Text, columns: List<Text>, values: List<SqlValue>) -> RowDump {
+public fn row_dump(table: Text, columns: List<Text>, values: List<ExportValue>) -> RowDump {
     RowDump { table: table, columns: columns, values: values }
 }
 
@@ -120,17 +120,17 @@ fn render_csv(row: &RowDump) -> Text {
     out
 }
 
-fn render_csv_value(v: &SqlValue) -> Text {
+fn render_csv_value(v: &ExportValue) -> Text {
     match v {
-        SvNull       => "".clone(),
-        SvInteger(_) => csv_quote_if_needed(&render_csv_plain(v)),
-        SvReal(_)    => render_csv_plain(v),
-        SvText(t)    => csv_quote(t),
-        SvBlob(_)    => csv_quote(&render_csv_plain(v)),
+        EvNull       => "".clone(),
+        EvInteger(_) => csv_quote_if_needed(&render_csv_plain(v)),
+        EvReal(_)    => render_csv_plain(v),
+        EvText(t)    => csv_quote(t),
+        EvBlob(_)    => csv_quote(&render_csv_plain(v)),
     }
 }
 
-fn render_csv_plain(v: &SqlValue) -> Text {
+fn render_csv_plain(v: &ExportValue) -> Text {
     // Reuse SQL-literal renderer minus the leading X' / quotes.
     render_sql_literal(v)
 }
@@ -183,13 +183,13 @@ fn render_jsonl(row: &RowDump) -> Text {
     out
 }
 
-fn render_jsonl_value(v: &SqlValue) -> Text {
+fn render_jsonl_value(v: &ExportValue) -> Text {
     match v {
-        SvNull       => "null".clone(),
-        SvInteger(_) => render_sql_literal(v),
-        SvReal(_)    => render_sql_literal(v),
-        SvText(t)    => json_quote(t),
-        SvBlob(_)    => json_quote(&render_sql_literal(v)),
+        EvNull       => "null".clone(),
+        EvInteger(_) => render_sql_literal(v),
+        EvReal(_)    => render_sql_literal(v),
+        EvText(t)    => json_quote(t),
+        EvBlob(_)    => json_quote(&render_sql_literal(v)),
     }
 }
 

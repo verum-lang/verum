@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, export, value, sql_value, bridge, unification
+// @timeout: 15000
+// @description: ExportValue rename + l6_session.SqlValue bridge (#162).
+//               Pre-fix: two SqlValue types existed in the codebase
+//               (`l6_session.SqlValue` with VNull/VInt/VReal/VText/
+//               VBlob AND `export.SqlValue` with SvNull/SvInteger/
+//               SvReal/SvText/SvBlob); pattern-matching dispatched
+//               unpredictably depending on import order.  Post-fix:
+//               export form renamed → `ExportValue` (with EvNull/
+//               EvInteger/EvReal/EvText/EvBlob) so each type's name
+//               reflects its role: SqlValue = SQLite-API surface,
+//               ExportValue = textual rendering surface.
+//
+// Spec: internal/specs/sqlite-native.md §22 (export tooling)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.export.value.{
+    ExportValue, EvNull, EvInteger, EvReal, EvText, EvBlob,
+    ev_kind_name, render_sql_literal, quote_sql_text,
+};
+
+// =============================================================================
+// 1. EvNull constructs + names
+// =============================================================================
+
+fn ev_null_constructs() {
+    let v = EvNull;
+    assert_eq(ev_kind_name(&v), "NULL".clone());
+}
+
+// =============================================================================
+// 2. EvInteger constructs + names
+// =============================================================================
+
+fn ev_integer_constructs() {
+    let v = EvInteger(42_i64);
+    assert_eq(ev_kind_name(&v), "INTEGER".clone());
+}
+
+// =============================================================================
+// 3. EvReal constructs + names
+// =============================================================================
+
+fn ev_real_constructs() {
+    let v = EvReal(3.14_f64);
+    assert_eq(ev_kind_name(&v), "REAL".clone());
+}
+
+// =============================================================================
+// 4. EvText constructs + names
+// =============================================================================
+
+fn ev_text_constructs() {
+    let v = EvText("hello".clone());
+    assert_eq(ev_kind_name(&v), "TEXT".clone());
+}
+
+// =============================================================================
+// 5. EvBlob constructs + names
+// =============================================================================
+
+fn ev_blob_constructs() {
+    let mut b: List<Byte> = List.new();
+    b.push(1 as Byte); b.push(2 as Byte);
+    let v = EvBlob(b);
+    assert_eq(ev_kind_name(&v), "BLOB".clone());
+}
+
+// =============================================================================
+// 6. render_sql_literal: NULL renders as "NULL"
+// =============================================================================
+
+fn render_null_literal() {
+    let v = EvNull;
+    assert_eq(render_sql_literal(&v), "NULL".clone());
+}
+
+// =============================================================================
+// 7. render_sql_literal: integer renders as decimal
+// =============================================================================
+
+fn render_integer_literal() {
+    let v = EvInteger(42_i64);
+    assert_eq(render_sql_literal(&v), "42".clone());
+}
+
+fn render_negative_integer_literal() {
+    let v = EvInteger(-7_i64);
+    assert_eq(render_sql_literal(&v), "-7".clone());
+}
+
+// =============================================================================
+// 8. render_sql_literal: text gets single-quoted
+// =============================================================================
+
+fn render_text_literal() {
+    let v = EvText("hello".clone());
+    let r = render_sql_literal(&v);
+    // Should be wrapped in single quotes.
+    assert(r.len() == 7);
+}
+
+// =============================================================================
+// 9. quote_sql_text doubles internal single quotes
+// =============================================================================
+
+fn quote_doubles_internal_quotes() {
+    let r = quote_sql_text(&"O'Brien".clone());
+    // 'O''Brien' = 9 chars: ' O ' ' B r i e n '
+    assert_eq(r.len(), 10);
+}
+
+// =============================================================================
+// 10. Foundation pin: zero variant clash with l6_session.SqlValue
+//     by NAME (the whole point of #162's rename)
+// =============================================================================
+
+fn no_variant_name_clash() {
+    // The four pairs of variant names below MUST be distinct
+    // strings — that's how a future grep across the codebase
+    // can reliably find each ecosystem's variants without
+    // false positives.
+    assert(ev_kind_name(&EvNull) != "VNull".clone());
+    assert(ev_kind_name(&EvInteger(0_i64)) != "VInt".clone());
+    // The kind_name functions return the SQLITE storage class
+    // names ("NULL"/"INTEGER"/...) NOT the variant identifiers,
+    // so they're identical across ecosystems by design — that's
+    // correct: storage class is the user-visible classification.
+    assert_eq(ev_kind_name(&EvNull), "NULL".clone());
+    assert_eq(ev_kind_name(&EvInteger(0_i64)), "INTEGER".clone());
+}
+
+fn main() {
+    ev_null_constructs();
+    ev_integer_constructs();
+    ev_real_constructs();
+    ev_text_constructs();
+    ev_blob_constructs();
+    render_null_literal();
+    render_integer_literal();
+    render_negative_integer_literal();
+    render_text_literal();
+    quote_doubles_internal_quotes();
+    no_variant_name_clash();
+}

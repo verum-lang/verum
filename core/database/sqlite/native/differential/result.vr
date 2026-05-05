@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.export.value.{
-    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob,
+    ExportValue, EvNull, EvInteger, EvReal, EvText, EvBlob,
 };
 
 // -----------------------------------------------------------------------------
@@ -41,9 +41,9 @@ public fn status_name(s: &RunStatus) -> Text {
 // DifferentialResultRow — one row of a result set
 // -----------------------------------------------------------------------------
 
-public type DifferentialResultRow is { values: List<SqlValue> }
+public type DifferentialResultRow is { values: List<ExportValue> }
 
-public fn result_row(values: List<SqlValue>) -> DifferentialResultRow {
+public fn result_row(values: List<ExportValue>) -> DifferentialResultRow {
     DifferentialResultRow { values: values }
 }
 
