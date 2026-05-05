@@ -602,6 +602,15 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        OpenIndex(cursor_id, root_page, n_cols) => {
+            // Index-cursor open (#160): same construction as OpenRead
+            // but with `IndexBtree` kind so cell parsing decodes
+            // index-record entries (key columns + trailing rowid).
+            let _ = state.cursors.open_read(cursor_id, root_page, n_cols, IndexBtree);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         OpenEphemeral(cursor_id, n_cols) => {
             let _ = state.cursors.open_ephemeral(cursor_id, n_cols);
             state.pc = state.pc + 1;
@@ -642,6 +651,20 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         RowIdOp(cursor_id, dst) => {
+            let rid = state.cursors.current_rowid(cursor_id);
+            state.regs.set(dst, RRowId(rid));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        IdxRowid(cursor_id, dst) => {
+            // Index cursors store the base-table rowid as the LAST
+            // column of every index record (#160).  The cursor's
+            // n_cols = n_indexed_cols + 1; we read column
+            // (n_cols - 1) which is the rowid.  Foundation pass:
+            // delegate to current_rowid which already reads the
+            // trailing rowid for index cursors via the cursor_table
+            // dispatch path.
             let rid = state.cursors.current_rowid(cursor_id);
             state.regs.set(dst, RRowId(rid));
             state.pc = state.pc + 1;
@@ -693,6 +716,26 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 cursor_id: cursor_id,
                 rowid: rowid,
             });
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        IdxInsert(cursor_id, record_reg) => {
+            // Insert one entry into an index B-tree (#160).  The
+            // record at `record_reg` is a pre-built MakeRecord
+            // output containing the key columns + trailing rowid.
+            // For the foundation-pass interpreter we round-trip
+            // the record through the row-store path used by the
+            // base table; the actual index-tree insert happens
+            // in the L3 pager-backed dispatch when wired.
+            let slot_kind = state.cursors.kind(cursor_id);
+            match slot_kind {
+                CskClosed => { state.pc = state.pc + 1; return Yield; }
+                _ => {}
+            }
+            let mut row: List<Register> = List.new();
+            row.push(state.regs.get(record_reg));
+            let _ = state.cursors.append_row(cursor_id, row);
             state.pc = state.pc + 1;
             Yield
         }

@@ -3195,15 +3195,14 @@ fn emit_annotated(st: &mut CgState, ann: &CostAnnotatedPlan) -> Result<(), Codeg
 
 /// `True` when the chosen access method has a specialised codegen
 /// lowering.  AmFullScan returns false (no specialisation needed).
-/// AmIndexSeek / AmIndexRangeScan / AmCoveringIndexScan currently
-/// return false (deferred to follow-up tasks #160 / #161 — those
-/// require dedicated index-cursor opcode shapes (`IdxRowid`,
-/// `OpenIndex`) that aren't in the L4 opcode set yet).  Only
-/// AmRowidLookup returns true at this layer.
+/// AmRowidLookup + AmIndexSeek (#160) lower to dedicated opcode
+/// shapes; AmIndexRangeScan + AmCoveringIndexScan still fall
+/// through to historical scan path until the range + covering
+/// shapes land (deferred #161).
 fn access_method_is_actionable(m: &AccessMethod) -> Bool {
     match m {
         AmRowidLookup => true,
-        AmIndexSeek(_) => false,
+        AmIndexSeek(_) => true,
         AmIndexRangeScan(_) => false,
         AmCoveringIndexScan(_) => false,
         AmEphemeralScan => false,
@@ -3211,10 +3210,10 @@ fn access_method_is_actionable(m: &AccessMethod) -> Bool {
     }
 }
 
-/// Lower a `PnProject(PnFilter(PnTableScan, pred), cols)` shape with
-/// `AmRowidLookup` access plan.  The predicate must have produced
-/// exactly one seek key (the rowid value); the residual predicate
-/// (any non-consumed conjuncts) is evaluated AFTER the seek hits.
+/// Lower a `PnProject(PnFilter(PnTableScan, pred), cols)` shape
+/// with a refined access plan.  Dispatches on `p.method` to the
+/// specialised lowering: AmRowidLookup → rowid-seek shape;
+/// AmIndexSeek → index-cursor seek shape (#160).
 fn emit_annotated_project_seek(
     st: &mut CgState,
     filter_plan: &PlanNode,
@@ -3226,7 +3225,15 @@ fn emit_annotated_project_seek(
             let scan_node = &**child;
             match scan_node {
                 PnTableScan(ref _t, cid, n_cols) => {
-                    return emit_rowid_lookup_projected(st, cid, n_cols, p, cols);
+                    match &p.method {
+                        AmRowidLookup => {
+                            return emit_rowid_lookup_projected(st, cid, n_cols, p, cols);
+                        }
+                        AmIndexSeek(_) => {
+                            return emit_index_seek_projected(st, cid, n_cols, p, cols);
+                        }
+                        _ => {},
+                    }
                 }
                 _ => {},
             }
@@ -3236,9 +3243,8 @@ fn emit_annotated_project_seek(
     Err(unsupported("annotated project-seek expected Filter(TableScan, _)".clone()))
 }
 
-/// Lower a bare `PnFilter(PnTableScan, pred)` with `AmRowidLookup`.
-/// Equivalent to `emit_annotated_project_seek` minus the projection
-/// step — emits every column from the matched row instead.
+/// Lower a bare `PnFilter(PnTableScan, pred)`.  Same dispatch
+/// surface as `emit_annotated_project_seek` minus projection.
 fn emit_annotated_filter_seek(
     st: &mut CgState,
     filter_plan: &PlanNode,
@@ -3249,7 +3255,15 @@ fn emit_annotated_filter_seek(
             let scan_node = &**child;
             match scan_node {
                 PnTableScan(ref _t, cid, n_cols) => {
-                    return emit_rowid_lookup_bare(st, cid, n_cols, p);
+                    match &p.method {
+                        AmRowidLookup => {
+                            return emit_rowid_lookup_bare(st, cid, n_cols, p);
+                        }
+                        AmIndexSeek(_) => {
+                            return emit_index_seek_bare(st, cid, n_cols, p);
+                        }
+                        _ => {},
+                    }
                 }
                 _ => {},
             }
@@ -3409,4 +3423,187 @@ fn emit_rowid_lookup_bare(
         prologue.0, prologue.1, prologue.2, prologue.3, prologue.4,
     );
     Ok(())
+}
+
+// =============================================================================
+// AmIndexSeek lowering (#160) — index-cursor + secondary-table seek
+// =============================================================================
+//
+// Shape for `SELECT cols FROM t WHERE indexed_col = K`:
+//
+//      OpenRead(t_cur, t_root, n_t_cols)
+//      OpenIndex(idx_cur, idx_root, n_keys+1)
+//      <emit K into key_reg>
+//      SeekGE(idx_cur, key_reg, n_keys, end)
+//      loop_top:
+//      NotFound(idx_cur, end_loop, key_reg, n_keys)
+//      IdxRowid(idx_cur, rid_reg)
+//      SeekGE(t_cur, rid_reg, 1, skip_row)
+//      <residual predicate IfNot, optional>
+//      <projected columns from t_cur>
+//      ResultRow(proj_start, n)
+//      skip_row:
+//      Next(idx_cur, loop_top)
+//      end_loop:
+//      end:
+//      Close(t_cur); Close(idx_cur)
+//
+// Cursor-id allocation: the table cursor uses the planner-assigned
+// `cursor_id`; the index cursor uses the next free slot
+// (`cursor_id + 1`).  Future planner work will surface the index
+// cursor as its own AccessPlan field; for the foundation pass we
+// derive it from the table-cursor id.
+// =============================================================================
+
+/// AmIndexSeek with explicit projection columns.
+fn emit_index_seek_projected(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+    cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_index_seek_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+
+    let proj_start = st.regs.alloc_n(cols.len());
+    let mut i: Int = 0;
+    while i < cols.len() {
+        match emit_expr(st, &cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, proj_start, cols.len());
+    emit_limit_body_counter(st, gp);
+
+    emit_index_seek_epilogue(st, prologue);
+    Ok(())
+}
+
+/// AmIndexSeek without explicit projection (bare Filter-over-TableScan).
+fn emit_index_seek_bare(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_index_seek_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+
+    let row_start = st.regs.alloc_n(n_cols);
+    let mut i: Int = 0;
+    while i < n_cols {
+        let _ = st.program.emit(Column(cursor_id, i, row_start + i));
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, row_start, n_cols);
+    emit_limit_body_counter(st, gp);
+
+    emit_index_seek_epilogue(st, prologue);
+    Ok(())
+}
+
+/// AmIndexSeek prologue snapshot — captures the patch points the
+/// epilogue needs to wire jump targets in lockstep.
+type IndexSeekPrologue is {
+    t_cur: Int,
+    idx_cur: Int,
+    key_reg: Int,
+    n_keys: Int,
+    seek_idx: Int,           // SeekGE(idx_cur) instruction index
+    loop_top: Int,           // first PC after seek
+    not_found_idx: Int,      // NotFound(idx_cur) — patched to end_loop
+    table_seek_idx: Int,     // SeekGE(t_cur) — patched to skip_row
+    next_idx_to_patch: Int,  // placeholder for Next(idx_cur, loop_top)
+};
+
+/// Common AmIndexSeek prologue: open both cursors, materialise key,
+/// seek into the index, set up the loop entry that the epilogue
+/// closes.  Returns the patch-point bundle.
+fn emit_index_seek_prologue(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<IndexSeekPrologue, CodegenError> {
+    let n_keys = p.seek_keys.len();
+    if n_keys < 1 {
+        return Err(InvalidPlan("AmIndexSeek expected ≥1 seek key".clone()));
+    }
+
+    let t_cur = cursor_id;
+    let idx_cur = cursor_id + 1;
+    if t_cur >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    if idx_cur >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkIndex, p.index_root_page, n_keys + 1);
+    }
+
+    let _ = st.program.emit(OpenRead(t_cur, 0, n_cols));
+    let _ = st.program.emit(OpenIndex(idx_cur, p.index_root_page, n_keys + 1));
+
+    // Materialise seek key(s) — for n_keys=1 (foundation pass)
+    // this is one emit_expr.
+    let key_reg = st.regs.alloc_n(n_keys);
+    let mut k: Int = 0;
+    while k < n_keys {
+        match emit_expr(st, &p.seek_keys[k], key_reg + k) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        k = k + 1;
+    }
+
+    // Seek to first matching index entry.  jump_if_miss → end.
+    let seek_idx = st.program.emit(SeekGE(idx_cur, key_reg, n_keys, 0));
+    let loop_top = st.program.instruction_count();
+    // Loop entry: if cursor's current key doesn't match, exit.
+    let not_found_idx = st.program.emit(NotFound(idx_cur, 0, key_reg, n_keys));
+    // Read rowid from index entry.
+    let rid_reg = st.regs.alloc();
+    let _ = st.program.emit(IdxRowid(idx_cur, rid_reg));
+    // Seek to base table by rowid; on miss skip the body + advance.
+    let table_seek_idx = st.program.emit(SeekGE(t_cur, rid_reg, 1, 0));
+
+    Ok(IndexSeekPrologue {
+        t_cur: t_cur,
+        idx_cur: idx_cur,
+        key_reg: key_reg,
+        n_keys: n_keys,
+        seek_idx: seek_idx,
+        loop_top: loop_top,
+        not_found_idx: not_found_idx,
+        table_seek_idx: table_seek_idx,
+        next_idx_to_patch: -1,  // patched by epilogue
+    })
+}
+
+/// Emit the AmIndexSeek epilogue: skip_row label + Next + end_loop +
+/// Close pair.  Patches all jump targets in the prologue to land at
+/// the right post-body instruction.
+fn emit_index_seek_epilogue(st: &mut CgState, pro: IndexSeekPrologue) {
+    // The body has just emitted ResultRow.  Now: Next(idx_cur,
+    // loop_top), then end_loop label.
+    let skip_row_target = st.program.instruction_count();
+    let _next_idx = st.program.emit(Next(pro.idx_cur, pro.loop_top));
+    let end_loop = st.program.instruction_count();
+
+    // Patch jump targets.
+    st.program.replace(pro.seek_idx, SeekGE(pro.idx_cur, pro.key_reg, pro.n_keys, end_loop));
+    st.program.replace(pro.not_found_idx, NotFound(pro.idx_cur, end_loop, pro.key_reg, pro.n_keys));
+    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.key_reg, 1, skip_row_target));
+    // ^ table_seek_idx jumps to skip_row (the Next opcode) on miss
+    //   — that advances the index and re-checks NotFound.
+
+    // Patch any pending LIMIT early-exits to land at end_loop.
+    emit_limit_finalize_patches(st, end_loop);
+    let _ = st.program.emit(Close(pro.t_cur));
+    let _ = st.program.emit(Close(pro.idx_cur));
 }
