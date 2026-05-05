@@ -994,6 +994,23 @@ impl<'s> CompilationPipeline<'s> {
                     }
 
                     // Create stub functions for items in the failing file.
+                    //
+                    // Pre-fix the stubs landed with `params = SmallVec::new()`
+                    // (from `FunctionDescriptor::default()`); archive_metadata
+                    // then surfaced every stub as a 0-param free fn.  When a
+                    // user mounted a same-named function from a sibling module
+                    // (`mount core.shell.builtins.{path_exists}`), the typecheck
+                    // alias ran through the simple-name slot — first-wins —
+                    // and picked up the 0-param stub instead of the real 1-arg
+                    // body.  Result: `path_exists(&path)` failed VBC codegen
+                    // with "wrong number of arguments: expected 0, found 1".
+                    //
+                    // Populate `params` (with positional names + UNIT type
+                    // refs) so the descriptor's arity matches the source
+                    // declaration even when the body itself couldn't be
+                    // compiled.  Type refs default to UNIT — the stub body
+                    // is `RetV` which never actually consults param types
+                    // at runtime, but the arity check at call sites does.
                     for item in &ast_module.items {
                         if let verum_ast::ItemKind::Function(func) = &item.kind {
                             total_func_count += 1;
@@ -1002,6 +1019,40 @@ impl<'s> CompilationPipeline<'s> {
                             let mut descriptor = FunctionDescriptor::new(name_id);
                             descriptor.register_count = 1;
                             descriptor.locals_count = func.params.len() as u16;
+                            for (i, p) in func.params.iter().enumerate() {
+                                let name = match &p.kind {
+                                    verum_ast::FunctionParamKind::SelfValue
+                                    | verum_ast::FunctionParamKind::SelfValueMut
+                                    | verum_ast::FunctionParamKind::SelfRef
+                                    | verum_ast::FunctionParamKind::SelfRefMut
+                                    | verum_ast::FunctionParamKind::SelfOwn
+                                    | verum_ast::FunctionParamKind::SelfOwnMut
+                                    | verum_ast::FunctionParamKind::SelfRefChecked
+                                    | verum_ast::FunctionParamKind::SelfRefCheckedMut
+                                    | verum_ast::FunctionParamKind::SelfRefUnsafe
+                                    | verum_ast::FunctionParamKind::SelfRefUnsafeMut => {
+                                        "self".to_string()
+                                    }
+                                    verum_ast::FunctionParamKind::Regular { pattern, .. } => {
+                                        if let verum_ast::PatternKind::Ident { name, .. } =
+                                            &pattern.kind
+                                        {
+                                            name.name.to_string()
+                                        } else {
+                                            format!("_arg{}", i)
+                                        }
+                                    }
+                                };
+                            let pname_id = merged_vbc.intern_string(&name);
+                            descriptor.params.push(verum_vbc::module::ParamDescriptor {
+                                name: pname_id,
+                                type_ref: verum_vbc::types::TypeRef::Concrete(
+                                    verum_vbc::types::TypeId::UNIT,
+                                ),
+                                is_mut: false,
+                                default: None,
+                            });
+                            }
                             let vbc_func = VbcFunction::new(descriptor, vec![Instruction::RetV]);
                             merged_vbc.add_function(vbc_func.descriptor.clone());
                         }

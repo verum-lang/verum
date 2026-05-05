@@ -1380,7 +1380,9 @@ impl VbcCodegen {
         // loses the provenance needed to resolve cross-module paths like
         // `super.darwin.tls.ctx_get`.
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) = Self::extract_source_module_name(module) {
+        if let Some(name) =
+            Self::resolve_full_module_path(module, &self.config.module_name)
+        {
             self.ctx.current_source_module = Some(name);
         }
         let module_name = self.ctx.current_source_module.clone().unwrap_or_default();
@@ -1438,6 +1440,60 @@ impl VbcCodegen {
             }
         }
         None
+    }
+
+    /// Resolve the full module path for the AST being compiled, given
+    /// the codegen's config.module_name as the parent prefix.
+    ///
+    /// Stdlib `.vr` files use short `module X;` declarations (e.g.
+    /// `core/shell/builtins.vr` says `module builtins;`) — the AST
+    /// only carries the leaf segment.  Without composition,
+    /// `current_source_module` lands as just `"builtins"` and every
+    /// per-module-qualified registration (the `<module>.<func>`
+    /// archive key, the qualified function lookup at call sites)
+    /// loses the parent `core.shell` path.  The user's
+    /// `mount core.shell.builtins.{path_exists}` then can't find
+    /// `core.shell.builtins.path_exists` in ctx.functions and falls
+    /// through to the bare-name lookup, picking up whichever
+    /// `path_exists` simple-name slot won the first-wins race —
+    /// which is a stub from a different file.
+    ///
+    /// Composition rules:
+    ///  * No AST module declaration → use `config.module_name`.
+    ///  * AST decl is a SHORT name (no dots) AND the parent
+    ///    config.module_name's last segment matches → AST is the
+    ///    `mod.vr` of the parent: use `config.module_name`.
+    ///  * AST decl is a SHORT name AND parent's last segment
+    ///    differs → AST is a SUBMODULE: append, yielding
+    ///    `config.module_name.<ast_decl>`.
+    ///  * AST decl is already DOTTED → user wrote a fully-
+    ///    qualified path; trust it as authoritative.
+    fn resolve_full_module_path(module: &Module, parent_module_name: &str) -> Option<String> {
+        let ast_name = Self::extract_source_module_name(module)?;
+        if ast_name.is_empty() {
+            if parent_module_name.is_empty() {
+                return None;
+            }
+            return Some(parent_module_name.to_string());
+        }
+        // Already qualified — trust it.
+        if ast_name.contains('.') {
+            return Some(ast_name);
+        }
+        // No parent — single-segment AST decl is canonical.
+        if parent_module_name.is_empty() || parent_module_name == "main" {
+            return Some(ast_name);
+        }
+        // mod.vr equivalent: AST's leaf matches parent's leaf.
+        let parent_leaf = parent_module_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(parent_module_name);
+        if ast_name == parent_leaf {
+            return Some(parent_module_name.to_string());
+        }
+        // Submodule file: prepend the parent path.
+        Some(format!("{}.{}", parent_module_name, ast_name))
     }
 
     /// Marks all type names in a module as user-defined.
@@ -2937,7 +2993,9 @@ impl VbcCodegen {
     /// NOT call `build_module()` — call `finalize_module()` separately when done.
     pub fn compile_module_items(&mut self, module: &Module) -> CodegenResult<()> {
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) = Self::extract_source_module_name(module) {
+        if let Some(name) =
+            Self::resolve_full_module_path(module, &self.config.module_name)
+        {
             self.ctx.current_source_module = Some(name);
         }
         let mut result = Ok(());
@@ -2964,7 +3022,9 @@ impl VbcCodegen {
     /// at runtime, which is the correct behavior.
     pub fn compile_module_items_lenient(&mut self, module: &Module) -> CodegenResult<()> {
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) = Self::extract_source_module_name(module) {
+        if let Some(name) =
+            Self::resolve_full_module_path(module, &self.config.module_name)
+        {
             self.ctx.current_source_module = Some(name);
         }
         let mut first_strict_err: Option<CodegenError> = None;
@@ -3284,6 +3344,21 @@ impl VbcCodegen {
         self.compile_pending_constants()?;
         // Compile any pending @thread_local initializations
         self.compile_pending_tls_inits()?;
+        // Ensure every Call/CallG/TailCall/etc. target has a
+        // corresponding VbcFunction descriptor in `self.functions`
+        // — without this, user code that calls a non-intrinsic
+        // stdlib function lands at runtime as
+        // `InterpreterError::FunctionNotFound`.  Most stdlib
+        // functions reach the interpreter via name-based intercepts
+        // (`try_intercept_shell_runtime`/`file_runtime`/`env_runtime`/…)
+        // which need the FUNCTION DESCRIPTOR's name to dispatch —
+        // so the descriptor must be present even when the body
+        // isn't. `emit_missing_stub_descriptors` walks every emitted
+        // instruction's `func_id` operand and adds a stub
+        // descriptor (with the right name + parent_type + arity)
+        // for any id that was registered in `ctx.functions` but
+        // hasn't been pushed to `self.functions`.
+        self.emit_missing_stub_descriptors();
         // Verify type-descriptor self-consistency before emitting bytecode.
         // Catches the class of bugs where codegen produces a TypeDescriptor
         // whose variants disagree with their declared `kind`/`arity`/
@@ -10741,6 +10816,159 @@ impl VbcCodegen {
         let id = self.ctx.strings.len() as u32;
         self.ctx.strings.push(s.to_string());
         id
+    }
+
+    /// Walk every emitted function's instruction stream collecting
+    /// the FunctionId targets of Call / CallG / TailCall / NewClosure /
+    /// Spawn / GenCreate / CallM operands.  For each unique id that
+    /// has NO corresponding VbcFunction in `self.functions` but DOES
+    /// appear in `ctx.functions` (i.e. was loaded from the stdlib
+    /// archive via `archive_ctx_loader::apply_lazy`), push a stub
+    /// VbcFunction with the right descriptor metadata (name, arity,
+    /// parent_type) so the interpreter's name-based intercept layer
+    /// can dispatch.
+    ///
+    /// Idempotent + bounded: only adds stubs for IDs that are both
+    /// (a) referenced by user bytecode and (b) registered in
+    /// ctx.functions.  Bodies are zero-instruction `RetV` stubs —
+    /// the actual implementation is intercepted at the call boundary
+    /// (`try_intercept_shell_runtime` / `file_runtime` / `env_runtime`
+    /// /… in dispatch_table).  No new module dependencies.
+    fn emit_missing_stub_descriptors(&mut self) {
+        use std::collections::{HashMap, HashSet};
+        // 1. Collect referenced FunctionIds from emitted bytecode.
+        let mut referenced: HashSet<u32> = HashSet::new();
+        for vbc_func in self.functions.iter() {
+            for instr in &vbc_func.instructions {
+                match instr {
+                    Instruction::Call { func_id, .. }
+                    | Instruction::CallG { func_id, .. }
+                    | Instruction::TailCall { func_id, .. }
+                    | Instruction::NewClosure { func_id, .. }
+                    | Instruction::Spawn { func_id, .. }
+                    | Instruction::GenCreate { func_id, .. } => {
+                        referenced.insert(*func_id);
+                    }
+                    Instruction::CallM { method_id, .. } => {
+                        referenced.insert(*method_id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // 2. Already-emitted IDs.
+        let emitted: HashSet<u32> = self
+            .functions
+            .iter()
+            .map(|f| f.descriptor.id.0)
+            .collect();
+        // 3. Build name → FunctionInfo map, indexed by id.
+        // ctx.functions is HashMap<String, FunctionInfo>; we need
+        // to find by id.  Build a side index.
+        let mut id_to_name: HashMap<u32, String> = HashMap::new();
+        for (name, info) in self.ctx.functions.iter() {
+            // Skip sentinel-id entries (FFI extern, newtype ctor —
+            // those are dispatched out-of-band; emitting a stub
+            // would collide with the real sentinel handler at the
+            // call site).  Use the same threshold as
+            // `import_functions`.
+            const SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+            if info.id.0 >= SENTINEL_THRESHOLD {
+                continue;
+            }
+            // Prefer simple names over qualified ones for the stub
+            // (interpreter intercepts dispatch by simple name).
+            // The first name registered for a given id wins —
+            // typical pattern is "name" first, then "module.name"
+            // alias, both pointing at the same FunctionInfo.
+            id_to_name.entry(info.id.0).or_insert_with(|| name.clone());
+        }
+        // 4. For each referenced id missing from `emitted`, create
+        // a stub.  Skip ids beyond SENTINEL_THRESHOLD (handled by
+        // the FFI / variant-ctor / newtype-ctor dispatch paths).
+        const SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        for id in referenced {
+            if id >= SENTINEL_THRESHOLD {
+                continue;
+            }
+            if emitted.contains(&id) {
+                continue;
+            }
+            let name = match id_to_name.get(&id) {
+                Some(n) => n.clone(),
+                None => continue, // ID not in ctx.functions — drop
+            };
+            // Strip qualified prefix to get the simple name for
+            // the descriptor.  intercepts (and the typecheck-side
+            // `register_inherent_methods_from_metadata`) work off
+            // the simple name.
+            let simple_name = name
+                .rsplit('.')
+                .next()
+                .unwrap_or(name.as_str())
+                .to_string();
+            let info = match self.ctx.functions.get(&name) {
+                Some(i) => i.clone(),
+                None => continue,
+            };
+            let name_id = StringId(self.ctx.intern_string_raw(&simple_name));
+            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+            descriptor.id = crate::module::FunctionId(id);
+            descriptor.register_count = 1;
+            descriptor.locals_count = info.param_count as u16;
+            // Populate ParamDescriptors — placeholder names + UNIT
+            // type refs.  Arity is the only field the dispatch path
+            // checks for stub descriptors; the body is `RetV` so
+            // type refs aren't consulted at runtime.
+            for (i, pname) in info.param_names.iter().enumerate() {
+                let pname_to_use = if pname.is_empty() {
+                    format!("_arg{}", i)
+                } else {
+                    pname.clone()
+                };
+                let pname_id = StringId(self.ctx.intern_string_raw(&pname_to_use));
+                descriptor.params.push(crate::module::ParamDescriptor {
+                    name: pname_id,
+                    type_ref: TypeRef::Concrete(TypeId::UNIT),
+                    is_mut: false,
+                    default: None,
+                });
+            }
+            // Pad to declared param_count when fewer names were
+            // available (extern FFI declarations sometimes come in
+            // with empty `param_names`).
+            while descriptor.params.len() < info.param_count {
+                let i = descriptor.params.len();
+                let pname_id = StringId(self.ctx.intern_string_raw(&format!("_arg{}", i)));
+                descriptor.params.push(crate::module::ParamDescriptor {
+                    name: pname_id,
+                    type_ref: TypeRef::Concrete(TypeId::UNIT),
+                    is_mut: false,
+                    default: None,
+                });
+            }
+            // PropertySet — only ASYNC matters for stubs; the rest
+            // are runtime-effect tags consulted at AOT codegen, not
+            // by the interpreter's intercept layer.
+            if info.is_async {
+                descriptor.properties |= crate::types::PropertySet::ASYNC;
+            }
+            descriptor.is_generator = info.is_generator;
+            // Copy parent_type when present so method-dispatch
+            // paths that key on `descriptor.parent_type` still work
+            // through the stub (e.g.
+            // `verify_global_type_table_consistency` reports).
+            if let Some(parent_name) = info.parent_type_name.as_deref() {
+                if let Some(&parent_tid) = self.type_name_to_id.get(parent_name) {
+                    descriptor.parent_type = Some(parent_tid);
+                }
+            }
+            let vbc_func = crate::module::VbcFunction::new(
+                descriptor,
+                vec![Instruction::RetV],
+            );
+            self.functions.push(vbc_func);
+        }
     }
 
     /// Builds the final VBC module.
