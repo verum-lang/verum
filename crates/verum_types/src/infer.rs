@@ -65562,7 +65562,7 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 fn register_variant_signature_for_lazy(
     checker: &mut TypeChecker,
     name: &Text,
-    _type_desc: &crate::core_metadata::TypeDescriptor,
+    type_desc: &crate::core_metadata::TypeDescriptor,
     cases: &List<crate::core_metadata::VariantCase>,
     pending: &mut Vec<Text>,
 ) {
@@ -65589,47 +65589,55 @@ fn register_variant_signature_for_lazy(
         }
     }
 
-    // Register variant signature + constructor parent mappings +
-    // unit-variant values in env, mirroring the eager
-    // `load_stdlib_from_metadata` block at lines ~1717-1731.
-    // Without this, `Ok(x)` / `Err(x)` / `None` / `Some(x)` etc. are
-    // unbound at user-code call sites despite the parent Result/
-    // Maybe type being registered.
+    // #126 — generic-parameter substitution at variant construction.
+    //
+    // Map every parent generic-param NAME (e.g. `"T"`, `"A"`, `"E"`)
+    // to a freshly-allocated `TypeVar`.  The variant payload types
+    // are then built using these vars instead of literal
+    // `Type::Named { path: "T" }` placeholders.  When the unit-variant
+    // env entry is inserted as a `TypeScheme::poly` quantified over
+    // the same vars, every lookup yields a freshly-instantiated
+    // `Type::Variant` whose generic positions are fresh `Type::Var`s
+    // — exactly what the unifier expects at `mapped == None` sites.
+    //
+    // Pre-fix this function inserted the variant_type as a `mono`
+    // scheme whose payload positions held rigid `Type::Named "T"`,
+    // so `Maybe<Int> == None` failed with `expected 'T', found 'Int'`
+    // because the unifier compared `Int` (concrete) against `Named "T"`
+    // (rigid name) with no rule to unify.
     use indexmap::IndexMap;
+    use crate::ty::TypeVar;
+    let param_to_var: IndexMap<Text, TypeVar> = type_desc
+        .generic_params
+        .iter()
+        .map(|gp| (gp.name.clone(), TypeVar::fresh()))
+        .collect();
+    let resolve_payload_name = |t: &Text| -> Type {
+        if let Some(tv) = param_to_var.get(t) {
+            Type::Var(*tv)
+        } else {
+            Type::Named {
+                path: TypeChecker::text_to_path(t),
+                args: List::new(),
+            }
+        }
+    };
+
     let mut variant_map: IndexMap<Text, Type> = IndexMap::new();
     for case in cases.iter() {
         let payload_ty = match &case.payload {
             Maybe::None => Type::Unit,
             Maybe::Some(crate::core_metadata::VariantPayload::Tuple(types)) => {
                 if types.len() == 1 {
-                    Type::Named {
-                        path: TypeChecker::text_to_path(&types[0]),
-                        args: List::new(),
-                    }
+                    resolve_payload_name(&types[0])
                 } else {
-                    Type::Tuple(
-                        types
-                            .iter()
-                            .map(|t| Type::Named {
-                                path: TypeChecker::text_to_path(t),
-                                args: List::new(),
-                            })
-                            .collect(),
-                    )
+                    Type::Tuple(types.iter().map(&resolve_payload_name).collect())
                 }
             }
             Maybe::Some(crate::core_metadata::VariantPayload::Record(fields)) => {
                 let field_map: IndexMap<Text, Type> = fields
                     .iter()
-                    .map(|f| {
-                        (
-                            f.name.clone(),
-                            Type::Named {
-                                path: TypeChecker::text_to_path(&f.ty),
-                                args: List::new(),
-                            },
-                        )
-                    })
+                    .map(|f| (f.name.clone(), resolve_payload_name(&f.ty)))
                     .collect();
                 Type::Record(field_map)
             }
@@ -65661,20 +65669,30 @@ fn register_variant_signature_for_lazy(
     // Register unit-variant constructors as env values (so `None`,
     // `Less`, `Greater`, … resolve as expressions) and ALWAYS the
     // qualified `Type.Variant` form.
+    //
+    // #126 — when the parent has generic params, the env entry must
+    // be a *polymorphic* `TypeScheme` quantified over the same fresh
+    // TypeVars that we substituted into the payload positions. This
+    // way every `lookup → instantiate` yields a fresh per-call-site
+    // copy with independent unification slots.
+    use crate::context::TypeScheme;
+    let scheme_vars: List<TypeVar> = param_to_var.values().copied().collect();
+    let make_scheme = || -> TypeScheme {
+        if scheme_vars.is_empty() {
+            TypeScheme::mono(variant_type.clone())
+        } else {
+            TypeScheme::poly(scheme_vars.clone(), variant_type.clone())
+        }
+    };
+
     for (vname, payload_ty) in &variant_map {
         if *payload_ty == Type::Unit {
             if checker.ctx.env.lookup(vname.as_str()).is_none() {
-                checker
-                    .ctx
-                    .env
-                    .insert_mono(vname.clone(), variant_type.clone());
+                checker.ctx.env.insert(vname.clone(), make_scheme());
             }
         }
         let qualified_name: Text = format!("{}.{}", name, vname).into();
-        checker
-            .ctx
-            .env
-            .insert_mono(qualified_name, variant_type.clone());
+        checker.ctx.env.insert(qualified_name, make_scheme());
     }
 
     // Payload-bearing variant constructors are NOT registered as
