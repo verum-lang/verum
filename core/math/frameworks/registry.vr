@@ -13,15 +13,26 @@
 // Architectural rationale (per VVA §18.7):
 //
 
-//  Verum-Foundation-Marketplace:
-//  ├── Standard frameworks (built-in)
-//  │ ├── ZFC, HoTT, MLTT, CIC, NCG, ∞-topos, cohesive
-//  ├── Verified extensions (community)
-//  │ ├── stack_model, (∞,∞), bounded_arithmetic_*,
-//  │ ├── linear_logic + ludics, giry_probability, α_quantum
-//  └── Experimental (research)
-//  ├── paraconsistent (LP, K3), relevance_logic,
-//  ├── intuitionistic_modal
+//  Verum-Foundation-Marketplace (matches `frameworks/mod.vr` mount tree):
+//  ├── Standard (populate_canonical_standard)
+//  │   ├── Meta-classifier:  diakrisis
+//  │   ├── Foundational impls — point at full-content cogs in
+//  │   │   `core/math/`:  zfc_two_inacc, hott (-> hott.vr),
+//  │   │   cubical (-> cubical.vr), mltt, cic, eff
+//  │   ├── Citation packages — `frameworks/*.vr`:  lurie_htt,
+//  │   │   schreiber_dcct, connes_reconstruction, petz_classification,
+//  │   │   arnold_catastrophe, baez_dolan, owl2_fs
+//  │   └── Special:  actic.raw  (neutral articulation base, ν = 0)
+//  ├── VerifiedExtension
+//  │   ├── populate_diakrisis_extensions:  diakrisis_biadjunction,
+//  │   │   diakrisis_stack_model, diakrisis_extensions, diakrisis_acts
+//  │   ├── populate_msfs_catalogue:  msfs_baseline, msfs_key_symbols,
+//  │   │   msfs_self_containment, msfs_strcat
+//  │   └── populate_bounded_arithmetic_family:  bounded_arithmetic_v_0
+//  │       .. v_1, s_2_1, v_np, v_ph, i_delta_0
+//  └── Experimental (populate_experimental — placeholder for
+//      future linear-logic + ludics / giry_probability /
+//      paraconsistent (LP, K3) / relevance_logic / intuitionistic_modal)
 //
 
 // Each framework — standard, verified, experimental — gets a single
@@ -31,7 +42,35 @@
 // coordinate space, the other frameworks are points in it).
 //
 
-// V0 (this file): record schema + sample-population helper.
+// Architectural distinction — three Standard sub-rosters:
+//
+//  * **Foundational implementations** are full-content cogs that
+//    expose primitives modelling the named foundation
+//    (`core/math/hott.vr`, `core/math/cubical.vr`, …).  They are
+//    THICK — types, functions, theorems implemented inside Verum's
+//    standard meta-theory (ZFC + 2 inaccessibles).  Their registry
+//    entries point at the implementation cog.
+//
+//  * **Citation packages** are THIN axiom-citation surfaces in
+//    this directory (`lurie_htt`, `schreiber_dcct`, …) — each
+//    `@framework(...)` declaration postulates a specific theorem
+//    from external literature and carries the citation for
+//    trusted-boundary audit.
+//
+//  * **Special** — `actic.raw` is the neutral articulation base
+//    (ν = 0); not a citation, not an implementation.
+//
+
+// `populate_full_canonical(r)` runs every populator above —
+// Standard + VerifiedExtension — so the registry covers every
+// cog `mod.vr` mounts.  Pinned by the kernel test
+// `pin_registry_covers_mod_mounts` in
+// `crates/verum_kernel/tests/k_arch_v_alignment.rs`: any new
+// `public mount core.math.frameworks.X` in `mod.vr` requires a
+// matching `framework_record_new(...)` call here.
+//
+
+// V0 (this file): record schema + comprehensive populators.
 // V1: CLI wiring, schema-validation for community submissions.
 // V2: cross-translation map matrix (currently only owl2_to_htt
 // + oc_dc_bridge are wired; full N×N catalog skeleton tracked here).
@@ -222,6 +261,140 @@ public fn populate_canonical_standard(r: &mut FrameworkRegistry) {
         Standard,
         false,
     ));
+
+    // ----- Foundational implementations — point at full-content
+    //       cogs in `core/math/`. Each name matches the
+    //       `Foundation` enum tag in `core/architecture/types.vr`
+    //       (lower-cased). The registry entry advertises that the
+    //       implementation lives at `core/math/<tag>.vr` (or
+    //       sibling) and is the cog tagged when a downstream cog
+    //       declares `@arch_module(foundation: Foundation.<Tag>)`.
+    //       ν = 0 because foundation-implementations are L_Fnd
+    //       primitives; τ-tag is `false` (intensional content).
+
+    registry_register(r, framework_record_new(
+        Text.from("zfc_two_inacc"),
+        Text.from("ZFC + 2 strongly inaccessibles — Verum's standard meta-theory"),
+        msfs_coord(Text.from("zfc_two_inacc"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("hott"),
+        Text.from("Homotopy Type Theory primitives — implementation at core/math/hott.vr"),
+        msfs_coord(Text.from("hott"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("cubical"),
+        Text.from("CCHM Cubical Type Theory primitives — implementation at core/math/cubical.vr"),
+        msfs_coord(Text.from("cubical"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("mltt"),
+        Text.from("Martin-Löf Type Theory — subsumed by CIC (canonical inclusion)"),
+        msfs_coord(Text.from("mltt"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("cic"),
+        Text.from("Calculus of Inductive Constructions — extends MLTT with inductive families"),
+        msfs_coord(Text.from("cic"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("eff"),
+        Text.from("Effective topos — realizability foundation"),
+        msfs_coord(Text.from("eff"), ord_zero(), false),
+        Standard,
+        false,
+    ));
+}
+
+// =============================================================================
+// VerifiedExtension populators — diakrisis extensions, MSFS catalogue
+// =============================================================================
+
+/// Populate the diakrisis extension family.  Each extension sits
+/// atop the canonical-primitive five (registered as `diakrisis` in
+/// the Standard tier) and carries further structural theorems.
+///
+/// Cogs mounted from `frameworks/mod.vr` lines 113-116:
+///   - diakrisis_biadjunction
+///   - diakrisis_stack_model
+///   - diakrisis_extensions
+///   - diakrisis_acts
+public fn populate_diakrisis_extensions(r: &mut FrameworkRegistry) {
+    registry_register(r, framework_record_new(
+        Text.from("diakrisis_biadjunction"),
+        Text.from("M ⊣ A biadjunction — articulation/enactment Morita duality"),
+        msfs_coord(Text.from("diakrisis_biadjunction"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("diakrisis_stack_model"),
+        Text.from("Stack-model semantics for canonical-primitive metaclassification"),
+        msfs_coord(Text.from("diakrisis_stack_model"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("diakrisis_extensions"),
+        Text.from("Further extension theorems atop the canonical-primitive five"),
+        msfs_coord(Text.from("diakrisis_extensions"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("diakrisis_acts"),
+        Text.from("Articulation acts — the categorical action surface"),
+        msfs_coord(Text.from("diakrisis_acts"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+}
+
+/// Populate the MSFS (Modular Stratification Framework System)
+/// catalogue.  Each entry corresponds to a Convention 1.X /
+/// Definition 1.X axiom catalogue.
+///
+/// Cogs mounted from `frameworks/mod.vr` line 142
+/// (`frameworks/msfs/{baseline, key_symbols, self_containment, strcat}`).
+public fn populate_msfs_catalogue(r: &mut FrameworkRegistry) {
+    registry_register(r, framework_record_new(
+        Text.from("msfs_baseline"),
+        Text.from("MSFS Convention 1.0 baseline axiom catalogue"),
+        msfs_coord(Text.from("msfs_baseline"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("msfs_key_symbols"),
+        Text.from("MSFS Convention 1.1 key-symbol catalogue"),
+        msfs_coord(Text.from("msfs_key_symbols"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("msfs_self_containment"),
+        Text.from("MSFS Convention 1.2 self-containment axioms"),
+        msfs_coord(Text.from("msfs_self_containment"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
+    registry_register(r, framework_record_new(
+        Text.from("msfs_strcat"),
+        Text.from("MSFS Convention 1.3 stratified-category axioms"),
+        msfs_coord(Text.from("msfs_strcat"), ord_zero(), false),
+        VerifiedExtension,
+        false,
+    ));
 }
 
 /// Populate the registry with the bounded-arithmetic family
@@ -270,6 +443,68 @@ public fn populate_bounded_arithmetic_family(r: &mut FrameworkRegistry) {
         VerifiedExtension,
         false,
     ));
+}
+
+// =============================================================================
+// Experimental tier — placeholder (V1 work)
+// =============================================================================
+
+/// Populate the Experimental tier.  Currently a no-op placeholder;
+/// future entries: linear-logic + ludics, giry_probability,
+/// paraconsistent (LP / K3), relevance logic, intuitionistic modal.
+/// Each Experimental entry must carry an explicit RFC justifying
+/// admission to the catalogue.
+public fn populate_experimental(_r: &mut FrameworkRegistry) {
+    // Reserved.  When the first Experimental framework lands,
+    // register it here and update the cross-side pin test.
+}
+
+// =============================================================================
+// Aggregate — populate_full_canonical
+// =============================================================================
+
+/// Populate the registry with the FULL canonical roster — Standard
+/// plus VerifiedExtension — covering every cog `frameworks/mod.vr`
+/// mounts.  This is the canonical entry point for `verum frameworks
+/// list`.
+///
+/// The cross-side pin test
+/// `crates/verum_kernel/tests/k_arch_v_alignment.rs::pin_registry_covers_mod_mounts`
+/// asserts the registry size matches the mount-count after this
+/// call; adding a new `public mount core.math.frameworks.X` in
+/// `mod.vr` therefore requires extending this aggregate (or one of
+/// its callees) in the same change-set.
+public fn populate_full_canonical(r: &mut FrameworkRegistry) {
+    populate_canonical_standard(r);
+    populate_diakrisis_extensions(r);
+    populate_msfs_catalogue(r);
+    populate_bounded_arithmetic_family(r);
+    populate_experimental(r);
+}
+
+/// Expected total framework count after `populate_full_canonical`.
+/// Pinned exactly so an off-by-one regression in any populator
+/// surfaces immediately.  Update in lockstep when extending
+/// the catalog.
+public fn expected_full_canonical_count() -> Int {
+    // Standard tier (15):
+    //   * Meta-classifier:           diakrisis                       (1)
+    //   * Special:                   actic.raw                       (1)
+    //   * Citation packages:         petz / arnold / owl2 / lurie /
+    //                                connes / baez / schreiber       (7)
+    //   * Foundational impls:        zfc_two_inacc / hott / cubical /
+    //                                mltt / cic / eff                (6)
+    // VerifiedExtension tier (14):
+    //   * Diakrisis extensions       biadjunction / stack_model /
+    //                                extensions / acts               (4)
+    //   * MSFS catalogue             baseline / key_symbols /
+    //                                self_containment / strcat       (4)
+    //   * Bounded arithmetic         v_0 / v_1 / s_2_1 / v_np /
+    //                                v_ph / i_delta_0                (6)
+    // Experimental tier (0):         placeholder                     (0)
+    // -----------------------------------------------------------------
+    // Total:                                                         29
+    29
 }
 
 // =============================================================================
