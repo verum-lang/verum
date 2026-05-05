@@ -293,6 +293,36 @@ pub struct CapabilitySchema {
     pub subsumed_by: Vec<String>,
 }
 
+/// Canonical capability-ontology registry — kernel-side mirror of
+/// `core/architecture/capability_ontology.vr::ATS_V_CANONICAL_CAPABILITIES`.
+/// The cross-side pin test
+/// `crates/verum_kernel/tests/k_arch_v_alignment.rs::pin_capability_ontology_aligned`
+/// asserts both sides agree on the canonical-tag set.
+///
+/// This baseline registry is the source of truth that the
+/// compile-side ATS-V phase consults when it runs the AT-1
+/// closure (`check_capability_ontology_v`).  Custom capability
+/// tags outside this set raise the violation regardless of mode.
+///
+/// Adding a new canonical capability requires (a) adding to the
+/// Verum-side `ATS_V_CANONICAL_CAPABILITIES` list, (b) adding the
+/// matching string here, (c) updating the pin test.
+pub fn canonical_capability_registry() -> Vec<String> {
+    vec![
+        // Observability
+        "logger".to_string(),
+        "metrics".to_string(),
+        "tracing".to_string(),
+        // Configuration
+        "config_read".to_string(),
+        "config_admin".to_string(),
+        // Supervision
+        "supervisor_spawn".to_string(),
+        // Kernel
+        "kernel_intrinsic".to_string(),
+    ]
+}
+
 // =============================================================================
 // Boundary — typed cross-module traffic discipline
 // =============================================================================

@@ -157,6 +157,118 @@ public type ChainAnalysis is {
 };
 
 // =============================================================================
+// Operationalisation — pure-data helpers
+// =============================================================================
+
+/// Stable diagnostic tag for `CanonicalAdjunction`.
+public fn canonical_adjunction_tag(a: CanonicalAdjunction) -> Text {
+    match a {
+        InlineExtract        => "inline_extract",
+        SpecialiseGeneralise => "specialise_generalise",
+        DecomposeCompose     => "decompose_compose",
+        StrengthenWeaken     => "strengthen_weaken",
+        CustomAdjunction(_)  => "custom",
+    }
+}
+
+/// Stable tag for `RefactoringDirection`.
+public fn refactoring_direction_tag(d: RefactoringDirection) -> Text {
+    match d {
+        Forward  => "forward",
+        Backward => "backward",
+    }
+}
+
+/// Stable tag for `AdjunctionVerdict`.
+public fn adjunction_verdict_tag(v: AdjunctionVerdict) -> Text {
+    match v {
+        Accepted             => "accepted",
+        BrokenAdjointPair    => "broken_adjoint_pair",
+        PreservationFailure  => "preservation_failure",
+        GainClaimFailure     => "gain_claim_failure",
+    }
+}
+
+/// True iff the verdict accepts the refactoring.
+public fn adjunction_verdict_is_accepted(v: AdjunctionVerdict) -> Bool {
+    match v {
+        Accepted => true,
+        _        => false,
+    }
+}
+
+/// True iff EVERY preserved-coverage entry shows the property
+/// genuinely survives (held_before ∧ held_after ∧ preserved_actual).
+/// Used by `analyze_refactoring` to decide PreservationFailure.
+public fn all_preservation_holds(coverages: List<PreservedCoverage>) -> Bool {
+    let mut i: Int = 0;
+    while i < coverages.len() {
+        let c = coverages[i];
+        if !(c.held_before && c.held_after && c.preserved_actual) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff EVERY gained-coverage entry shows the property is
+/// genuinely new (¬held_before ∧ held_after ∧ gained_actual).
+/// Used by `analyze_refactoring` to decide GainClaimFailure.
+public fn all_gain_holds(coverages: List<GainedCoverage>) -> Bool {
+    let mut i: Int = 0;
+    while i < coverages.len() {
+        let c = coverages[i];
+        if !(!c.held_before && c.held_after && c.gained_actual) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// True iff the chain is accepted — every step accepted AND
+/// non-empty (refusal to claim acceptance from absence of evidence).
+public fn chain_acceptance_predicate(c: &ChainAnalysis) -> Bool {
+    if c.step_analyses.len() == 0 {
+        return false;
+    }
+    let mut i: Int = 0;
+    while i < c.step_analyses.len() {
+        if !adjunction_verdict_is_accepted(c.step_analyses[i].verdict) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Soundness pins
+// =============================================================================
+
+/// **Pin**: only `Accepted` verdict signals success.  The other three
+/// (BrokenAdjointPair / PreservationFailure / GainClaimFailure) all
+/// reject the refactoring.
+public fn verdict_acceptance_uniqueness_pin() -> Bool {
+    adjunction_verdict_is_accepted(AdjunctionVerdict.Accepted) &&
+    !adjunction_verdict_is_accepted(AdjunctionVerdict.BrokenAdjointPair) &&
+    !adjunction_verdict_is_accepted(AdjunctionVerdict.PreservationFailure) &&
+    !adjunction_verdict_is_accepted(AdjunctionVerdict.GainClaimFailure)
+}
+
+/// **Pin**: empty chain rejected.  Chain composition discipline:
+/// `(F ∘ F') ⊣ (G' ∘ G)` requires at least one factor.
+public fn empty_chain_rejected_pin() -> Bool {
+    let empty_chain = ChainAnalysis {
+        schema_version: 1,
+        step_analyses: [],
+        chain_accepted: false,
+    };
+    !chain_acceptance_predicate(&empty_chain)
+}
+
+// =============================================================================
 // Kernel-discharge bridge
 // =============================================================================
 

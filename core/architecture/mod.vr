@@ -195,6 +195,14 @@ mount super.counterfactual.{
     MetricComparison,
     InvariantEvaluation,
     CounterfactualReport,
+    arch_metric_tag,
+    metric_value_tag,
+    invariant_status_tag,
+    invariant_status_is_stable,
+    report_overall_stable_predicate,
+    report_diverging_metric_count_predicate,
+    invariant_status_uniqueness_pin,
+    empty_invariants_unstable_pin,
     kernel_arch_counterfactual_engine,
 };
 mount super.adjunction.{
@@ -207,6 +215,15 @@ mount super.adjunction.{
     AdjunctionAnalysis,
     RefactoringChain,
     ChainAnalysis,
+    canonical_adjunction_tag,
+    refactoring_direction_tag,
+    adjunction_verdict_tag,
+    adjunction_verdict_is_accepted,
+    all_preservation_holds,
+    all_gain_holds,
+    chain_acceptance_predicate,
+    verdict_acceptance_uniqueness_pin,
+    empty_chain_rejected_pin,
     kernel_arch_adjunction_analyzer,
 };
 mount super.yoneda.{
@@ -214,5 +231,12 @@ mount super.yoneda.{
     AgreementStatus,
     ObserverAgreement,
     YonedaVerdict,
+    observation_observer_tag,
+    agreement_status_tag,
+    all_agreements_agree,
+    count_disagreements,
+    yoneda_verdict_equivalent_predicate,
+    empty_agreements_not_equivalent_pin,
+    agreement_status_disjoint_pin,
     kernel_arch_yoneda_equivalence,
 };

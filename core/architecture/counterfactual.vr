@@ -142,6 +142,126 @@ public type CounterfactualReport is {
 // Kernel-discharge bridge
 // =============================================================================
 
+// =============================================================================
+// Operationalisation — pure-data helpers
+// =============================================================================
+
+/// Stable diagnostic tag for an `ArchMetric`.
+public fn arch_metric_tag(m: ArchMetric) -> Text {
+    match m {
+        ExposedCapabilityCount  => "exposed_capability_count",
+        RequiredCapabilityCount => "required_capability_count",
+        ReadCapabilityCount     => "read_capability_count",
+        WriteCapabilityCount    => "write_capability_count",
+        NetworkCapabilityCount  => "network_capability_count",
+        BoundaryInvariantCount  => "boundary_invariant_count",
+        CompositionDegree       => "composition_degree",
+        LinearResourceCount     => "linear_resource_count",
+        StratumOrdinal          => "stratum_ordinal",
+        CveCompleteness         => "cve_completeness",
+        StrictModeFlag          => "strict_mode_flag",
+        CustomMetric(_)         => "custom",
+    }
+}
+
+/// Stable tag for a `MetricValue` arm — useful for audit JSON
+/// without leaking the inner payload.
+public fn metric_value_tag(v: MetricValue) -> Text {
+    match v {
+        IntegerMetric(_)     => "integer",
+        FloatMetric(_)       => "float",
+        CategoricalMetric(_) => "categorical",
+        UnknownMetric        => "unknown",
+    }
+}
+
+/// Stable tag for `InvariantStatus`.  `HoldsBoth` is the only
+/// arm that satisfies counterfactual stability per the engine's
+/// soundness contract.
+public fn invariant_status_tag(s: InvariantStatus) -> Text {
+    match s {
+        HoldsBoth     => "holds_both",
+        HoldsBaseOnly => "holds_base_only",
+        HoldsAltOnly  => "holds_alt_only",
+        HoldsNeither  => "holds_neither",
+    }
+}
+
+/// True iff the status arm satisfies counterfactual stability —
+/// only `HoldsBoth`.  `HoldsBaseOnly` and `HoldsAltOnly` mean
+/// brittleness under decision swap; `HoldsNeither` means the
+/// invariant fails in both branches.
+public fn invariant_status_is_stable(s: InvariantStatus) -> Bool {
+    match s {
+        HoldsBoth => true,
+        _         => false,
+    }
+}
+
+/// Aggregate stability — true iff EVERY invariant evaluation
+/// satisfies `invariant_status_is_stable`.  Empty list yields
+/// `false` (refusal to claim stability from absence of evidence).
+public fn report_overall_stable_predicate(r: &CounterfactualReport) -> Bool {
+    if r.invariant_evaluations.len() == 0 {
+        return false;
+    }
+    let mut i: Int = 0;
+    while i < r.invariant_evaluations.len() {
+        if !invariant_status_is_stable(r.invariant_evaluations[i].status) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// Count of `MetricComparison` entries whose `diverges` flag is true.
+public fn report_diverging_metric_count_predicate(r: &CounterfactualReport) -> Int {
+    let mut count: Int = 0;
+    let mut i: Int = 0;
+    while i < r.metric_comparisons.len() {
+        if r.metric_comparisons[i].diverges {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Soundness pins
+// =============================================================================
+
+/// **Pin**: `HoldsBoth` is the unique stable arm; the other three
+/// (`HoldsBaseOnly`, `HoldsAltOnly`, `HoldsNeither`) all break
+/// stability.  Per the engine's soundness contract.
+public fn invariant_status_uniqueness_pin() -> Bool {
+    invariant_status_is_stable(InvariantStatus.HoldsBoth) &&
+    !invariant_status_is_stable(InvariantStatus.HoldsBaseOnly) &&
+    !invariant_status_is_stable(InvariantStatus.HoldsAltOnly) &&
+    !invariant_status_is_stable(InvariantStatus.HoldsNeither)
+}
+
+/// **Pin**: empty invariant list yields `overall_stable = false`.
+/// The engine refuses to claim stability from absence of evidence.
+public fn empty_invariants_unstable_pin() -> Bool {
+    let report = CounterfactualReport {
+        schema_version: 1,
+        pair_name: "empty_test",
+        base_decision: "base",
+        alt_decision: "alt",
+        metric_comparisons: [],
+        invariant_evaluations: [],
+        overall_stable: false,
+        diverging_metric_count: 0,
+    };
+    !report_overall_stable_predicate(&report)
+}
+
+// =============================================================================
+// Kernel-discharge bridge
+// =============================================================================
+
 /// **Counterfactual reasoning engine — non-destructive evaluation.**
 ///
 /// Discharges the kernel-side counterfactual module's soundness
