@@ -331,9 +331,7 @@ fn register_module_metadata(
             Some(s) => Text::from(s),
             None => continue,
         };
-        if meta.functions.contains_key(&simple_name) {
-            continue;
-        }
+        let simple_already_registered = meta.functions.contains_key(&simple_name);
 
         let parent_type = match fn_desc.parent_type {
             Some(tid) => match type_id_to_name.get(&tid.0) {
@@ -405,9 +403,28 @@ fn register_module_metadata(
             if !meta.functions.contains_key(&qualified_key) {
                 meta.functions.insert(qualified_key, descriptor.clone());
             }
+        } else if !module_path.is_empty() {
+            // Free function — register under MODULE-qualified key
+            // ALWAYS, even when the simple-name slot is taken by an
+            // earlier first-wins registration.  Required so
+            // `core.shell.exec.run` and `core.sys.process_ops.run`
+            // both have unambiguous qualified slots — the typechecker's
+            // mount-import shadowing fallback then disambiguates by
+            // walking the user's mount tree's prefix to construct
+            // the right qualified key.
+            let qualified_key: Text =
+                format!("{}.{}", module_path, simple_name).into();
+            if !meta.functions.contains_key(&qualified_key) {
+                meta.functions.insert(qualified_key, descriptor.clone());
+            }
         }
 
-        meta.functions.insert(simple_name, descriptor);
+        // Simple-name slot is first-wins (preserves the existing
+        // discipline; collisions are resolved at use-sites via the
+        // qualified key registered above).
+        if !simple_already_registered {
+            meta.functions.insert(simple_name, descriptor);
+        }
     }
 }
 

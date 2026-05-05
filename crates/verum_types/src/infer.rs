@@ -1542,6 +1542,179 @@ impl TypeChecker {
     /// loading of IoResult, Metadata, and Path so their alias
     /// targets and inductive-constructor registrations are
     /// available when the user code matches against them.
+    /// On-demand stdlib type loader for method-dispatch sites.
+    ///
+    /// The pre-pass (`register_stdlib_types_for_module`) doesn't
+    /// recurse into function bodies — `collect_named_types_from_function_body`
+    /// is intentionally a no-op for performance.  Body-local
+    /// pattern matches that bind variables of stdlib types (e.g.
+    /// `match fs_metadata(p) { Ok(m) => m.len() }`) therefore reach
+    /// method dispatch with the receiver type's `inherent_methods`
+    /// bucket empty.  This helper closes that gap by walking every
+    /// type name reachable from `recv_ty` and lazy-loading each
+    /// through the same machinery the pre-pass uses.
+    ///
+    /// Idempotent — short-circuits at every layer:
+    ///  * `ensure_stdlib_type_loaded` skips if `ctx.type_defs`
+    ///    already has the type.
+    ///  * `register_inherent_methods_from_metadata` skips method
+    ///    names already populated in the bucket.
+    pub fn lazy_load_receiver_methods(&mut self, recv_ty: &Type) {
+        if self.core_metadata.is_none() {
+            return;
+        }
+        let mut names: Vec<Text> = Vec::new();
+        Self::push_referenced_type_names(recv_ty, &mut names);
+        if names.is_empty() {
+            return;
+        }
+        let mut pending: Vec<Text> = names;
+        let mut already: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
+        while let Some(name) = pending.pop() {
+            if !already.insert(name.clone()) {
+                continue;
+            }
+            self.ensure_stdlib_type_loaded(&name, &mut pending);
+        }
+    }
+
+    /// CoreMetadata-driven re-export resolver for free functions.
+    ///
+    /// Walks `ast`'s public mount declarations looking for a tree
+    /// that re-exports `func_name`.  When found, derives the source
+    /// module path from the mount's prefix and constructs the
+    /// `module_path.func_name` key for `metadata.functions`.  If
+    /// metadata holds that key, parse the descriptor's parameter
+    /// + return strings into a `Type::Function` and return.
+    ///
+    /// Stops at the first match — multiple re-export chains
+    /// shouldn't produce duplicate keys (the first-wins discipline
+    /// in archive_metadata gives at most one qualified key per
+    /// concrete (module_path, simple_name) pair).
+    pub fn resolve_metadata_reexport_function(
+        &self,
+        metadata: &crate::core_metadata::CoreMetadata,
+        ast: &verum_ast::Module,
+        func_name: &str,
+        ast_module_path: &Text,
+    ) -> Option<Type> {
+        use verum_ast::ItemKind;
+        use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
+        use verum_ast::ty::PathSegment;
+        for item in ast.items.iter() {
+            let mount = match &item.kind {
+                ItemKind::Mount(m) if m.visibility == AstVisibility::Public => m,
+                _ => continue,
+            };
+            // Two surfaces: `pub mount .X.{name}` (Nested) and
+            // `pub mount .X.name` (Path).
+            let (matched_prefix_segments, matched) = match &mount.tree.kind {
+                MountTreeKind::Nested { prefix, trees } => {
+                    let mut found = false;
+                    for tree in trees.iter() {
+                        if let MountTreeKind::Path(item_path) = &tree.kind {
+                            if let Some(PathSegment::Name(id)) = item_path.segments.last() {
+                                if id.name.as_str() == func_name {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if !found {
+                        continue;
+                    }
+                    let segs: Vec<&str> = prefix
+                        .segments
+                        .iter()
+                        .filter_map(|s| match s {
+                            PathSegment::Name(id) => Some(id.name.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    (segs, true)
+                }
+                MountTreeKind::Path(path) => {
+                    if let Some(PathSegment::Name(id)) = path.segments.last() {
+                        if id.name.as_str() != func_name {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                    let segs: Vec<&str> = path
+                        .segments
+                        .iter()
+                        .take(path.segments.len() - 1)
+                        .filter_map(|s| match s {
+                            PathSegment::Name(id) => Some(id.name.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    (segs, true)
+                }
+                _ => continue,
+            };
+            if !matched {
+                continue;
+            }
+            // Build `current_module.prefix.func_name`.  We don't
+            // have direct access to the source module's path here,
+            // but `self.current_module_path` reflects the unit
+            // currently being typechecked — the usual case is the
+            // caller passes ast = module_info.ast where module_info
+            // is the directly-mounted module, so its path lives in
+            // the resolved_module_path the caller already knows.
+            // Pass that through current_module_path so this helper
+            // can compose the qualified key.
+            let module_path = matched_prefix_segments.join(".");
+            // Compose candidate qualified keys for the
+            // `metadata.functions` lookup.  The function's actual
+            // recorded module_path is the SOURCE module — but the
+            // function may have been re-exported through any number
+            // of intermediate modules, so we have to try multiple
+            // assumptions about which module owns the descriptor.
+            //
+            // Precedence:
+            //   1. `<ast_module_path>.<func_name>` — the function
+            //      was registered against the re-exporting module
+            //      (most common for stdlib's `public module X;` +
+            //      `public mount .X.{fn}` pattern, where the VBC
+            //      module_path strips the file segment).
+            //   2. `<ast_module_path>.<prefix>.<func_name>` — the
+            //      function lives in the prefix submodule.
+            //   3. `<prefix>.<func_name>` — absolute prefix.
+            //   4. `core.<prefix>.<func_name>` — root prefix
+            //      where the prefix already starts at `core`.
+            let cur = ast_module_path.as_str();
+            let mut candidates: Vec<String> = Vec::new();
+            if !cur.is_empty() {
+                candidates.push(format!("{}.{}", cur, func_name));
+                if !module_path.is_empty() {
+                    candidates.push(format!("{}.{}.{}", cur, module_path, func_name));
+                }
+            }
+            if !module_path.is_empty() {
+                candidates.push(format!("core.{}.{}", module_path, func_name));
+                candidates.push(format!("{}.{}", module_path, func_name));
+            }
+            for key in candidates {
+                let key_text: Text = key.into();
+                if let Some(fd) = metadata.functions.get(&key_text) {
+                    let params: List<Type> = fd
+                        .params
+                        .iter()
+                        .map(|p| parse_descriptor_type_string(p.ty.as_str()))
+                        .collect();
+                    let return_ty = parse_descriptor_type_string(fd.return_type.as_str());
+                    return Some(Type::function(params, return_ty));
+                }
+            }
+        }
+        None
+    }
+
     fn push_referenced_type_names(ty: &Type, out: &mut Vec<Text>) {
         match ty {
             Type::Named { path, args } => {
@@ -34110,6 +34283,60 @@ impl TypeChecker {
 
                         // Fallback: register as a named type reference if full registration failed
                         if !registered_successfully {
+                            // Function-shadowing guard: if find_type_declaration_with_source_module
+                            // returned None we still don't know whether the
+                            // imported item is genuinely a missing type or a
+                            // FUNCTION exported via a re-export chain that
+                            // resolve_export_kind_with_reexports failed to
+                            // re-classify (ExportKind::Type is the default
+                            // for re-exported items — see the comment at
+                            // 33858).  When the source module's AST DOES
+                            // hold a function declaration for this name,
+                            // register the function signature in env and
+                            // SKIP the Named-type placeholder.  Without
+                            // this guard, mounting `core.shell.{run}` —
+                            // where `core.shell` re-exports
+                            // `core.shell.exec.run` and the export kind
+                            // resolves as Type — leaves `run` registered
+                            // as `Type::Named { path: "run" }`, so every
+                            // call site fails with "not a function: run"
+                            // because the env-lookup hits the
+                            // self-referential placeholder before the
+                            // function lookup gets a chance.
+                            if let Some((func_type, type_vars, _src)) = self
+                                .find_function_with_source_module(
+                                    &module_info.ast,
+                                    item_name,
+                                    &resolved_module_path,
+                                    registry,
+                                )
+                            {
+                                let scheme = if type_vars.is_empty() {
+                                    TypeScheme::mono(func_type)
+                                } else {
+                                    TypeScheme::poly(type_vars, func_type)
+                                };
+                                self.ctx.env.insert(register_name, scheme);
+                                registered_successfully = true;
+                            } else {
+                                if let Some(metadata) = self.core_metadata.clone() {
+                                    if let Some(func_type) = self
+                                        .resolve_metadata_reexport_function(
+                                            &metadata,
+                                            &module_info.ast,
+                                            item_name,
+                                            &resolved_module_path,
+                                        )
+                                    {
+                                        self.ctx
+                                            .env
+                                            .insert(register_name, TypeScheme::mono(func_type));
+                                        registered_successfully = true;
+                                    }
+                                }
+                            }
+                        }
+                        if !registered_successfully {
                             // CRITICAL FIX: Check if the type already exists before overwriting.
                             // Bootstrap registers types like Maybe<T> as Type::Variant.
                             // We must NOT overwrite these with Type::Named fallbacks.
@@ -46452,6 +46679,21 @@ impl TypeChecker {
             Type::CapabilityRestricted { base, .. } => *base,
             other => other,
         };
+
+        // Lazy-load receiver type's inherent methods from
+        // CoreMetadata.  The lazy preload pre-pass
+        // (`register_stdlib_types_for_module`) only walks user code's
+        // top-level type references — it skips function bodies (the
+        // `collect_named_types_from_function_body` no-op) so a
+        // body-local pattern bind like `match fs_metadata(p) { Ok(m)
+        // => m.len() }` would land here with `m: Metadata` but
+        // `inherent_methods["Metadata"]` empty.  Trigger an on-miss
+        // load before any dispatch path consults the bucket.  Cheap
+        // and idempotent — `ensure_stdlib_type_loaded` short-circuits
+        // when the type is already in `ctx.type_defs`, and
+        // `register_inherent_methods_from_metadata` skips method
+        // names already registered.
+        self.lazy_load_receiver_methods(&recv_ty);
 
         // Smart-pointer auto-deref for method resolution. If the
         // receiver is a type with a Deref::Target AND (a) the method
