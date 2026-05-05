@@ -836,6 +836,14 @@ impl<'a> Deserializer<'a> {
  protocols.push(ProtocolImpl { protocol, methods });
  }
 
+ // Alias target (Option<TypeRef>) — encoded for every
+ // descriptor as discriminant byte + optional payload.
+ let alias_target = if decode_u8(self.data, &mut self.offset)? == 1 {
+ Some(self.parse_type_ref()?)
+ } else {
+ None
+ };
+
  Ok(TypeDescriptor {
  id,
  name,
@@ -849,6 +857,7 @@ impl<'a> Deserializer<'a> {
  clone_fn,
  protocols,
  visibility,
+ alias_target,
  })
  }
 

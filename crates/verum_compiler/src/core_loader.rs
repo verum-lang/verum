@@ -281,6 +281,18 @@ fn convert_type_descriptor(
         | TypeKind::Tuple
         | TypeKind::Array
         | TypeKind::Tensor => TypeDescriptorKind::Opaque,
+        TypeKind::Alias => {
+            // Alias kind: target stored on `alias_target` TypeRef.
+            // Render to bare type-name string for the metadata
+            // consumer; the unifier-side parser re-structures it
+            // (Result<T, StreamError> → Type::Generic).
+            let target = vbc_type
+                .alias_target
+                .as_ref()
+                .map(|t| type_ref_to_text(t, module))
+                .unwrap_or_default();
+            TypeDescriptorKind::Alias { target }
+        }
     };
 
     Ok(TypeDescriptor {

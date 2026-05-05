@@ -555,6 +555,16 @@ pub enum TypeKind {
     Array = 7,
     /// Tensor type.
     Tensor = 8,
+    /// Type alias: `type Alias<T> is Target<T, ConcreteRest>;`.
+    /// Stored target shape lives on `TypeDescriptor.alias_target`
+    /// (a `TypeRef`).  At downstream resolution time the unifier
+    /// reads the target and applies positional generic args from
+    /// the alias's `type_params` — same `try_expand_alias`
+    /// machinery already used for ctx-level aliases.  Without this
+    /// kind, source `type IoResult<T> is Result<T, StreamError>;`
+    /// silently lost the alias relation through VBC, leaving
+    /// `IoResult<X>` un-unifiable with the underlying Result.
+    Alias = 9,
 }
 
 impl TryFrom<u8> for TypeKind {
@@ -571,6 +581,7 @@ impl TryFrom<u8> for TypeKind {
             6 => Ok(TypeKind::Unit),
             7 => Ok(TypeKind::Array),
             8 => Ok(TypeKind::Tensor),
+            9 => Ok(TypeKind::Alias),
             _ => Err(value),
         }
     }
@@ -659,6 +670,16 @@ pub struct TypeDescriptor {
     pub protocols: SmallVec<[ProtocolImpl; 2]>,
     /// Visibility.
     pub visibility: Visibility,
+    /// Alias target shape, only present for `kind ==
+    /// TypeKind::Alias`.  Stored as a `TypeRef` so generic
+    /// instantiations (`Result<T, StreamError>` from
+    /// `type IoResult<T> is Result<T, StreamError>;`) preserve
+    /// both the base type and any concretely-bound type
+    /// arguments.  At alias-expansion time the consumer reads
+    /// this target and substitutes positional `type_params` →
+    /// concrete args at the use site.
+    #[serde(default)]
+    pub alias_target: Option<TypeRef>,
 }
 
 impl Default for TypeDescriptor {
@@ -676,6 +697,7 @@ impl Default for TypeDescriptor {
             clone_fn: None,
             protocols: SmallVec::new(),
             visibility: Visibility::Public,
+            alias_target: None,
         }
     }
 }

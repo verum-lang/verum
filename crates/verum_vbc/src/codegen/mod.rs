@@ -8213,8 +8213,53 @@ impl VbcCodegen {
                 // For `type Vec4f = Vec<Float32, 4>`, extract "Vec"
                 // For `type MyInt = Int`, extract "Int"
                 if let Some(base_name) = self.extract_base_type_name(target_type) {
-                    self.type_aliases.insert(type_name, base_name);
+                    self.type_aliases
+                        .insert(type_name.clone(), base_name);
                 }
+                // Emit a `TypeKind::Alias` TypeDescriptor so the
+                // archive preserves the alias relation.
+                // Pre-fix every `type IoResult<T> is Result<T,
+                // StreamError>;` lost the alias info at VBC stage —
+                // archive_metadata couldn't find IoResult, and the
+                // typechecker's pattern matcher saw `IoResult<X>`
+                // as a bare opaque Type::Generic with no resolution
+                // path back to Result.
+                let type_id = TypeId(self.next_type_id);
+                self.next_type_id = self.next_type_id.saturating_add(1);
+                let name_id = StringId(self.intern_string(&type_name));
+                let target_ref = self.ast_type_to_type_ref(target_type);
+                // Generic params (T, K, V, …) on the alias signature.
+                let mut alias_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
+                    smallvec::SmallVec::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        let gname_id = StringId(self.intern_string(gname.name.as_str()));
+                        alias_type_params.push(crate::types::TypeParamDescriptor {
+                            name: gname_id,
+                            id: crate::types::TypeParamId(idx as u16),
+                            bounds: smallvec::SmallVec::new(),
+                            default: None,
+                            variance: crate::types::Variance::Invariant,
+                        });
+                    }
+                }
+                let type_desc = crate::types::TypeDescriptor {
+                    id: type_id,
+                    name: name_id,
+                    kind: crate::types::TypeKind::Alias,
+                    type_params: alias_type_params,
+                    fields: smallvec::SmallVec::new(),
+                    variants: smallvec::SmallVec::new(),
+                    size: 0,
+                    alignment: 0,
+                    drop_fn: None,
+                    clone_fn: None,
+                    protocols: smallvec::SmallVec::new(),
+                    visibility: crate::types::Visibility::Public,
+                    alias_target: Some(target_ref),
+                };
+                self.type_name_to_id.insert(type_name.clone(), type_id);
+                self.push_type_dedupe(type_desc);
             }
 
             // Newtype and tuple types: register the type name as constructor

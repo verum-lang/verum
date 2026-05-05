@@ -964,6 +964,7 @@ impl<'a> BytecodeSpecializer<'a> {
             clone_fn: base_desc.and_then(|d| d.clone_fn),
             protocols: base_desc.map(|d| d.protocols.clone()).unwrap_or_default(),
             visibility: base_desc.map(|d| d.visibility).unwrap_or_default(),
+            alias_target: base_desc.and_then(|d| d.alias_target.clone()),
         };
 
         // Update layout cache

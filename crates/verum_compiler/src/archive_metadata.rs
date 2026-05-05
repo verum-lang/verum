@@ -256,6 +256,18 @@ fn register_module_metadata(
             | TypeKind::Primitive | TypeKind::Array | TypeKind::Tensor => {
                 TypeDescriptorKind::Opaque
             }
+            TypeKind::Alias => {
+                // Alias target → bare type-name string.  The
+                // unifier-side resolver re-parses this back into
+                // structural form via
+                // `parse_descriptor_type_string`.
+                let target = ty
+                    .alias_target
+                    .as_ref()
+                    .map(|t| Text::from(type_ref_to_text(t, &type_id_to_name)))
+                    .unwrap_or_default();
+                TypeDescriptorKind::Alias { target }
+            }
         };
 
         let descriptor = TypeDescriptor {
