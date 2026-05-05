@@ -21,6 +21,14 @@
 // A newer kernel accepts any certificate at version
 // `[0, CERTIFICATE_SCHEMA_VERSION_MAX]` — version 0 is the
 // legacy pre-versioned form, kept for backward compatibility.
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.verify.certificate;
+
 let CERTIFICATE_SCHEMA_VERSION_MAX: Int = 1;
 
 // Summary view of an SMT certificate.
