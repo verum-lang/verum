@@ -79,6 +79,37 @@ impl TypeChecker {
             return Ok(ty.clone());
         }
 
+        // Step 1.5: VBCA lookup-on-miss for stdlib types (#128).
+        //
+        // The lazy pre-pass (`register_stdlib_types_for_module` →
+        // `collect_named_types_from_function_body`) intentionally
+        // skips function bodies, so stdlib types referenced ONLY
+        // from inline body expressions (e.g. `let v: List<Int> =
+        // List<Int>.new()`) never get pre-loaded.  Without this
+        // miss-trigger, body-position references to unmounted
+        // stdlib types throw `type not found: List` / `Map` etc.
+        //
+        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // the existence test is `core_metadata.types` membership,
+        // not a hardcoded list of stdlib type names.
+        // `ensure_stdlib_type_loaded` is idempotent (gates on
+        // `lookup_type(name).is_none()` internally) so the retry
+        // is safe in any context.
+        let name_text = verum_common::Text::from(name);
+        let mut pending: Vec<verum_common::Text> = Vec::new();
+        self.ensure_stdlib_type_loaded(&name_text, &mut pending);
+        let mut bound = 256usize;
+        while let Some(next) = pending.pop() {
+            bound = bound.saturating_sub(1);
+            if bound == 0 {
+                break;
+            }
+            self.ensure_stdlib_type_loaded(&next, &mut pending);
+        }
+        if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
+            return Ok(ty.clone());
+        }
+
         // Step 2: Use module resolver to find the type
         if let Maybe::Some(current_module) = self.current_module() {
             match self.module_resolver.resolve_name(name, current_module) {

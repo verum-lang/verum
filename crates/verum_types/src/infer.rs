@@ -13781,7 +13781,46 @@ impl TypeChecker {
                     let ty = scheme.instantiate();
                     let resolved_ty = self.unifier.apply(&ty);
                     Ok(resolved_ty)
-                } else if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
+                } else if {
+                    // #128 — lookup-on-miss for stdlib types in
+                    // expression position.  The lazy pre-pass
+                    // (`register_stdlib_types_for_module` →
+                    // `collect_named_types_from_function_body`) is a
+                    // no-op for V0 perf, so body-position type
+                    // expressions like `List<Int>.new()` don't get
+                    // their referenced type pre-loaded.  When the
+                    // type-table miss happens here, hit
+                    // `ensure_stdlib_type_loaded` once before
+                    // throwing UnboundVariable.  Idempotent — when
+                    // the type is already present the helper short-
+                    // circuits at the `lookup_type(name).is_none()`
+                    // gate.
+                    //
+                    // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+                    // the lookup is keyed by the user-written name;
+                    // the actual existence test is `core_metadata.types`
+                    // membership, not a hardcoded list of stdlib
+                    // type names.
+                    let name_text = verum_common::Text::from(name);
+                    if self.ctx.lookup_type(name).is_none() {
+                        let mut pending: Vec<Text> = Vec::new();
+                        self.ensure_stdlib_type_loaded(&name_text, &mut pending);
+                        // Drain transitive deps surfaced by the
+                        // initial load — same discipline as the
+                        // pre-pass loop.  Bounded by the metadata's
+                        // type count so a malformed dep cycle
+                        // can't loop forever.
+                        let mut bound = 256usize;
+                        while let Some(next) = pending.pop() {
+                            bound = bound.saturating_sub(1);
+                            if bound == 0 {
+                                break;
+                            }
+                            self.ensure_stdlib_type_loaded(&next, &mut pending);
+                        }
+                    }
+                    self.ctx.lookup_type(name).is_some()
+                } && let Maybe::Some(ty) = self.ctx.lookup_type(name) {
                     // Check if this is a type name being used in a context
                     // where it will be followed by a variant/field access. This is needed
                     // for cross-file imported variant types when the parser creates a Path
