@@ -1,0 +1,183 @@
+// =============================================================================
+// core.architecture.phase — ATS-V phase 6.5 surface
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch_phase`.**
+//
+// ATS-V phase sits between type inference (Phase 4-6) and VBC
+// codegen (Phase 7) in the compilation pipeline.  Its job:
+//
+//   1. Walk every module in the parsed AST.
+//   2. Extract `@arch_module(...)` attributes.
+//   3. Build a `Shape` for each module.
+//   4. Run all 32 anti-pattern checks (full canonical catalog).
+//   5. Aggregate violations into `ArchPhaseReport`.
+//
+// ## Backward compatibility
+//
+// Modules without an `@arch_module(...)` declaration use the
+// default Shape (`shape_default_for_unannotated`) and pass every
+// check vacuously.  This keeps existing cogs working through the
+// gradual ATS-V rollout — annotation is opt-in until a cog opts
+// into strict mode.
+//
+// ## No early exit
+//
+// The phase walks every module regardless of earlier violations.
+// Humans and agents need the complete violation roster in one
+// pass — early exit on the first failure forces N round-trips
+// to surface N independent issues.  Aggregation through
+// `ArchPhaseReport` exposes the full picture.
+//
+// ## Diagnostic completeness
+//
+// Every violation carries the stable RFC code (ATS-V-AP-NNN), a
+// human-readable message, and an auto-fix suggestion (when the
+// pattern admits one).  The dual-audience contract: review-friendly
+// prose + machine-readable codes share the same diagnostic.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.architecture.phase;
+
+mount core.prelude.{Bool, Int, Maybe, List, Text};
+mount super.types.Shape;
+mount super.anti_patterns.{AntiPatternCode, AntiPatternViolation};
+mount super.parse.ArchParseError;
+
+// =============================================================================
+// ModuleArchResult — per-module phase outcome
+// =============================================================================
+
+/// Per-module result of running ATS-V phase.  Mirrors
+/// `verum_kernel::arch_phase::ModuleArchResult`.
+public type ModuleArchResult is {
+    module_name: Text,
+    shape: Maybe<Shape>,
+    parse_errors: List<ArchParseError>,
+    violations: List<AntiPatternViolation>,
+};
+
+/// True iff the module's arch_type is load-bearing — no parse
+/// errors AND no anti-pattern violations.
+public fn module_arch_result_is_load_bearing(r: ModuleArchResult) -> Bool {
+    r.parse_errors.len() == 0 && r.violations.len() == 0
+}
+
+// =============================================================================
+// ArchPhaseReport — aggregated phase report
+// =============================================================================
+
+/// Aggregated ATS-V phase report across all modules.  Mirrors
+/// `verum_kernel::arch_phase::ArchPhaseReport`.
+public type ArchPhaseReport is {
+    modules: List<ModuleArchResult>,
+};
+
+/// Empty phase report — initial accumulator.
+public fn arch_phase_report_empty() -> ArchPhaseReport {
+    ArchPhaseReport { modules: [] }
+}
+
+/// True iff every module is load-bearing — phase compiles cleanly.
+public fn arch_phase_report_is_load_bearing(r: ArchPhaseReport) -> Bool {
+    let mut i: Int = 0;
+    while i < r.modules.len() {
+        if !module_arch_result_is_load_bearing(r.modules[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// Total count of anti-pattern violations across all modules.
+public fn arch_phase_report_total_violations(r: ArchPhaseReport) -> Int {
+    let mut total: Int = 0;
+    let mut i: Int = 0;
+    while i < r.modules.len() {
+        total = total + r.modules[i].violations.len();
+        i = i + 1;
+    }
+    total
+}
+
+/// Total count of parse errors across all modules.
+public fn arch_phase_report_total_parse_errors(r: ArchPhaseReport) -> Int {
+    let mut total: Int = 0;
+    let mut i: Int = 0;
+    while i < r.modules.len() {
+        total = total + r.modules[i].parse_errors.len();
+        i = i + 1;
+    }
+    total
+}
+
+/// Count of modules that have an explicit `@arch_module(...)`
+/// declaration (vs. those falling back to default shape).
+public fn arch_phase_report_annotated_count(r: ArchPhaseReport) -> Int {
+    let mut count: Int = 0;
+    let mut i: Int = 0;
+    while i < r.modules.len() {
+        if r.modules[i].shape is Some(_) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// CompositionStep / CompositionVerificationReport — chain check
+// =============================================================================
+
+/// Per-step result of cross-module composition verification.
+public type CompositionStep is {
+    left: Text,
+    right: Text,
+    composed: Bool,
+    violations: List<(AntiPatternCode, Text)>,
+};
+
+/// Aggregate report describing every composition step the phase
+/// verified across the mounted module graph.
+public type CompositionVerificationReport is {
+    steps: List<CompositionStep>,
+};
+
+/// Load-bearing iff every composition step succeeded.
+public fn composition_verification_is_load_bearing(
+    r: CompositionVerificationReport,
+) -> Bool {
+    let mut i: Int = 0;
+    while i < r.steps.len() {
+        if !r.steps[i].composed {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Kernel-discharge bridge — phase orchestrator
+// =============================================================================
+
+/// **ATS-V phase 6.5 dispatch.**
+///
+/// Discharges the kernel-side `verum_kernel::arch_phase::run_arch_phase`
+/// driver.  Soundness contract (spec §3 + §17.5):
+///   * **No early exit**: walks every module regardless of earlier
+///     violations — agents need complete rosters.
+///   * **Backward compat**: modules without `@arch_module(...)` get
+///     the default Shape and pass vacuously.
+///   * **Diagnostic completeness**: every violation carries the stable
+///     RFC code (ATS-V-AP-NNN) + human message + auto-fix suggestion.
+@framework(ats_v, "ATS-V phase orchestrator — Phase 6.5 of the compilation pipeline, sitting between type inference (Phases 4-6) and VBC codegen (Phase 7). Walks every module, extracts @arch_module(...) attributes via the canonical 13-field roster, builds Shapes via arch_parse, runs the full 32-anti-pattern catalog, aggregates violations into ArchPhaseReport without early-exit. Modules without an @arch_module(...) annotation use the default Shape and pass vacuously. Kernel implementation: crates/verum_kernel/src/arch_phase.rs. Compiler wiring: crates/verum_compiler/src/pipeline/ats_v_phase.rs::phase_ats_v.")
+@kernel_discharge("kernel_arch_phase_orchestrator")
+public axiom kernel_arch_phase_orchestrator() -> Bool
+    ensures true;

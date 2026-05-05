@@ -2,9 +2,8 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §3 (Architectural слоёный пирог),
 //! ATS-V phase sits between type inference (Phase 4-6) and VBC
-//! codegen (Phase 7). Its job:
+//! codegen (Phase 7) in the compilation pipeline.  Its job:
 //!
 //! 1. Walk every module in the parsed AST.
 //! 2. Extract `@arch_module(...)` attributes via [`crate::arch_parse`].

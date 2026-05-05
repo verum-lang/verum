@@ -18,24 +18,24 @@
 //!
 //! This module ships the **canonical [`VerificationVerdict`] type**:
 //! one sum-type that every verification mechanism in `verum_kernel`
-//! converts to. Audit gates, bundle aggregator, ATS-V phase (when
-//! it lands per `internal/specs/ats-v.md`) — all consume this single
-//! type. No parallel verdict shapes; every redundancy in the
-//! verification stack reduces to identity-on-this-type.
+//! converts to.  Audit gates, bundle aggregator, ATS-V phase — all
+//! consume this single type.  No parallel verdict shapes; every
+//! redundancy in the verification stack reduces to
+//! identity-on-this-type.
 //!
-//! ## Alignment with the ATS-V specification
+//! ## Alignment with the ATS-V architectural type system
 //!
-//! Per `internal/specs/ats-v.md` §17.1 (Reuse compliance audit), the
-//! V-axis (verification) of every artifact reduces to the existing
-//! `@verify(strategy)` ladder. This type's [`DischargeMethod`]
+//! Under the reuse-over-invention discipline, the V-axis
+//! (verification) of every artifact reduces to the existing
+//! `@verify(strategy)` ladder.  This type's [`DischargeMethod`]
 //! enum is the kernel-side mirror of that ladder, plus the broader
 //! discharge surface (kernel intrinsics, framework citations,
-//! differential agreement, MSFS corpus theorems) that exists outside
-//! the pure SMT path.
+//! differential agreement, MSFS corpus theorems) that exists
+//! outside the pure SMT path.
 //!
 //! Future ATS-V discharge variants (CapabilityCheck, BoundaryCheck,
-//! CompositionCheck — per spec §4) plug into [`DischargeMethod`] as
-//! additional variants without disturbing the verdict algebra.
+//! CompositionCheck) plug into [`DischargeMethod`] as additional
+//! variants without disturbing the verdict algebra.
 //!
 //! ## Reuse rules
 //!
@@ -219,10 +219,12 @@ pub enum DischargeMethod {
         reason: IouReason,
     },
     // ----------------------------------------------------------------
-    // ATS-V foundation slots — placeholders per
-    // `internal/specs/ats-v.md` §4 (architectural primitives).
-    // These variants land empty in v0.1 of the verdict type and
-    // are filled out by the ATS-V phase ( deliverable).
+    // ATS-V foundation slots — discharge variants for the eight
+    // architectural primitives (Capability / Boundary / Composition
+    // / Lifecycle / Foundation / Tier / MsfsStratum / CveClosure)
+    // plus the canonical 32-pattern roster.  These variants are
+    // emitted by the ATS-V phase and consumed by the audit-bundle
+    // aggregator.
     // ----------------------------------------------------------------
     /// ATS-V capability flow check — discharged when a cog's
     /// declared `requires` list is satisfied by environment + no

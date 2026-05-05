@@ -4,28 +4,42 @@
 //
 // **Verum-native mirror of `verum_kernel::arch_counterfactual`.**
 //
-// Per `internal/specs/ats-v.md` §20.4 + §22.1, the counterfactual
-// engine evaluates a cog's architectural Shape under base +
-// alternative decisions WITHOUT actually switching implementations.
-// Comparative metric extraction at type level.
+// ## What the counterfactual engine does
 //
-// **Pipeline**:
+// The engine evaluates a cog's architectural Shape under base +
+// alternative decisions WITHOUT actually switching the
+// implementation.  Both decisions remain types; the engine
+// performs comparative metric extraction at type level so a cog
+// can be reasoned about as "would this property still hold if we
+// had picked the other framework / database / encoding?"
+//
+// ## Pipeline
+//
 //   1. Caller supplies `(CounterfactualPair, base_shape, alt_shape)`.
-//   2. `extract_metric` projects each Shape to typed `MetricValue`s.
-//   3. `evaluate_invariant` walks each `ArchProposition` against both
-//      shapes — returns `InvariantStatus`.
+//   2. `extract_metric` projects each Shape to typed `MetricValue`s
+//      via the canonical 11-metric catalog (ExposedCapabilityCount,
+//      ReadCapabilityCount, NetworkCapabilityCount, etc.).
+//   3. `evaluate_invariant` walks each `ArchProposition` against
+//      both shapes — returns `InvariantStatus` (HoldsBoth /
+//      HoldsBaseOnly / HoldsAltOnly / HoldsNeither).
 //   4. `CounterfactualReport` carries the comparative payload with
-//      stable JSON `schema_version=1` for agent surfaces (per spec
-//      §32.4).
+//      a stable `schema_version` field for agent surfaces under the
+//      dual-audience contract (human review + machine pattern
+//      matching share the same JSON shape).
 //
-// **Soundness contract** (per §22.2): `overall_stable` iff every
-// declared `stability_invariant` evaluates to `HoldsBoth`.  Empty
-// invariants → unstable (engine refuses to claim stability from
-// absence of evidence).
+// ## Soundness contract
 //
-// **Self-attestation**: this cog is itself ATS-V-typed via the
-// `@arch_module(...)` declaration below — dogfood for the
-// architectural type system.
+// `overall_stable` iff every declared `stability_invariant`
+// evaluates to `HoldsBoth`.  Empty invariants → unstable (the
+// engine refuses to claim stability from absence of evidence).
+// This pin closes a red-team vector: an attacker submitting a
+// CounterfactualPair with `stability_invariants: []` cannot
+// fabricate a "stable" verdict.
+//
+// ## Self-attestation
+//
+// This cog is itself ATS-V-typed via the `@arch_module(...)`
+// declaration below — dogfood for the architectural type system.
 // =============================================================================
 
 @arch_module(
@@ -42,9 +56,12 @@ mount super.mtac.{ArchProposition, CounterfactualPair};
 // ArchMetric — canonical metric set
 // =============================================================================
 
-/// Architectural metric projectable from a `Shape`.  Baseline set
-/// of 11 metrics; extending the catalog requires RFC ATS-V-006 per
-/// spec §29.2.
+/// Architectural metric projectable from a `Shape`.  Baseline
+/// set of 11 metrics; extending the catalog requires an ATS-V
+/// RFC + a kernel-side `ArchMetric` enum bump + the cross-side
+/// pin-test bump.  Stability versioning: existing variants never
+/// renumber; deprecation requires ≥2 minor versions of dual
+/// support.
 public type ArchMetric is
     | ExposedCapabilityCount
     | RequiredCapabilityCount
@@ -74,10 +91,13 @@ public type MetricValue is
 // InvariantStatus — relational evaluation outcome
 // =============================================================================
 
-/// Status of an `ArchProposition` under a counterfactual evaluation.
-/// Per spec §22.2, **only** `HoldsBoth` satisfies counterfactual
-/// stability — a relational property requiring presence under both
-/// decisions.
+/// Status of an `ArchProposition` under a counterfactual
+/// evaluation.  Stability is a relational property: only
+/// `HoldsBoth` satisfies counterfactual stability — `HoldsBaseOnly`
+/// and `HoldsAltOnly` mean the proposition's truth depends on the
+/// chosen decision, hence the architecture is brittle under that
+/// decision.  `HoldsNeither` means the invariant simply fails in
+/// both branches.
 public type InvariantStatus is
     | HoldsBoth
     | HoldsBaseOnly
@@ -102,7 +122,11 @@ public type InvariantEvaluation is {
     status: InvariantStatus,
 };
 
-/// Counterfactual engine output per spec §22.1.
+/// Counterfactual engine output — comparative payload with stable
+/// JSON shape for agent / human dual-audience surfaces.
+/// `overall_stable` iff every declared stability invariant evaluates
+/// to `HoldsBoth`; `diverging_metric_count` records how many of the
+/// 11 baseline metrics produced different values across the swap.
 public type CounterfactualReport is {
     schema_version: Int,
     pair_name: Text,
@@ -120,12 +144,20 @@ public type CounterfactualReport is {
 
 /// **Counterfactual reasoning engine — non-destructive evaluation.**
 ///
-/// Discharges the kernel-side `arch_counterfactual` module's
-/// soundness contracts: 4-arm `InvariantStatus` arms each pin to a
-/// distinct relational outcome (HoldsBoth iff both shapes satisfy;
-/// HoldsBaseOnly iff base satisfies but alt does not; etc).  Empty
-/// invariants → unstable by default per spec §22.2.
-@framework(ats_v, "ATS-V counterfactual reasoning engine (spec internal/specs/ats-v.md §20.4 + §22.1). Non-destructive what-if evaluation at type level — both decisions remain types. 11-metric baseline catalog. Implementation: crates/verum_kernel/src/arch_counterfactual.rs.")
+/// Discharges the kernel-side counterfactual module's soundness
+/// contracts:
+///   * 4-arm `InvariantStatus` pins to four distinct relational
+///     outcomes (HoldsBoth iff both shapes satisfy; HoldsBaseOnly
+///     iff base satisfies but alt does not; symmetrically for
+///     HoldsAltOnly; HoldsNeither otherwise).
+///   * Empty stability invariants → `overall_stable: false` (the
+///     engine refuses to claim stability from absence of evidence).
+///   * 11-metric baseline catalog covers exposed/required
+///     capability counts, network capability count, boundary
+///     invariant count, composition degree, linear resource count,
+///     stratum ordinal, CVE completeness, strict-mode flag plus
+///     `Custom(name)` for user-defined metrics.
+@framework(ats_v, "ATS-V counterfactual reasoning engine — non-destructive what-if evaluation at type level. Both decisions remain types; the engine performs comparative metric extraction across the 11-metric baseline catalog without ever switching implementations. Kernel implementation: crates/verum_kernel/src/arch_counterfactual.rs.")
 @kernel_discharge("kernel_arch_counterfactual_engine")
 public axiom kernel_arch_counterfactual_engine() -> Bool
     ensures true;

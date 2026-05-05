@@ -161,11 +161,17 @@ pub enum KernelError {
     /// comprehended object's depth.
     ///
 
-    /// See:
-    ///  - `internal/specs/verification-architecture.md` §2.4, §4.4
-    ///  - Diakrisis `docs/02-canonical-primitive/02-axiomatics.md` T-2f*
-    ///  - Yanofsky N.S. 2003. *A Universal Approach to Self-Referential
-    ///  Paradoxes, Incompleteness and Fixed Points.*
+    /// Background: the K-Refine paradox-immunity barrier prevents a
+    /// refinement predicate from comprehending an object whose
+    /// M-iteration depth equals or exceeds its own — the predicate
+    /// would then be expressible in terms of itself, opening the
+    /// classical Yanofsky family of self-referential paradoxes.
+    /// The strictly-less-than check is exactly the Diakrisis T-2f*
+    /// barrier.
+    ///
+    /// External reference: Yanofsky N.S. (2003) *A Universal
+    /// Approach to Self-Referential Paradoxes, Incompleteness and
+    /// Fixed Points.*
     #[error(
         "kernel: K-Refine depth violation: predicate depth {pred_depth} \
          must be strictly less than base depth {base_depth} + 1 \

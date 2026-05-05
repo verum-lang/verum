@@ -3,34 +3,312 @@
 // =============================================================================
 //
 // **Kernel-discharge attestation surface for the ATS-V architectural
-// type system, .**
+// type system.**
 //
-// Mirrors `core.verify.codegen_soundness` (#162) and
-// `core.verify.separation_soundness` (#161 V0): each axiom records a
-// kernel-discharge bridge for an architectural invariant — admitted-with-
-// citation-to-the-spec, dispatched through a stable kernel intrinsic.
+// Mirrors the discharge pattern of `core.verify.codegen_soundness`
+// and `core.verify.separation_soundness`: each axiom records a
+// kernel-discharge bridge for an architectural invariant —
+// admitted with explicit citation to the underlying refinement
+// predicate, dispatched through a stable kernel intrinsic.
 //
-// **Stable error codes**: each anti-pattern carries a stable RFC code
-// `ATS-V-AP-NNN` (per spec §32.4). Codes are 001..010;
-// remaining codes 011..032 land with the rest of the
-// canonical catalog.
+// ## Stable error codes
 //
-// **Architectural alignment**: discharge through 8 kernel intrinsics
-// in `verum_kernel::intrinsic_dispatch`:
+// Every anti-pattern carries a stable RFC code `ATS-V-AP-NNN`.
+// Codes never get re-used across versions; deprecation requires
+// ≥2 minor versions of dual support.  Diagnostics surface the
+// code so both human reviewers and agents can pattern-match
+// (dual-audience contract).
+//
+// ## 32-pattern roster (full canonical catalog)
+//
+// **Capability / composition core (AP-001..010):**
+//   AP-001 CapabilityEscalation     undeclared capability used
+//   AP-002 CapabilityLeak           linear/affine capability escapes scope
+//   AP-003 DependencyCycle          composes_with graph cyclic
+//   AP-004 TierMixing               cross-tier call without bridge
+//   AP-005 FoundationDrift          incompatible foundations composed
+//   AP-006 RegisterMixing           register-machine state mixes domains
+//   AP-007 TxStraddling             operation crosses transactional boundary
+//   AP-008 ResourceStraddling       single resource accessed across boundary
+//   AP-009 LifecycleRegression      higher-rank cog cites lower-rank one
+//   AP-010 CveIncomplete            strict mode missing CVE axis
+//
+// **Boundary / lifecycle / capability extensions (AP-011..026):**
+//   AP-011 AbsoluteBoundaryAttempt    stratum = LAbs (AFN-T α violation)
+//   AP-012 InvariantViolation         declared boundary invariant fails
+//   AP-013 DanglingMessageType        message type without wire encoding
+//   AP-014 UnauthenticatedCrossing    Network boundary without AuthFirst
+//   AP-015 DeterministicViolation     DST test depends on non-deterministic
+//   AP-016 CapabilityDuplication      Linear capability used twice
+//   AP-017 OrphanCapability           Relevant cap declared but unused
+//   AP-018 MissingHandoff             composition cap missing from list
+//   AP-019 FoundationDowngrade        strong foundation downgraded w/o bridge
+//   AP-020 TimeBoundLeakage           TimeBound capability outlives TTL
+//   AP-021 PersistenceMismatch        Persist declared for non-durable op
+//   AP-022 CapabilityLaundering       multi-hop privilege escalation
+//   AP-023 FoundationForgery          declared ≠ cited axioms
+//   AP-024 TransitiveLifecycleRegression   multi-hop AP-009
+//   AP-025 DeclarationDrift           declared ≠ inferred shape
+//   AP-026 FoundationContentMismatch  body uses foreign-foundation construct
+//
+// **MTAC modal-temporal arms (AP-027..032):**
+//   AP-027 TemporalInconsistency      invariant fails across time-points
+//   AP-028 CounterfactualBrittleness  fragile under decision swap
+//   AP-029 MissedAdjoint              refactoring without inverse
+//   AP-030 UniversalPropertyViolation universal claim violated
+//   AP-031 PhantomEvolution           unsatisfiable trigger
+//   AP-032 YonedaInequivalentRefactor observer-functor changes
+//
+// ## Discharge through 8 base + 4 red-team kernel intrinsics
 //
 // * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
 // * `kernel_arch_boundary_check` — invariants across boundaries.
-// * `kernel_arch_composition_check` — composition algebra (§5.3 spec).
+// * `kernel_arch_composition_check` — composition algebra.
 // * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
 // * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
-// * `kernel_arch_anti_pattern_check` — generic dispatcher (10 patterns).
-// * `kernel_arch_cve_closure` — AP-010 CveIncomplete (strict mode).
+// * `kernel_arch_anti_pattern_check` — generic dispatcher (32 patterns).
+// * `kernel_arch_cve_closure` — AP-010 CveIncomplete.
 // * `kernel_arch_soundness_v0` — composes the 7 above.
+// * `kernel_arch_capability_ontology_check` — AT-1 attack closure.
+// * `kernel_arch_yoneda_canonical_roster_complete` — AT-3 attack closure.
+// * `kernel_arch_theorem_cve_required` — AT-2 attack closure.
+// * `kernel_arch_consumes_format_check` — AT-5 attack closure.
 // =============================================================================
 
 module core.architecture.anti_patterns;
 
-mount core.prelude.{Bool};
+mount core.prelude.{Bool, Int, Maybe, List, Text};
+
+// =============================================================================
+// AntiPatternCode — stable RFC code, 32-pattern canonical roster
+// =============================================================================
+
+/// Stable RFC error code `ATS-V-AP-NNN` per spec §32.4.
+/// Pattern-matchable by agents; documented on docs site.
+///
+/// **32 canonical variants**:
+///   * AP-001..010 — capability/composition core
+///   * AP-011..026 — boundary/lifecycle/capability ontology extensions
+///   * AP-027..032 — MTAC modal-temporal arms
+///
+/// **Stability**: codes never get re-used; removing a pattern
+/// requires deprecation cycle ≥ 2 minor versions per spec §29.5.
+/// Mirrors `verum_kernel::arch_anti_pattern::AntiPatternCode`.
+public type AntiPatternCode is
+    // ----- Capability / composition core (AP-001..010) -----
+    | CapabilityEscalation
+    | CapabilityLeak
+    | DependencyCycle
+    | TierMixing
+    | FoundationDrift
+    | RegisterMixing
+    | TxStraddling
+    | ResourceStraddling
+    | LifecycleRegression
+    | CveIncomplete
+    // ----- Boundary / lifecycle / capability ontology (AP-011..026) -----
+    | AbsoluteBoundaryAttempt
+    | InvariantViolation
+    | DanglingMessageType
+    | UnauthenticatedCrossing
+    | DeterministicViolation
+    | CapabilityDuplication
+    | OrphanCapability
+    | MissingHandoff
+    | FoundationDowngrade
+    | TimeBoundLeakage
+    | PersistenceMismatch
+    | CapabilityLaundering
+    | FoundationForgery
+    | TransitiveLifecycleRegression
+    | DeclarationDrift
+    | FoundationContentMismatch
+    // ----- MTAC modal-temporal (AP-027..032) -----
+    | TemporalInconsistency
+    | CounterfactualBrittleness
+    | MissedAdjoint
+    | UniversalPropertyViolation
+    | PhantomEvolution
+    | YonedaInequivalentRefactor;
+
+/// Stable error code string `ATS-V-AP-NNN` for agent surfaces.
+/// Mirrors `verum_kernel::arch_anti_pattern::AntiPatternCode::code`.
+public fn anti_pattern_code_str(c: AntiPatternCode) -> Text {
+    match c {
+        CapabilityEscalation             => "ATS-V-AP-001",
+        CapabilityLeak                   => "ATS-V-AP-002",
+        DependencyCycle                  => "ATS-V-AP-003",
+        TierMixing                       => "ATS-V-AP-004",
+        FoundationDrift                  => "ATS-V-AP-005",
+        RegisterMixing                   => "ATS-V-AP-006",
+        TxStraddling                     => "ATS-V-AP-007",
+        ResourceStraddling               => "ATS-V-AP-008",
+        LifecycleRegression              => "ATS-V-AP-009",
+        CveIncomplete                    => "ATS-V-AP-010",
+        AbsoluteBoundaryAttempt          => "ATS-V-AP-011",
+        InvariantViolation               => "ATS-V-AP-012",
+        DanglingMessageType              => "ATS-V-AP-013",
+        UnauthenticatedCrossing          => "ATS-V-AP-014",
+        DeterministicViolation           => "ATS-V-AP-015",
+        CapabilityDuplication            => "ATS-V-AP-016",
+        OrphanCapability                 => "ATS-V-AP-017",
+        MissingHandoff                   => "ATS-V-AP-018",
+        FoundationDowngrade              => "ATS-V-AP-019",
+        TimeBoundLeakage                 => "ATS-V-AP-020",
+        PersistenceMismatch              => "ATS-V-AP-021",
+        CapabilityLaundering             => "ATS-V-AP-022",
+        FoundationForgery                => "ATS-V-AP-023",
+        TransitiveLifecycleRegression    => "ATS-V-AP-024",
+        DeclarationDrift                 => "ATS-V-AP-025",
+        FoundationContentMismatch        => "ATS-V-AP-026",
+        TemporalInconsistency            => "ATS-V-AP-027",
+        CounterfactualBrittleness        => "ATS-V-AP-028",
+        MissedAdjoint                    => "ATS-V-AP-029",
+        UniversalPropertyViolation       => "ATS-V-AP-030",
+        PhantomEvolution                 => "ATS-V-AP-031",
+        YonedaInequivalentRefactor       => "ATS-V-AP-032",
+    }
+}
+
+/// Canonical short name (matches spec §7 + §26 catalog).
+public fn anti_pattern_name(c: AntiPatternCode) -> Text {
+    match c {
+        CapabilityEscalation             => "CapabilityEscalation",
+        CapabilityLeak                   => "CapabilityLeak",
+        DependencyCycle                  => "DependencyCycle",
+        TierMixing                       => "TierMixing",
+        FoundationDrift                  => "FoundationDrift",
+        RegisterMixing                   => "RegisterMixing",
+        TxStraddling                     => "TxStraddling",
+        ResourceStraddling               => "ResourceStraddling",
+        LifecycleRegression              => "LifecycleRegression",
+        CveIncomplete                    => "CveIncomplete",
+        AbsoluteBoundaryAttempt          => "AbsoluteBoundaryAttempt",
+        InvariantViolation               => "InvariantViolation",
+        DanglingMessageType              => "DanglingMessageType",
+        UnauthenticatedCrossing          => "UnauthenticatedCrossing",
+        DeterministicViolation           => "DeterministicViolation",
+        CapabilityDuplication            => "CapabilityDuplication",
+        OrphanCapability                 => "OrphanCapability",
+        MissingHandoff                   => "MissingHandoff",
+        FoundationDowngrade              => "FoundationDowngrade",
+        TimeBoundLeakage                 => "TimeBoundLeakage",
+        PersistenceMismatch              => "PersistenceMismatch",
+        CapabilityLaundering             => "CapabilityLaundering",
+        FoundationForgery                => "FoundationForgery",
+        TransitiveLifecycleRegression    => "TransitiveLifecycleRegression",
+        DeclarationDrift                 => "DeclarationDrift",
+        FoundationContentMismatch        => "FoundationContentMismatch",
+        TemporalInconsistency            => "TemporalInconsistency",
+        CounterfactualBrittleness        => "CounterfactualBrittleness",
+        MissedAdjoint                    => "MissedAdjoint",
+        UniversalPropertyViolation       => "UniversalPropertyViolation",
+        PhantomEvolution                 => "PhantomEvolution",
+        YonedaInequivalentRefactor       => "YonedaInequivalentRefactor",
+    }
+}
+
+/// Full canonical roster — exactly 32 entries.  Adding a 33rd
+/// requires RFC ATS-V-007 + kernel-side enum bump + pin-test bump.
+/// Used by `verum audit --bundle` to walk every code at runtime.
+public fn anti_pattern_full_roster() -> List<AntiPatternCode> {
+    [
+        AntiPatternCode.CapabilityEscalation,
+        AntiPatternCode.CapabilityLeak,
+        AntiPatternCode.DependencyCycle,
+        AntiPatternCode.TierMixing,
+        AntiPatternCode.FoundationDrift,
+        AntiPatternCode.RegisterMixing,
+        AntiPatternCode.TxStraddling,
+        AntiPatternCode.ResourceStraddling,
+        AntiPatternCode.LifecycleRegression,
+        AntiPatternCode.CveIncomplete,
+        AntiPatternCode.AbsoluteBoundaryAttempt,
+        AntiPatternCode.InvariantViolation,
+        AntiPatternCode.DanglingMessageType,
+        AntiPatternCode.UnauthenticatedCrossing,
+        AntiPatternCode.DeterministicViolation,
+        AntiPatternCode.CapabilityDuplication,
+        AntiPatternCode.OrphanCapability,
+        AntiPatternCode.MissingHandoff,
+        AntiPatternCode.FoundationDowngrade,
+        AntiPatternCode.TimeBoundLeakage,
+        AntiPatternCode.PersistenceMismatch,
+        AntiPatternCode.CapabilityLaundering,
+        AntiPatternCode.FoundationForgery,
+        AntiPatternCode.TransitiveLifecycleRegression,
+        AntiPatternCode.DeclarationDrift,
+        AntiPatternCode.FoundationContentMismatch,
+        AntiPatternCode.TemporalInconsistency,
+        AntiPatternCode.CounterfactualBrittleness,
+        AntiPatternCode.MissedAdjoint,
+        AntiPatternCode.UniversalPropertyViolation,
+        AntiPatternCode.PhantomEvolution,
+        AntiPatternCode.YonedaInequivalentRefactor,
+    ]
+}
+
+/// **Pin**: roster size is exactly 32.  Mirrors kernel-side test
+/// `architectural_pin_anti_pattern_count`.
+public fn anti_pattern_roster_size_invariant() -> Bool {
+    anti_pattern_full_roster().len() == 32
+}
+
+// =============================================================================
+// Severity — diagnostic level
+// =============================================================================
+
+/// Diagnostic severity for an `AntiPatternViolation`.  Maps onto
+/// the host diagnostic system's three-level surface.  Mirrors
+/// `verum_kernel::arch_anti_pattern::Severity`.
+public type Severity is
+    | Error    // Hard error — fails the audit; mature corpus must close
+    | Warning  // Non-blocking; soft-mode default for not-yet-strict cogs
+    | Hint;    // Gentle nudge for code that could be cleaner
+
+public fn severity_tag(s: Severity) -> Text {
+    match s {
+        Error   => "error",
+        Warning => "warning",
+        Hint    => "hint",
+    }
+}
+
+// =============================================================================
+// AntiPatternViolation — structured diagnostic
+// =============================================================================
+
+/// Structured diagnostic produced when an anti-pattern check fails.
+/// Per spec §32.4 — dual-audience: `human_message` for review,
+/// `auto_fix_suggestion` for agent automated remediation.
+/// Mirrors `verum_kernel::arch_anti_pattern::AntiPatternViolation`.
+public type AntiPatternViolation is {
+    code: AntiPatternCode,
+    severity: Severity,
+    summary: Text,
+    human_message: Text,
+    auto_fix_suggestion: Maybe<Text>,
+};
+
+// =============================================================================
+// DiagnosticContext — caller-provided context for richer messages
+// =============================================================================
+
+/// Context the caller supplies to anti-pattern checkers so the
+/// resulting diagnostics can reference the cog by name + cite the
+/// surrounding module.  Mirrors
+/// `verum_kernel::arch_anti_pattern::DiagnosticContext`.
+public type DiagnosticContext is {
+    cog_name: Text,
+    parent_module: Maybe<Text>,
+};
+
+public fn diagnostic_context_default() -> DiagnosticContext {
+    DiagnosticContext {
+        cog_name: "<unknown>",
+        parent_module: None,
+    }
+}
 
 // =============================================================================
 // Capability discipline (AP-001 + AP-002)
@@ -43,7 +321,7 @@ mount core.prelude.{Bool};
 /// capabilities escaping scope).
 ///
 /// **Stable RFC codes**: ATS-V-AP-001, ATS-V-AP-002.
-@framework(ats_v, "ATS-V Anti-pattern catalog (spec internal/specs/ats-v.md §7) — AP-001 CapabilityEscalation, AP-002 CapabilityLeak. Capability flavour (Linear/Affine/Relevant/Unrestricted) reuses existing @quantity(0|1|omega) attribute (spec §17.1).")
+@framework(ats_v, "ATS-V Anti-pattern catalog — AP-001 CapabilityEscalation (cog uses an undeclared capability), AP-002 CapabilityLeak (linear/affine capability escapes its declared scope). Capability flavour Linear/Affine/Relevant/Unrestricted reuses the existing @quantity(0|1|omega) binding-site attribute, NOT a parallel enum.")
 @kernel_discharge("kernel_arch_capability_discipline")
 public axiom kernel_arch_capability_discipline() -> Bool
     ensures true;
@@ -58,7 +336,7 @@ public axiom kernel_arch_capability_discipline() -> Bool
 /// declared `messages_in` / `messages_out` lists, capability
 /// handoffs match `capability_handoff`, and BoundaryInvariants
 /// hold.
-@framework(ats_v, "ATS-V Boundary type check (spec internal/specs/ats-v.md §4.3 + §7 invariants). Cross-module traffic is typed; raw bytes / dangling message types / unauthenticated crossings flag respective anti-patterns.")
+@framework(ats_v, "ATS-V Boundary type check — cross-module traffic is typed at the cog edge: messages_in/messages_out enumerate allowed crossings, capability_handoff records value-level transfers, invariants pin two-sided predicates. Raw byte streams (RawBytes wire encoding without justification), dangling message types (Typed{name,schema_hash} without an entry in messages_*), and unauthenticated crossings (Network boundary without AuthenticatedFirst invariant) raise AP-013/AP-014/AP-012 respectively.")
 @kernel_discharge("kernel_arch_boundary_check")
 public axiom kernel_arch_boundary_check() -> Bool
     ensures true;
@@ -76,7 +354,7 @@ public axiom kernel_arch_boundary_check() -> Bool
 /// * Resulting stratum is admissible (not LAbs).
 /// * No dependency cycle (AP-003).
 /// * Composition is associative + decidable (proved RT1.5).
-@framework(ats_v, "ATS-V Composition algebra (spec internal/specs/ats-v.md §4.4 + §5.3). Composition is associative; decidability per §5.4. Detects AP-003 DependencyCycle, AP-005 FoundationDrift, AP-004 TierMixing through this dispatch.")
+@framework(ats_v, "ATS-V Composition algebra — A ⊗ B is well-formed iff: (1) capability flow valid (B.requires ⊆ A.exposes), (2) foundations compatible (equality OR canonical inclusion), (3) tiers compatible per tier_compatible_with, (4) neither stratum is LAbs, (5) the composition graph stays acyclic. Composition is associative ((A⊗B)⊗C ≡ A⊗(B⊗C)) and decidable in time linear in the union of capabilities. Detects AP-003 DependencyCycle, AP-004 TierMixing, AP-005 FoundationDrift, AP-018 MissingHandoff through this dispatch.")
 @kernel_discharge("kernel_arch_composition_check")
 public axiom kernel_arch_composition_check() -> Bool
     ensures true;
@@ -92,7 +370,7 @@ public axiom kernel_arch_composition_check() -> Bool
 /// transitively (the check is transitive per RT1.3 refinement).
 ///
 /// **Stable RFC code**: ATS-V-AP-009.
-@framework(ats_v, "ATS-V-AP-009 LifecycleRegression (spec internal/specs/ats-v.md §7 + §4.5). Lifecycle ranks: Theorem(4) > Conditional(3) > Plan(2) > Hypothesis(1) > Obsolete(0). Citing strictly-lower-rank artifacts is a defect; transitive check rejects multi-hop regressions.")
+@framework(ats_v, "ATS-V-AP-009 LifecycleRegression. Lifecycle rank poset: Theorem(6) > {Definition, Conditional}(5) > Postulate(4) > Plan(3) > Hypothesis(2) > Interpretation(1) > {Retracted, Obsolete}(0). A higher-rank cog citing a strictly-lower-rank one is a defect — load-bearing artefacts must rest on load-bearing dependencies. The check is transitive (AP-024 catches multi-hop regression chains).")
 @kernel_discharge("kernel_arch_lifecycle_check")
 public axiom kernel_arch_lifecycle_check() -> Bool
     ensures true;
@@ -107,7 +385,7 @@ public axiom kernel_arch_lifecycle_check() -> Bool
 /// `@framework(bridge_corpus, ...)` translates between them.
 ///
 /// **Stable RFC code**: ATS-V-AP-005.
-@framework(ats_v, "ATS-V-AP-005 FoundationDrift (spec internal/specs/ats-v.md §7 + §4.6). Canonical inclusions: CIC ⊃ MLTT, Cubical ⊃ HoTT. Cross-paradigm composition (e.g. ZFC + HoTT) requires explicit functor-bridge.")
+@framework(ats_v, "ATS-V-AP-005 FoundationDrift. Composing two cogs whose foundations differ without an explicit functor-bridge is a defect — there is no canonical translation that preserves refinement-predicate truth values across the divide. Canonical inclusions accepted without bridge: Mltt → Cic (CIC subsumes Martin-Löf TT), Hott → Cubical (cubical HoTT subsumes Book HoTT). Cross-paradigm pairs (e.g. ZFC + HoTT) require an explicit @framework(bridge_corpus, ...) declaration.")
 @kernel_discharge("kernel_arch_foundation_consistency")
 public axiom kernel_arch_foundation_consistency() -> Bool
     ensures true;
@@ -126,7 +404,7 @@ public axiom kernel_arch_foundation_consistency() -> Bool
 /// Each violation surfaces as `VerificationVerdict::Rejected` with
 /// the pattern's stable code in the diagnostic metadata (per spec
 /// §32.4 dual-audience design).
-@framework(ats_v, "ATS-V anti-pattern catalog (spec internal/specs/ats-v.md §7). 32 canonical patterns total: AP-001..010 (CapabilityEscalation, CapabilityLeak, DependencyCycle, TierMixing, FoundationDrift, RegisterMixing, TxStraddling, ResourceStraddling, LifecycleRegression, CveIncomplete) + AP-011..026 (boundary/composition extensions) + AP-027..032 (TemporalInconsistency, CounterfactualBrittleness, MissedAdjoint, UniversalPropertyViolation, PhantomEvolution, YonedaInequivalentRefactor).")
+@framework(ats_v, "ATS-V anti-pattern catalog dispatcher — walks the full canonical 32-pattern roster: AP-001..010 capability/composition core (CapabilityEscalation, CapabilityLeak, DependencyCycle, TierMixing, FoundationDrift, RegisterMixing, TxStraddling, ResourceStraddling, LifecycleRegression, CveIncomplete), AP-011..026 boundary/lifecycle extensions (AbsoluteBoundaryAttempt, InvariantViolation, DanglingMessageType, UnauthenticatedCrossing, DeterministicViolation, CapabilityDuplication, OrphanCapability, MissingHandoff, FoundationDowngrade, TimeBoundLeakage, PersistenceMismatch, CapabilityLaundering, FoundationForgery, TransitiveLifecycleRegression, DeclarationDrift, FoundationContentMismatch), AP-027..032 MTAC modal-temporal arms (TemporalInconsistency, CounterfactualBrittleness, MissedAdjoint, UniversalPropertyViolation, PhantomEvolution, YonedaInequivalentRefactor). Each violation surfaces VerificationVerdict::Rejected with the stable RFC code in the diagnostic metadata.")
 @kernel_discharge("kernel_arch_anti_pattern_check")
 public axiom kernel_arch_anti_pattern_check() -> Bool
     ensures true;
@@ -141,7 +419,7 @@ public axiom kernel_arch_anti_pattern_check() -> Bool
 /// without complete CVE-closure (all three axes) is a defect.
 ///
 /// **Stable RFC code**: ATS-V-AP-010.
-@framework(ats_v, "ATS-V-AP-010 CveIncomplete (spec internal/specs/ats-v.md §7 + §4.8 + §30 CVE-closure). Each public artifact in strict mode must declare all three CVE axes: cve_closure_C (Constructive witness), cve_closure_V_strategy (Verifiable per @verify ladder), cve_closure_E (Executable entry point).")
+@framework(ats_v, "ATS-V-AP-010 CveIncomplete. Every public artefact in strict mode must declare all three CVE axes: cve_closure_C (Constructive witness — function path or constructor), cve_closure_V_strategy (Verifiable — which step of the @verify ladder discharges the claim), cve_closure_E (Executable — entry point or audit command). Missing any axis with strict=true raises this pattern; soft-mode emits a warning. The companion red-team closure axiom kernel_arch_theorem_cve_required raises CveIncomplete to Error severity for Lifecycle.Theorem(...) regardless of strict-flag, since Theorem-status semantically implies full CVE+ closure.")
 @kernel_discharge("kernel_arch_cve_closure")
 public axiom kernel_arch_cve_closure() -> Bool
     ensures true;
@@ -162,7 +440,68 @@ public axiom kernel_arch_cve_closure() -> Bool
 /// * Lifecycle integrity
 /// * Anti-pattern absence (32 canonical patterns)
 /// hold.
-@framework(ats_v, "ATS-V soundness witness (spec internal/specs/ats-v.md §9.2). Composes 7 dispatch intrinsics into a single end-to-end discharge. Soundness chain spans the full 32-pattern catalog, including MTAC modal operators (§20-§23 spec). Eventually self-hosted (verum_arch CVE-closed Verum cog).")
+@framework(ats_v, "ATS-V end-to-end soundness witness. Composes the 7 base dispatch intrinsics (capability_discipline, boundary_check, composition_check, lifecycle_check, foundation_consistency, anti_pattern_check, cve_closure) into a single discharge. Soundness statement: when `verum check` accepts a cog with arch_type T, all of capability discipline, composition correctness, foundation consistency, CVE closure (strict mode), lifecycle integrity, and absence of the 32 canonical anti-patterns hold simultaneously. Eventually self-hosted as a CVE-closed Verum cog itself.")
 @kernel_discharge("kernel_arch_soundness_v0")
 public axiom kernel_arch_soundness_v0() -> Bool
+    ensures true;
+
+// =============================================================================
+// Red-team closure axioms — operationalising attack-vector checks
+// =============================================================================
+
+/// **AT-1 closure**: capability-ontology completeness check.
+/// Every `Capability::Custom { tag, schema }` declared in any
+/// `@arch_module(...)` MUST have its `tag` registered in
+/// `core.architecture.capability_ontology.ATS_V_CANONICAL_CAPABILITIES`
+/// (or in a corpus-extended registry).  Fires AP-001 / AP-005 (or
+/// new code) on unregistered tags.
+///
+/// **Attack closed**: a malicious cog declaring `Capability.Custom("admin")`
+/// with arbitrary `transfers_privilege: true` schema cannot inject a
+/// fake high-privilege capability — the registry check rejects.
+@framework(ats_v, "ATS-V capability-ontology completeness check. Closes attack-vector AT-1: a malicious cog declaring Capability.Custom { tag: \"admin\", schema: { transfers_privilege: true, ... } } cannot inject a fake high-privilege capability — the parser fallback fills schema with conservative defaults, and this gate rejects the cog at ATS-V phase if `tag` is absent from core.architecture.capability_ontology.ATS_V_CANONICAL_CAPABILITIES (or a corpus-extended registry).")
+@kernel_discharge("kernel_arch_capability_ontology_check")
+public axiom kernel_arch_capability_ontology_check() -> Bool
+    ensures true;
+
+/// **AT-3 closure**: Yoneda canonical-roster completeness.
+/// Yoneda-equivalence verdict is sound iff the agreement list spans
+/// EVERY observer in the canonical 5-roster (EndUser / PeerCog /
+/// Stakeholder / Auditor / Adversary).  An adversary submitting a
+/// verdict with only Auditor agreement (the strictest, hardest to
+/// fake) would otherwise pass without testing the easy observers.
+///
+/// **Attack closed**: forged `YonedaVerdict { agreements: [auditor_agreed], equivalent: true }`
+/// is rejected because its agreement count `< 5`.
+@framework(ats_v, "ATS-V Yoneda canonical-roster completeness (spec §20.7 + §23). Closes attack-vector AT-3: a verdict claiming equivalence must walk the full canonical-5 roster, not a curated subset. Auditor alone is necessary but not sufficient.")
+@kernel_discharge("kernel_arch_yoneda_canonical_roster_complete")
+public axiom kernel_arch_yoneda_canonical_roster_complete() -> Bool
+    ensures true;
+
+/// **AT-2 closure**: theorem-status requires CVE-closure regardless
+/// of strict mode.  AP-010 currently fires only when `strict = true`,
+/// but `Lifecycle::Theorem` is a load-bearing claim — soft-mode bypass
+/// of CVE-closure for `[T]`-status is itself a defect.
+///
+/// **Attack closed**: cog declaring `lifecycle: Lifecycle.Theorem("v1.0"), strict: false`
+/// without any CVE axis is now flagged as `CveIncomplete` (Severity.Error)
+/// even outside strict mode, because Theorem semantically REQUIRES the
+/// triple irrespective of declaration-strictness flag.
+@framework(ats_v, "ATS-V theorem-CVE coupling (spec §4.5 + §4.8). Closes attack-vector AT-2: Theorem lifecycle implies CVE⁺ closure by definition (CVE §3.5); `strict = false` cannot bypass this semantic constraint.")
+@kernel_discharge("kernel_arch_theorem_cve_required")
+public axiom kernel_arch_theorem_cve_required() -> Bool
+    ensures true;
+
+/// **AT-5 closure**: `consumes` field format validation.
+/// The `consumes: List<Text>` field carries free-form strings like
+/// `"randomness/16384 bytes"`.  Without grammar enforcement, any
+/// string passes — including injection vectors for downstream gas
+/// accounting.  This axiom requires each entry to match the canonical
+/// pattern `<resource_kind>/<positive_int> <unit>` where `unit ∈ {bytes, ops, ms, ns}`.
+///
+/// **Attack closed**: cog declaring `consumes: ["'; DROP TABLE--"]`
+/// is rejected at ATS-V phase, before reaching gas-table dispatch.
+@framework(ats_v, "ATS-V consumes-format validation (spec §4.1 consumes field). Closes attack-vector AT-5: free-form Text field gains a canonical resource-grammar; format violations surface as DeclarationDrift (AP-025) at ATS-V phase.")
+@kernel_discharge("kernel_arch_consumes_format_check")
+public axiom kernel_arch_consumes_format_check() -> Bool
     ensures true;

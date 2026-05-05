@@ -4,18 +4,113 @@
 //
 // **Verum-native mirror of `verum_kernel::arch`.**
 //
-// Per `internal/specs/ats-v.md` §4 (Architectural primitives) +
-// §17 (Reuse compliance), every concept here uses canonical
-// Verum syntax — `type X is variant_list`, `type X is { fields }`,
-// `type X is protocol { ... }` — with no new grammar productions.
+// ## What ATS-V is
 //
-// Cross-side alignment with `verum_kernel::arch::*` is pinned by
-// the kernel test suite. Adding a new variant here requires
-// updating the kernel-side enum AND vice-versa.
+// The Architectural Type System for Verum (ATS-V) promotes
+// architectural intent — *who can do what, across which boundary,
+// under which discipline* — from prose into the type system.
+// Eight primitives carry the load: Capability, Boundary,
+// Composition, Lifecycle, Foundation, Tier, MsfsStratum,
+// CveClosure.  Their aggregate is `Shape`, the typed fingerprint
+// of every cog.
 //
-// **Self-attestation**: this cog is itself ATS-V-typed via the
-// `@arch_module(...)` declaration below — dogfood for the
-// architectural type system.
+// ## Reuse-over-invention principle
+//
+// ATS-V introduces ZERO new grammar productions.  Every primitive
+// is expressed via existing Verum syntax — variants, records,
+// protocols, attributes:
+//
+//   * `type X is | A | B` — sum types carry Capability /
+//     Lifecycle / Foundation / Tier / MsfsStratum / etc.
+//   * `type X is { ... }` — records carry Boundary / CveClosure /
+//     Shape / CapabilitySchema / etc.
+//   * `@arch_module(...)` typed attribute — exactly one new
+//     attribute name, parsed by the existing attribute mechanism.
+//   * `@kernel_discharge(<intrinsic>)` axioms — bridge to kernel
+//     side via the existing axiom-with-attribute pattern.
+//   * Capability flavour (Linear / Affine / Relevant / Unrestricted)
+//     attaches via the existing `@quantity(0|1|omega)` attribute
+//     on the binding site, NOT via a parallel enum here.
+//   * Verification routes (V-axis of CVE) reuse the existing
+//     `@verify(strategy)` ladder.
+//   * Foundation citation reuses existing `@framework(corpus, ...)`.
+//   * Refinement predicates for anti-patterns reuse existing
+//     `where` clauses.
+//
+// ## Cross-side pin (kernel ↔ Verum alignment)
+//
+// Every type, every variant, every helper function in this cog has
+// a 1:1 counterpart in the Rust-side `verum_kernel::arch::*`
+// module.  Drift in either direction breaks the architectural
+// type-checker phase that walks `@arch_module(...)` declarations.
+//
+// The cross-side pin test in
+// `crates/verum_kernel/tests/k_arch_v_alignment.rs` enumerates the
+// canonical roster (variant count, variant tag, helper function
+// presence) and fails CI on any divergence.  Adding a new variant
+// requires updating BOTH sides AND the pin-test roster in the
+// same change-set.
+//
+// ## Operationalisation
+//
+// Every methodological concept that is pure data is exposed as a
+// `public fn` on the Verum side, not merely an axiom.  Verum
+// cogs can compute lifecycle ranks, stratum admissibility,
+// foundation subsumption, etc., without crossing the FFI
+// boundary.  The kernel discharges only the non-decidable parts
+// (e.g. capability-flow inference from cog source body).
+//
+// ## CVE — the seven-symbol taxonomy
+//
+// The Lifecycle variants below correspond to a seven-symbol
+// canonical taxonomy used across the corpus to classify the
+// epistemic state of every architectural artefact:
+//
+//   * `[H]` Hypothesis     — speculative; constructive partial,
+//                            no verification, no execution.
+//                            Must carry a maturation plan; without
+//                            one it degrades to `[I]`.
+//   * `[Plan]`             — ATS-V legacy "committed but not yet
+//                            implemented" (TODO with a target
+//                            completion date); distinct from `[P]`
+//                            Postulate.
+//   * `[P]` Postulate      — base assumption accepted without proof
+//                            at this layer; constructive accepted,
+//                            verifiable absent, executable accepted.
+//                            Discharged by citation to a trusted
+//                            external base.
+//   * `[D]` Definition     — postulated by fiat; constructive
+//                            present (the definition itself),
+//                            verifiable trivial (definitions are not
+//                            theorems), executable present.
+//   * `[C]` Conditional    — proven under explicit assumptions;
+//                            full CVE closure relative to those
+//                            assumptions.  Reads as `[T]` in the
+//                            context where the conditions hold.
+//   * `[T]` Theorem        — fully proven, load-bearing; full CVE+
+//                            triple closure (constructive +
+//                            verifiable + executable).
+//   * `[I]` Interpretation — CVE-violator; transitional only.  All
+//                            three CVE axes absent AND no maturation
+//                            plan.  Permitted ONLY in transitional
+//                            corpus revisions; mature corpus must
+//                            contain ZERO `[I]` entries.
+//   * `[✗]` Retracted      — previously declared but withdrawn /
+//                            refuted.  Removed from active corpus
+//                            but record preserved as negative
+//                            example in audit chronicle.
+//   * `[O]` Obsolete       — deprecated, scheduled for removal;
+//                            less strict than Retracted.
+//
+// Lifecycle ranks (used by AP-009 LifecycleRegression):
+// `[T] > [D] = [C] > [P] > Plan > [H] > [I] > {[✗], Obsolete}`.
+// Citing strictly-lower-rank artifacts from a higher-rank one is
+// a defect; the check is transitive.
+//
+// ## Self-attestation
+//
+// This cog is itself ATS-V-typed via the `@arch_module(...)`
+// declaration below — dogfood for the architectural type system.
 // =============================================================================
 
 @arch_module(
@@ -85,10 +180,19 @@ public type NetDirection is
 // Capability — first-class possibility
 // =============================================================================
 
-/// First-class capability tracked at architecture level.  Per ATS-V
-/// spec §4.2.  Substructural-logic flavour (Linear / Affine /
-/// Relevant / Unrestricted) attaches via existing `@quantity(0|1|omega)`
+/// First-class capability tracked at architecture level.  A
+/// capability answers "what may this cog DO?" — read a resource,
+/// write to one, execute an FFI/syscall/program, escalate
+/// privilege, spawn a task, hold a time-bounded right, persist
+/// state, or use a network endpoint.  Custom capabilities open
+/// the catalog while preserving an explicit registry guard
+/// (`core.architecture.capability_ontology`).
+///
+/// Substructural-logic flavour (Linear / Affine / Relevant /
+/// Unrestricted) attaches via the existing `@quantity(0|1|omega)`
 /// attribute at the binding site — NOT via a parallel enum here.
+/// This keeps the capability *kind* and the capability *usage
+/// discipline* in distinct, orthogonal type-system axes.
 public type Capability is
     | Read(ResourceTag)
     | Write(ResourceTag)
@@ -130,7 +234,22 @@ public type BoundaryPhysicalLayer is
     | Ipc
     | NetworkLayer;
 
-/// Boundary record per spec §4.3.
+/// Cross-module / cross-cog boundary.  A `Boundary` carries the
+/// **typed traffic discipline** at the cog's edge:
+///   * what messages enter and leave (`messages_in`, `messages_out`)
+///   * which capabilities transfer across the edge as values
+///     (`capability_handoff`)
+///   * what predicates both sides preserve at all times
+///     (`invariants`)
+///   * how the bytes are encoded on the wire (`wire_encoding`)
+///   * where the boundary physically sits — same crate, IPC,
+///     network — (`physical_layer`).
+///
+/// A Boundary makes cross-cog interaction structurally explicit:
+/// raw byte streams, dangling message types, and unauthenticated
+/// crossings each surface as distinct anti-patterns
+/// (`DanglingMessageType`, `UnauthenticatedCrossing`,
+/// `InvariantViolation`).
 public type Boundary is {
     messages_in: List<MessageType>,
     messages_out: List<MessageType>,
@@ -149,23 +268,27 @@ public type ConfidenceLevel is
     | Medium
     | High;
 
-/// Lifecycle stage per spec §4.5 — CVE 7-symbol taxonomy
-/// (`internal/holon/internal/cve/docs/cve-architecture.md` §3.5).
+/// Lifecycle stage — the maturation level of an architectural
+/// artefact, encoded into the CVE seven-symbol taxonomy detailed
+/// in this cog's header comment.  See the `lifecycle_rank` and
+/// `lifecycle_cve_glyph` helpers below for the operational
+/// projections used by AP-009 (LifecycleRegression).
 ///
 /// Rank poset (used by AP-009 LifecycleRegression):
 ///   Theorem > {Definition, Conditional} > Postulate > Plan
 ///     > Hypothesis > Interpretation > {Retracted, Obsolete}
 ///
-/// CVE-glyph mapping:
-///   Hypothesis     = [Г]   speculative
-///   Plan           = (ATS-V legacy, no CVE glyph)
-///   Postulate      = [П]   base assumption (kernel-discharge)
-///   Definition     = [О]   by-fiat boundary
-///   Conditional    = [С]   proven under conditions
-///   Theorem        = [Т]   КВИ⁺ full closure
-///   Interpretation = [И]   KVI-violator (transitional)
-///   Retracted      = [✗]   withdrawn
-///   Obsolete       = [O]   deprecated (legacy)
+/// CVE-glyph mapping (single-character canonical codes used in
+/// audit JSON, error messages, and dual-audience rendering):
+///   Hypothesis     = H   speculative
+///   Plan           = Plan (ATS-V legacy, no CVE glyph)
+///   Postulate      = P   base assumption (kernel-discharge)
+///   Definition     = D   by-fiat boundary
+///   Conditional    = C   proven under explicit conditions
+///   Theorem        = T   CVE⁺ full closure (load-bearing)
+///   Interpretation = I   CVE-violator (transitional only)
+///   Retracted      = ✗   explicitly withdrawn / refuted
+///   Obsolete       = O   deprecated (legacy)
 public type Lifecycle is
     | Hypothesis(ConfidenceLevel)
     | Plan(Text)
@@ -181,9 +304,21 @@ public type Lifecycle is
 // Foundation — meta-theoretic profile
 // =============================================================================
 
-/// Foundation profile per spec §4.6.  Composing cogs with
-/// incompatible foundations without an explicit functor-bridge
-/// triggers `FoundationDrift` (ATS-V-AP-005).
+/// Foundation profile — the meta-theoretic universe a cog's
+/// proof corpus inhabits.  Composing two cogs whose foundations
+/// differ without an explicit functor-bridge between them raises
+/// `FoundationDrift` (ATS-V-AP-005): there is no canonical
+/// translation that preserves the truth-values of refinement
+/// predicates across the divide.
+///
+/// Canonical inclusions (no bridge required):
+///   * `Mltt → Cic`     CIC subsumes Martin-Löf TT (CIC = MLTT
+///                      + inductive families)
+///   * `Hott → Cubical` cubical HoTT subsumes Book HoTT
+///
+/// Cross-paradigm pairs (e.g. ZFC ↔ HoTT) require an explicit
+/// `@framework(bridge_corpus, ...)` declaration; otherwise AP-005
+/// fires.
 public type Foundation is
     | ZfcTwoInacc
     | Hott
@@ -197,22 +332,47 @@ public type Foundation is
 // Tier — execution placement
 // =============================================================================
 
-/// Execution tier per spec §4.7.  Tier mismatches without bridge
-/// trigger `TierMixing` (ATS-V-AP-004).
+/// Execution tier — where the cog runs.  Tier mismatches between
+/// caller and callee without an explicit bridge raise `TierMixing`
+/// (ATS-V-AP-004): a Tier-0 interpreter cannot transparently call
+/// into a Tier-2 GPU kernel, etc.
+///
+/// Tiers:
+///   * `Interp`    — Tier 0: VBC interpreter, fast startup.
+///   * `Aot`       — Tier 1: AOT via LLVM, native speed.
+///   * `Gpu`       — Tier 2: GPU compilation via MLIR.
+///   * `Check`     — Type-checking only, no codegen, nothing runs.
+///   * `MultiTier` — cog runs on any of the listed tiers.
+///
+/// **Variant naming pin**: `Check` (not `TierCheck`). Mirrors
+/// `verum_kernel::arch::Tier::Check` — the kernel parser at
+/// `arch_parse::parse_tier` accepts the bare segment `"Check"` and
+/// rejects `"TierCheck"`. Any drift here breaks `@arch_module(at_tier
+/// = Tier.Check)` declarations.
 public type Tier is
     | Interp
     | Aot
     | Gpu
-    | TierCheck
+    | Check
     | MultiTier(List<Tier>);
 
 // =============================================================================
 // MsfsStratum — position in MSFS moduli space
 // =============================================================================
 
-/// MSFS stratum per spec §4.7 + reflection_tower.  `LAbs` is
-/// inadmissible by AFN-T α (MSFS Theorem 5.1) — declaring it
-/// triggers stratum-admissibility check.
+/// MSFS stratum — position of the cog in the moduli space of the
+/// Modular-Stratified Foundation reflection tower.  Three
+/// admissible levels plus one canonically-empty level:
+///
+///   * `LFnd`    — foundation level, base of the tower.
+///   * `LCls`    — classifier level, derives from LFnd.
+///   * `LClsTop` — maximal classifier sub-class.
+///   * `LAbs`    — empty by AFN-T α (boundary closure axiom);
+///                 declaring it is a defect.
+///
+/// Any cog claiming `LAbs` triggers AP-011 `AbsoluteBoundaryAttempt`.
+/// The accompanying soundness pin `stratum_l_abs_unique_inadmissible`
+/// asserts admissibility is exactly the complement of `LAbs`.
 public type MsfsStratum is
     | LFnd
     | LCls
@@ -223,8 +383,17 @@ public type MsfsStratum is
 // CveClosure — Constructive / Verifiable / Executable triple
 // =============================================================================
 
-/// Verification strategy reuses existing `@verify(...)` ladder
-/// per grammar verum.ebnf:467+.
+/// Verification strategy — the level of discharge claimed for a
+/// proposition.  Mirrors the existing `@verify(...)` attribute
+/// ladder, NOT a parallel system.  The 9 strategies are strictly
+/// ordered on the Diakrisis ν-ladder:
+///
+///   `Runtime < Static < Fast < Formal < Proof < Thorough <
+///    Reliable < Certified < Synthesize`
+///
+/// Refining downward (e.g. `formal` to `runtime`) on an existing
+/// proposition is itself a Diakrisis regression and an AP-009
+/// candidate.
 public type VerifyStrategy is
     | Runtime
     | Static
@@ -236,7 +405,24 @@ public type VerifyStrategy is
     | Certified
     | Synthesize;
 
-/// CVE-closure triple per spec §4.8 + §32 (dual-audience contract).
+/// CVE-closure triple — three orthogonal axes that, together,
+/// constitute a fully discharged architectural claim:
+///
+///   * `constructive`         — Constructive witness: a function
+///                              path or constructor that produces
+///                              the artefact concretely.
+///   * `verifiable_strategy`  — Verification route: which `@verify`
+///                              ladder step discharges the claim.
+///   * `executable`           — Executable artefact: an entry
+///                              point or audit command that
+///                              actually runs the witness.
+///
+/// In strict mode (`@arch_module(strict = true)`), all three axes
+/// MUST be present; missing any axis is AP-010 (CveIncomplete).
+/// Soft mode emits warnings instead of errors.  Per the
+/// dual-audience contract, the resulting diagnostic surfaces
+/// both human-readable text and machine-readable RFC codes so
+/// reviewers and agents share a vocabulary.
 public type CveClosure is {
     constructive: Maybe<Text>,
     verifiable_strategy: Maybe<VerifyStrategy>,
@@ -247,9 +433,29 @@ public type CveClosure is {
 // Shape — main carrier of @arch_module(...)
 // =============================================================================
 
-/// Main carrier per spec §4.1.  The compiler builds a `Shape` from
-/// each `@arch_module(...)` declaration; the ATS-V phase consumes
-/// it during architectural type checking.
+/// Main carrier of `@arch_module(...)` — the typed architectural
+/// fingerprint of a cog.  The compiler builds a `Shape` from each
+/// `@arch_module(...)` declaration; the ATS-V phase (Phase 6.5,
+/// between type inference and VBC codegen) consumes it during
+/// architectural type checking and produces the per-module
+/// violation roster.
+///
+/// Field semantics (all 13 fields the parser recognises):
+///   * `exposes`          — capabilities surfacing externally
+///   * `requires`         — capabilities the cog needs from peers
+///   * `preserves`        — boundary invariants honoured by the
+///                          cog at every internal call
+///   * `consumes`         — linear/affine resources the cog uses
+///                          up (canonical format
+///                          `<resource>/<N> <unit>` — see AT-5
+///                          closure axiom in anti_patterns.vr)
+///   * `at_tier`          — execution tier constraint
+///   * `foundation`       — meta-theoretic profile
+///   * `stratum`          — MSFS moduli-space level
+///   * `cve_closure`      — CVE-closure triple
+///   * `lifecycle`        — maturation stage
+///   * `composes_with`    — cogs/functions this one composes with
+///   * `strict`           — strict-mode flag (errors vs warnings)
 public type Shape is {
     exposes: List<Capability>,
     requires: List<Capability>,
@@ -263,3 +469,351 @@ public type Shape is {
     composes_with: List<Text>,
     strict: Bool,
 };
+
+// =============================================================================
+// CapabilitySchema — inline metadata for Capability.Custom
+// =============================================================================
+
+/// Schema bundled into a `Capability.Custom` variant — mirrors
+/// `verum_kernel::arch::CapabilitySchema`.  Distinct from
+/// `core.architecture.capability_ontology.CapabilityRegistration`,
+/// which is a registry-side record carrying `name` + `deprecation`;
+/// `CapabilitySchema` is the inline payload the kernel constructs
+/// at parse time when the cog source declares
+/// `Capability.Custom { tag: "x", schema: CapabilitySchema { ... } }`.
+public type CapabilitySchema is {
+    description: Text,
+    transfers_privilege: Bool,
+    subsumed_by: List<Text>,
+};
+
+/// Default schema for a custom capability the kernel parser cannot
+/// resolve to a registry entry.  Conservative: zero-priv by default,
+/// no subsumption claims.  Matches kernel `arch_parse.rs` fallback.
+public fn capability_schema_inferred_default() -> CapabilitySchema {
+    CapabilitySchema {
+        description: "<inferred at parse time>",
+        transfers_privilege: false,
+        subsumed_by: [],
+    }
+}
+
+// =============================================================================
+// Operationalisation — pure-data helpers (mirror kernel `impl` methods)
+// =============================================================================
+//
+// Every helper here is a TOTAL, DECIDABLE function on pure data.
+// No FFI, no kernel intrinsic — Verum cogs can call them directly.
+// The kernel-side `impl` blocks compute the same values bit-for-bit;
+// the cross-side pin test in `verum_kernel/tests/k_arch_v_alignment.rs`
+// asserts every match arm here corresponds to a kernel match arm.
+// =============================================================================
+
+// ----- Tier -----
+
+/// Stable diagnostic tag — single token used in audit JSON,
+/// anti-pattern messages, dual-audience surfaces (spec §32.4).
+/// Mirrors `verum_kernel::arch::Tier::tag`.
+public fn tier_tag(t: Tier) -> Text {
+    match t {
+        Interp        => "interp",
+        Aot           => "aot",
+        Gpu           => "gpu",
+        Check         => "check",
+        MultiTier(_)  => "multi_tier",
+    }
+}
+
+/// True iff `caller_tier` can call into `callee_tier` without
+/// violating tier discipline (spec §4.7).  Mirrors
+/// `verum_kernel::arch::Tier::compatible_with`.
+///
+/// **Soundness**: identity always; MultiTier is reflexive set-membership;
+/// Check is incompatible with any executable tier (Check is type-check-only,
+/// nothing runs).  Cross-tier pairs (Interp ↔ Aot ↔ Gpu) require an
+/// explicit `@bridge_tier(...)` annotation — flagged by AP-004.
+public fn tier_compatible_with(caller: Tier, callee: Tier) -> Bool {
+    match (caller, callee) {
+        (Check, _)          => false,
+        (_, Check)          => false,
+        (Interp, Interp)    => true,
+        (Aot, Aot)          => true,
+        (Gpu, Gpu)          => true,
+        (MultiTier(allowed), other)  => tier_list_contains(allowed, other),
+        (other, MultiTier(allowed))  => tier_list_contains(allowed, other),
+        _                   => false,
+    }
+}
+
+fn tier_list_contains(allowed: List<Tier>, target: Tier) -> Bool {
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if tier_eq(allowed[i], target) {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+fn tier_eq(a: Tier, b: Tier) -> Bool {
+    match (a, b) {
+        (Interp, Interp)         => true,
+        (Aot, Aot)               => true,
+        (Gpu, Gpu)               => true,
+        (Check, Check)           => true,
+        (MultiTier(_), MultiTier(_)) => true, // structural equality is caller's job
+        _                        => false,
+    }
+}
+
+// ----- MsfsStratum -----
+
+public fn stratum_tag(s: MsfsStratum) -> Text {
+    match s {
+        LFnd    => "l_fnd",
+        LCls    => "l_cls",
+        LClsTop => "l_cls_top",
+        LAbs    => "l_abs",
+    }
+}
+
+/// True iff the stratum is admissible — i.e. NOT `LAbs`.  AFN-T α
+/// (MSFS Theorem 5.1) proves `L_Abs` is empty by construction;
+/// declaring it triggers AP-011 `AbsoluteBoundaryAttempt`.
+public fn stratum_is_admissible(s: MsfsStratum) -> Bool {
+    match s {
+        LAbs => false,
+        _    => true,
+    }
+}
+
+// ----- Foundation -----
+
+public fn foundation_tag(f: Foundation) -> Text {
+    match f {
+        ZfcTwoInacc           => "zfc_two_inacc",
+        Hott                  => "hott",
+        Cubical               => "cubical",
+        Cic                   => "cic",
+        Mltt                  => "mltt",
+        Eff                   => "eff",
+        CustomFoundation(_,_) => "custom",
+    }
+}
+
+/// True iff `self` is interpretable into `target` without an
+/// explicit functor-bridge.  Canonical inclusions (spec §4.6):
+///   * identity (any → itself)
+///   * `Mltt → Cic`     — CIC subsumes MLTT (CIC = MLTT + inductive families)
+///   * `Hott → Cubical` — cubical subsumes Book HoTT
+///
+/// Cross-paradigm pairs (e.g. ZFC ↔ HoTT) require explicit
+/// `@framework(bridge_corpus, ...)`; otherwise AP-005 fires.
+public fn foundation_directly_subsumed_by(src: Foundation, target: Foundation) -> Bool {
+    match (src, target) {
+        (ZfcTwoInacc, ZfcTwoInacc) => true,
+        (Hott, Hott)               => true,
+        (Cubical, Cubical)         => true,
+        (Cic, Cic)                 => true,
+        (Mltt, Mltt)               => true,
+        (Eff, Eff)                 => true,
+        (Mltt, Cic)                => true,
+        (Hott, Cubical)            => true,
+        _                          => false,
+    }
+}
+
+// ----- Lifecycle -----
+
+public fn lifecycle_tag(lc: Lifecycle) -> Text {
+    match lc {
+        Hypothesis(_)     => "hypothesis",
+        Plan(_)           => "plan",
+        Postulate(_)      => "postulate",
+        Definition        => "definition",
+        Conditional(_)    => "conditional",
+        Theorem(_)        => "theorem",
+        Interpretation(_) => "interpretation",
+        Retracted(_,_)    => "retracted",
+        Obsolete(_,_)     => "obsolete",
+    }
+}
+
+/// CVE §3.5 single-character status code — for compact rendering
+/// in cross-format outputs and stable error codes.  Mirrors
+/// `verum_kernel::arch::Lifecycle::cve_glyph`.
+public fn lifecycle_cve_glyph(lc: Lifecycle) -> Text {
+    match lc {
+        Hypothesis(_)     => "H",
+        Plan(_)           => "Plan",  // ATS-V legacy — no CVE glyph
+        Postulate(_)      => "P",
+        Definition        => "D",
+        Conditional(_)    => "C",
+        Theorem(_)        => "T",
+        Interpretation(_) => "I",
+        Retracted(_,_)    => "✗",
+        Obsolete(_,_)     => "O",
+    }
+}
+
+/// Lifecycle ordering for AP-009 LifecycleRegression check.
+/// `[T] > [D] = [C] > [P] > Plan > [H] > [I] > {[✗], Obsolete}`.
+/// CVE §3.5 + §3.1: mature artifacts cite mature artifacts.
+public fn lifecycle_rank(lc: Lifecycle) -> Int {
+    match lc {
+        Obsolete(_,_)     => 0,
+        Retracted(_,_)    => 0,
+        Interpretation(_) => 1,
+        Hypothesis(_)     => 2,
+        Plan(_)           => 3,
+        Postulate(_)      => 4,
+        Definition        => 5,
+        Conditional(_)    => 5,
+        Theorem(_)        => 6,
+    }
+}
+
+/// True iff the lifecycle is forbidden in mature corpus per CVE §6.7
+/// — `[I]` Interpretation without a maturation plan.  Used by the
+/// future anti-pattern check `InterpretationInMatureCorpus`.
+public fn lifecycle_is_mature_corpus_forbidden(lc: Lifecycle) -> Bool {
+    match lc {
+        Interpretation(_) => true,
+        _                 => false,
+    }
+}
+
+// ----- CveClosure -----
+
+/// Number of CVE axes that discharge (0..=3).
+public fn cve_closure_degree(cve: CveClosure) -> Int {
+    let mut n: Int = 0;
+    if cve.constructive is Some(_)         { n = n + 1; }
+    if cve.verifiable_strategy is Some(_)  { n = n + 1; }
+    if cve.executable is Some(_)           { n = n + 1; }
+    n
+}
+
+/// True iff all three CVE axes are present (full CVE-closure).
+public fn cve_closure_is_fully_closed(cve: CveClosure) -> Bool {
+    cve_closure_degree(cve) == 3
+}
+
+// ----- VerifyStrategy -----
+
+public fn verify_strategy_tag(s: VerifyStrategy) -> Text {
+    match s {
+        Runtime    => "runtime",
+        Static     => "static",
+        Fast       => "fast",
+        Formal     => "formal",
+        Proof      => "proof",
+        Thorough   => "thorough",
+        Reliable   => "reliable",
+        Certified  => "certified",
+        Synthesize => "synthesize",
+    }
+}
+
+/// Strength rank — strictly increasing on the Diakrisis ν-ladder
+/// (VVA §12).  Higher rank ≡ stronger discharge; ascending steps
+/// only — refining a `formal` to `runtime` flag is a Diakrisis
+/// regression and AP-009 candidate.
+public fn verify_strategy_rank(s: VerifyStrategy) -> Int {
+    match s {
+        Runtime    => 0,
+        Static     => 1,
+        Fast       => 2,
+        Formal     => 3,
+        Proof      => 4,
+        Thorough   => 5,
+        Reliable   => 6,
+        Certified  => 7,
+        Synthesize => 8,
+    }
+}
+
+// ----- Capability -----
+
+public fn capability_tag(c: Capability) -> Text {
+    match c {
+        Read(_)              => "read",
+        Write(_)             => "write",
+        Exec(_)              => "exec",
+        Escalate(_)          => "escalate",
+        Spawn(_)             => "spawn",
+        TimeBound(_)         => "time_bound",
+        Persist(_)           => "persist",
+        Network(_,_)         => "network",
+        CustomCapability(_)  => "custom",
+    }
+}
+
+// ----- Shape -----
+
+/// Default shape for cogs without `@arch_module` per spec §6.1
+/// (smart default inference).  Soft-mode trivial — vacuously
+/// passes every anti-pattern check.  Mirrors
+/// `verum_kernel::arch::Shape::default_for_unannotated`.
+public fn shape_default_for_unannotated() -> Shape {
+    Shape {
+        exposes: [],
+        requires: [],
+        preserves: [],
+        consumes: [],
+        at_tier: Tier.MultiTier([Tier.Interp, Tier.Aot]),
+        foundation: Foundation.ZfcTwoInacc,
+        stratum: MsfsStratum.LFnd,
+        cve_closure: CveClosure {
+            constructive: None,
+            verifiable_strategy: None,
+            executable: None,
+        },
+        lifecycle: Lifecycle.Plan("unspecified"),
+        composes_with: [],
+        strict: false,
+    }
+}
+
+// =============================================================================
+// Soundness theorems — pure-data invariants provable from the helpers
+// =============================================================================
+
+/// **Soundness pin**: lifecycle ranks form a strict partial order
+/// where `Theorem > Conditional > Plan > Hypothesis > Obsolete`.
+/// Decidable from `lifecycle_rank` alone; mirrored by the kernel
+/// pin test `lifecycle_rank_orders_correctly`.
+public fn lifecycle_rank_strict_order_holds() -> Bool {
+    lifecycle_rank(Lifecycle.Theorem("v0.1")) > lifecycle_rank(Lifecycle.Conditional([])) &&
+    lifecycle_rank(Lifecycle.Conditional([])) > lifecycle_rank(Lifecycle.Plan("x")) &&
+    lifecycle_rank(Lifecycle.Plan("x")) > lifecycle_rank(Lifecycle.Hypothesis(ConfidenceLevel.Medium)) &&
+    lifecycle_rank(Lifecycle.Hypothesis(ConfidenceLevel.Medium)) > lifecycle_rank(Lifecycle.Obsolete("x", None))
+}
+
+/// **Soundness pin**: AFN-T α boundary closure — `LAbs` is the
+/// unique inadmissible stratum.
+public fn stratum_l_abs_unique_inadmissible() -> Bool {
+    !stratum_is_admissible(MsfsStratum.LAbs) &&
+    stratum_is_admissible(MsfsStratum.LFnd) &&
+    stratum_is_admissible(MsfsStratum.LCls) &&
+    stratum_is_admissible(MsfsStratum.LClsTop)
+}
+
+/// **Soundness pin**: Foundation subsumption is reflexive +
+/// asymmetric on canonical inclusions (CIC ⊃ MLTT, Cubical ⊃ HoTT).
+public fn foundation_canonical_inclusions_hold() -> Bool {
+    foundation_directly_subsumed_by(Foundation.Mltt, Foundation.Cic) &&
+    foundation_directly_subsumed_by(Foundation.Hott, Foundation.Cubical) &&
+    !foundation_directly_subsumed_by(Foundation.Cic, Foundation.Mltt) &&
+    !foundation_directly_subsumed_by(Foundation.ZfcTwoInacc, Foundation.Hott)
+}
+
+/// **Soundness pin**: Tier `Check` runs nothing — incompatible with
+/// every executable tier.
+public fn tier_check_runs_nothing() -> Bool {
+    !tier_compatible_with(Tier.Check, Tier.Aot) &&
+    !tier_compatible_with(Tier.Aot, Tier.Check) &&
+    !tier_compatible_with(Tier.Check, Tier.Interp) &&
+    !tier_compatible_with(Tier.Check, Tier.Gpu)
+}

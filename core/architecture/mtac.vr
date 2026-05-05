@@ -4,20 +4,61 @@
 //
 // **Verum-native mirror of `verum_kernel::arch_mtac`.**
 //
-// Per `internal/specs/ats-v.md` §20-§22, MTAC extends ATS-V with a
-// functorial parameter over (Time × Decisions × Observers).  This
-// cog mirrors the kernel-side primitive types so Verum-side code
-// that constructs `@arch_module(...)` declarations can refer to
-// MTAC concepts by canonical Verum syntax.
+// ## Why MTAC
 //
-// **Cross-side alignment**: every variant here corresponds 1:1 with
-// a Rust-side enum variant in `verum_kernel::arch_mtac::*`.  Adding
-// a new variant requires updating both sides; pinned by kernel test
-// suite parity checks.
+// Classical static notations (C4, UML, ArchiMate) treat
+// architecture as a **point** in shape-space.  Real architecture
+// is a **functor** from time × decisions × observers to shape:
 //
-// **Self-attestation**: this cog is itself ATS-V-typed via the
-// `@arch_module(...)` declaration below — dogfood for the
-// architectural type system.
+//   `arch_type<C>: TimeCategory × DecisionCategory × ObserverCategory → ShapeCategory`
+//
+// MTAC primitives establish the categories this functor maps
+// between.  Anti-patterns AP-027..032 catch shapes that fail to
+// be functorial (TemporalInconsistency, CounterfactualBrittleness,
+// MissedAdjoint, UniversalPropertyViolation, PhantomEvolution,
+// YonedaInequivalentRefactor).
+//
+// ## What this cog ships
+//
+//   * `TimePoint`         — point in the time category (4 variants:
+//                           Past / Now / Future / Counterfactual);
+//                           non-linear lattice (branching futures).
+//   * `Decision`          — point in the decision category;
+//                           selects one of several options.
+//   * `Observer`          — point in the observer category
+//                           (5 canonical: EndUser / PeerCog /
+//                           Stakeholder / Auditor / Adversary).
+//   * `ArchProposition`   — content of a modal assertion
+//                           (HasCapability / FoundationStable /
+//                           PublicApiUnchanged / Custom).
+//   * `ModalAssertion`    — Modal Architectural Logic operators
+//                           (Necessity / Possibility / Eventually /
+//                           Always / Until / CounterfactualImpl).
+//   * `ArchEvolution`     — future-oriented type with cost class
+//                           and reversibility annotation.
+//   * `CounterfactualPair`— what-if pair for stability evaluation.
+//   * `AdjunctionWitness` — refactoring as F: Old → New ⊣ G: New → Old.
+//
+// ## Operationalisation
+//
+// Pure-data helpers (`time_point_precedes`, `decision_is_resolved`,
+// `observer_full_canonical_roster`, `modal_is_temporal`,
+// `modal_is_modal`, `adjunction_witness_is_adjoint_of`) plus
+// soundness pins are exposed as `public fn` so Verum code can
+// reason about MTAC structure without crossing the FFI boundary.
+//
+// ## Cross-side alignment
+//
+// Every variant corresponds 1:1 with a Rust-side enum variant in
+// `verum_kernel::arch_mtac::*`.  The cross-side pin test in
+// `crates/verum_kernel/tests/k_arch_v_alignment.rs` enumerates the
+// canonical roster (variant counts, tag strings, helper presence)
+// and fails CI on any drift.
+//
+// ## Self-attestation
+//
+// This cog is itself ATS-V-typed via the `@arch_module(...)`
+// declaration below — dogfood for the architectural type system.
 // =============================================================================
 
 @arch_module(
@@ -33,9 +74,12 @@ mount core.prelude.{Bool, Int, Maybe, List, Text};
 // TimePoint — point in the time category (§20.1)
 // =============================================================================
 
-/// A point in MTAC's time category.  Per spec §20.1, time is a
-/// non-linear lattice (branching futures, counterfactual past
-/// branches), not a strict linear order.
+/// A point in MTAC's time category.  Time is a non-linear lattice
+/// (branching futures, counterfactual past branches), NOT a strict
+/// linear order.  The chronological partial-order helper
+/// `time_point_precedes` returns `false` for incomparable pairs
+/// (different counterfactual branches, mixed concrete-historical
+/// with counterfactual).
 public type TimePoint is
     | Past(Int)              // Unix-epoch seconds (concrete past)
     | Now                    // Current moment
@@ -52,8 +96,13 @@ public type DecisionOption is {
     description: Text,
 };
 
-/// Architectural decision per spec §20.1.  Selects one of several
-/// options; can be unresolved or fixed.
+/// Architectural decision — a named choice with several options
+/// the architecture can resolve to.  An unresolved Decision (no
+/// `chosen` value) carries a closed set of alternatives the cog
+/// is committed to picking from later; a resolved Decision pins
+/// exactly one.  Used by MTAC counterfactual reasoning to evaluate
+/// "what if we had picked the other option" without changing the
+/// implementation.
 public type Decision is {
     name: Text,
     options: List<DecisionOption>,
@@ -65,9 +114,21 @@ public type Decision is {
 // Observer — point in the observer category (§20.1)
 // =============================================================================
 
-/// Yoneda-driven observer of the system per spec §20.1 + §23.
-/// Architecture is uniquely characterised by what it does to all
-/// observers.
+/// Yoneda-driven observer of the system.  By the algorithmic
+/// Yoneda lemma applied to architecture: a cog is uniquely
+/// determined by its representable functor `Hom(-, X)` projected
+/// onto the canonical observer roster.  Two cogs are
+/// Yoneda-equivalent iff every observer's projection agrees;
+/// such a refactoring is "trivially safe" (no observer can
+/// distinguish before/after).
+///
+/// Five canonical observer kinds, each with its own projection
+/// surface (see `core.architecture.yoneda::ShapeObservation`):
+///   * `EndUser`     — public-interface view
+///   * `PeerCog`     — composition partners + boundary capabilities
+///   * `Stakeholder` — deployment-level concerns
+///   * `Auditor`     — full Shape projection (strictest observer)
+///   * `Adversary`   — attack surface = exposes + outbound traffic
 public type Observer is
     | EndUser(Text)         // kind
     | PeerCog(Text)         // module_path
@@ -91,8 +152,13 @@ public type ArchProposition is
 // ModalAssertion — Modal Architectural Logic (MAL) operators (§20.3)
 // =============================================================================
 
-/// MAL operators per spec §20.3.  Combines S4/S5-style modal logic
-/// with LTL temporal operators.  6 canonical operators.
+/// Modal Architectural Logic (MAL) operators — six canonical
+/// arms combining S4/S5-style modal logic (Necessity, Possibility)
+/// with LTL temporal operators (Eventually, Always, Until) and a
+/// counterfactual conditional.  Used in `@arch_module(...)`
+/// `preserves` and in MTAC anti-pattern checks (AP-027 catches
+/// invariants that fail to hold across time-points; AP-028 catches
+/// brittleness under counterfactual decision swaps).
 public type ModalAssertion is
     | Necessity(ArchProposition)                              // □ A
     | Possibility(ArchProposition)                            // ◇ A
@@ -117,7 +183,11 @@ public type Reversibility is
     | Irreversible
     | BoundedReversible(Int);  // window_seconds
 
-/// Expected evolution of the cog's architecture per spec §21.3.
+/// Expected evolution of the cog's architecture — a future-oriented
+/// type stating: "under trigger T, by expected time TP, the cog
+/// will undergo a change of cost class C with reversibility R."
+/// Used by MTAC AP-031 PhantomEvolution: an evolution path through
+/// an unsatisfiable trigger is itself an architectural defect.
 public type ArchEvolution is {
     trigger: Text,
     expected_time: TimePoint,
@@ -130,8 +200,11 @@ public type ArchEvolution is {
 // =============================================================================
 
 /// (base, alternative) decision pair used in counterfactual
-/// evaluation per spec §22.  Stability invariants record which
-/// architectural propositions MUST hold across the decision swap.
+/// evaluation.  Stability invariants record which architectural
+/// propositions MUST hold across the decision swap.  An empty
+/// stability_invariants list yields `unstable` (the engine
+/// refuses to claim stability from absence of evidence).  This
+/// is the input to AP-028 CounterfactualBrittleness.
 public type CounterfactualPair is {
     name: Text,
     base: Decision,
@@ -143,10 +216,18 @@ public type CounterfactualPair is {
 // AdjunctionWitness — refactoring as adjunction (§20.6)
 // =============================================================================
 
-/// Witness pair for refactoring-as-adjunction per spec §20.6.
-/// `forward` is `F: Old → New`, `backward` is `G: New → Old` with
-/// `F ⊣ G`.  `is_adjoint_of` discipline: structural mirror
-/// equality of (forward_name, backward_name) pairs.
+/// Witness pair for refactoring-as-adjunction.  Every
+/// architectural refactoring is a pair of functors `(F, G)` where
+/// `F: Old → New` ⊣ `G: New → Old` (left adjoint).  ATS-V accepts
+/// a refactoring as a typed transformation only if a valid
+/// adjoint pair exists, eliminating anti-patterns like
+/// "split modules without preservation invariants" (AP-029
+/// MissedAdjoint).
+///
+/// `is_adjoint_of` discipline: structural mirror equality of
+/// (forward_name, backward_name) pairs — operationalised by
+/// `adjunction_witness_is_adjoint_of` below.  The semantic
+/// universal-property check (RT2.5) lives in the kernel discharge.
 public type AdjunctionWitness is {
     forward_name: Text,
     backward_name: Text,
@@ -161,13 +242,217 @@ public type AdjunctionWitness is {
 /// **MTAC primitives + 6 modal-temporal anti-patterns
 /// (ATS-V-AP-027..032).**
 ///
-/// Discharges the kernel-side `arch_mtac` module's structural
-/// well-formedness.  Per spec §20-§22, MTAC primitives must
-/// satisfy: TimePoint partial order well-formed, Observer roster
-/// canonical-5, ModalAssertion ↔ propositional-formula bijection,
-/// ArchEvolution trigger satisfiability checked, AdjunctionWitness
-/// `is_adjoint_of` symmetric.
-@framework(ats_v, "ATS-V MTAC primitives (spec internal/specs/ats-v.md §20-§22). Adds 6 modal-temporal anti-patterns AP-027 TemporalInconsistency / AP-028 CounterfactualBrittleness / AP-029 MissedAdjoint / AP-030 UniversalPropertyViolation / AP-031 PhantomEvolution / AP-032 YonedaInequivalentRefactor. Implementation: crates/verum_kernel/src/arch_mtac.rs.")
+/// Discharges the kernel-side MTAC module's structural
+/// well-formedness.  MTAC primitives must satisfy:
+///   * TimePoint partial order well-formed (acyclic on concrete
+///     timestamps, Counterfactual branches isolated by label).
+///   * Observer roster canonical-5 (EndUser / PeerCog /
+///     Stakeholder / Auditor / Adversary).
+///   * ModalAssertion ↔ propositional-formula bijection (no
+///     spurious operators outside the canonical 6).
+///   * ArchEvolution trigger satisfiability checked.
+///   * AdjunctionWitness `is_adjoint_of` is symmetric on the
+///     structural pair.
+///
+/// Anti-patterns introduced by this discharge:
+///   * AP-027 TemporalInconsistency        — invariant fails across
+///                                            time-points.
+///   * AP-028 CounterfactualBrittleness    — verdict fragile under
+///                                            decision swap.
+///   * AP-029 MissedAdjoint                — refactoring without
+///                                            inverse adjoint.
+///   * AP-030 UniversalPropertyViolation   — uniqueness claim
+///                                            violated.
+///   * AP-031 PhantomEvolution             — unsatisfiable trigger.
+///   * AP-032 YonedaInequivalentRefactor   — observer-functor
+///                                            changes.
+@framework(ats_v, "ATS-V MTAC primitives — six modal-temporal anti-patterns AP-027..032 covering temporal inconsistency, counterfactual brittleness, missed adjoints, universal-property violations, phantom evolutions, and Yoneda-inequivalent refactorings. Kernel implementation: crates/verum_kernel/src/arch_mtac.rs.")
 @kernel_discharge("kernel_arch_mtac_calculus")
 public axiom kernel_arch_mtac_calculus() -> Bool
     ensures true;
+
+// =============================================================================
+// Operationalisation — pure-data helpers (mirror kernel `impl` methods)
+// =============================================================================
+
+// ----- TimePoint -----
+
+public fn time_point_tag(tp: TimePoint) -> Text {
+    match tp {
+        Past(_)            => "past",
+        Now                => "now",
+        Future(_)          => "future",
+        Counterfactual(_)  => "counterfactual",
+    }
+}
+
+/// Chronological partial order: `self ≤ other`.  Returns `false`
+/// when the two points are not comparable (different
+/// counterfactual branches, or mixed concrete-historical against
+/// counterfactual).  Mirrors `verum_kernel::arch_mtac::TimePoint::precedes`.
+public fn time_point_precedes(a: TimePoint, b: TimePoint) -> Bool {
+    match (a, b) {
+        (Past(x), Past(y))          => x <= y,
+        (Past(_), Now)              => true,
+        (Past(_), Future(_))        => true,
+        (Now, Now)                  => true,
+        (Now, Future(_))            => true,
+        (Future(x), Future(y))      => x <= y,
+        (Counterfactual(p), Counterfactual(q)) => p == q,
+        _                           => false,
+    }
+}
+
+// ----- Decision -----
+
+/// True iff a decision is fully resolved (chosen value set).
+public fn decision_is_resolved(d: Decision) -> Bool {
+    d.chosen is Some(_)
+}
+
+// ----- Observer -----
+
+public fn observer_tag(o: Observer) -> Text {
+    match o {
+        EndUser(_)      => "end_user",
+        PeerCog(_)      => "peer_cog",
+        Stakeholder(_)  => "stakeholder",
+        Auditor(_)      => "auditor",
+        Adversary(_)    => "adversary",
+    }
+}
+
+/// Full canonical observer roster — exactly 5 entries (Yoneda
+/// invariant: every architectural shape is uniquely determined by
+/// what these 5 observers see).  Adding a 6th observer requires
+/// RFC ATS-V-007 + kernel-side `Observer::full_canonical_roster`
+/// update + pin-test bump.
+public fn observer_full_canonical_roster() -> List<Observer> {
+    [
+        Observer.EndUser("default"),
+        Observer.PeerCog("<any>"),
+        Observer.Stakeholder("operator"),
+        Observer.Auditor("compliance"),
+        Observer.Adversary("external"),
+    ]
+}
+
+// ----- ModalAssertion -----
+
+public fn modal_assertion_tag(m: ModalAssertion) -> Text {
+    match m {
+        Necessity(_)               => "necessity",
+        Possibility(_)             => "possibility",
+        Eventually(_)              => "eventually",
+        Always(_)                  => "always",
+        Until(_,_)                 => "until",
+        CounterfactualImpl(_,_)    => "counterfactual",
+    }
+}
+
+/// True iff this is an LTL temporal operator (Eventually / Always / Until).
+public fn modal_is_temporal(m: ModalAssertion) -> Bool {
+    match m {
+        Eventually(_) => true,
+        Always(_)     => true,
+        Until(_,_)    => true,
+        _             => false,
+    }
+}
+
+/// True iff this is an S4/S5 modal operator (Necessity / Possibility).
+public fn modal_is_modal(m: ModalAssertion) -> Bool {
+    match m {
+        Necessity(_)   => true,
+        Possibility(_) => true,
+        _              => false,
+    }
+}
+
+// ----- ArchProposition -----
+
+public fn arch_proposition_tag(p: ArchProposition) -> Text {
+    match p {
+        HasCapability(_)       => "has_capability",
+        FoundationStable       => "foundation_stable",
+        PublicApiUnchanged     => "public_api_unchanged",
+        CustomProposition(_)   => "custom",
+    }
+}
+
+// ----- AdjunctionWitness -----
+
+/// True iff this witness is a left-adjoint of `other`'s right-adjoint.
+/// Structural mirror equality of (forward_name, backward_name) pairs.
+/// Mirrors `verum_kernel::arch_mtac::AdjunctionWitness::is_adjoint_of`.
+///
+/// Soundness contract (spec §20.6): when `f.is_adjoint_of(g) ∧
+/// g.is_adjoint_of(f)`, the pair `(F, G)` constitutes a bona fide
+/// categorical adjunction up to forward/backward labelling.  The
+/// universal-property check (RT2.5) lives in the kernel discharge.
+public fn adjunction_witness_is_adjoint_of(
+    a: AdjunctionWitness,
+    b: AdjunctionWitness,
+) -> Bool {
+    a.forward_name == b.backward_name && a.backward_name == b.forward_name
+}
+
+// =============================================================================
+// Soundness pins — invariants on the helpers above
+// =============================================================================
+
+/// **Pin**: canonical observer roster has exactly 5 entries.
+/// Per spec §23 Yoneda invariant: distinguishing observers must be
+/// finite and canonical; new observer kinds require RFC review.
+public fn observer_roster_size_invariant() -> Bool {
+    observer_full_canonical_roster().len() == 5
+}
+
+/// **Pin**: temporal and modal operators are disjoint —
+/// `is_temporal ∧ is_modal` is unsatisfiable across the 6 canonical
+/// arms.  Counterfactual is neither (own arm).
+public fn modal_temporal_disjoint() -> Bool {
+    let n = ModalAssertion.Necessity(ArchProposition.FoundationStable);
+    let p = ModalAssertion.Possibility(ArchProposition.FoundationStable);
+    let e = ModalAssertion.Eventually(ArchProposition.FoundationStable);
+    let g = ModalAssertion.Always(ArchProposition.FoundationStable);
+    let u = ModalAssertion.Until(ArchProposition.FoundationStable, ArchProposition.FoundationStable);
+    let c = ModalAssertion.CounterfactualImpl(ArchProposition.FoundationStable, ArchProposition.FoundationStable);
+    modal_is_modal(n) && !modal_is_temporal(n) &&
+    modal_is_modal(p) && !modal_is_temporal(p) &&
+    modal_is_temporal(e) && !modal_is_modal(e) &&
+    modal_is_temporal(g) && !modal_is_modal(g) &&
+    modal_is_temporal(u) && !modal_is_modal(u) &&
+    !modal_is_modal(c) && !modal_is_temporal(c)
+}
+
+/// **Pin**: Counterfactual TimePoint branches are never directly
+/// comparable across distinct branch labels.  Same branch is
+/// reflexive (self-comparable).  Per spec §20.1.
+public fn time_counterfactual_branches_isolated() -> Bool {
+    let alt_a = TimePoint.Counterfactual("a");
+    let alt_b = TimePoint.Counterfactual("b");
+    time_point_precedes(alt_a, alt_a) &&
+    !time_point_precedes(alt_a, alt_b) &&
+    !time_point_precedes(alt_b, alt_a)
+}
+
+/// **Pin**: AdjunctionWitness mirror symmetry — if `f` is the adjoint
+/// of `g`, then `g` is the adjoint of `f`.  Per spec §20.6
+/// (refactoring-as-adjunction is symmetric on the structural pair).
+public fn adjunction_mirror_symmetry() -> Bool {
+    let f = AdjunctionWitness {
+        forward_name: "inline",
+        backward_name: "extract",
+        preserved: [],
+        gained: [],
+    };
+    let g = AdjunctionWitness {
+        forward_name: "extract",
+        backward_name: "inline",
+        preserved: [],
+        gained: [],
+    };
+    adjunction_witness_is_adjoint_of(f, g) &&
+    adjunction_witness_is_adjoint_of(g, f)
+}

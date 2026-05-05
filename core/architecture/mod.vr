@@ -4,8 +4,8 @@
 //
 // **Verum-native canonical types for the Architectural Type System.**
 //
-// Per `internal/specs/ats-v.md` §17.4 (Reuse compliance), the ATS-V
-// extension is implemented as:
+// Under the reuse-over-invention discipline, the ATS-V extension
+// is implemented as:
 //
 //   1. ONE typed attribute — `@arch_module(...)` — recognised by the
 //      compiler-internal dispatch (V8.1 META1 architectural principle,
@@ -13,8 +13,9 @@
 //
 //   2. THIS library — Verum-native `type X is variant_list`
 //      declarations that mirror the kernel-side `verum_kernel::arch*`
-//      primitives.  Both sides stay in sync via cross-side pin tests
-//      in `verum_kernel`'s test suite.
+//      primitives.  Both sides stay aligned via the cross-side pin
+//      test in `crates/verum_kernel/tests/k_arch_v_alignment.rs`,
+//      which fails CI on any drift.
 //
 //   3. Per-module kernel-discharge bridges declared as
 //      `@kernel_discharge(<intrinsic>)` axioms — one per architectural
@@ -24,41 +25,88 @@
 // (#161) and `core.verify.codegen_soundness` (#162): kernel-discharge
 // pattern with `@kernel_discharge(<intrinsic>)` annotations.
 //
-// **Module roster**:
+// **Module roster** (10 modules, full ATS-V surface coverage):
 //
 //   1. `types.vr` — canonical primitives (Capability / Boundary /
 //      Composition / Lifecycle / Foundation / Tier / MsfsStratum /
-//      CveClosure / Shape).
+//      CveClosure / Shape / CapabilitySchema) + pure-data helpers.
 //   2. `capability_ontology.vr` — registered Custom capability names.
-//   3. `anti_patterns.vr` — 32-pattern canonical anti-pattern catalog
-//      (ATS-V-AP-001..032) with kernel-discharge bridges.
+//   3. `anti_patterns.vr` — full 32-pattern roster (AntiPatternCode /
+//      AntiPatternViolation / Severity / DiagnosticContext) + 12
+//      kernel-discharge bridges.
 //   4. `mtac.vr` — Modal-Temporal Architectural Calculus primitives
-//      (TimePoint / Decision / Observer / ModalAssertion /
-//      ArchProposition / ArchEvolution / CounterfactualPair /
-//      AdjunctionWitness).
-//   5. `counterfactual.vr` — non-destructive counterfactual
-//      reasoning engine (ArchMetric / MetricValue / InvariantStatus /
+//      + helpers (time_point_precedes, observer_full_canonical_roster,
+//      modal_is_temporal/is_modal, adjunction_witness_is_adjoint_of).
+//   5. `counterfactual.vr` — non-destructive counterfactual reasoning
+//      engine (ArchMetric / MetricValue / InvariantStatus /
 //      CounterfactualReport).
 //   6. `adjunction.vr` — adjunction analyzer for refactoring
 //      (CanonicalAdjunction / Refactoring / AdjunctionAnalysis /
 //      RefactoringChain).
-//   7. `yoneda.vr` — Yoneda-equivalence checker
-//      (ShapeObservation / AgreementStatus / YonedaVerdict).
+//   7. `yoneda.vr` — Yoneda-equivalence checker (ShapeObservation /
+//      AgreementStatus / YonedaVerdict).
+//   8. `composition.vr` — A ⊗ B typed operation (CompositionResult)
+//      with associativity pin.
+//   9. `corpus.vr` — cross-cog invariants (CorpusInvariant /
+//      CorpusViolation / CorpusReport, 4 baseline checks).
+//  10. `phase.vr` — ATS-V phase 6.5 orchestrator surface
+//      (ModuleArchResult / ArchPhaseReport / CompositionStep /
+//      CompositionVerificationReport).
+//  11. `parse.vr` — `@arch_module(...)` parser error type
+//      (ArchParseError, 5 variants) + canonical-field roster pin.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.architecture.mod;
 
 mount super.types.{
     Capability,
+    CapabilitySchema,
     Boundary,
     Lifecycle,
     Foundation,
     Tier,
     MsfsStratum,
     CveClosure,
+    VerifyStrategy,
     Shape,
+    capability_schema_inferred_default,
+    tier_tag,
+    tier_compatible_with,
+    stratum_tag,
+    stratum_is_admissible,
+    foundation_tag,
+    foundation_directly_subsumed_by,
+    lifecycle_tag,
+    lifecycle_cve_glyph,
+    lifecycle_rank,
+    lifecycle_is_mature_corpus_forbidden,
+    cve_closure_degree,
+    cve_closure_is_fully_closed,
+    verify_strategy_tag,
+    verify_strategy_rank,
+    capability_tag,
+    shape_default_for_unannotated,
+    lifecycle_rank_strict_order_holds,
+    stratum_l_abs_unique_inadmissible,
+    foundation_canonical_inclusions_hold,
+    tier_check_runs_nothing,
 };
 mount super.anti_patterns.{
+    AntiPatternCode,
+    Severity,
+    AntiPatternViolation,
+    DiagnosticContext,
+    anti_pattern_code_str,
+    anti_pattern_name,
+    anti_pattern_full_roster,
+    anti_pattern_roster_size_invariant,
+    severity_tag,
+    diagnostic_context_default,
     kernel_arch_capability_discipline,
     kernel_arch_boundary_check,
     kernel_arch_composition_check,
@@ -67,6 +115,50 @@ mount super.anti_patterns.{
     kernel_arch_anti_pattern_check,
     kernel_arch_cve_closure,
     kernel_arch_soundness_v0,
+    kernel_arch_capability_ontology_check,
+    kernel_arch_yoneda_canonical_roster_complete,
+    kernel_arch_theorem_cve_required,
+    kernel_arch_consumes_format_check,
+};
+mount super.composition.{
+    CompositionResult,
+    composition_result_is_composed,
+    composition_result_tag,
+    composition_result_violation_count,
+    kernel_arch_composition_engine,
+    kernel_arch_composition_associative,
+};
+mount super.corpus.{
+    CorpusInvariant,
+    CorpusViolation,
+    CorpusReport,
+    corpus_invariant_tag,
+    corpus_invariant_name,
+    corpus_invariant_full_list,
+    corpus_invariant_roster_size_invariant,
+    corpus_report_empty,
+    corpus_report_is_load_bearing,
+    kernel_arch_corpus_verify,
+};
+mount super.phase.{
+    ModuleArchResult,
+    ArchPhaseReport,
+    CompositionStep,
+    CompositionVerificationReport,
+    module_arch_result_is_load_bearing,
+    arch_phase_report_empty,
+    arch_phase_report_is_load_bearing,
+    arch_phase_report_total_violations,
+    arch_phase_report_total_parse_errors,
+    arch_phase_report_annotated_count,
+    composition_verification_is_load_bearing,
+    kernel_arch_phase_orchestrator,
+};
+mount super.parse.{
+    ArchParseError,
+    arch_parse_error_tag,
+    arch_module_canonical_fields,
+    arch_module_field_count_invariant,
 };
 mount super.mtac.{
     TimePoint,
@@ -80,6 +172,20 @@ mount super.mtac.{
     Reversibility,
     CounterfactualPair,
     AdjunctionWitness,
+    time_point_tag,
+    time_point_precedes,
+    decision_is_resolved,
+    observer_tag,
+    observer_full_canonical_roster,
+    modal_assertion_tag,
+    modal_is_temporal,
+    modal_is_modal,
+    arch_proposition_tag,
+    adjunction_witness_is_adjoint_of,
+    observer_roster_size_invariant,
+    modal_temporal_disjoint,
+    time_counterfactual_branches_isolated,
+    adjunction_mirror_symmetry,
     kernel_arch_mtac_calculus,
 };
 mount super.counterfactual.{

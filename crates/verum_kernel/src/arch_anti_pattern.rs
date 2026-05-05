@@ -2,8 +2,7 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §7 (Anti-pattern catalog) +
-//! §32.4 (Stable error codes), each canonical anti-pattern has:
+//! Each canonical anti-pattern in the ATS-V catalog has:
 //!
 //! * Stable RFC error code `ATS-V-AP-NNN` (machine-readable).
 //! * Refinement predicate over [`crate::arch::Shape`] (algorithmic
@@ -12,8 +11,10 @@
 //! `human_message` + agent `auto_fix_diff`).
 //! * Docs URL (`https://verum.lang/docs/ats-v/ap-NNN`).
 //!
-//! This module ships the first 10 canonical anti-patterns
-//! (.2). Remaining 22 land (per spec §11).
+//! This module ships the full canonical 32-pattern roster:
+//! AP-001..010 capability/composition core, AP-011..026 boundary/
+//! lifecycle/capability ontology extensions, AP-027..032 MTAC
+//! modal-temporal arms.
 //!
 //! ## Discharge route
 //!
@@ -27,12 +28,12 @@
 //!
 //! ## Stable error code reservation
 //!
-//! Codes ATS-V-AP-001..010 are RESERVED for the patterns below;
-//! adding new patterns appends to the catalog (ATS-V-AP-011+).
-//! Removing a pattern requires deprecation cycle ≥ 2 minor
-//! versions — codes never get re-used (per spec §29.5 versioning).
+//! Codes ATS-V-AP-001..032 are RESERVED for the patterns below.
+//! Adding new patterns appends to the catalog (ATS-V-AP-033+).
+//! Removing a pattern requires a deprecation cycle ≥ 2 minor
+//! versions — codes never get re-used.
 
-use crate::arch::{Capability, Foundation, Lifecycle, Shape, Tier};
+use crate::arch::{BoundaryInvariant, Capability, Foundation, Lifecycle, Shape, Tier};
 
 // =============================================================================
 // AntiPatternCode — stable RFC code
@@ -915,6 +916,92 @@ pub struct DiagnosticContext {
     /// observer-functor actually differs (AP-032
     /// `YonedaInequivalentRefactor`).
     pub yoneda_observer_diff: Vec<(crate::arch_mtac::Observer, bool)>,
+    // ----- AP-012..AP-026 fields -----
+    /// Per-boundary status of declared invariants (AP-012).
+    /// `(boundary_name, invariant, holds_at_runtime)`.  When
+    /// `holds_at_runtime` is `false`, the cog declares an invariant
+    /// the body fails to preserve.
+    pub boundary_invariant_status: Vec<(String, BoundaryInvariant, bool)>,
+    /// Message types the body uses but the boundary does not declare
+    /// in `messages_in` / `messages_out` (AP-013).  Each entry names
+    /// the offending message type by `MessageType::tag()`-style label.
+    pub dangling_message_types: Vec<String>,
+    /// Network boundary names that lack `BoundaryInvariant::AuthenticatedFirst`
+    /// (AP-014).  The phase populates this when it sees a `Boundary`
+    /// with `BoundaryPhysicalLayer::Network` whose invariants list
+    /// does not include AuthenticatedFirst.
+    pub network_boundaries_without_auth: Vec<String>,
+    /// Functions marked `@deterministic` that nonetheless invoke
+    /// non-deterministic primitives (AP-015).  Each entry: `(fn_name,
+    /// primitive_used)`.
+    pub deterministic_violations: Vec<(String, String)>,
+    /// Linear capabilities (`@quantity(1)`) the body consumed more
+    /// than once (AP-016).
+    pub linear_capability_duplications: Vec<Capability>,
+    /// Relevant capabilities (`@quantity(omega)` with at-least-once
+    /// discipline) declared but never used (AP-017).
+    pub relevant_capability_orphans: Vec<Capability>,
+    /// Composition-handoff gaps: `(peer_cog, capability_required_but_not_listed)`.
+    /// Populated by the composition walker (AP-018).
+    pub composition_handoff_gaps: Vec<(String, Capability)>,
+    /// Foundation downgrade chain: `(peer_cog, peer_foundation,
+    /// downgraded_foundation)` — populated when the cog accepts a
+    /// foundation strictly weaker than its declared one without an
+    /// explicit bridge (AP-019).
+    pub foundation_downgrades: Vec<(String, Foundation, Foundation)>,
+    /// `Capability::TimeBound` instances the cog uses past their
+    /// declared TTL (AP-020).
+    pub time_bound_leaks: Vec<Capability>,
+    /// `Capability::Persist` declared on operations the body proves
+    /// to be non-durable (AP-021).  Each entry: the offending
+    /// capability + the function name.
+    pub persistence_mismatches: Vec<(Capability, String)>,
+    /// Privilege-escalation chain length when the cog laundered
+    /// capabilities through multiple hops (AP-022).  `0` means no
+    /// chain detected; `>= 2` raises the violation.
+    pub capability_laundering_chain_length: u32,
+    /// Foundation declared by `@arch_module(foundation: ...)` does
+    /// NOT match the framework-corpus actually cited by `@framework(...)`
+    /// inside the cog (AP-023).  `(declared_foundation, cited_corpus_label)`.
+    pub foundation_forgeries: Vec<(Foundation, String)>,
+    /// Transitive closure of the lifecycle regression check (AP-024).
+    /// Each entry: `(intermediate_cog, terminal_cog, terminal_lifecycle)`
+    /// — the cog's transitive citation reaches a strictly-lower-rank
+    /// artefact through `intermediate_cog`.
+    pub transitive_lifecycle_regressions: Vec<(String, String, Lifecycle)>,
+    /// Inferred Shape from body analysis when it diverges from the
+    /// declared Shape (AP-025).  `Some(delta)` carries a structured
+    /// description of the divergence; `None` means inference agrees
+    /// or is unavailable.
+    pub declaration_drift: Option<ShapeDelta>,
+    /// Body uses constructs (axiom citations, primitive types) from
+    /// a foundation other than the cog's declared one without a
+    /// bridge (AP-026).  `(construct_label, foreign_foundation)`.
+    pub foreign_foundation_constructs: Vec<(String, Foundation)>,
+    // ----- Red-team closure inputs -----
+    /// Capability ontology — set of registered Custom-tag names.
+    /// Empty means the registry is unavailable (skip AT-1 check
+    /// rather than false-positive).
+    pub capability_ontology_registry: Vec<String>,
+    /// Yoneda verdicts attached to the cog whose `agreements`
+    /// list claims `equivalent: true` (AT-3 input).  Each entry:
+    /// `(verdict_label, observer_tags_in_agreement)`.
+    pub yoneda_verdicts_claimed: Vec<(String, Vec<String>)>,
+}
+
+/// Structured description of how the inferred Shape diverges from
+/// the declared one (AP-025 DeclarationDrift).  Populated by the
+/// ATS-V phase when body-level inference produces capability /
+/// boundary-invariant / consumes lists that disagree with the
+/// `@arch_module(...)` declaration.
+#[derive(Debug, Clone)]
+pub struct ShapeDelta {
+    /// Capabilities the body uses but the declaration omits.
+    pub missing_in_declared: Vec<Capability>,
+    /// Capabilities the declaration claims but the body never exercises.
+    pub missing_in_body: Vec<Capability>,
+    /// Free-form summary the diagnostic surfaces in the human message.
+    pub summary: String,
 }
 
 // =============================================================================
@@ -1119,6 +1206,736 @@ pub fn check_yoneda_inequivalent_refactor(
     })
 }
 
+// =============================================================================
+// AP-012..AP-026 implementations — boundary / lifecycle / capability ontology
+// =============================================================================
+
+/// ATS-V-AP-012 — InvariantViolation.
+/// Cog declares a boundary invariant the body fails to preserve.
+///
+/// **Predicate**: forall (boundary_name, invariant, holds) in
+/// `boundary_invariant_status`. holds == true.
+///
+/// **Severity**: Error in any mode — declaring an invariant the
+/// body violates is a load-bearing safety claim that does not hold.
+pub fn check_invariant_violation(
+    shape: &Shape,
+    statuses: &[(String, BoundaryInvariant, bool)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    let failed: Vec<_> = statuses.iter().filter(|(_, _, h)| !h).collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = failed
+        .iter()
+        .map(|(b, inv, _)| format!("{}::{:?}", b, inv))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::InvariantViolation,
+        severity: Severity::Error,
+        summary: format!(
+            "{} boundary invariant(s) declared but not preserved: {}",
+            failed.len(),
+            labels.join(", "),
+        ),
+        human_message: "A `@arch_module(preserves = [...])` declaration is a load-bearing claim. \
+                        The body must preserve every listed invariant on every reachable path; \
+                        the body of this cog violates one or more declared invariants."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either remove the invariant from `preserves` or fix the body to preserve it.".into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-013 — DanglingMessageType.
+/// Body sends/receives a message type that the boundary does not
+/// declare in messages_in/messages_out.
+pub fn check_dangling_message_type(
+    shape: &Shape,
+    dangling: &[String],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if dangling.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::DanglingMessageType,
+        severity: Severity::Error,
+        summary: format!(
+            "{} message type(s) cross the boundary without a declaration: {}",
+            dangling.len(),
+            dangling.join(", "),
+        ),
+        human_message: "Cross-module messages MUST appear in the boundary's `messages_in` or \
+                        `messages_out` list. Raw / undeclared traffic is the canonical source \
+                        of schema-drift incidents — every cross-module message-type gets a \
+                        stable name + schema_hash."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Add the offending types to `messages_in` / `messages_out`, or wrap them in a \
+             declared `MessageType::Typed { name, schema_hash }`."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-014 — UnauthenticatedCrossing.
+/// Network boundary lacks `BoundaryInvariant::AuthenticatedFirst`.
+pub fn check_unauthenticated_crossing(
+    shape: &Shape,
+    boundaries: &[String],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if boundaries.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::UnauthenticatedCrossing,
+        severity: Severity::Error,
+        summary: format!(
+            "{} network boundary/ies missing AuthenticatedFirst: {}",
+            boundaries.len(),
+            boundaries.join(", "),
+        ),
+        human_message: "Network boundaries cross trust domains.  A boundary with \
+                        `BoundaryPhysicalLayer::Network` MUST list \
+                        `BoundaryInvariant::AuthenticatedFirst` so the receiver authenticates \
+                        the peer before any payload is processed.  Skipping authentication is \
+                        the classic remote-code-execution amplifier."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Add `BoundaryInvariant.AuthenticatedFirst` to the boundary's invariants list."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-015 — DeterministicViolation.
+/// Function marked `@deterministic` calls a non-deterministic primitive.
+pub fn check_deterministic_violation(
+    shape: &Shape,
+    violations: &[(String, String)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if violations.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = violations
+        .iter()
+        .map(|(f, p)| format!("{} → {}", f, p))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::DeterministicViolation,
+        severity: Severity::Error,
+        summary: format!(
+            "{} `@deterministic` function(s) invoke non-deterministic primitives: {}",
+            violations.len(),
+            labels.join(", "),
+        ),
+        human_message: "A `@deterministic` function MUST produce identical output on identical \
+                        inputs across runs / hosts / clock domains.  Calling Random / SystemTime / \
+                        FilesystemMtime / network primitives violates this contract.  \
+                        Determinism is the foundation of replay verification and DST testing."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either remove the `@deterministic` annotation, or refactor the function to thread \
+             the non-deterministic value in as an explicit parameter."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-016 — CapabilityDuplication.
+/// Linear (`@quantity(1)`) capability used twice.
+pub fn check_capability_duplication(
+    shape: &Shape,
+    duplicated: &[Capability],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if duplicated.is_empty() {
+        return None;
+    }
+    let tags: Vec<&str> = duplicated.iter().map(|c| c.tag()).collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::CapabilityDuplication,
+        severity: Severity::Error,
+        summary: format!(
+            "{} linear capability/ies used more than once: {}",
+            duplicated.len(),
+            tags.join(", "),
+        ),
+        human_message: "Linear capabilities (declared with `@quantity(1)`) carry a single-use \
+                        contract — exactly one consumption per binding.  Duplicating use is \
+                        equivalent to creating a fresh capability ex nihilo, breaking the \
+                        substructural-logic discipline that backs ATS-V's resource accounting."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Promote the binding from `@quantity(1)` to `@quantity(omega)`, OR explicitly \
+             clone/split the resource via the capability's split combinator."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-017 — OrphanCapability.
+/// Relevant (`@quantity` with at-least-once discipline) capability declared but unused.
+pub fn check_orphan_capability(
+    shape: &Shape,
+    orphans: &[Capability],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if orphans.is_empty() {
+        return None;
+    }
+    let tags: Vec<&str> = orphans.iter().map(|c| c.tag()).collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::OrphanCapability,
+        severity: Severity::Warning,
+        summary: format!(
+            "{} relevant capability/ies declared but never used: {}",
+            orphans.len(),
+            tags.join(", "),
+        ),
+        human_message: "Relevant capabilities carry an at-least-once contract — the binding \
+                        MUST be consumed at least once on every reachable path.  An unused \
+                        relevant binding either signals dead code or a stale `requires` \
+                        declaration; in both cases the capability surface lies about what the \
+                        cog actually needs."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Remove the orphan capability from `requires`, or add a body site that consumes it."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-018 — MissingHandoff.
+/// Composition partner needs a capability the cog does not list in `composes_with` handoff.
+pub fn check_missing_handoff(
+    shape: &Shape,
+    gaps: &[(String, Capability)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if gaps.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = gaps
+        .iter()
+        .map(|(p, c)| format!("{} ← {}", p, c.tag()))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::MissingHandoff,
+        severity: Severity::Error,
+        summary: format!(
+            "{} composition handoff gap(s): {}",
+            gaps.len(),
+            labels.join(", "),
+        ),
+        human_message: "Composition `A ⊗ B` is well-formed iff `B.requires ⊆ A.exposes`.  \
+                        A peer cog requires capabilities the current cog does not expose; the \
+                        composition cannot type-check."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Add the missing capability to `exposes`, OR remove the peer from `composes_with` \
+             and route through an intermediate cog that provides the handoff."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-019 — FoundationDowngrade.
+/// Cog accepts a foundation strictly weaker than its declared one without a bridge.
+pub fn check_foundation_downgrade(
+    shape: &Shape,
+    downgrades: &[(String, Foundation, Foundation)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if downgrades.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = downgrades
+        .iter()
+        .map(|(p, from, to)| format!("{}: {} → {}", p, from.tag(), to.tag()))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::FoundationDowngrade,
+        severity: Severity::Error,
+        summary: format!(
+            "{} foundation downgrade(s) without bridge: {}",
+            downgrades.len(),
+            labels.join(", "),
+        ),
+        human_message: "A foundation downgrade — composing with a peer whose foundation is \
+                        strictly weaker than yours — silently demotes the cog's load-bearing \
+                        proofs from the strong foundation to the weaker one.  Refinement \
+                        predicates that hold under HoTT may not hold under MLTT; downgrading \
+                        without an explicit bridge invalidates the entire chain."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Insert an explicit `@framework(bridge_corpus, ...)` declaration covering the \
+             downgrade, or refuse the composition."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-020 — TimeBoundLeakage.
+/// `Capability::TimeBound` used past its declared TTL.
+pub fn check_time_bound_leakage(
+    shape: &Shape,
+    leaks: &[Capability],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if leaks.is_empty() {
+        return None;
+    }
+    let tags: Vec<&str> = leaks.iter().map(|c| c.tag()).collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::TimeBoundLeakage,
+        severity: Severity::Error,
+        summary: format!(
+            "{} TimeBound capability/ies leaked past TTL: {}",
+            leaks.len(),
+            tags.join(", "),
+        ),
+        human_message: "`Capability::TimeBound { until }` carries an explicit expiry contract.  \
+                        Using the capability past its declared TTL is the lifetime equivalent of \
+                        a use-after-free — the issuer assumed the right would be voided by the \
+                        time the body reached the offending site."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either tighten the TTL to cover the actual usage window, OR factor the late call \
+             out into a separate cog that re-acquires a fresh time-bound right."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-021 — PersistenceMismatch.
+/// `Capability::Persist` declared on a non-durable operation.
+pub fn check_persistence_mismatch(
+    shape: &Shape,
+    mismatches: &[(Capability, String)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if mismatches.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = mismatches
+        .iter()
+        .map(|(c, fn_name)| format!("{}::{}", c.tag(), fn_name))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::PersistenceMismatch,
+        severity: Severity::Warning,
+        summary: format!(
+            "{} Persist capability/ies on non-durable ops: {}",
+            mismatches.len(),
+            labels.join(", "),
+        ),
+        human_message: "`Capability::Persist { medium }` declares the operation writes to a \
+                        durable medium.  When the body inspects to a non-durable operation \
+                        (in-memory mutation, ephemeral tx, no fsync), the declaration overstates \
+                        the durability guarantee and downstream reasoning depends on a falsehood."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either replace `Persist` with the appropriate non-durable capability \
+             (Write/Memory), OR add the durability barrier (fsync/commit/flush) to the body."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-022 — CapabilityLaundering.
+/// Multi-hop privilege escalation chain (Escalate → Persist → Network …).
+pub fn check_capability_laundering(
+    shape: &Shape,
+    chain_length: u32,
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if chain_length < 2 {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::CapabilityLaundering,
+        severity: Severity::Error,
+        summary: format!(
+            "Privilege-escalation chain of length {} detected",
+            chain_length,
+        ),
+        human_message: "A multi-hop chain that walks privilege upward through intermediate \
+                        cogs (Escalate → Persist → Network is the canonical example) is the \
+                        capability-system equivalent of money laundering.  The privilege \
+                        ultimately exercised exceeds anything any single declaration permits.  \
+                        Each hop must individually justify its escalation."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Refactor the chain so each hop's escalation is explicit and individually \
+             reviewable, OR collapse the chain into a single direct-escalation site that names \
+             the final target privilege."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-023 — FoundationForgery.
+/// Declared foundation does NOT match the framework-corpus actually cited.
+pub fn check_foundation_forgery(
+    shape: &Shape,
+    forgeries: &[(Foundation, String)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if forgeries.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = forgeries
+        .iter()
+        .map(|(f, corpus)| format!("declared {}, cited {}", f.tag(), corpus))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::FoundationForgery,
+        severity: Severity::Error,
+        summary: format!("{} foundation forgery/ies: {}", forgeries.len(), labels.join("; ")),
+        human_message: "A cog declaring `foundation: Foundation.X` MUST cite axioms / theorems \
+                        that actually live in the X corpus.  A cog declaring HoTT but citing a \
+                        ZFC-only theorem is silently importing axioms from the wrong universe — \
+                        the proof corpus is locally inconsistent."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either change the declared foundation to match the cited corpus, OR replace the \
+             citation with a corresponding theorem from the declared foundation, OR insert a \
+             foundation-bridge translating the citation."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-024 — TransitiveLifecycleRegression.
+/// Cog cites a chain that ultimately reaches a strictly-lower-rank artefact.
+pub fn check_transitive_lifecycle_regression(
+    shape: &Shape,
+    chains: &[(String, String, Lifecycle)],
+) -> Option<AntiPatternViolation> {
+    let self_rank = shape.lifecycle.rank();
+    let bad: Vec<_> = chains
+        .iter()
+        .filter(|(_, _, lc)| lc.rank() < self_rank)
+        .collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = bad
+        .iter()
+        .map(|(via, terminal, lc)| format!("{} → {} ({})", via, terminal, lc.tag()))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::TransitiveLifecycleRegression,
+        severity: Severity::Error,
+        summary: format!(
+            "{} transitive lifecycle regression(s): {}",
+            bad.len(),
+            labels.join("; "),
+        ),
+        human_message: "AP-009 catches direct citation of a lower-rank artefact.  AP-024 \
+                        catches the same defect through transitive chains: a Theorem citing a \
+                        Conditional that cites an Interpretation is still a Theorem resting on \
+                        an Interpretation, however many hops away."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Mature one of the intermediate artefacts to a load-bearing rank, OR retract the \
+             dependency that reaches into the low-rank tail."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-025 — DeclarationDrift.
+/// Body-inferred Shape diverges from declared Shape.
+pub fn check_declaration_drift(
+    shape: &Shape,
+    delta: Option<&ShapeDelta>,
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    let d = delta?;
+    if d.missing_in_declared.is_empty() && d.missing_in_body.is_empty() {
+        return None;
+    }
+    let missing_in_decl: Vec<&str> = d.missing_in_declared.iter().map(|c| c.tag()).collect();
+    let missing_in_body: Vec<&str> = d.missing_in_body.iter().map(|c| c.tag()).collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::DeclarationDrift,
+        severity: Severity::Warning,
+        summary: format!(
+            "Declared Shape diverges from inferred Shape: {} (body-only: {}; declared-only: {})",
+            d.summary,
+            missing_in_decl.join(", "),
+            missing_in_body.join(", "),
+        ),
+        human_message: "The `@arch_module(...)` declaration MUST faithfully describe what the \
+                        body actually does.  A capability the body uses but the declaration \
+                        omits is a hidden trust-boundary violation; a capability the declaration \
+                        claims but the body never exercises lies to downstream reviewers about \
+                        the cog's footprint."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Update the `@arch_module(...)` declaration to match the inferred Shape, OR adjust \
+             the body to match the declaration."
+                .into(),
+        ),
+    })
+}
+
+/// ATS-V-AP-026 — FoundationContentMismatch.
+/// Body uses a construct from a foreign foundation without a bridge.
+///
+/// **Predicate**: foreign foundation `f` is admissible under the
+/// cog's declared foundation iff `f` is directly subsumed by the
+/// cog's foundation (canonical inclusions: Mltt → Cic, Hott →
+/// Cubical, plus identity).  A construct from a foreign foundation
+/// not subsumed by the cog's foundation is the architectural
+/// equivalent of a type-system escape — the construct's truth
+/// values do not transfer.
+pub fn check_foundation_content_mismatch(
+    shape: &Shape,
+    foreign: &[(String, Foundation)],
+) -> Option<AntiPatternViolation> {
+    let bad: Vec<_> = foreign
+        .iter()
+        .filter(|(_, f)| !f.directly_subsumed_by(&shape.foundation))
+        .collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> = bad
+        .iter()
+        .map(|(c, f)| format!("{}@{}", c, f.tag()))
+        .collect();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::FoundationContentMismatch,
+        severity: Severity::Error,
+        summary: format!(
+            "{} body construct(s) cite a foreign foundation: {}",
+            bad.len(),
+            labels.join(", "),
+        ),
+        human_message: "AP-023 catches forgery at the declaration↔citation level.  AP-026 \
+                        catches the same defect at the body level: a HoTT-declared cog whose \
+                        body uses a CIC-only inductive eliminator without a bridge is locally \
+                        inconsistent regardless of what its `@framework(...)` annotations say."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Insert a foundation bridge for the construct, OR rewrite the body using a \
+             construct native to the cog's declared foundation."
+                .into(),
+        ),
+    })
+}
+
+// =============================================================================
+// Red-team closure checks — AT-1, AT-2, AT-3, AT-5
+// =============================================================================
+
+/// **AT-1 closure** — Capability ontology completeness.
+/// Every `Capability::Custom { tag, .. }` in the cog's exposes/requires
+/// must have its `tag` registered in the canonical ontology.
+///
+/// Empty registry means the registry is unavailable; the check
+/// returns `None` rather than false-positive against every Custom
+/// capability.  When a registry is supplied, unregistered tags raise
+/// the violation regardless of `strict` mode.
+pub fn check_capability_ontology_v(
+    shape: &Shape,
+    registry: &[String],
+) -> Option<AntiPatternViolation> {
+    if registry.is_empty() {
+        return None;
+    }
+    let mut unregistered: Vec<&str> = Vec::new();
+    let walk = shape.exposes.iter().chain(shape.requires.iter());
+    for cap in walk {
+        if let Capability::Custom { tag, .. } = cap {
+            if !registry.iter().any(|r| r == tag) && !unregistered.contains(&tag.as_str()) {
+                unregistered.push(tag.as_str());
+            }
+        }
+    }
+    if unregistered.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::CapabilityEscalation, // AT-1 surfaces under AP-001 family
+        severity: Severity::Error,
+        summary: format!(
+            "{} Custom capability tag(s) not in ontology registry: {}",
+            unregistered.len(),
+            unregistered.join(", "),
+        ),
+        human_message: "Every `Capability.Custom { tag, schema }` MUST appear in the canonical \
+                        capability ontology before the cog passes the ATS-V phase.  The parser \
+                        fills `schema` with conservative defaults when the source omits fields, \
+                        so without a registry check, a cog declaring \
+                        `Capability.Custom(\"admin\")` could fabricate an arbitrary \
+                        high-privilege capability.  The registry guard closes attack-vector AT-1."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either register the tag in `core.architecture.capability_ontology.ATS_V_CANONICAL_CAPABILITIES`, \
+             OR replace the Custom variant with one of the canonical Capability arms."
+                .into(),
+        ),
+    })
+}
+
+/// **AT-2 closure** — Theorem implies CVE-closure.
+/// `Lifecycle.Theorem(...)` requires full CVE+ regardless of `strict` flag.
+///
+/// Soft-mode `CveIncomplete` is a warning; AT-2 closure raises this
+/// to Error severity for Theorem-status cogs because the missing CVE
+/// axes invalidate the load-bearing claim implicit in `[T]` status.
+pub fn check_theorem_cve_required_v(shape: &Shape) -> Option<AntiPatternViolation> {
+    if !matches!(shape.lifecycle, Lifecycle::Theorem { .. }) {
+        return None;
+    }
+    if shape.cve_closure.is_fully_closed() {
+        return None;
+    }
+    let degree = shape.cve_closure.closure_degree();
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::CveIncomplete,
+        severity: Severity::Error,
+        summary: format!(
+            "Lifecycle.Theorem with incomplete CVE-closure (degree {}/3)",
+            degree,
+        ),
+        human_message: "`Lifecycle.Theorem(...)` declares a load-bearing, fully-proven artefact.  \
+                        By definition this requires the full CVE+ triple: a Constructive witness, \
+                        a Verifiable strategy from the @verify ladder, and an Executable \
+                        artefact.  A Theorem missing any axis is a load-bearing claim resting on \
+                        absent foundations.  The check fires regardless of the `strict` flag — \
+                        Theorem status is an unconditional CVE+ commitment.  Closes AT-2."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Either complete the CVE-closure axes, OR demote the lifecycle to Conditional / \
+             Postulate / Plan / Hypothesis as appropriate."
+                .into(),
+        ),
+    })
+}
+
+/// **AT-3 closure** — Yoneda canonical-roster completeness.
+/// A YonedaVerdict with `equivalent: true` must span the full
+/// canonical 5-roster (EndUser / PeerCog / Stakeholder / Auditor /
+/// Adversary).
+pub fn check_yoneda_canonical_roster_complete_v(
+    shape: &Shape,
+    verdicts: &[(String, Vec<String>)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    let canonical: [&str; 5] = ["end_user", "peer_cog", "stakeholder", "auditor", "adversary"];
+    let mut bad: Vec<&str> = Vec::new();
+    for (label, observers) in verdicts {
+        let missing: Vec<&str> = canonical
+            .iter()
+            .copied()
+            .filter(|c| !observers.iter().any(|o| o == c))
+            .collect();
+        if !missing.is_empty() {
+            bad.push(label.as_str());
+        }
+    }
+    if bad.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::YonedaInequivalentRefactor, // AT-3 surfaces under AP-032 family
+        severity: Severity::Error,
+        summary: format!(
+            "{} Yoneda verdict(s) missing canonical observer(s): {}",
+            bad.len(),
+            bad.join(", "),
+        ),
+        human_message: "A Yoneda equivalence verdict claiming `equivalent: true` is sound only \
+                        when every canonical observer (EndUser, PeerCog, Stakeholder, Auditor, \
+                        Adversary) has been queried and agrees.  Verdicts based on a curated \
+                        subset cannot fabricate equivalence — Auditor agreement is the strongest \
+                        but still necessary, not sufficient.  Closes AT-3."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Re-run the Yoneda equivalence check against the full canonical 5-roster supplied \
+             by `observer_full_canonical_roster()`."
+                .into(),
+        ),
+    })
+}
+
+/// **AT-5 closure** — `consumes` field format validation.
+/// Each entry must match `<resource>/<positive_int> <unit>` where
+/// unit ∈ {bytes, ops, ms, ns}.
+pub fn check_consumes_format_v(shape: &Shape) -> Option<AntiPatternViolation> {
+    let valid_units = ["bytes", "ops", "ms", "ns"];
+    let mut bad: Vec<&str> = Vec::new();
+    for entry in &shape.consumes {
+        if !consumes_entry_well_formed(entry, &valid_units) {
+            bad.push(entry.as_str());
+        }
+    }
+    if bad.is_empty() {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::DeclarationDrift, // AT-5 surfaces under AP-025 family
+        severity: Severity::Error,
+        summary: format!(
+            "{} `consumes` entry/ies violate canonical format: {}",
+            bad.len(),
+            bad.join(", "),
+        ),
+        human_message: "Every `consumes` entry MUST match the canonical pattern \
+                        `<resource>/<positive_int> <unit>` where unit ∈ {bytes, ops, ms, ns}.  \
+                        Free-form strings would otherwise pass through to gas-accounting, \
+                        diagnostics, and downstream analytics — a vector for injection and \
+                        format-confusion attacks.  Closes AT-5."
+            .to_string(),
+        auto_fix_suggestion: Some(
+            "Rewrite each entry to the canonical form, e.g. `randomness/16384 bytes` or \
+             `compute/1000000 ops`."
+                .into(),
+        ),
+    })
+}
+
+/// Pure helper — returns true iff `entry` matches `<resource>/<positive_int> <unit>`
+/// where unit ∈ `valid_units`.  No regex dependency — manual scan.
+fn consumes_entry_well_formed(entry: &str, valid_units: &[&str]) -> bool {
+    // Form: <resource>/<int> <unit>
+    //       ^^^^^^^^ ^^^^^ ^^^^^^^^
+    let slash = entry.find('/');
+    let space = entry.rfind(' ');
+    let (slash, space) = match (slash, space) {
+        (Some(s), Some(sp)) if s < sp => (s, sp),
+        _ => return false,
+    };
+    let resource = &entry[..slash];
+    let qty = &entry[slash + 1..space];
+    let unit = &entry[space + 1..];
+    if resource.is_empty() {
+        return false;
+    }
+    // qty must be all-digit, non-empty, no leading zero except "0" itself
+    if qty.is_empty() || !qty.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    if qty.len() > 1 && qty.starts_with('0') {
+        return false;
+    }
+    // qty must be > 0
+    if qty.chars().all(|c| c == '0') {
+        return false;
+    }
+    valid_units.iter().any(|u| *u == unit)
+}
+
 /// Walk every canonical anti-pattern check; return all violations.
 /// Used by ATS-V phase + audit gate.
 pub fn check_all_anti_patterns(
@@ -1180,6 +1997,69 @@ pub fn check_all_anti_patterns(
         violations.push(v);
     }
     if let Some(v) = check_yoneda_inequivalent_refactor(shape, &ctx.yoneda_observer_diff) {
+        violations.push(v);
+    }
+    // ----- Boundary / lifecycle / capability ontology — AP-012..AP-026 -----
+    if let Some(v) = check_invariant_violation(shape, &ctx.boundary_invariant_status) {
+        violations.push(v);
+    }
+    if let Some(v) = check_dangling_message_type(shape, &ctx.dangling_message_types) {
+        violations.push(v);
+    }
+    if let Some(v) = check_unauthenticated_crossing(shape, &ctx.network_boundaries_without_auth) {
+        violations.push(v);
+    }
+    if let Some(v) = check_deterministic_violation(shape, &ctx.deterministic_violations) {
+        violations.push(v);
+    }
+    if let Some(v) = check_capability_duplication(shape, &ctx.linear_capability_duplications) {
+        violations.push(v);
+    }
+    if let Some(v) = check_orphan_capability(shape, &ctx.relevant_capability_orphans) {
+        violations.push(v);
+    }
+    if let Some(v) = check_missing_handoff(shape, &ctx.composition_handoff_gaps) {
+        violations.push(v);
+    }
+    if let Some(v) = check_foundation_downgrade(shape, &ctx.foundation_downgrades) {
+        violations.push(v);
+    }
+    if let Some(v) = check_time_bound_leakage(shape, &ctx.time_bound_leaks) {
+        violations.push(v);
+    }
+    if let Some(v) = check_persistence_mismatch(shape, &ctx.persistence_mismatches) {
+        violations.push(v);
+    }
+    if let Some(v) = check_capability_laundering(shape, ctx.capability_laundering_chain_length) {
+        violations.push(v);
+    }
+    if let Some(v) = check_foundation_forgery(shape, &ctx.foundation_forgeries) {
+        violations.push(v);
+    }
+    if let Some(v) = check_transitive_lifecycle_regression(
+        shape,
+        &ctx.transitive_lifecycle_regressions,
+    ) {
+        violations.push(v);
+    }
+    if let Some(v) = check_declaration_drift(shape, ctx.declaration_drift.as_ref()) {
+        violations.push(v);
+    }
+    if let Some(v) = check_foundation_content_mismatch(shape, &ctx.foreign_foundation_constructs) {
+        violations.push(v);
+    }
+    // ----- Red-team closures — AT-1, AT-2, AT-3, AT-5 -----
+    if let Some(v) = check_capability_ontology_v(shape, &ctx.capability_ontology_registry) {
+        violations.push(v);
+    }
+    if let Some(v) = check_theorem_cve_required_v(shape) {
+        violations.push(v);
+    }
+    if let Some(v) = check_yoneda_canonical_roster_complete_v(shape, &ctx.yoneda_verdicts_claimed)
+    {
+        violations.push(v);
+    }
+    if let Some(v) = check_consumes_format_v(shape) {
         violations.push(v);
     }
     violations
@@ -1718,5 +2598,448 @@ mod tests {
         assert!(codes.contains(&AntiPatternCode::UniversalPropertyViolation));
         assert!(codes.contains(&AntiPatternCode::PhantomEvolution));
         assert!(codes.contains(&AntiPatternCode::YonedaInequivalentRefactor));
+    }
+
+    // =============================================================================
+    // AP-012..AP-026 — boundary / lifecycle / capability ontology
+    // =============================================================================
+
+    #[test]
+    fn invariant_violation_fires_on_unpreserved() {
+        let shape = Shape::default_for_unannotated();
+        let statuses = vec![
+            ("front".to_string(), BoundaryInvariant::AllOrNothing, true),
+            (
+                "back".to_string(),
+                BoundaryInvariant::AuthenticatedFirst,
+                false,
+            ),
+        ];
+        let v = check_invariant_violation(&shape, &statuses).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::InvariantViolation);
+        assert_eq!(v.severity, Severity::Error);
+        assert!(v.summary.contains("AuthenticatedFirst"));
+    }
+
+    #[test]
+    fn invariant_violation_silent_when_all_preserved() {
+        let shape = Shape::default_for_unannotated();
+        let statuses = vec![("front".to_string(), BoundaryInvariant::AllOrNothing, true)];
+        assert!(check_invariant_violation(&shape, &statuses).is_none());
+    }
+
+    #[test]
+    fn dangling_message_type_fires() {
+        let shape = Shape::default_for_unannotated();
+        let dangling = vec!["UndeclaredMsg".to_string()];
+        let v = check_dangling_message_type(&shape, &dangling).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::DanglingMessageType);
+    }
+
+    #[test]
+    fn unauthenticated_crossing_fires() {
+        let shape = Shape::default_for_unannotated();
+        let bad = vec!["public_api".to_string()];
+        let v = check_unauthenticated_crossing(&shape, &bad).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::UnauthenticatedCrossing);
+        assert_eq!(v.severity, Severity::Error);
+    }
+
+    #[test]
+    fn deterministic_violation_fires() {
+        let shape = Shape::default_for_unannotated();
+        let bad = vec![("hash_block".to_string(), "SystemTime::now".to_string())];
+        let v = check_deterministic_violation(&shape, &bad).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::DeterministicViolation);
+    }
+
+    #[test]
+    fn capability_duplication_fires_on_linear_double_use() {
+        let shape = Shape::default_for_unannotated();
+        let dup = vec![Capability::Read {
+            resource: ResourceTag::Logger,
+        }];
+        let v = check_capability_duplication(&shape, &dup).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::CapabilityDuplication);
+    }
+
+    #[test]
+    fn orphan_capability_fires_warning() {
+        let shape = Shape::default_for_unannotated();
+        let orphans = vec![Capability::Write {
+            resource: ResourceTag::Memory {
+                region: "scratch".into(),
+            },
+        }];
+        let v = check_orphan_capability(&shape, &orphans).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::OrphanCapability);
+        assert_eq!(v.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn missing_handoff_fires() {
+        let shape = Shape::default_for_unannotated();
+        let gaps = vec![(
+            "peer_cog".to_string(),
+            Capability::Network {
+                protocol: NetProtocol::Tcp,
+                direction: NetDirection::Inbound,
+            },
+        )];
+        let v = check_missing_handoff(&shape, &gaps).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::MissingHandoff);
+    }
+
+    #[test]
+    fn foundation_downgrade_fires() {
+        let shape = Shape::default_for_unannotated();
+        let downgrades = vec![("peer".to_string(), Foundation::Hott, Foundation::Mltt)];
+        let v = check_foundation_downgrade(&shape, &downgrades).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::FoundationDowngrade);
+    }
+
+    #[test]
+    fn time_bound_leakage_fires() {
+        let shape = Shape::default_for_unannotated();
+        let leaks = vec![Capability::TimeBound {
+            until: ExpirationPolicy::AfterDuration { milliseconds: 1000 },
+        }];
+        let v = check_time_bound_leakage(&shape, &leaks).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::TimeBoundLeakage);
+    }
+
+    #[test]
+    fn persistence_mismatch_fires() {
+        let shape = Shape::default_for_unannotated();
+        let mismatches = vec![(
+            Capability::Persist {
+                medium: PersistenceMedium::Disk { path: "/tmp/x".into() },
+            },
+            "ephemeral_op".to_string(),
+        )];
+        let v = check_persistence_mismatch(&shape, &mismatches).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::PersistenceMismatch);
+        assert_eq!(v.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn capability_laundering_fires_at_chain_length_two() {
+        let shape = Shape::default_for_unannotated();
+        assert!(check_capability_laundering(&shape, 0).is_none());
+        assert!(check_capability_laundering(&shape, 1).is_none());
+        let v = check_capability_laundering(&shape, 2).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::CapabilityLaundering);
+        assert!(check_capability_laundering(&shape, 5).is_some());
+    }
+
+    #[test]
+    fn foundation_forgery_fires() {
+        let shape = Shape::default_for_unannotated();
+        let forgeries = vec![(Foundation::Hott, "zfc_corpus".to_string())];
+        let v = check_foundation_forgery(&shape, &forgeries).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::FoundationForgery);
+    }
+
+    #[test]
+    fn transitive_lifecycle_regression_fires() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.lifecycle = Lifecycle::Theorem {
+            since: "v0.1".into(),
+        };
+        let chains = vec![(
+            "intermediate".to_string(),
+            "deep_dep".to_string(),
+            Lifecycle::Hypothesis {
+                confidence: ConfidenceLevel::Low,
+            },
+        )];
+        let v = check_transitive_lifecycle_regression(&shape, &chains).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::TransitiveLifecycleRegression);
+    }
+
+    #[test]
+    fn transitive_lifecycle_regression_silent_when_ranks_compatible() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.lifecycle = Lifecycle::Hypothesis {
+            confidence: ConfidenceLevel::Medium,
+        };
+        let chains = vec![(
+            "intermediate".to_string(),
+            "deep_dep".to_string(),
+            Lifecycle::Theorem {
+                since: "v0.1".into(),
+            },
+        )];
+        // Hypothesis citing Theorem is fine — hypothesis < theorem.
+        assert!(check_transitive_lifecycle_regression(&shape, &chains).is_none());
+    }
+
+    #[test]
+    fn declaration_drift_fires() {
+        let shape = Shape::default_for_unannotated();
+        let delta = ShapeDelta {
+            missing_in_declared: vec![Capability::Read {
+                resource: ResourceTag::Logger,
+            }],
+            missing_in_body: vec![],
+            summary: "body uses logger".into(),
+        };
+        let v = check_declaration_drift(&shape, Some(&delta)).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::DeclarationDrift);
+        assert_eq!(v.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn declaration_drift_silent_when_no_diff() {
+        let shape = Shape::default_for_unannotated();
+        let delta = ShapeDelta {
+            missing_in_declared: vec![],
+            missing_in_body: vec![],
+            summary: "agreed".into(),
+        };
+        assert!(check_declaration_drift(&shape, Some(&delta)).is_none());
+        assert!(check_declaration_drift(&shape, None).is_none());
+    }
+
+    #[test]
+    fn foundation_content_mismatch_fires_on_foreign_construct() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.foundation = Foundation::ZfcTwoInacc;
+        // Body uses a HoTT construct — different foundation, no canonical inclusion.
+        let foreign = vec![("identity_path_eliminator".to_string(), Foundation::Hott)];
+        let v = check_foundation_content_mismatch(&shape, &foreign).expect("must fire");
+        assert_eq!(v.code, AntiPatternCode::FoundationContentMismatch);
+    }
+
+    #[test]
+    fn foundation_content_mismatch_silent_when_subsumed() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.foundation = Foundation::Cic;
+        // Body uses MLTT construct — CIC subsumes MLTT, no defect.
+        let foreign = vec![("inductive_family".to_string(), Foundation::Mltt)];
+        assert!(check_foundation_content_mismatch(&shape, &foreign).is_none());
+    }
+
+    // =============================================================================
+    // Red-team closure checks — AT-1, AT-2, AT-3, AT-5
+    // =============================================================================
+
+    #[test]
+    fn capability_ontology_fires_on_unregistered_custom() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.exposes.push(Capability::Custom {
+            tag: "admin_god_mode".into(),
+            schema: CapabilitySchema {
+                description: "fake".into(),
+                transfers_privilege: true,
+                subsumed_by: vec![],
+            },
+        });
+        let registry = vec!["logger".to_string(), "metrics".to_string()];
+        let v = check_capability_ontology_v(&shape, &registry).expect("AT-1 must fire");
+        assert!(v.summary.contains("admin_god_mode"));
+        assert_eq!(v.severity, Severity::Error);
+    }
+
+    #[test]
+    fn capability_ontology_silent_when_registered() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.exposes.push(Capability::Custom {
+            tag: "logger".into(),
+            schema: CapabilitySchema {
+                description: "ok".into(),
+                transfers_privilege: false,
+                subsumed_by: vec![],
+            },
+        });
+        let registry = vec!["logger".to_string()];
+        assert!(check_capability_ontology_v(&shape, &registry).is_none());
+    }
+
+    #[test]
+    fn capability_ontology_silent_when_registry_unavailable() {
+        // Empty registry → check skipped (no false-positive against
+        // every Custom).
+        let mut shape = Shape::default_for_unannotated();
+        shape.exposes.push(Capability::Custom {
+            tag: "anything".into(),
+            schema: CapabilitySchema {
+                description: "x".into(),
+                transfers_privilege: false,
+                subsumed_by: vec![],
+            },
+        });
+        assert!(check_capability_ontology_v(&shape, &[]).is_none());
+    }
+
+    #[test]
+    fn theorem_cve_required_fires_in_soft_mode() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.lifecycle = Lifecycle::Theorem {
+            since: "v1.0".into(),
+        };
+        // strict = false; CVE-closure empty.  AT-2 says: still fire as Error.
+        shape.strict = false;
+        let v = check_theorem_cve_required_v(&shape).expect("AT-2 must fire");
+        assert_eq!(v.code, AntiPatternCode::CveIncomplete);
+        assert_eq!(v.severity, Severity::Error);
+    }
+
+    #[test]
+    fn theorem_cve_required_silent_when_fully_closed() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.lifecycle = Lifecycle::Theorem {
+            since: "v1.0".into(),
+        };
+        shape.cve_closure = CveClosure {
+            constructive: Some("c".into()),
+            verifiable_strategy: Some(VerifyStrategy::Certified),
+            executable: Some("e".into()),
+        };
+        assert!(check_theorem_cve_required_v(&shape).is_none());
+    }
+
+    #[test]
+    fn theorem_cve_required_silent_for_non_theorem_lifecycle() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.lifecycle = Lifecycle::Hypothesis {
+            confidence: ConfidenceLevel::Low,
+        };
+        // Even with empty CVE, non-Theorem lifecycle does not fire AT-2.
+        assert!(check_theorem_cve_required_v(&shape).is_none());
+    }
+
+    #[test]
+    fn yoneda_canonical_roster_fires_on_partial_agreement() {
+        let shape = Shape::default_for_unannotated();
+        let verdicts = vec![(
+            "refactor_v1".to_string(),
+            // Auditor only — missing the other 4.
+            vec!["auditor".to_string()],
+        )];
+        let v = check_yoneda_canonical_roster_complete_v(&shape, &verdicts)
+            .expect("AT-3 must fire");
+        assert_eq!(v.code, AntiPatternCode::YonedaInequivalentRefactor);
+        assert_eq!(v.severity, Severity::Error);
+    }
+
+    #[test]
+    fn yoneda_canonical_roster_silent_on_full_5_roster() {
+        let shape = Shape::default_for_unannotated();
+        let verdicts = vec![(
+            "refactor_v1".to_string(),
+            vec![
+                "end_user".to_string(),
+                "peer_cog".to_string(),
+                "stakeholder".to_string(),
+                "auditor".to_string(),
+                "adversary".to_string(),
+            ],
+        )];
+        assert!(check_yoneda_canonical_roster_complete_v(&shape, &verdicts).is_none());
+    }
+
+    #[test]
+    fn consumes_format_fires_on_malformed() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.consumes = vec![
+            "randomness/16384 bytes".to_string(),
+            "'; DROP TABLE--".to_string(),
+            "memory/0 bytes".to_string(),
+        ];
+        let v = check_consumes_format_v(&shape).expect("AT-5 must fire");
+        assert_eq!(v.code, AntiPatternCode::DeclarationDrift);
+        assert!(v.summary.contains("DROP TABLE"));
+    }
+
+    #[test]
+    fn consumes_format_silent_on_well_formed() {
+        let mut shape = Shape::default_for_unannotated();
+        shape.consumes = vec![
+            "randomness/16384 bytes".to_string(),
+            "compute/1000000 ops".to_string(),
+            "latency/500 ms".to_string(),
+            "precision/1 ns".to_string(),
+        ];
+        assert!(check_consumes_format_v(&shape).is_none());
+    }
+
+    #[test]
+    fn consumes_format_unit_validation() {
+        let units = ["bytes", "ops", "ms", "ns"];
+        // Unknown unit raises violation
+        assert!(!consumes_entry_well_formed("randomness/16384 kilobytes", &units));
+        // Missing slash
+        assert!(!consumes_entry_well_formed("16384 bytes", &units));
+        // Missing space
+        assert!(!consumes_entry_well_formed("randomness/16384bytes", &units));
+        // Empty resource
+        assert!(!consumes_entry_well_formed("/16384 bytes", &units));
+        // Leading zero
+        assert!(!consumes_entry_well_formed("randomness/0123 bytes", &units));
+        // Zero quantity
+        assert!(!consumes_entry_well_formed("memory/0 bytes", &units));
+        // Well-formed
+        assert!(consumes_entry_well_formed("randomness/16384 bytes", &units));
+        assert!(consumes_entry_well_formed("compute/1 ops", &units));
+    }
+
+    #[test]
+    fn check_all_routes_through_red_team_closures() {
+        // Compose a Shape that triggers every red-team closure simultaneously.
+        let shape = Shape {
+            exposes: vec![Capability::Custom {
+                tag: "unregistered_cap".into(),
+                schema: CapabilitySchema {
+                    description: "x".into(),
+                    transfers_privilege: true,
+                    subsumed_by: vec![],
+                },
+            }],
+            requires: vec![],
+            preserves: vec![],
+            consumes: vec!["bad_format_no_slash".to_string()],
+            at_tier: Tier::Aot,
+            foundation: Foundation::ZfcTwoInacc,
+            stratum: MsfsStratum::LFnd,
+            cve_closure: CveClosure {
+                constructive: None,
+                verifiable_strategy: None,
+                executable: None,
+            },
+            lifecycle: Lifecycle::Theorem {
+                since: "v1.0".into(),
+            },
+            composes_with: vec![],
+            strict: false,
+        };
+        let ctx = DiagnosticContext {
+            cog_name: "evil".into(),
+            capability_ontology_registry: vec!["logger".to_string()],
+            yoneda_verdicts_claimed: vec![("partial".to_string(), vec!["auditor".to_string()])],
+            ..Default::default()
+        };
+        let violations = check_all_anti_patterns(&shape, &ctx);
+        let codes: std::collections::HashSet<_> = violations.iter().map(|v| v.code).collect();
+        // AT-1 (capability ontology) → CapabilityEscalation
+        assert!(
+            codes.contains(&AntiPatternCode::CapabilityEscalation),
+            "AT-1 closure must fire on unregistered Custom tag"
+        );
+        // AT-2 (theorem requires CVE) → CveIncomplete
+        assert!(
+            codes.contains(&AntiPatternCode::CveIncomplete),
+            "AT-2 closure must fire on Theorem without CVE"
+        );
+        // AT-3 (yoneda roster) → YonedaInequivalentRefactor
+        assert!(
+            codes.contains(&AntiPatternCode::YonedaInequivalentRefactor),
+            "AT-3 closure must fire on partial Yoneda agreement"
+        );
+        // AT-5 (consumes format) → DeclarationDrift
+        assert!(
+            codes.contains(&AntiPatternCode::DeclarationDrift),
+            "AT-5 closure must fire on malformed consumes entry"
+        );
     }
 }

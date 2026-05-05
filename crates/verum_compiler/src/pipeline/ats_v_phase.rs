@@ -1,11 +1,10 @@
 //! ATS-V architectural type system phase.
 //!
 //! This is the compiler-pipeline integration of the kernel-side
-//! `verum_kernel::arch_phase` module.  Per `internal/specs/ats-v.md`
-//! §3 + §17.4, the phase runs after type-checking and walks every
-//! `@arch_module(...)` declaration in the module — both the module-
-//! level attribute and per-item attributes (cog / module / function
-//! level).
+//! `verum_kernel::arch_phase` module.  The phase runs after
+//! type-checking and walks every `@arch_module(...)` declaration
+//! in the module — both the module-level attribute and per-item
+//! attributes (cog / module / function level).
 //!
 //! For each declaration:
 //!
@@ -19,11 +18,12 @@
 //!      readable message + the `auto_fix_suggestion` (when present)
 //!      as a help label.
 //!
-//! Per spec §17.5 backward-compat: modules without `@arch_module(...)`
-//! are silently skipped.  Default-shape vacuous violations would
-//! never fire (the default shape has empty capability lists, no
-//! foundation drift, etc.) so this phase is a no-op for unannotated
-//! code.
+//! Backward compatibility: modules without an `@arch_module(...)`
+//! declaration are silently skipped.  The default Shape has empty
+//! capability lists, ZFC foundation, multi-tier execution, etc.,
+//! so it would vacuously pass every anti-pattern check anyway —
+//! emitting diagnostics for unannotated code would just generate
+//! noise during the gradual ATS-V rollout.
 
 use anyhow::Result;
 use tracing::debug;
@@ -100,9 +100,9 @@ impl<'s> CompilationPipeline<'s> {
 }
 
 /// Build a structured diagnostic from an `AntiPatternViolation`.
-/// Per spec §32.4 (dual-audience contract): the diagnostic carries
-/// the stable code (ATS-V-AP-NNN) so both human reviewers and
-/// agents can pattern-match.
+/// Under the dual-audience contract: the diagnostic carries the
+/// stable code (ATS-V-AP-NNN) so both human reviewers and agents
+/// can pattern-match against the same payload.
 fn build_violation_diagnostic(
     v: &AntiPatternViolation,
     module_name: &str,
@@ -133,7 +133,8 @@ fn build_violation_diagnostic(
     }
 
     // The auto-fix suggestion (when present) — agents pattern-
-    // match on this for autonomous remediation per spec §32.6.
+    // match on this for autonomous remediation under the
+    // dual-audience contract.
     if let Some(fix) = &v.auto_fix_suggestion {
         builder = builder.add_note(format!("Suggested fix: {}", fix));
     }
@@ -154,11 +155,12 @@ fn run_arch_phase_for_attrs(
         if attr.name.as_str() != "arch_module" {
             continue;
         }
-        // Extract the named-arg expressions.  Empty arg list is
-        // valid — fires the "minimal shape" code path on the kernel
-        // side (`run_arch_phase_one` returns no parse_errors and
-        // runs the canonical 32 anti-pattern checks against
-        // `Shape::default_for_unannotated()`).
+        // Extract the named-arg expressions.  An empty arg list
+        // is valid — it fires the "minimal shape" code path on
+        // the kernel side: `run_arch_phase_one` returns no
+        // parse errors and runs the canonical 32 anti-pattern
+        // checks against `Shape::default_for_unannotated()`,
+        // which passes every check vacuously.
         let args_slice: &[verum_ast::expr::Expr] = match &attr.args {
             Maybe::Some(args) => args.as_slice(),
             Maybe::None => &[],
