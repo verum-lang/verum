@@ -9365,6 +9365,14 @@ impl VbcCodegen {
                         }
                     })
                     .collect();
+                if std::env::var("VERUM_TRACE_GP").is_ok()
+                    && type_name.as_deref() == Some("Maybe")
+                {
+                    eprintln!(
+                        "[compile_item Impl] type_name={:?} impl_decl.generics.len()={} impl_type_generics={:?}",
+                        type_name, impl_decl.generics.len(), impl_type_generics
+                    );
+                }
 
                 // Pre-populate impl block const generics - enables recognizing SIZE, N etc.
                 // in impl<const SIZE: Int> StackAllocator<SIZE> { ... }
@@ -9898,11 +9906,73 @@ impl VbcCodegen {
             descriptor.return_type = ret_type.clone();
         }
 
+        // Build a generic-param-name → TypeParamId index map for
+        // type-ref resolution.  Combines the function's own
+        // generics with the impl-block generics inherited from the
+        // parent type.  Source for impl generics is the parent
+        // type's `type_params` if found in `self.types` (the
+        // codegen registers impl block's `<T>` into the parent
+        // TypeDescriptor's type_params during the type-decl pass),
+        // PLUS `ctx.generic_type_params` as a redundant safety net
+        // for code paths that don't yet propagate the parent type
+        // descriptor.
+        // Without this, a method like `fn unwrap_or(default: T) -> T`
+        // inside `implement Maybe<T>` had T unresolved → fell back
+        // through `get_well_known_type_id` → matched
+        // `well_known_types["Heap"] = TypeId::PTR(14)` (because
+        // PTR's name slot was occupied by Heap), so descriptors
+        // landed with `default: Heap`.  Result: `Maybe<Int>.unwrap_or(0)`
+        // failed at user-code typecheck with `expected 'Heap',
+        // found 'Int'`.
+        let mut method_generic_param_map: std::collections::HashMap<String, u16> =
+            std::collections::HashMap::new();
+        let mut next_pid: u16 = 0;
+        // 1. Inherit impl-block generics from the parent type's
+        //    `TypeDescriptor.type_params` if available.  This is
+        //    the authoritative source — populated by the Sum/Record
+        //    arms of `register_type_constructors` from
+        //    `type_decl.generics`.  Resolves T/E/K/V correctly even
+        //    when ctx.generic_type_params got cleared between the
+        //    impl-block setup and compile_function entry (which
+        //    happens for some collect-decls → compile-bodies pass
+        //    sequences in stdlib bootstrap).
+        if let Some(parent_name) = impl_type_name {
+            if let Some(&parent_tid) = self.type_name_to_id.get(parent_name.as_str()) {
+                if let Some(parent_desc) = self.types.iter().find(|t| t.id == parent_tid) {
+                    for tp in parent_desc.type_params.iter() {
+                        if let Some(name) = self.ctx.strings.get(tp.name.0 as usize) {
+                            if !method_generic_param_map.contains_key(name) {
+                                method_generic_param_map.insert(name.clone(), next_pid);
+                                next_pid += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 2. Fallback: also inherit from ctx.generic_type_params.
+        for g in self.ctx.generic_type_params.iter() {
+            if !method_generic_param_map.contains_key(g) {
+                method_generic_param_map.insert(g.clone(), next_pid);
+                next_pid += 1;
+            }
+        }
+        // Function-level generics added after.
+        for gp in func.generics.iter() {
+            if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                let n = gname.name.to_string();
+                if !method_generic_param_map.contains_key(&n) {
+                    method_generic_param_map.insert(n, next_pid);
+                    next_pid += 1;
+                }
+            }
+        }
+
         // Populate parameter descriptors for proper method dispatch matching.
         // This enables the interpreter to match methods by parameter count.
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             let type_ref = if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
-                self.ast_type_to_type_ref(ty)
+                self.resolve_field_type_ref(ty, &method_generic_param_map)
             } else {
                 TypeRef::Concrete(TypeId::UNIT)
             };
@@ -9913,6 +9983,16 @@ impl VbcCodegen {
                 is_mut: *is_mut,
                 default: None,
             });
+        }
+        // Also fix return_type: the func_info.return_type was built
+        // earlier without generic-param awareness; rebuild it here
+        // from the AST so generic returns (`-> T`, `-> Maybe<T>`,
+        // `-> Result<T, E>`) preserve param refs as
+        // TypeRef::Generic(idx) instead of degrading to
+        // TypeRef::Concrete(PTR).
+        if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
+            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &method_generic_param_map);
+            descriptor.return_type = resolved_return;
         }
 
         // Extract optimization hints from AST attributes (@inline, @cold, @hot, etc.)
