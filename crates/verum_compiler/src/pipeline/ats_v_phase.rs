@@ -31,8 +31,9 @@ use tracing::debug;
 use verum_ast::Module;
 use verum_common::{List, Maybe};
 use verum_diagnostics::{DiagnosticBuilder, Severity};
+use verum_kernel::arch::Foundation;
 use verum_kernel::arch_anti_pattern::{AntiPatternViolation, Severity as KernelSeverity};
-use verum_kernel::arch_phase::{run_arch_phase_one, ModuleArchResult};
+use verum_kernel::arch_phase::{run_arch_phase_one_with, ModuleArchResult, PhaseInputs};
 
 use super::CompilationPipeline;
 
@@ -147,27 +148,139 @@ fn build_violation_diagnostic(
 
 /// Walk an attribute list looking for `@arch_module(...)`.  Returns
 /// the kernel-side phase result (or `None` if no annotation found).
+///
+/// **Body-level data wiring**: alongside the `@arch_module(...)`
+/// extraction, this function ALSO scans the surrounding attribute
+/// list for `@framework(corpus, ...)` annotations and feeds them
+/// into the kernel phase via `PhaseInputs.foreign_foundation_constructs`.
+/// This activates the AP-026 FoundationContentMismatch check —
+/// without this wiring, AP-026 would only fire in unit tests
+/// (silent-regression risk identical in shape to the AT-1 wiring
+/// closed in Phase I of the ATS-V sweep).
 fn run_arch_phase_for_attrs(
     attrs: &List<verum_ast::attr::Attribute>,
     module_name: &str,
 ) -> Option<ModuleArchResult> {
+    let mut arch_module_args: Option<&[verum_ast::expr::Expr]> = None;
     for attr in attrs.iter() {
-        if attr.name.as_str() != "arch_module" {
+        if attr.name.as_str() == "arch_module" {
+            // Extract the named-arg expressions.  An empty arg list
+            // is valid — it fires the "minimal shape" code path on
+            // the kernel side: `run_arch_phase_one` returns no
+            // parse errors and runs the canonical 32 anti-pattern
+            // checks against `Shape::default_for_unannotated()`,
+            // which passes every check vacuously.
+            arch_module_args = Some(match &attr.args {
+                Maybe::Some(args) => args.as_slice(),
+                Maybe::None => &[],
+            });
+        }
+    }
+    let args_slice = arch_module_args?;
+    let inputs = PhaseInputs {
+        capability_ontology_registry: None, // use kernel-static default
+        yoneda_verdicts_claimed: Vec::new(),
+        foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
+    };
+    Some(run_arch_phase_one_with(
+        module_name.to_string(),
+        args_slice,
+        &inputs,
+    ))
+}
+
+/// Walk an attribute list and surface every `@framework(corpus, ...)`
+/// annotation as a `(construct_label, foundation_tag)` pair for
+/// AP-026 FoundationContentMismatch.
+///
+/// The translation table maps the `corpus` first-arg of
+/// `@framework(corpus, ...)` to the matching `Foundation` enum
+/// variant.  Unrecognised corpus names are silently skipped (they
+/// will be picked up by AP-023 FoundationForgery via the citation
+/// table independently).
+fn extract_foreign_foundation_constructs(
+    attrs: &List<verum_ast::attr::Attribute>,
+) -> Vec<(String, Foundation)> {
+    let mut out: Vec<(String, Foundation)> = Vec::new();
+    for attr in attrs.iter() {
+        if attr.name.as_str() != "framework" {
             continue;
         }
-        // Extract the named-arg expressions.  An empty arg list
-        // is valid — it fires the "minimal shape" code path on
-        // the kernel side: `run_arch_phase_one` returns no
-        // parse errors and runs the canonical 32 anti-pattern
-        // checks against `Shape::default_for_unannotated()`,
-        // which passes every check vacuously.
-        let args_slice: &[verum_ast::expr::Expr] = match &attr.args {
-            Maybe::Some(args) => args.as_slice(),
-            Maybe::None => &[],
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => continue,
         };
-        return Some(run_arch_phase_one(module_name.to_string(), args_slice));
+        // First arg is the corpus identifier (e.g. `hott`, `cic`,
+        // `mltt`); subsequent args are the citation string.
+        let corpus_arg = match args.iter().next() {
+            Some(a) => a,
+            None => continue,
+        };
+        let corpus_name = match expr_to_path_str(corpus_arg) {
+            Some(s) => s,
+            None => continue,
+        };
+        let foundation = match corpus_name.as_str() {
+            "hott" => Foundation::Hott,
+            "cubical" => Foundation::Cubical,
+            "cic" => Foundation::Cic,
+            "mltt" => Foundation::Mltt,
+            "eff" => Foundation::Eff,
+            "zfc_two_inacc" | "zfc" => Foundation::ZfcTwoInacc,
+            // Other corpus names (lurie_htt, schreiber_dcct, etc.)
+            // are tracked by AP-023 FoundationForgery directly.
+            _ => continue,
+        };
+        // Citation-string second arg (if present) gives the
+        // construct label; fallback uses the corpus name itself.
+        let label = args
+            .iter()
+            .nth(1)
+            .and_then(expr_to_string_lit)
+            .unwrap_or_else(|| corpus_name.clone());
+        out.push((label, foundation));
     }
-    None
+    out
+}
+
+/// Best-effort path-string extraction from an attribute argument.
+/// Recognises `Path(["foo"])` and `Path(["foo", "bar"])` shapes.
+fn expr_to_path_str(expr: &verum_ast::expr::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::ty::PathSegment;
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            let segs: Vec<&str> = p
+                .segments
+                .iter()
+                .filter_map(|s| match s {
+                    PathSegment::Name(ident) => Some(ident.name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if segs.is_empty() {
+                None
+            } else {
+                Some(segs.last().copied().unwrap_or("").to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Best-effort string-literal extraction from an attribute argument.
+fn expr_to_string_lit(expr: &verum_ast::expr::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::literal::{LiteralKind, StringLit};
+    match &expr.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Text(StringLit::Regular(s) | StringLit::MultiLine(s)) => {
+                Some(s.as_str().to_string())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 // =============================================================================

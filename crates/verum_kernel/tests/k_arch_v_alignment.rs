@@ -1237,7 +1237,106 @@ fn pin_yoneda_helpers_present() {
 }
 
 // =============================================================================
-// 20. Internal/ references must NOT appear in any architecture .vr file
+// 20. @arch_module discipline extends to core/verify/ and core/proof/
+// =============================================================================
+
+#[test]
+fn pin_verify_cogs_have_arch_module() {
+    pin_dir_arch_module_coverage("verify", 5);
+}
+
+#[test]
+fn pin_proof_cogs_have_arch_module() {
+    pin_dir_arch_module_coverage("proof", 5);
+}
+
+/// Helper: every `.vr` file directly under `core/<dir>/` must
+/// carry `@arch_module(...)` self-attestation.
+fn pin_dir_arch_module_coverage(dir_name: &str, expected_min: usize) {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let target = workspace_root.join("core").join(dir_name);
+
+    let mut missing: Vec<String> = Vec::new();
+    let mut total: usize = 0;
+    for entry in std::fs::read_dir(&target).expect("read core/<dir>/") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+            continue;
+        }
+        total += 1;
+        let text = std::fs::read_to_string(&path).expect("read .vr");
+        if !text.contains("@arch_module") {
+            missing.push(
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("<unknown>")
+                    .to_string(),
+            );
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} of {} core/{}/*.vr files missing @arch_module attestation: {}",
+        missing.len(),
+        total,
+        dir_name,
+        missing.join(", "),
+    );
+    assert!(
+        total >= expected_min,
+        "core/{}/ should have >= {} .vr files, found {}",
+        dir_name,
+        expected_min,
+        total
+    );
+}
+
+// =============================================================================
+// 21. Compiler ats_v_phase wires foreign-foundation citations
+// =============================================================================
+
+#[test]
+fn pin_compiler_phase_wires_foreign_foundation_constructs() {
+    // Phase M closure: verum_compiler::pipeline::ats_v_phase calls
+    // run_arch_phase_one_with (not bare run_arch_phase_one) and
+    // surfaces @framework(corpus, "...") body annotations into
+    // PhaseInputs.foreign_foundation_constructs so AP-026
+    // FoundationContentMismatch fires in real builds.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let phase_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("pipeline")
+            .join("ats_v_phase.rs"),
+    )
+    .expect("read ats_v_phase.rs");
+    assert!(
+        phase_src.contains("run_arch_phase_one_with"),
+        "ats_v_phase.rs must call run_arch_phase_one_with (not bare run_arch_phase_one)"
+    );
+    assert!(
+        phase_src.contains("PhaseInputs"),
+        "ats_v_phase.rs must construct PhaseInputs"
+    );
+    assert!(
+        phase_src.contains("extract_foreign_foundation_constructs"),
+        "ats_v_phase.rs must extract foreign-foundation citations"
+    );
+}
+
+// =============================================================================
+// 22. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

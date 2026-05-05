@@ -6,6 +6,13 @@
 // dispatch on "prove / fall-back / hard-fail" in the same
 // semantic table the compiler enforces.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.verify.attempt;
+
 // The result of an SMT proof attempt.
 type ProofAttempt is
     // The backend returned Unsat on the negated goal — valid.
