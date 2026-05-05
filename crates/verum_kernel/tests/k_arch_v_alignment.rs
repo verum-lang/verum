@@ -1014,7 +1014,7 @@ fn pin_registry_covers_mod_mounts() {
 
     // Count `framework_record_new(` invocations and assert it
     // matches the advertised expected_full_canonical_count().
-    let invocations = registry_text.matches("framework_record_new(").count();
+    let _invocations = registry_text.matches("framework_record_new(").count();
     // mod.vr declares 1 schema definition + 31 records.  Net
     // record-count is invocations - 1 (the type-constructor signature).
     // Simpler: count actual call sites by looking for the pattern
@@ -1040,7 +1040,204 @@ fn pin_registry_covers_mod_mounts() {
 }
 
 // =============================================================================
-// 17. Internal/ references must NOT appear in any architecture .vr file
+// 17. Capability ontology — kernel registry mirrors Verum-side roster
+// =============================================================================
+
+#[test]
+fn pin_capability_ontology_aligned() {
+    // Cross-side pin: kernel-static
+    // `arch::canonical_capability_registry()` mirrors the Verum-side
+    // `core/architecture/capability_ontology.vr::ATS_V_CANONICAL_CAPABILITIES`
+    // list.  Adding a new canonical capability requires updating both
+    // sides AND this pin in the same change-set.
+    let kernel_registry = verum_kernel::arch::canonical_capability_registry();
+    assert_eq!(
+        kernel_registry.len(),
+        7,
+        "kernel canonical capability registry size pinned to 7"
+    );
+    let expected: std::collections::BTreeSet<&'static str> = [
+        "logger",
+        "metrics",
+        "tracing",
+        "config_read",
+        "config_admin",
+        "supervisor_spawn",
+        "kernel_intrinsic",
+    ]
+    .iter()
+    .copied()
+    .collect();
+    let actual: std::collections::BTreeSet<&str> =
+        kernel_registry.iter().map(|s| s.as_str()).collect();
+    assert_eq!(
+        actual, expected,
+        "kernel canonical capability registry tag set drifted from canonical roster"
+    );
+
+    // Verify the Verum-side .vr surface has the same tags.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let vr_text = std::fs::read_to_string(
+        workspace_root
+            .join("core")
+            .join("architecture")
+            .join("capability_ontology.vr"),
+    )
+    .expect("read capability_ontology.vr");
+    for tag in &expected {
+        let needle = format!("name: \"{}\"", tag);
+        assert!(
+            vr_text.contains(&needle),
+            "Verum-side capability_ontology.vr missing canonical tag: {}",
+            tag,
+        );
+    }
+}
+
+// =============================================================================
+// 18. PhaseInputs — red-team data wiring exists on the kernel surface
+// =============================================================================
+
+#[test]
+fn pin_phase_inputs_wires_red_team_data() {
+    // The kernel `arch_phase::run_arch_phase_one_with` accepts a
+    // `PhaseInputs` struct that propagates capability_ontology_registry,
+    // yoneda_verdicts_claimed, and foreign_foundation_constructs into
+    // the DiagnosticContext that drives `check_all_anti_patterns`.
+    //
+    // Without this wiring the red-team closures (AT-1 / AT-3 /
+    // AP-026) would only fire in unit tests and never against
+    // real cogs — silent regression risk.  This pin asserts the
+    // PhaseInputs surface exists.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_phase.rs"),
+    )
+    .expect("read arch_phase.rs");
+    assert!(
+        src.contains("pub struct PhaseInputs"),
+        "arch_phase.rs must expose PhaseInputs struct"
+    );
+    assert!(
+        src.contains("pub fn run_arch_phase_one_with"),
+        "arch_phase.rs must expose run_arch_phase_one_with entry"
+    );
+    assert!(
+        src.contains("ctx.capability_ontology_registry"),
+        "run_arch_phase_one* must populate ctx.capability_ontology_registry"
+    );
+    assert!(
+        src.contains("canonical_capability_registry"),
+        "run_arch_phase_one default must use canonical_capability_registry"
+    );
+}
+
+// =============================================================================
+// 19. Counterfactual / adjunction / yoneda operationalisation pin
+// =============================================================================
+
+#[test]
+fn pin_counterfactual_helpers_present() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let cf = std::fs::read_to_string(
+        workspace_root
+            .join("core")
+            .join("architecture")
+            .join("counterfactual.vr"),
+    )
+    .expect("read counterfactual.vr");
+    for needle in &[
+        "public fn arch_metric_tag",
+        "public fn metric_value_tag",
+        "public fn invariant_status_tag",
+        "public fn invariant_status_is_stable",
+        "public fn report_overall_stable_predicate",
+        "public fn invariant_status_uniqueness_pin",
+        "public fn empty_invariants_unstable_pin",
+    ] {
+        assert!(
+            cf.contains(needle),
+            "counterfactual.vr missing operationalisation helper: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_adjunction_helpers_present() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let adj = std::fs::read_to_string(
+        workspace_root
+            .join("core")
+            .join("architecture")
+            .join("adjunction.vr"),
+    )
+    .expect("read adjunction.vr");
+    for needle in &[
+        "public fn canonical_adjunction_tag",
+        "public fn refactoring_direction_tag",
+        "public fn adjunction_verdict_tag",
+        "public fn adjunction_verdict_is_accepted",
+        "public fn all_preservation_holds",
+        "public fn all_gain_holds",
+        "public fn chain_acceptance_predicate",
+        "public fn verdict_acceptance_uniqueness_pin",
+        "public fn empty_chain_rejected_pin",
+    ] {
+        assert!(
+            adj.contains(needle),
+            "adjunction.vr missing operationalisation helper: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_yoneda_helpers_present() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let yon = std::fs::read_to_string(
+        workspace_root
+            .join("core")
+            .join("architecture")
+            .join("yoneda.vr"),
+    )
+    .expect("read yoneda.vr");
+    for needle in &[
+        "public fn observation_observer_tag",
+        "public fn agreement_status_tag",
+        "public fn all_agreements_agree",
+        "public fn count_disagreements",
+        "public fn yoneda_verdict_equivalent_predicate",
+        "public fn empty_agreements_not_equivalent_pin",
+        "public fn agreement_status_disjoint_pin",
+    ] {
+        assert!(
+            yon.contains(needle),
+            "yoneda.vr missing operationalisation helper: {}",
+            needle,
+        );
+    }
+}
+
+// =============================================================================
+// 20. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

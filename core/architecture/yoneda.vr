@@ -132,6 +132,96 @@ public type YonedaVerdict is {
 };
 
 // =============================================================================
+// Operationalisation — pure-data helpers
+// =============================================================================
+
+/// Stable observer-kind tag for a `ShapeObservation` arm.
+public fn observation_observer_tag(o: ShapeObservation) -> Text {
+    match o {
+        EndUserView { kind: _, exposes: _, lifecycle: _ }                                                       => "end_user",
+        PeerCogView { module_path: _, is_in_composition: _, requires: _, exposes: _ }                            => "peer_cog",
+        StakeholderView { role: _, tier: _, foundation: _, lifecycle: _, persistence_capabilities: _ }           => "stakeholder",
+        AuditorView { audit_kind: _, exposes: _, requires: _, foundation: _, stratum: _, cve_closure: _, tier: _, lifecycle: _, composes_with: _, strict: _ } => "auditor",
+        AdversaryView { threat_model: _, attack_surface: _, outbound_capabilities: _ }                           => "adversary",
+    }
+}
+
+/// Stable tag for `AgreementStatus`.
+public fn agreement_status_tag(s: AgreementStatus) -> Text {
+    match s {
+        Agree    => "agree",
+        Disagree => "disagree",
+    }
+}
+
+/// True iff every entry in the agreement list is `Agree`.
+/// Used by `yoneda_equivalent` to decide the verdict's
+/// `equivalent` field.
+public fn all_agreements_agree(agreements: List<ObserverAgreement>) -> Bool {
+    let mut i: Int = 0;
+    while i < agreements.len() {
+        match agreements[i].status {
+            Agree    => {},
+            Disagree => return false,
+        }
+        i = i + 1;
+    }
+    true
+}
+
+/// Count of `Disagree` arms in the agreement list.  Mirrors
+/// `YonedaVerdict.disagreement_count` for caller-side sanity
+/// checks.
+public fn count_disagreements(agreements: List<ObserverAgreement>) -> Int {
+    let mut count: Int = 0;
+    let mut i: Int = 0;
+    while i < agreements.len() {
+        match agreements[i].status {
+            Disagree => count = count + 1,
+            Agree    => {},
+        }
+        i = i + 1;
+    }
+    count
+}
+
+/// **Yoneda equivalence predicate** — verdict.equivalent is sound
+/// iff (a) the agreement list is non-empty AND (b) all
+/// agreements are `Agree`.  This composition refuses to claim
+/// equivalence from absence of evidence (empty list ⇒ false) and
+/// from partial agreement (any Disagree ⇒ false).  AT-3 closure
+/// (`kernel_arch_yoneda_canonical_roster_complete`) further
+/// requires the agreement list to span the full canonical 5-roster.
+public fn yoneda_verdict_equivalent_predicate(v: &YonedaVerdict) -> Bool {
+    if v.agreements.len() == 0 {
+        return false;
+    }
+    all_agreements_agree(v.agreements)
+}
+
+// =============================================================================
+// Soundness pins
+// =============================================================================
+
+/// **Pin**: empty agreement list yields equivalent=false.
+public fn empty_agreements_not_equivalent_pin() -> Bool {
+    let v = YonedaVerdict {
+        schema_version: 1,
+        agreements: [],
+        equivalent: false,
+        disagreement_count: 0,
+    };
+    !yoneda_verdict_equivalent_predicate(&v)
+}
+
+/// **Pin**: AgreementStatus is binary — only Agree and Disagree.
+/// `all_agreements_agree` distinguishes them correctly.
+public fn agreement_status_disjoint_pin() -> Bool {
+    agreement_status_tag(AgreementStatus.Agree) == "agree" &&
+    agreement_status_tag(AgreementStatus.Disagree) == "disagree"
+}
+
+// =============================================================================
 // Kernel-discharge bridge
 // =============================================================================
 

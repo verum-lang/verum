@@ -131,11 +131,55 @@ pub fn run_arch_phase(modules: &[(String, &[Expr])]) -> ArchPhaseReport {
 
 /// Run the phase for a single module. Public для CLI consumers
 /// that want per-module dispatch (e.g. `verum arch explain <cog>`).
+///
+/// **Red-team data wiring**: this function populates
+/// `DiagnosticContext` slots that activate the AT-1..AT-5
+/// closures.  Without this wiring the closures would only fire
+/// in unit tests (silent regression risk).  Currently activated:
+///
+///   * `capability_ontology_registry` — the kernel-static
+///     canonical registry from `arch::canonical_capability_registry`
+///     drives AT-1 (Custom-tag must be registered).
+///
+/// Other fields (yoneda_verdicts_claimed, foreign_foundation_constructs,
+/// composition_handoff_gaps, transitive_lifecycle_regressions, …)
+/// require body-level analysis the kernel-internal phase does not
+/// have access to.  Compiler-side
+/// `verum_compiler::pipeline::ats_v_phase` extends this context
+/// with the additional slots when wiring lands per #ATS-V-V1.
 pub fn run_arch_phase_one(module_name: String, attribute_args: &[Expr]) -> ModuleArchResult {
- // Step 1: parse Shape from attribute args.
+    run_arch_phase_one_with(module_name, attribute_args, &PhaseInputs::default())
+}
+
+/// Per-module phase inputs the caller can supply.  Defaults to
+/// the kernel-static canonical capability registry; consumers
+/// (compiler pipeline, audit-bundle CLI) override with richer
+/// data when available.
+#[derive(Debug, Clone, Default)]
+pub struct PhaseInputs {
+    /// Override capability-ontology registry — `None` uses the
+    /// kernel-static canonical roster.
+    pub capability_ontology_registry: Option<Vec<String>>,
+    /// Yoneda verdicts the cog has attached
+    /// (label, list-of-observer-tags-in-agreement).
+    pub yoneda_verdicts_claimed: Vec<(String, Vec<String>)>,
+    /// Foreign-foundation constructs detected in the body.
+    pub foreign_foundation_constructs: Vec<(String, crate::arch::Foundation)>,
+}
+
+/// Run the phase for a single module with caller-supplied inputs.
+/// Used by the compiler pipeline + audit-bundle CLI to surface
+/// red-team and body-level checks that need data unavailable to
+/// the bare-name `run_arch_phase_one` entry point.
+pub fn run_arch_phase_one_with(
+    module_name: String,
+    attribute_args: &[Expr],
+    inputs: &PhaseInputs,
+) -> ModuleArchResult {
+    // Step 1: parse Shape from attribute args.
     let (shape, parse_errors) = if attribute_args.is_empty() {
- // Module has no @arch_module annotation — use default shape
- // per spec §17.5 backward-compat.
+        // Module has no @arch_module annotation — backward-compat
+        // default Shape (vacuously passes every check).
         (None, Vec::new())
     } else {
         match parse_arch_module(attribute_args) {
@@ -144,14 +188,19 @@ pub fn run_arch_phase_one(module_name: String, attribute_args: &[Expr]) -> Modul
         }
     };
 
- // Step 2: run anti-pattern checks. Use parsed shape OR
- // default shape (so default-shape modules still get checked
- // for sanity — vacuous violations).
+    // Step 2: build DiagnosticContext with red-team data wired in.
     let shape_for_checks = shape
         .clone()
         .unwrap_or_else(Shape::default_for_unannotated);
     let mut ctx = DiagnosticContext::default();
     ctx.cog_name = module_name.clone();
+    ctx.capability_ontology_registry = inputs
+        .capability_ontology_registry
+        .clone()
+        .unwrap_or_else(crate::arch::canonical_capability_registry);
+    ctx.yoneda_verdicts_claimed = inputs.yoneda_verdicts_claimed.clone();
+    ctx.foreign_foundation_constructs = inputs.foreign_foundation_constructs.clone();
+
     let violations = check_all_anti_patterns(&shape_for_checks, &ctx);
 
     ModuleArchResult {

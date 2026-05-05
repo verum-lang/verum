@@ -387,9 +387,15 @@ pub fn check_capability_escalation(
     shape: &Shape,
     inferred_used: &[Capability],
 ) -> Option<AntiPatternViolation> {
+    // Performance: build a HashSet over shape.requires once (O(N)),
+    // then test each inferred_used membership in O(1) hashed lookup.
+    // Net: O(N + M) instead of the naive O(N * M) `.contains()` scan.
+    // Capability derives Hash so HashSet works out of the box.
+    use std::collections::HashSet;
+    let required: HashSet<&Capability> = shape.requires.iter().collect();
     let undeclared: Vec<&Capability> = inferred_used
         .iter()
-        .filter(|c| !shape.requires.contains(c))
+        .filter(|c| !required.contains(*c))
         .collect();
     if undeclared.is_empty() {
         return None;
@@ -1752,18 +1758,25 @@ pub fn check_capability_ontology_v(
     if registry.is_empty() {
         return None;
     }
-    let mut unregistered: Vec<&str> = Vec::new();
-    let walk = shape.exposes.iter().chain(shape.requires.iter());
-    for cap in walk {
+    // Performance: build HashSet over registry once (O(R)) then
+    // test each Custom-tag in O(1).  Track unregistered via
+    // BTreeSet for stable diagnostic ordering + O(log K) membership
+    // (K = number of unique unregistered tags, bounded by Custom-cap
+    // count in the cog).
+    use std::collections::{BTreeSet, HashSet};
+    let registered: HashSet<&str> = registry.iter().map(|s| s.as_str()).collect();
+    let mut unregistered: BTreeSet<&str> = BTreeSet::new();
+    for cap in shape.exposes.iter().chain(shape.requires.iter()) {
         if let Capability::Custom { tag, .. } = cap {
-            if !registry.iter().any(|r| r == tag) && !unregistered.contains(&tag.as_str()) {
-                unregistered.push(tag.as_str());
+            if !registered.contains(tag.as_str()) {
+                unregistered.insert(tag.as_str());
             }
         }
     }
     if unregistered.is_empty() {
         return None;
     }
+    let unregistered: Vec<&str> = unregistered.into_iter().collect();
     Some(AntiPatternViolation {
         code: AntiPatternCode::CapabilityEscalation, // AT-1 surfaces under AP-001 family
         severity: Severity::Error,
@@ -1832,15 +1845,19 @@ pub fn check_yoneda_canonical_roster_complete_v(
     verdicts: &[(String, Vec<String>)],
 ) -> Option<AntiPatternViolation> {
     let _ = shape;
-    let canonical: [&str; 5] = ["end_user", "peer_cog", "stakeholder", "auditor", "adversary"];
+    use std::collections::HashSet;
+    // Canonical roster is small (5) but a HashSet keeps the
+    // membership test O(1) instead of O(5·O) per verdict, where
+    // O = observers.len().  For verdict-heavy bundles this scales
+    // linearly in the total observer count.
+    let canonical: HashSet<&str> = ["end_user", "peer_cog", "stakeholder", "auditor", "adversary"]
+        .iter()
+        .copied()
+        .collect();
     let mut bad: Vec<&str> = Vec::new();
     for (label, observers) in verdicts {
-        let missing: Vec<&str> = canonical
-            .iter()
-            .copied()
-            .filter(|c| !observers.iter().any(|o| o == c))
-            .collect();
-        if !missing.is_empty() {
+        let observed: HashSet<&str> = observers.iter().map(|s| s.as_str()).collect();
+        if !canonical.is_subset(&observed) {
             bad.push(label.as_str());
         }
     }
