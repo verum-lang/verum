@@ -1,15 +1,68 @@
 // =============================================================================
-// mod.vr - Verum Scientific Computing Module
+// mod.vr - core.math — dual-role mathematical library
 // =============================================================================
-// Layer: 0-9 (Mathematical Computing Stack)
+// Layer: Standard Library / Mathematics
 //
 
-// This module provides production-ready scientific computing organized into
-// hierarchical layers (L0-L9), from bare-metal IEEE 754 operations to
-// distributed tensor computations.
+// `core.math` plays two coexisting architectural roles:
+//
+//   (A) **Scientific computing stack** (L0-L9 hierarchy described
+//       below) — production-ready numerical primitives from
+//       bare-metal IEEE 754 ops up through distributed tensor
+//       computation, autodiff, neural networks, and agent / LLM
+//       integration.  This is the user-facing surface most cogs
+//       import.
+//
+//   (B) **Foundational mathematical primitives** — type theory
+//       (`hott.vr`, `cubical.vr`), category theory (`category.vr`,
+//       `infinity_category.vr`, `infinity_topos.vr`,
+//       `kan_extension.vr`, `fibration.vr`, `model_category.vr`,
+//       `operad.vr`, `day_convolution.vr`), simplicial / cubical
+//       homotopy (`simplicial.vr`, `cohesive.vr`, `sdg.vr`),
+//       formal logic (`logic.vr`), quantum / probabilistic
+//       structures (`quantum_logic.vr`, `giry.vr`,
+//       `epistemic.vr`), and verification-relevant scaffolding
+//       (`tactics.vr`, `observational.vr`, `meta_cls.vr`,
+//       `strata.vr`, `absolute_layer.vr`,
+//       `dual_absolute_layer.vr`, `diakrisis_primitive.vr`).
+//       These are the cogs that other foundational modules
+//       depend on for type-theoretic content.
+//
+// The two roles share the same directory because they share the
+// same meta-theory (Verum's standard ZFC + 2 inaccessibles): a
+// scientific-computing cog and a HoTT cog are both implemented in
+// the same foundation, so they live side-by-side without
+// architectural conflict.
 //
 
-// # Architecture
+// # Sub-directories
+//
+//   * `frameworks/` — trusted-axiom packages CITED FROM external
+//     mathematical literature (Lurie HTT, Schreiber DCCT,
+//     Connes-Chamseddine, Petz, Arnold-Mather, Baez-Dolan, OWL 2,
+//     Diakrisis + extensions, MSFS catalogue, bounded-arithmetic
+//     family).  Each `@framework(...)` declaration carries an
+//     explicit citation for trusted-boundary audit.
+//
+//   * `foundations/` — meta-classifier-relative self-recognition
+//     theorems.  Currently `self_recognition.vr` (VVA Phase 5:
+//     Verum's own kernel rules formalised as Verum theorems
+//     cross-validated against the Diakrisis corpus).
+//
+// The architectural distinction:
+//
+//   * Files DIRECTLY in `core/math/` = mathematical primitives
+//     implemented in Verum's standard meta-theory (ZFC + 2 inacc).
+//     THICK (full implementations).
+//
+//   * Files in `core/math/frameworks/` = thin axiom-citation
+//     surfaces postulating specific theorems from external works.
+//
+//   * Files in `core/math/foundations/` = Verum proves its own
+//     architectural theorems.
+//
+
+// # Scientific computing stack (L0-L9)
 //
 
 // ```
@@ -31,9 +84,12 @@
 //
 
 // ```verum
-// mount core.math.*; // Full math library
-// mount core.math.simple.*; // Simple API for prototyping
-// mount core.math.linalg.*; // Linear algebra only
+// mount core.math.*;          // Full math library (both roles)
+// mount core.math.simple.*;   // Simple API for prototyping (L0-L2 subset)
+// mount core.math.linalg.*;   // Linear algebra only (L2)
+// mount core.math.hott.*;     // HoTT primitives only (foundational)
+// mount core.math.cubical.*;  // Cubical TT primitives only (foundational)
+// mount core.math.frameworks.*; // Citation-tagged axiom packages
 // ```
 //
 
@@ -61,7 +117,23 @@
 // - GradientTape: Autodiff recording
 //
 
-// Spec: docs/architecture/math-spec.md
+// # Cross-references
+//
+// Architecture-as-Types tagging across all `core/math/` cogs:
+//   * @arch_module(foundation, stratum, lifecycle) — every cog in
+//     this directory carries the self-attestation declaration.
+//     The cross-side pin test at
+//     `crates/verum_kernel/tests/k_arch_v_alignment.rs::
+//      pin_math_cogs_have_arch_module` asserts coverage.
+//
+// Foundation tag conventions are documented in
+// `core/architecture/types.vr` (under the Foundation enum
+// declaration).  In short: every cog in this directory tags
+// `Foundation.ZfcTwoInacc` because the implementation lives in
+// Verum's standard meta-theory; the `Foundation.Hott` /
+// `Foundation.Cubical` / etc. tags exist for the subsumption
+// graph and apply to cogs whose .vr source SEMANTICS requires
+// the named foundation to be sound (no such cog currently exists).
 // =============================================================================
 
 @arch_module(

@@ -319,6 +319,48 @@ public type Lifecycle is
 /// Cross-paradigm pairs (e.g. ZFC ↔ HoTT) require an explicit
 /// `@framework(bridge_corpus, ...)` declaration; otherwise AP-005
 /// fires.
+///
+/// **Tag-usage convention** — when does a cog tag which Foundation?
+///
+/// The `Foundation` enum has seven inhabitants but only one
+/// (`ZfcTwoInacc`) is in active use across the corpus.  This is
+/// not an oversight; the others have a precise role defined by
+/// the meta-theory:
+///
+///   * `ZfcTwoInacc` — DEFAULT.  Tag this when the cog's `.vr`
+///     source is itself implemented in Verum's standard
+///     meta-theory (ZFC + 2 strongly-inaccessibles).  Every
+///     current cog in `core/` uses this tag, including
+///     `core/math/hott.vr` and `core/math/cubical.vr` which
+///     EXPOSE HoTT/cubical primitives but are themselves
+///     implemented in ZFC (the Verum-source code uses standard
+///     match expressions, refinement types, etc., not HoTT-native
+///     constructs).
+///
+///   * `Hott` / `Cubical` / `Mltt` / `Cic` / `Eff` — RESERVED for
+///     future cogs whose `.vr` source SEMANTICS requires the
+///     named foundation to be sound.  Such a cog would (a) use
+///     constructs unique to that foundation (e.g. univalence as a
+///     definitional equality, not an axiom), and (b) have
+///     refinement predicates whose truth values depend on the
+///     foundation's own axioms.  No such cog exists in the
+///     current corpus; the enum variants are kept for the
+///     subsumption-graph testing visible through
+///     `foundation_directly_subsumed_by` and for future
+///     extensibility.
+///
+///   * `CustomFoundation(name, framework_corpus)` — for
+///     user-defined foundations admitted via the
+///     `@framework(corpus, ...)` registration mechanism.
+///
+/// **Important pin**: the operational `Foundation.Hott` /
+/// `Foundation.Cubical` enum variant exists and is recognised
+/// by the parser, but tagging it on a cog whose `.vr` source is
+/// actually implemented in ZFC would be a `FoundationForgery`
+/// (AP-023) — declared foundation does NOT match cited axioms.
+/// The current `core/math/hott.vr` correctly tags `ZfcTwoInacc`
+/// because its implementation is ZFC-sound; downstream cogs
+/// CITING HoTT axioms would not change that.
 public type Foundation is
     | ZfcTwoInacc
     | Hott

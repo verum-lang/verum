@@ -6,6 +6,15 @@
 // Layer: Standard Library / Proof
 //
 
+// **Naming convention** — the `_old` in this file's name refers to
+// the `old(expr)` keyword used in postconditions (Eiffel / JML /
+// Dafny / SPARK convention).  It is NOT a deprecation marker;
+// this surface is current, supported, and load-bearing for
+// every mutating function whose postcondition compares post-state
+// to pre-state.  Renaming would break the public API; the
+// documentation here makes the semantics unambiguous.
+//
+
 // User-facing surface for the dependent-contracts analysis core
 // (`verum_types.contracts_old`). Postconditions in mutating
 // functions often need to refer to the *prior* value of state,

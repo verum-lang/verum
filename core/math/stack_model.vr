@@ -35,10 +35,24 @@
 //  the truncation theorem.
 //
 
+// Architectural attestation — this cog implements the operational
+// surface of the (∞,2)-stack model.  Implementation lives in
+// Verum's standard meta-theory (ZFC + 2 inacc); the diakrisis
+// citations recorded via `@framework(diakrisis, ...)` annotations
+// supply the trusted-boundary axioms.
+//
+
 // LOC budget: 3000 LOC stdlib total per VVA-3 V0 plan; ~200 LOC
 // kernel rule (`K-Universe-Ascent`) deferred to V1 once kernel work
 // schedules.
 // =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.math.stack_model;
 
 mount core.action.articulation.{Articulation};
 

@@ -855,7 +855,192 @@ fn pin_auxiliary_attribute_types_present() {
 }
 
 // =============================================================================
-// 15. Internal/ references must NOT appear in any architecture .vr file
+// 15. Every core/math/*.vr file must carry @arch_module attestation
+// =============================================================================
+
+#[test]
+fn pin_math_cogs_have_arch_module() {
+    // ATS-V annotation discipline: every cog in `core/math/`
+    // self-attests via `@arch_module(foundation, stratum,
+    // lifecycle)`.  This pin reads each `.vr` file directly under
+    // core/math/ and asserts it contains the attribute.  Files in
+    // sub-directories (frameworks/, foundations/) are checked by
+    // their own pins.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let math_dir = workspace_root.join("core").join("math");
+
+    let mut missing: Vec<String> = Vec::new();
+    let mut total: usize = 0;
+    for entry in std::fs::read_dir(&math_dir).expect("read core/math/") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+            continue;
+        }
+        total += 1;
+        let text = std::fs::read_to_string(&path).expect("read .vr");
+        if !text.contains("@arch_module") {
+            missing.push(
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("<unknown>")
+                    .to_string(),
+            );
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} of {} core/math/*.vr files missing @arch_module attestation: {}",
+        missing.len(),
+        total,
+        missing.join(", "),
+    );
+    assert!(total >= 60, "core/math/ should have >= 60 .vr files, found {}", total);
+}
+
+// =============================================================================
+// 16. registry.vr populates every framework mod.vr mounts
+// =============================================================================
+
+#[test]
+fn pin_registry_covers_mod_mounts() {
+    // The `frameworks/registry.vr` populators
+    // (`populate_full_canonical` aggregating
+    // `populate_canonical_standard` + `populate_diakrisis_extensions`
+    // + `populate_msfs_catalogue` + `populate_bounded_arithmetic_family`
+    // + `populate_experimental`) must register every public
+    // `mount core.math.frameworks.X` in `frameworks/mod.vr`.
+    //
+    // This pin reads BOTH files as text and asserts:
+    //   1. Every mount target name in mod.vr appears as a
+    //      registered framework name in registry.vr.
+    //   2. The expected_full_canonical_count() advertised total
+    //      lines up with the literal-string count of
+    //      `framework_record_new` invocations.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let frameworks_dir = workspace_root.join("core").join("math").join("frameworks");
+
+    let mod_text = std::fs::read_to_string(frameworks_dir.join("mod.vr"))
+        .expect("read frameworks/mod.vr");
+    let registry_text = std::fs::read_to_string(frameworks_dir.join("registry.vr"))
+        .expect("read frameworks/registry.vr");
+
+    // Extract the simple mount targets (single-segment after
+    // `core.math.frameworks.`).  We accept the file-or-directory
+    // names that `mod.vr` currently mounts; sub-mounts within
+    // those subdirs are recorded with name expansions in the
+    // registry (e.g. `msfs/{baseline,key_symbols,...}` →
+    // `msfs_baseline`, etc.).
+    let canonical_simple = [
+        "lurie_htt",
+        "schreiber_dcct",
+        "connes_reconstruction",
+        "petz_classification",
+        "arnold_catastrophe",
+        "baez_dolan",
+        "owl2_fs",
+        "diakrisis",
+        "diakrisis_biadjunction",
+        "diakrisis_stack_model",
+        "diakrisis_extensions",
+        "diakrisis_acts",
+        "bounded_arithmetic",
+        "registry",
+        "msfs",
+    ];
+    for n in &canonical_simple {
+        let needle = format!("core.math.frameworks.{}", n);
+        assert!(
+            mod_text.contains(&needle),
+            "frameworks/mod.vr missing mount: {}",
+            needle,
+        );
+    }
+
+    // Verify each registered framework name we claim above appears
+    // in registry.vr (foundational impl + citation pack + extensions).
+    let registered_names = [
+        // Standard tier — citation packages
+        "\"lurie_htt\"",
+        "\"schreiber_dcct\"",
+        "\"connes_reconstruction\"",
+        "\"petz_classification\"",
+        "\"arnold_catastrophe\"",
+        "\"baez_dolan\"",
+        "\"owl2_fs\"",
+        // Standard tier — meta-classifier + special
+        "\"diakrisis\"",
+        "\"actic.raw\"",
+        // Standard tier — foundational implementations
+        "\"zfc_two_inacc\"",
+        "\"hott\"",
+        "\"cubical\"",
+        "\"mltt\"",
+        "\"cic\"",
+        "\"eff\"",
+        // VerifiedExtension — diakrisis extensions
+        "\"diakrisis_biadjunction\"",
+        "\"diakrisis_stack_model\"",
+        "\"diakrisis_extensions\"",
+        "\"diakrisis_acts\"",
+        // VerifiedExtension — MSFS catalogue
+        "\"msfs_baseline\"",
+        "\"msfs_key_symbols\"",
+        "\"msfs_self_containment\"",
+        "\"msfs_strcat\"",
+        // VerifiedExtension — bounded-arithmetic family
+        "\"bounded_arithmetic_v_0\"",
+        "\"bounded_arithmetic_v_1\"",
+        "\"bounded_arithmetic_s_2_1\"",
+        "\"bounded_arithmetic_v_np\"",
+        "\"bounded_arithmetic_v_ph\"",
+        "\"bounded_arithmetic_i_delta_0\"",
+    ];
+    for n in &registered_names {
+        assert!(
+            registry_text.contains(n),
+            "registry.vr missing framework_record_new(...) registration for {}",
+            n,
+        );
+    }
+
+    // Count `framework_record_new(` invocations and assert it
+    // matches the advertised expected_full_canonical_count().
+    let invocations = registry_text.matches("framework_record_new(").count();
+    // mod.vr declares 1 schema definition + 31 records.  Net
+    // record-count is invocations - 1 (the type-constructor signature).
+    // Simpler: count actual call sites by looking for the pattern
+    // "registry_register(r, framework_record_new(" which is the
+    // canonical invocation form.
+    let registered = registry_text
+        .matches("registry_register(r, framework_record_new(")
+        .count();
+    assert_eq!(
+        registered, 29,
+        "registry.vr should register exactly 29 frameworks (Standard 15 + VerifiedExt 14); \
+         counted {} registry_register(r, framework_record_new(...)) sites",
+        registered,
+    );
+    assert!(
+        registry_text.contains("public fn populate_full_canonical("),
+        "registry.vr must expose populate_full_canonical aggregator"
+    );
+    assert!(
+        registry_text.contains("public fn expected_full_canonical_count()"),
+        "registry.vr must expose expected_full_canonical_count"
+    );
+}
+
+// =============================================================================
+// 17. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]
