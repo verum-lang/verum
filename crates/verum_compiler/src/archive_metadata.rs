@@ -293,15 +293,35 @@ fn register_module_metadata(
             parent_type: parent_type.clone(),
         };
 
-        // Mirror the function name into the parent type's `methods`
-        // list so the typechecker's lazy registration pass can
-        // discover inherent methods at type-load time without a
-        // second walk over `meta.functions`.
+        // Mirror the SIMPLE method name (no `Type.` prefix) into
+        // the parent type's `methods` list, and ALSO register the
+        // descriptor under the simple name as a fallback lookup
+        // key for `register_inherent_methods_from_metadata`.
+        // Pre-fix the methods list contained `"Text.with_capacity"`
+        // (the qualified VBC function name as-stored) but the
+        // typechecker dispatches methods by simple name
+        // (`with_capacity`), so the inherent_methods bucket lookup
+        // never matched — every `text.with_capacity(n)` call site
+        // failed `no method named with_capacity found for type Text`.
         if let Maybe::Some(parent_name) = &parent_type {
+            let simple_method_name = if let Some(idx) = simple_name.as_str().rfind('.') {
+                Text::from(&simple_name.as_str()[idx + 1..])
+            } else {
+                simple_name.clone()
+            };
             if let Some(td) = meta.types.get_mut(parent_name) {
-                if !td.methods.iter().any(|m| m == &simple_name) {
-                    td.methods.push(simple_name.clone());
+                if !td.methods.iter().any(|m| m == &simple_method_name) {
+                    td.methods.push(simple_method_name.clone());
                 }
+            }
+            // Also alias the descriptor under the qualified key so
+            // `register_inherent_methods_from_metadata`'s
+            // `metadata.functions.get("Text.with_capacity")` finds it.
+            // Keep the simple-name slot first-wins for free fns.
+            let qualified_key: Text =
+                format!("{}.{}", parent_name, simple_method_name).into();
+            if !meta.functions.contains_key(&qualified_key) {
+                meta.functions.insert(qualified_key, descriptor.clone());
             }
         }
 
