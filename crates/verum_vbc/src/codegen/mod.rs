@@ -7876,10 +7876,33 @@ impl VbcCodegen {
                     self.type_name_to_id.insert(type_name.clone(), tid);
                     tid
                 };
+                // Capture generic parameters from the AST so the
+                // archive's TypeDescriptor preserves them.  Pre-fix
+                // `Maybe<T>` / `Result<T, E>` / etc. landed in VBC
+                // with empty `type_params`; archive_metadata then
+                // emitted CoreMetadata with `generic_params=[]`,
+                // breaking positional substitution at use sites
+                // (e.g. `Maybe<Int>.unwrap_or(0)` failed to bind T
+                // → Int because T wasn't recorded).
+                let mut sum_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
+                    smallvec::SmallVec::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        let gname_id = StringId(self.ctx.intern_string_raw(gname.name.as_str()));
+                        sum_type_params.push(crate::types::TypeParamDescriptor {
+                            name: gname_id,
+                            id: crate::types::TypeParamId(idx as u16),
+                            bounds: smallvec::SmallVec::new(),
+                            default: None,
+                            variance: crate::types::Variance::Invariant,
+                        });
+                    }
+                }
                 let mut sum_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Sum,
+                    type_params: sum_type_params,
                     ..Default::default()
                 };
                 for (variant_index, variant) in variants.iter().enumerate() {
@@ -7979,11 +8002,30 @@ impl VbcCodegen {
                     tid
                 };
 
+                // Capture generic parameters from the AST.  Same
+                // rationale as the Sum/Variant arm — without
+                // type_params, archive_metadata loses positional
+                // substitution info at use sites.
+                let mut record_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
+                    smallvec::SmallVec::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        let gname_id = StringId(self.ctx.intern_string_raw(gname.name.as_str()));
+                        record_type_params.push(crate::types::TypeParamDescriptor {
+                            name: gname_id,
+                            id: crate::types::TypeParamId(idx as u16),
+                            bounds: smallvec::SmallVec::new(),
+                            default: None,
+                            variance: crate::types::Variance::Invariant,
+                        });
+                    }
+                }
                 // Create a TypeDescriptor for this type (drop_fn will be set later if Drop is implemented)
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
+                    type_params: record_type_params,
                     ..Default::default()
                 };
 
