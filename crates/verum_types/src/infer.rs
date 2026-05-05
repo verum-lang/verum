@@ -1411,6 +1411,42 @@ impl TypeChecker {
             self.ctx.define_type(name.clone(), ty.clone());
             self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
 
+            // Type alias: also register in BOTH the ctx's alias
+            // registry AND the unifier's alias registry so
+            // `try_expand_alias` and the pattern matcher can resolve
+            // `IoResult<T>` → `Result<T, IoError>` etc.  Generic
+            // alias param-name list goes through
+            // `register_type_alias_params` so positional type
+            // argument substitution works (`IoResult<Text>` →
+            // `Result<Text, StreamError>`, not just
+            // `Result<T, StreamError>`).
+            //
+            // Pre-fix every match pattern over a stdlib alias
+            // (`match res { Ok(p) => …, Err(e) => … }` on
+            // `IoResult<Text>`) failed `Pattern expects a variant
+            // type, but scrutinee has type IoResult<...>`.
+            if let crate::core_metadata::TypeDescriptorKind::Alias { target } =
+                &type_desc.kind
+            {
+                let target_ty = Type::Named {
+                    path: Self::text_to_path(target),
+                    args: List::new(),
+                };
+                self.ctx.define_alias(name.clone(), target_ty.clone());
+                self.unifier
+                    .register_type_alias(name.clone(), target_ty);
+                let param_names: List<Text> = type_desc
+                    .generic_params
+                    .iter()
+                    .map(|gp| gp.name.clone())
+                    .collect();
+                if !param_names.is_empty() {
+                    self.unifier
+                        .register_type_alias_params(name.clone(), param_names);
+                }
+                pending.push(target.clone());
+            }
+
             // Variant signatures — same logic as the eager loader, gated
             // to this single type.  Pushes payload type names into
             // `pending` so the loop registers them too.

@@ -1329,6 +1329,44 @@ impl TypeChecker {
                         }
                     }
 
+                    // Try resolving Type::Named to a Type::Variant via the
+                    // inductive_constructors registry — populated by
+                    // `register_stdlib_constructors_from_metadata` for
+                    // stdlib variant types (Result, Maybe, Ordering, …)
+                    // and by user-side `register_inductive_type` calls
+                    // for user-declared sum types.  Without this fall-
+                    // back, every `match res { Ok(p) => …, Err(e) => …
+                    // }` over a Result/Maybe/IoResult scrutinee fails
+                    // `Pattern expects a variant type` despite the
+                    // constructor info being available.
+                    let type_name_text = verum_common::Text::from(type_name);
+                    if let Maybe::Some(constructors) =
+                        self.ctx.get_constructors(&type_name_text)
+                    {
+                        let constructors = constructors.clone();
+                        let mut variants: indexmap::IndexMap<verum_common::Text, Type> =
+                            indexmap::IndexMap::new();
+                        for ctor in constructors.iter() {
+                            let payload_ty = if ctor.args.is_empty() {
+                                Type::Unit
+                            } else if ctor.args.len() == 1 {
+                                ctor.args
+                                    .first()
+                                    .map(|a| a.as_ref().clone())
+                                    .unwrap_or(Type::Unit)
+                            } else {
+                                Type::Tuple(
+                                    ctor.args.iter().map(|a| a.as_ref().clone()).collect(),
+                                )
+                            };
+                            variants.insert(ctor.name.clone(), payload_ty);
+                        }
+                        if !variants.is_empty() {
+                            let variant_type = Type::Variant(variants);
+                            return self.bind_pattern(pattern, &variant_type);
+                        }
+                    }
+
                     // Not a newtype or tuple struct
                     if self.stdlib_single_file_mode {
                         Ok(())
@@ -1383,10 +1421,65 @@ impl TypeChecker {
                         // Look up the type definition to discover its registered variants
                         // instead of hardcoding specific type names like Maybe/Result.
                         let type_def = self.ctx.lookup_type(generic_name.as_str()).cloned();
-                        let variant_map = match &type_def {
+                        let mut variant_map = match &type_def {
                             Some(Type::Variant(variants)) => Some(variants.clone()),
                             _ => None,
                         };
+
+                        // Lazy-path fallback: when `type_def` is not a
+                        // Type::Variant (typical when stdlib types
+                        // were registered via `ensure_stdlib_type_loaded`
+                        // which stores them as Type::Named/Generic
+                        // handles), build the variant map from the
+                        // inductive_constructors registry.  Closes
+                        // pattern-matching errors on `IoResult<T>` /
+                        // `Result<T,E>` / `Maybe<T>` scrutinees that
+                        // resolve to type aliases of variant types.
+                        if variant_map.is_none() {
+                            let gname = verum_common::Text::from(generic_name.as_str());
+                            if let Maybe::Some(constructors) = self.ctx.get_constructors(&gname) {
+                                let mut variants: indexmap::IndexMap<verum_common::Text, Type> =
+                                    indexmap::IndexMap::new();
+                                for ctor in constructors.iter() {
+                                    let payload_ty = if ctor.args.is_empty() {
+                                        Type::Unit
+                                    } else if ctor.args.len() == 1 {
+                                        ctor.args
+                                            .first()
+                                            .map(|a| a.as_ref().clone())
+                                            .unwrap_or(Type::Unit)
+                                    } else {
+                                        Type::Tuple(
+                                            ctor.args
+                                                .iter()
+                                                .map(|a| a.as_ref().clone())
+                                                .collect(),
+                                        )
+                                    };
+                                    variants.insert(ctor.name.clone(), payload_ty);
+                                }
+                                if !variants.is_empty() {
+                                    variant_map = Some(variants);
+                                }
+                            }
+                        }
+                        // Type-alias fallback: if generic_name resolves
+                        // to an alias target via the unifier's alias
+                        // registry (e.g. IoResult<T> → Result<T, IoError>),
+                        // expand and recurse.
+                        if variant_map.is_none() {
+                            if let Some(expanded) = self.unifier.try_expand_alias(&expanded_ty) {
+                                if !matches!(&expanded, Type::Generic { .. } | Type::Named { .. })
+                                    || matches!(&expanded, Type::Variant(_))
+                                {
+                                    return self.bind_pattern(pattern, &expanded);
+                                }
+                                // The expansion is itself a Named/Generic
+                                // — recurse so its constructor/variant
+                                // resolution kicks in.
+                                return self.bind_pattern(pattern, &expanded);
+                            }
+                        }
 
                         // Strip qualified prefix (e.g., "Maybe.Some" -> "Some")
                         let bare_tag = tag.rsplit('.').next().unwrap_or(tag);
