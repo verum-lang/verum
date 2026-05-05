@@ -7886,6 +7886,8 @@ impl VbcCodegen {
                 // → Int because T wasn't recorded).
                 let mut sum_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
                     smallvec::SmallVec::new();
+                let mut sum_generic_param_map: std::collections::HashMap<String, u16> =
+                    std::collections::HashMap::new();
                 for (idx, gp) in type_decl.generics.iter().enumerate() {
                     if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
                         let gname_id = StringId(self.ctx.intern_string_raw(gname.name.as_str()));
@@ -7896,6 +7898,8 @@ impl VbcCodegen {
                             default: None,
                             variance: crate::types::Variance::Invariant,
                         });
+                        sum_generic_param_map
+                            .insert(gname.name.to_string(), idx as u16);
                     }
                 }
                 let mut sum_desc = TypeDescriptor {
@@ -7932,10 +7936,45 @@ impl VbcCodegen {
                                     smallvec::SmallVec::new(),
                                 )
                             } else {
+                                // Populate `fields` with positional
+                                // type info so archive_metadata can
+                                // recover the per-slot TypeRef of each
+                                // tuple variant payload.  Pre-fix
+                                // `fields_desc` was always empty for
+                                // tuple variants; archive_metadata's
+                                // arity-padding fallback then always
+                                // grabbed the FIRST generic param
+                                // ("T") for every slot — so
+                                // `Result.Err(E)` got serialised as
+                                // `Err(T)` and the typechecker bound
+                                // payloads to the wrong type
+                                // parameter.  Use
+                                // `resolve_field_type_ref` so generic
+                                // params land as
+                                // `TypeRef::Generic(idx)` keyed by the
+                                // parent's positional generic params.
+                                let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+                                    types
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, ty)| {
+                                            let pos_name = format!("_{}", i);
+                                            crate::types::FieldDescriptor {
+                                                name: StringId(
+                                                    self.ctx.intern_string_raw(&pos_name),
+                                                ),
+                                                type_ref: self.resolve_field_type_ref(
+                                                    ty,
+                                                    &sum_generic_param_map,
+                                                ),
+                                                ..Default::default()
+                                            }
+                                        })
+                                        .collect();
                                 (
                                     crate::types::VariantKind::Tuple,
                                     types.len() as u8,
-                                    smallvec::SmallVec::new(),
+                                    fds,
                                 )
                             }
                         }
@@ -7954,7 +7993,10 @@ impl VbcCodegen {
                                         name: StringId(
                                             self.ctx.intern_string_raw(f.name.name.as_str()),
                                         ),
-                                        type_ref: self.ast_type_to_type_ref(&f.ty),
+                                        type_ref: self.resolve_field_type_ref(
+                                            &f.ty,
+                                            &sum_generic_param_map,
+                                        ),
                                         ..Default::default()
                                     })
                                     .collect();

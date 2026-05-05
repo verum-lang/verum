@@ -153,6 +153,7 @@ fn test_roundtrip_type_descriptor() {
         clone_fn: Some(100),
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
+        alias_target: None,
     };
 
     module.types.push(desc);
@@ -212,6 +213,7 @@ fn test_roundtrip_sum_type() {
         clone_fn: None,
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
+        alias_target: None,
     };
 
     module.types.push(desc);
@@ -638,6 +640,7 @@ fn test_roundtrip_all_type_kinds() {
             clone_fn: None,
             protocols: smallvec::smallvec![],
             visibility: Visibility::Public,
+            alias_target: None,
         });
     }
     module.header.type_table_count = kinds.len() as u32;
@@ -672,6 +675,7 @@ fn test_roundtrip_all_visibility_levels() {
             clone_fn: None,
             protocols: smallvec::smallvec![],
             visibility: *vis,
+            alias_target: None,
         });
     }
     module.header.type_table_count = visibilities.len() as u32;
@@ -840,6 +844,7 @@ fn test_roundtrip_empty_and_full_variants() {
         clone_fn: None,
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
+        alias_target: None,
     });
     module.header.type_table_count = 1;
 
