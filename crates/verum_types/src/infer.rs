@@ -43937,24 +43937,185 @@ impl TypeChecker {
             }
         } else {
             Type::Generic {
-                name: parent_name,
+                name: parent_name.clone(),
                 args: fresh_args.clone(),
             }
         };
-        // Constructor argument types — the registry's
-        // `InductiveConstructor.args` may contain Type::Var
-        // placeholders that should map to the parent's fresh args
-        // positionally.  For simple cases (`Ok(T)` → `Ok` has one
-        // arg `T`) this works directly; for more complex
-        // signatures the typechecker's existing substitute_type_params
-        // handles refinement at unify time.
-        let params: List<Type> = ctor.args.iter().map(|a| a.as_ref().clone()).collect();
+        // #126b — substitute the constructor's rigid named-T type
+        // parameters with the parent's fresh TypeVars.  Pre-fix
+        // `params` was a verbatim clone of `ctor.args` whose payload
+        // positions held rigid `Type::Named { path: "T" }` (the
+        // generic parameter name as registered by the lazy stdlib
+        // loader).  Calling `Some(10)` then surfaced as
+        // `expected 'T', found 'Int'` because the unifier compared
+        // `Int` against the rigid named-T placeholder.
+        //
+        // The substitution map comes from the constructor's own
+        // `type_params: List<(Text, Box<Type>)>` field — a property
+        // of the constructor's registration, not a hardcoded list of
+        // stdlib generic names.
+        // Build the parameter-name → fresh-TypeVar substitution map.
+        //
+        // Source priority (first that yields names wins):
+        //   1. `ctor.type_params` — populated when the constructor was
+        //      registered via the eager source-driven path
+        //      (register_type_declaration). Empty under VBCA lazy load.
+        //   2. `__type_params_<parent>` registry record — populated by
+        //      `register_generic_stdlib_type`. Empty under lazy load.
+        //   3. `core_metadata.types[parent].generic_params` — the
+        //      authoritative VBCA-side metadata. THIS is what fires
+        //      under the lazy-loader path; it's the parent type's own
+        //      `generic_params` list as serialised in the archive.
+        //
+        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`: the
+        // substitution map's KEYS come from the parent's own metadata,
+        // never from a hardcoded list of stdlib param names.
+        let mut tv_subst: indexmap::IndexMap<verum_common::Text, Type> =
+            indexmap::IndexMap::new();
+        if !ctor.type_params.is_empty() {
+            for (i, (param_name, _)) in ctor.type_params.iter().enumerate() {
+                if let Some(fresh_arg) = fresh_args.get(i) {
+                    tv_subst.insert(param_name.clone(), fresh_arg.clone());
+                }
+            }
+        } else {
+            let params_key: verum_common::Text =
+                format!("__type_params_{}", parent_name).into();
+            if let Option::Some(Type::Record(param_record)) =
+                self.ctx.lookup_type(params_key.as_str())
+            {
+                for (i, (param_name, _)) in param_record.iter().enumerate() {
+                    if let Some(fresh_arg) = fresh_args.get(i) {
+                        tv_subst.insert(param_name.clone(), fresh_arg.clone());
+                    }
+                }
+            } else if let Maybe::Some(metadata) = &self.core_metadata {
+                if let Some(td) = metadata.types.get(&parent_name) {
+                    for (i, gp) in td.generic_params.iter().enumerate() {
+                        if let Some(fresh_arg) = fresh_args.get(i) {
+                            tv_subst.insert(gp.name.clone(), fresh_arg.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let subst_named_params = |ty: &Type| -> Type {
+            Self::substitute_named_params_in_type(ty, &tv_subst)
+        };
+        let params: List<Type> = ctor
+            .args
+            .iter()
+            .map(|a| subst_named_params(a.as_ref()))
+            .collect();
         if params.is_empty() {
             // Unit-position variant (None, Less, …) — return the
             // constructed value directly, not a function.
             Some(return_type)
         } else {
             Some(Type::function(params, return_type))
+        }
+    }
+
+    /// Replace every `Type::Named { path: name, args: [] }` whose
+    /// `name` matches a key in `subst` with the corresponding
+    /// substitution type. Recurses into Generic / Tuple / Function /
+    /// Reference / Record / Variant / Array / Slice / TypeApp /
+    /// Future / Promise containers. Used by
+    /// `try_resolve_variant_constructor` (and the analogous
+    /// payload-substitution path in `register_variant_signature_for_lazy`)
+    /// to swap rigid named-T type-parameter placeholders for fresh
+    /// per-call-site TypeVars.
+    fn substitute_named_params_in_type(
+        ty: &Type,
+        subst: &indexmap::IndexMap<verum_common::Text, Type>,
+    ) -> Type {
+        if subst.is_empty() {
+            return ty.clone();
+        }
+        match ty {
+            Type::Named { path, args } if args.is_empty() => {
+                if let Some(seg) = path.segments.iter().next() {
+                    if path.segments.len() == 1 {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            if let Some(replacement) = subst.get(&ident.name) {
+                                return replacement.clone();
+                            }
+                        }
+                    }
+                }
+                ty.clone()
+            }
+            Type::Generic { name, args } => Type::Generic {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| Self::substitute_named_params_in_type(a, subst))
+                    .collect(),
+            },
+            Type::Named { path, args } => Type::Named {
+                path: path.clone(),
+                args: args
+                    .iter()
+                    .map(|a| Self::substitute_named_params_in_type(a, subst))
+                    .collect(),
+            },
+            Type::Tuple(parts) => Type::Tuple(
+                parts
+                    .iter()
+                    .map(|p| Self::substitute_named_params_in_type(p, subst))
+                    .collect(),
+            ),
+            Type::Function {
+                params,
+                return_type,
+                type_params,
+                contexts,
+                properties,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| Self::substitute_named_params_in_type(p, subst))
+                    .collect(),
+                return_type: Box::new(Self::substitute_named_params_in_type(
+                    return_type,
+                    subst,
+                )),
+                type_params: type_params.clone(),
+                contexts: contexts.clone(),
+                properties: properties.clone(),
+            },
+            Type::Reference { mutable, inner } => Type::Reference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_named_params_in_type(inner, subst)),
+            },
+            Type::CheckedReference { mutable, inner } => Type::CheckedReference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_named_params_in_type(inner, subst)),
+            },
+            Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_named_params_in_type(inner, subst)),
+            },
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(Self::substitute_named_params_in_type(element, subst)),
+                size: *size,
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(Self::substitute_named_params_in_type(element, subst)),
+            },
+            Type::Variant(variants) => Type::Variant(
+                variants
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_named_params_in_type(v, subst)))
+                    .collect(),
+            ),
+            Type::Record(fields) => Type::Record(
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_named_params_in_type(v, subst)))
+                    .collect(),
+            ),
+            _ => ty.clone(),
         }
     }
 
