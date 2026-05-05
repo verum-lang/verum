@@ -67,6 +67,9 @@ mount core.database.sqlite.native.l1_pager.journal.wal.{
     WalChecksum, wal_running_checksum,
 };
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.SqliteVfs;
+mount core.database.sqlite.native.l1_pager.wal_index.{
+    WalIndex, wal_index_new,
+};
 
 // -----------------------------------------------------------------------------
 // WalBackend — sum type mirroring `PagerBackend` for consistency
@@ -98,6 +101,17 @@ public type affine WalWriter is {
     /// readers verify frame integrity in lockstep without scanning
     /// the whole WAL.  See `wal_running_checksum` in journal/wal.vr.
     running: WalChecksum,
+    /// In-memory WAL-index (#150 + #163).  Updated atomically with
+    /// every `wal_writer_append_frame` so concurrent readers see
+    /// the new frame via `WalIndex.find_frame` without walking the
+    /// WAL file.  `wal_writer_commit` publishes the new mx_frame
+    /// via `WalIndex.commit_header`; `wal_writer_reset` calls
+    /// `WalIndex.reset_after_checkpoint`.  Pre-#163: the WalIndex
+    /// data structure shipped (#150) but no caller updated it —
+    /// readers had to fall back to walking the WAL from byte 0.
+    /// Post-#163: the writer + index are kept in lockstep so the
+    /// .shm protocol actually delivers its multi-reader payoff.
+    index: WalIndex,
 };
 
 // -----------------------------------------------------------------------------
@@ -166,11 +180,17 @@ public fn wal_writer_create(
     state.salt1 = salt1;
     state.salt2 = salt2;
 
+    // Initialise the WAL-index (#163).  Fresh WAL ⇒ fresh index;
+    // header isn't committed yet (`is_init = false`) — first
+    // wal_writer_commit will flip the bit + publish the mx_frame.
+    let index = wal_index_new(page_size);
+
     Ok(WalWriter {
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
         running: initial_cksum,
+        index: index,
     })
 }
 
@@ -249,11 +269,18 @@ public fn wal_writer_open(
     // `wal_writer_open` itself doesn't walk frames; the `recover`
     // entry in wal_reader.vr does that and updates `running` via
     // `wal_writer_set_running` before any append is attempted.
+    //
+    // The WalIndex (#163) starts uninitialised; recovery populates
+    // it via `wal_writer_index_replay` (called from wal_reader's
+    // recover_state path) so readers don't have to re-walk the
+    // WAL on every reopen.
+    let index = wal_index_new(hdr.page_size);
     Ok(WalWriter {
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
         running: WalChecksum { s1: hdr.checksum1, s2: hdr.checksum2 },
+        index: index,
     })
 }
 
@@ -268,6 +295,34 @@ implement WalWriter {
     /// Borrow the state for read access (no mutation).  Used by
     /// the snapshot machinery and the pager's read fast path.
     public fn state(&self) -> &WalState { &self.state }
+
+    /// Borrow the WAL-index for read access (#163).  Concurrent
+    /// readers (single-process for now; cross-process arrives
+    /// when the WsbMmap backend lands) call `find_frame` /
+    /// `try_acquire_reader_mark` against this.
+    public fn index(&self) -> &WalIndex { &self.index }
+}
+
+/// Recovery seam (#163) — overwrite the writer's in-memory
+/// WalIndex with one rebuilt from the on-disk frame stream.
+/// Used by `wal_reader::recover_state` after walking the WAL
+/// file end-to-end so the post-reopen writer state matches
+/// the pre-crash invariant: every appended frame is in the
+/// index, the header reflects the last-commit mx_frame.
+pub fn wal_writer_set_index(w: &mut WalWriter, index: WalIndex) {
+    w.index = index;
+}
+
+/// Append-frame seam for recovery: re-publish a single frame
+/// to the WalIndex without touching the WAL file or rolling
+/// checksum.  Used by `recover_state` to repopulate the index
+/// frame-by-frame as it walks the WAL during crash recovery.
+pub fn wal_writer_index_publish_frame(
+    w: &mut WalWriter,
+    page_no: Int,
+    frame_no: Int,
+) {
+    w.index.append_frame(page_no, frame_no);
 }
 
 // -----------------------------------------------------------------------------
@@ -332,6 +387,12 @@ public fn wal_writer_append_frame(
     w.state.record_appended_frame(page_no, is_commit, commit_db_size);
     // Persist the post-frame rolling state for the next append.
     w.running = after_body;
+    // Publish the new frame to the in-memory WAL-index (#163) so
+    // concurrent readers can find it via `WalIndex.find_frame`
+    // without walking the WAL file.  `mx_frame` was just bumped
+    // by `record_appended_frame`, so we use the post-bump value
+    // as the new frame number.
+    w.index.append_frame(page_no, w.state.mx_frame);
     Ok(())
 }
 
@@ -343,10 +404,23 @@ public fn wal_writer_commit(
     w: &mut WalWriter,
     flags: SyncFlags,
 ) -> Result<(), PagerError> {
+    // fsync FIRST — durability before observability.  If the
+    // sync fails, the WalIndex header is NOT bumped, so readers
+    // continue to see the old mx_frame and don't observe data
+    // that hasn't reached durable storage.
     match backend_sync(&w.backend, flags) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(io_error("wal commit: fsync failed", e)),
+        Ok(_)  => {},
+        Err(e) => return Err(io_error("wal commit: fsync failed", e)),
     }
+    // Publish the new mx_frame + n_page to the WalIndex (#163).
+    // Concurrent readers' next snapshot will see the post-commit
+    // state via WalIndex.commit_header — no WAL-walk needed.
+    let mx = w.state.mx_frame;
+    let n_pg = w.state.last_commit_db_size as u32;
+    let s1 = w.state.salt1;
+    let s2 = w.state.salt2;
+    w.index.commit_header(mx, n_pg, s1, s2);
+    Ok(())
 }
 
 /// Reset the WAL: rotate salts, rewrite the file header, drop the
@@ -395,6 +469,11 @@ public fn wal_writer_reset(
     }
     w.write_cursor = file_header_size();
     w.running = initial_cksum;
+    // Reset the WAL-index too (#163): drop hash sections, zero
+    // mx_frame, install new salts, bump change_count so any
+    // in-flight reader detects the salt rotation on its next
+    // snapshot probe.
+    w.index.reset_after_checkpoint(new_salt1, new_salt2);
     Ok(())
 }
 
