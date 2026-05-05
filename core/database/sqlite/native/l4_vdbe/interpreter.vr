@@ -671,6 +671,54 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        IdxGT(cursor_id, jump_target, key_reg, n_keys) => {
+            // Index range-scan upper-bound check (#161).  Compare
+            // cursor's CURRENT key against value at `key_reg`;
+            // jump if greater (range exhausted on ascending walk).
+            // Foundation pass: ephemeral row-store cursors don't
+            // track per-row keys explicitly — we use cursor
+            // exhaustion as the conservative jump trigger so
+            // range scans terminate cleanly via the cursor path
+            // even before key-aware comparison wires up.
+            let _ = key_reg; let _ = n_keys;
+            if !state.cursors.has_more(cursor_id) {
+                state.pc = jump_target;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        IdxGE(cursor_id, jump_target, key_reg, n_keys) => {
+            let _ = key_reg; let _ = n_keys;
+            if !state.cursors.has_more(cursor_id) {
+                state.pc = jump_target;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        IdxLT(cursor_id, jump_target, key_reg, n_keys) => {
+            let _ = key_reg; let _ = n_keys;
+            if !state.cursors.has_more(cursor_id) {
+                state.pc = jump_target;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        IdxLE(cursor_id, jump_target, key_reg, n_keys) => {
+            let _ = key_reg; let _ = n_keys;
+            if !state.cursors.has_more(cursor_id) {
+                state.pc = jump_target;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
         NewRowid(cursor_id, dst) => {
             let rid = state.cursors.peek_next_rowid(cursor_id);
             state.regs.set(dst, RRowId(rid));

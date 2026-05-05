@@ -113,6 +113,10 @@ fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
         SeekLT(c, k, n, t) => SeekLT(c, k, n, remap_one(t, mapping)),
         Found(c, t, k, n)    => Found(c, remap_one(t, mapping), k, n),
         NotFound(c, t, k, n) => NotFound(c, remap_one(t, mapping), k, n),
+        IdxGT(c, t, k, n)    => IdxGT(c, remap_one(t, mapping), k, n),
+        IdxGE(c, t, k, n)    => IdxGE(c, remap_one(t, mapping), k, n),
+        IdxLT(c, t, k, n)    => IdxLT(c, remap_one(t, mapping), k, n),
+        IdxLE(c, t, k, n)    => IdxLE(c, remap_one(t, mapping), k, n),
         SorterNext(c, t)     => SorterNext(c, remap_one(t, mapping)),
         other => clone_op(other),
     }
@@ -174,6 +178,10 @@ fn clone_op(op: &Opcode) -> Opcode {
         SeekLT(c, k, n, t) => SeekLT(c, k, n, t),
         Found(c, t, k, n)    => Found(c, t, k, n),
         NotFound(c, t, k, n) => NotFound(c, t, k, n),
+        IdxGT(c, t, k, n)    => IdxGT(c, t, k, n),
+        IdxGE(c, t, k, n)    => IdxGE(c, t, k, n),
+        IdxLT(c, t, k, n)    => IdxLT(c, t, k, n),
+        IdxLE(c, t, k, n)    => IdxLE(c, t, k, n),
         IdxInsert(c, r)    => IdxInsert(c, r),
         Insert(c, d, k, f) => Insert(c, d, k, f),
         Delete(c)          => Delete(c),
@@ -377,6 +385,10 @@ fn opcode_jump_targets(op: &Opcode) -> List<Int> {
         SeekLT(_, _, _, t)   => { out.push(t); }
         Found(_, t, _, _)    => { out.push(t); }
         NotFound(_, t, _, _) => { out.push(t); }
+        IdxGT(_, t, _, _)    => { out.push(t); }
+        IdxGE(_, t, _, _)    => { out.push(t); }
+        IdxLT(_, t, _, _)    => { out.push(t); }
+        IdxLE(_, t, _, _)    => { out.push(t); }
         SorterNext(_, t)     => { out.push(t); }
         _ => {}
     }

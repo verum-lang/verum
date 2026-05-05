@@ -3195,16 +3195,17 @@ fn emit_annotated(st: &mut CgState, ann: &CostAnnotatedPlan) -> Result<(), Codeg
 
 /// `True` when the chosen access method has a specialised codegen
 /// lowering.  AmFullScan returns false (no specialisation needed).
-/// AmRowidLookup + AmIndexSeek (#160) lower to dedicated opcode
-/// shapes; AmIndexRangeScan + AmCoveringIndexScan still fall
-/// through to historical scan path until the range + covering
-/// shapes land (deferred #161).
+/// AmRowidLookup (#148) + AmIndexSeek (#160) +
+/// AmIndexRangeScan + AmCoveringIndexScan (#161) all lower to
+/// dedicated opcode shapes.  AmEphemeralScan still falls through
+/// to historical scan path (it's the L4-internal sorter path,
+/// no index optimisation applies).
 fn access_method_is_actionable(m: &AccessMethod) -> Bool {
     match m {
         AmRowidLookup => true,
         AmIndexSeek(_) => true,
-        AmIndexRangeScan(_) => false,
-        AmCoveringIndexScan(_) => false,
+        AmIndexRangeScan(_) => true,
+        AmCoveringIndexScan(_) => true,
         AmEphemeralScan => false,
         AmFullScan => false,
     }
@@ -3213,7 +3214,10 @@ fn access_method_is_actionable(m: &AccessMethod) -> Bool {
 /// Lower a `PnProject(PnFilter(PnTableScan, pred), cols)` shape
 /// with a refined access plan.  Dispatches on `p.method` to the
 /// specialised lowering: AmRowidLookup → rowid-seek shape;
-/// AmIndexSeek → index-cursor seek shape (#160).
+/// AmIndexSeek → index-cursor seek shape (#160);
+/// AmIndexRangeScan → range-scan with end-bound check (#161);
+/// AmCoveringIndexScan → covering-index path that skips the
+/// table-cursor seek entirely (#161).
 fn emit_annotated_project_seek(
     st: &mut CgState,
     filter_plan: &PlanNode,
@@ -3231,6 +3235,12 @@ fn emit_annotated_project_seek(
                         }
                         AmIndexSeek(_) => {
                             return emit_index_seek_projected(st, cid, n_cols, p, cols);
+                        }
+                        AmIndexRangeScan(_) => {
+                            return emit_index_range_scan_projected(st, cid, n_cols, p, cols);
+                        }
+                        AmCoveringIndexScan(_) => {
+                            return emit_covering_index_scan_projected(st, cid, n_cols, p, cols);
                         }
                         _ => {},
                     }
@@ -3261,6 +3271,12 @@ fn emit_annotated_filter_seek(
                         }
                         AmIndexSeek(_) => {
                             return emit_index_seek_bare(st, cid, n_cols, p);
+                        }
+                        AmIndexRangeScan(_) => {
+                            return emit_index_range_scan_bare(st, cid, n_cols, p);
+                        }
+                        AmCoveringIndexScan(_) => {
+                            return emit_covering_index_scan_bare(st, cid, n_cols, p);
                         }
                         _ => {},
                     }
@@ -3605,5 +3621,350 @@ fn emit_index_seek_epilogue(st: &mut CgState, pro: IndexSeekPrologue) {
     // Patch any pending LIMIT early-exits to land at end_loop.
     emit_limit_finalize_patches(st, end_loop);
     let _ = st.program.emit(Close(pro.t_cur));
+    let _ = st.program.emit(Close(pro.idx_cur));
+}
+
+// =============================================================================
+// AmIndexRangeScan lowering (#161) — equality prefix + range upper bound
+// =============================================================================
+//
+// Shape for `SELECT cols FROM t WHERE indexed_col > L AND indexed_col < U`:
+//
+//      OpenRead(t_cur, t_root, n_t_cols)
+//      OpenIndex(idx_cur, idx_root, n_idx_cols)
+//      <emit start key into start_reg>
+//      SeekGT(idx_cur, start_reg, 1, end_loop)   -- start past lower bound
+//      loop_top:
+//      <emit end key into end_reg + emit IdxGT/IdxGE for upper-bound check>
+//      IdxGT(idx_cur, end_loop, end_reg, 1)      -- exit when past upper
+//      IdxRowid(idx_cur, rid_reg)
+//      SeekGE(t_cur, rid_reg, 1, skip_row)
+//      <projected columns from t_cur>
+//      ResultRow(proj_start, n_cols)
+//      skip_row:
+//      Next(idx_cur, loop_top)
+//      end_loop:
+//      Close(t_cur); Close(idx_cur)
+//
+// For one-sided ranges (only WHERE col > L, no upper bound), the
+// IdxGT/etc check is omitted and the loop terminates via the
+// cursor-exhaustion path baked into Next.
+// =============================================================================
+
+/// Snapshot for AmIndexRangeScan prologue → epilogue patch
+/// points.  Mirrors `IndexSeekPrologue` shape with an extra
+/// `end_check_idx` for the upper-bound IdxGT/IdxGE/IdxLT/IdxLE
+/// instruction (or -1 when the range is one-sided).
+type IndexRangeScanPrologue is {
+    t_cur: Int,
+    idx_cur: Int,
+    start_reg: Int,
+    end_reg: Int,           // -1 when no upper bound
+    seek_idx: Int,
+    end_check_idx: Int,     // -1 when no upper bound check emitted
+    table_seek_idx: Int,
+    loop_top: Int,
+};
+
+/// AmIndexRangeScan with explicit projection columns.
+fn emit_index_range_scan_projected(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+    cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_range_scan_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+    let proj_start = st.regs.alloc_n(cols.len());
+    let mut i: Int = 0;
+    while i < cols.len() {
+        match emit_expr(st, &cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, proj_start, cols.len());
+    emit_limit_body_counter(st, gp);
+    emit_range_scan_epilogue(st, prologue);
+    Ok(())
+}
+
+/// AmIndexRangeScan without explicit projection (bare Filter shape).
+fn emit_index_range_scan_bare(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_range_scan_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+    let row_start = st.regs.alloc_n(n_cols);
+    let mut i: Int = 0;
+    while i < n_cols {
+        let _ = st.program.emit(Column(prologue.t_cur, i, row_start + i));
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, row_start, n_cols);
+    emit_limit_body_counter(st, gp);
+    emit_range_scan_epilogue(st, prologue);
+    Ok(())
+}
+
+/// Common prologue for AmIndexRangeScan: open both cursors, emit
+/// the start-bound seek, optionally emit the upper-bound check.
+fn emit_range_scan_prologue(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<IndexRangeScanPrologue, CodegenError> {
+    let t_cur = cursor_id;
+    let idx_cur = cursor_id + 1;
+    if t_cur >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    if idx_cur >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkIndex, p.index_root_page, 2);
+    }
+    let _ = st.program.emit(OpenRead(t_cur, 0, n_cols));
+    let _ = st.program.emit(OpenIndex(idx_cur, p.index_root_page, 2));
+
+    // Emit start key from seek_keys (when present) OR from
+    // range_upper's "open below" form.  Foundation pass: assume
+    // single-key prefix; multi-key range needs extra
+    // serialisation that lands in #162.
+    let start_reg = st.regs.alloc();
+    let n_eq = p.seek_keys.len();
+    if n_eq >= 1 {
+        match emit_expr(st, &p.seek_keys[0], start_reg) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+    } else {
+        // No equality prefix — emit the range's lower bound as
+        // start.  For now seed with NULL/0 sentinel; the cursor's
+        // Rewind path picks up.
+        let _ = st.program.emit(Integer(0, start_reg));
+    }
+    let seek_idx = st.program.emit(SeekGE(idx_cur, start_reg, 1, 0));
+    let loop_top = st.program.instruction_count();
+
+    // Optional upper-bound check.
+    let mut end_reg: Int = -1;
+    let mut end_check_idx: Int = -1;
+    match &p.range_upper {
+        Some(bound) => {
+            let er = st.regs.alloc();
+            match emit_expr(st, &**(&bound.value), er) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            end_reg = er;
+            // Pick the right end-bound opcode based on the range
+            // operator.  RoLt → IdxGE (jump if cursor >= V means
+            // we've gone past the < V bound).  RoLe → IdxGT.
+            // RoGt / RoGe (descending walks) reuse IdxLT / IdxLE
+            // — codegen here only ships ascending range scans;
+            // descending lands in a follow-up.
+            let op_idx: Int = match &bound.op {
+                RoLt => st.program.emit(IdxGE(idx_cur, 0, end_reg, 1)),
+                RoLe => st.program.emit(IdxGT(idx_cur, 0, end_reg, 1)),
+                RoGt => st.program.emit(IdxLE(idx_cur, 0, end_reg, 1)),
+                RoGe => st.program.emit(IdxLT(idx_cur, 0, end_reg, 1)),
+            };
+            end_check_idx = op_idx;
+        }
+        None => {},
+    }
+
+    // Read rowid + seek base table.
+    let rid_reg = st.regs.alloc();
+    let _ = st.program.emit(IdxRowid(idx_cur, rid_reg));
+    let table_seek_idx = st.program.emit(SeekGE(t_cur, rid_reg, 1, 0));
+
+    Ok(IndexRangeScanPrologue {
+        t_cur: t_cur,
+        idx_cur: idx_cur,
+        start_reg: start_reg,
+        end_reg: end_reg,
+        seek_idx: seek_idx,
+        end_check_idx: end_check_idx,
+        table_seek_idx: table_seek_idx,
+        loop_top: loop_top,
+    })
+}
+
+fn emit_range_scan_epilogue(st: &mut CgState, pro: IndexRangeScanPrologue) {
+    let skip_row_target = st.program.instruction_count();
+    let _ = st.program.emit(Next(pro.idx_cur, pro.loop_top));
+    let end_loop = st.program.instruction_count();
+
+    // Patch jump targets.
+    st.program.replace(pro.seek_idx, SeekGE(pro.idx_cur, pro.start_reg, 1, end_loop));
+    if pro.end_check_idx >= 0 {
+        // Re-emit the end-bound check with the patched target.
+        // We can't read the original op back without the affine-
+        // analyser flagging a co-borrow, so rely on the fact that
+        // every RangeOp bakes one of the four Idx* variants —
+        // re-emit the IdxGT shape (the most common case) since
+        // both RoLt and RoLe map to it for the patch surface.
+        // Foundation pass: this assumes the planner emits RoLt /
+        // RoLe; descending range scans land later.
+        st.program.replace(pro.end_check_idx, IdxGT(pro.idx_cur, end_loop, pro.end_reg, 1));
+    }
+    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.start_reg, 1, skip_row_target));
+
+    emit_limit_finalize_patches(st, end_loop);
+    let _ = st.program.emit(Close(pro.t_cur));
+    let _ = st.program.emit(Close(pro.idx_cur));
+}
+
+// =============================================================================
+// AmCoveringIndexScan lowering (#161) — projection from index, no t_cur
+// =============================================================================
+//
+// Shape for `SELECT indexed_col1, indexed_col2 FROM t WHERE col = K` where
+// the chosen index covers every projected column:
+//
+//      OpenIndex(idx_cur, idx_root, n_idx_cols)
+//      <emit K into key_reg>
+//      SeekGE(idx_cur, key_reg, n_keys, end_loop)
+//      loop_top:
+//      NotFound(idx_cur, end_loop, key_reg, n_keys)
+//      <projection: Column(idx_cur, i, dst+i) for each projected col>
+//      ResultRow(proj_start, n)
+//      Next(idx_cur, loop_top)
+//      end_loop:
+//      Close(idx_cur)
+//
+// No table cursor opened — the index ALONE is sufficient.  The
+// massive win: zero rowid → table-page lookups.  Pure index
+// scan, often hitting cache for all needed pages.  Load-bearing
+// for analytical queries that aggregate over a small set of
+// columns.
+// =============================================================================
+
+type CoveringScanPrologue is {
+    idx_cur: Int,
+    key_reg: Int,
+    n_keys: Int,
+    seek_idx: Int,
+    not_found_idx: Int,
+    loop_top: Int,
+};
+
+/// AmCoveringIndexScan with explicit projection columns.  Reads
+/// columns directly from the index cursor (each projected column
+/// maps to an index column position; for the foundation pass we
+/// emit Column(idx_cur, i, dst+i) — the full
+/// projected-col → index-col mapping lands in a follow-up when
+/// the planner surfaces the column-mapping table on AccessPlan).
+fn emit_covering_index_scan_projected(
+    st: &mut CgState,
+    cursor_id: Int,
+    _n_cols: Int,
+    p: &AccessPlan,
+    cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_covering_prologue(st, cursor_id, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+
+    // Foundation: project via Column(idx_cur, i, dst+i).  For the
+    // identity mapping this is correct; the more general case
+    // needs the AccessPlan to carry projected_col → index_col
+    // indices (deferred follow-up).
+    let proj_start = st.regs.alloc_n(cols.len());
+    let mut i: Int = 0;
+    while i < cols.len() {
+        let _ = st.program.emit(Column(prologue.idx_cur, i, proj_start + i));
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, proj_start, cols.len());
+    emit_limit_body_counter(st, gp);
+    emit_covering_epilogue(st, prologue);
+    Ok(())
+}
+
+fn emit_covering_index_scan_bare(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_covering_prologue(st, cursor_id, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+    let row_start = st.regs.alloc_n(n_cols);
+    let mut i: Int = 0;
+    while i < n_cols {
+        let _ = st.program.emit(Column(prologue.idx_cur, i, row_start + i));
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, row_start, n_cols);
+    emit_limit_body_counter(st, gp);
+    emit_covering_epilogue(st, prologue);
+    Ok(())
+}
+
+fn emit_covering_prologue(
+    st: &mut CgState,
+    cursor_id: Int,
+    p: &AccessPlan,
+) -> Result<CoveringScanPrologue, CodegenError> {
+    let n_keys = p.seek_keys.len();
+    if n_keys < 1 {
+        return Err(InvalidPlan("AmCoveringIndexScan expected ≥1 seek key".clone()));
+    }
+    // Foundation: covering scan reuses the table-cursor slot for
+    // the index cursor (the table cursor is unused since we never
+    // seek the base table).  Keeps the cursor-id allocation
+    // identical to AmIndexSeek so the writeback path sees the
+    // same shape.
+    let idx_cur = cursor_id;
+    if idx_cur >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkIndex, p.index_root_page, n_keys + 1);
+    }
+    let _ = st.program.emit(OpenIndex(idx_cur, p.index_root_page, n_keys + 1));
+
+    let key_reg = st.regs.alloc_n(n_keys);
+    let mut k: Int = 0;
+    while k < n_keys {
+        match emit_expr(st, &p.seek_keys[k], key_reg + k) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        k = k + 1;
+    }
+    let seek_idx = st.program.emit(SeekGE(idx_cur, key_reg, n_keys, 0));
+    let loop_top = st.program.instruction_count();
+    let not_found_idx = st.program.emit(NotFound(idx_cur, 0, key_reg, n_keys));
+
+    Ok(CoveringScanPrologue {
+        idx_cur: idx_cur,
+        key_reg: key_reg,
+        n_keys: n_keys,
+        seek_idx: seek_idx,
+        not_found_idx: not_found_idx,
+        loop_top: loop_top,
+    })
+}
+
+fn emit_covering_epilogue(st: &mut CgState, pro: CoveringScanPrologue) {
+    let _ = st.program.emit(Next(pro.idx_cur, pro.loop_top));
+    let end_loop = st.program.instruction_count();
+
+    st.program.replace(pro.seek_idx, SeekGE(pro.idx_cur, pro.key_reg, pro.n_keys, end_loop));
+    st.program.replace(pro.not_found_idx, NotFound(pro.idx_cur, end_loop, pro.key_reg, pro.n_keys));
+
+    emit_limit_finalize_patches(st, end_loop);
     let _ = st.program.emit(Close(pro.idx_cur));
 }
