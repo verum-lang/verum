@@ -139,14 +139,22 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
         pending_index.insert(page_no, frame_no);
 
         if is_commit_frame(&fh) {
-            // Promote pending_index into writer.state.frame_index;
-            // bump mx_frame; record commit_db_size.
+            // Promote pending_index into BOTH (a) writer.state.frame_index
+            // — the writer's authoritative in-memory page→frame map;
+            // and (b) writer.index — the .shm WalIndex consulted by
+            // concurrent readers' find_frame fast path (#150 + #163).
+            // Without (b), post-recovery readers attaching to an
+            // empty .shm header would fall back to byte-0 WAL walking
+            // — defeating the whole multi-reader concurrency story.
             let pending_keys = pending_index.keys();
             let mut k: Int = 0;
             while k < pending_keys.len() {
                 let kp = pending_keys[k];
                 match maybe_int_get(&pending_index, kp) {
-                    Some(fn_ok) => { writer.state.frame_index.insert(kp, fn_ok); }
+                    Some(fn_ok) => {
+                        writer.state.frame_index.insert(kp, fn_ok);
+                        writer.index.append_frame(kp, fn_ok);
+                    }
                     None => {}
                 }
                 k = k + 1;
@@ -164,6 +172,22 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
 
     // Anything in pending_index is an incomplete transaction.
     report.incomplete_trailer = pending_index.keys().len();
+
+    // Publish the recovered header to the WalIndex so the .shm
+    // matches the post-recovery on-disk reality (#150 + #163).  The
+    // commit_header flips is_init=true — any reader attaching from
+    // here on consults find_frame() instead of walking the WAL from
+    // byte 0.  Skipped when no commit-marker was found (recovery
+    // accepted zero frames; .shm stays uninitialised, readers will
+    // trigger a fresh recovery on next attach).
+    if report.last_commit_frame > 0 {
+        let mx = writer.state.mx_frame;
+        let n_pg = writer.state.last_commit_db_size as u32;
+        let s1 = writer.state.salt1;
+        let s2 = writer.state.salt2;
+        writer.index.commit_header(mx, n_pg, s1, s2);
+    }
+
     Ok(report)
 }
 
