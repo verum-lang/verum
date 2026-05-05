@@ -65182,6 +65182,22 @@ fn parse_descriptor_type_string(raw: &str) -> Type {
     if trimmed.is_empty() || trimmed == "()" {
         return Type::Unit;
     }
+    // VBC opaque-type fallbacks → fresh type variable.  The
+    // string `"__opaque_type_N"` (from `archive_metadata::type_ref_to_text`'s
+    // fallback for unmapped concrete TypeIds) and `"__generic_N"`
+    // (TypeRef::Generic(N) without a param-name map) both
+    // represent "VBC didn't resolve this further" — the unifier
+    // should treat them as fresh type variables so they unify
+    // with any concrete type at use sites.  Without this, every
+    // method signature carrying an unresolved cross-module
+    // TypeId fails downstream unification (`expected
+    // '__opaque_type_14', found 'Text'`).
+    if trimmed.starts_with("__opaque_type_")
+        || trimmed.starts_with("__generic_")
+        || trimmed == "__opaque_typeref"
+    {
+        return Type::Var(crate::ty::TypeVar::fresh());
+    }
     // References: "&mut T" / "&T".
     if let Some(rest) = trimmed.strip_prefix("&mut ") {
         return Type::Reference {
