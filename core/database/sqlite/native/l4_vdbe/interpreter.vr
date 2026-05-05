@@ -308,6 +308,19 @@ fn cmp_eq(a: &Register, b: &Register) -> Bool {
     }
 }
 
+/// Collect `n_keys` consecutive registers starting at `key_reg` into
+/// a fresh `List<Register>`.  Used by Idx{GT,GE,LT,LE} (#164) to
+/// build the comparison RHS handed to `CursorTable::cmp_current_key_to`.
+fn collect_key_values(state: &VdbeState, key_reg: Int, n_keys: Int) -> List<Register> {
+    let mut out: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < n_keys {
+        out.push(state.regs.get(key_reg + i));
+        i = i + 1;
+    }
+    out
+}
+
 // -----------------------------------------------------------------------------
 // Step
 // -----------------------------------------------------------------------------
@@ -672,49 +685,45 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         IdxGT(cursor_id, jump_target, key_reg, n_keys) => {
-            // Index range-scan upper-bound check (#161).  Compare
-            // cursor's CURRENT key against value at `key_reg`;
-            // jump if greater (range exhausted on ascending walk).
-            // Foundation pass: ephemeral row-store cursors don't
-            // track per-row keys explicitly — we use cursor
-            // exhaustion as the conservative jump trigger so
-            // range scans terminate cleanly via the cursor path
-            // even before key-aware comparison wires up.
-            let _ = key_reg; let _ = n_keys;
-            if !state.cursors.has_more(cursor_id) {
-                state.pc = jump_target;
-            } else {
-                state.pc = state.pc + 1;
+            // Index range-scan upper-bound check (#164).  Compare the
+            // cursor's CURRENT key against the n_keys values starting
+            // at `key_reg`; jump when cursor.key > bound.  Cursor
+            // exhaustion → jump (treat as past EOF).
+            let key_vals = collect_key_values(state, key_reg, n_keys);
+            match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
+                None         => { state.pc = jump_target; }
+                Some(c) if c > 0 => { state.pc = jump_target; }
+                _            => { state.pc = state.pc + 1; }
             }
             Yield
         }
 
         IdxGE(cursor_id, jump_target, key_reg, n_keys) => {
-            let _ = key_reg; let _ = n_keys;
-            if !state.cursors.has_more(cursor_id) {
-                state.pc = jump_target;
-            } else {
-                state.pc = state.pc + 1;
+            let key_vals = collect_key_values(state, key_reg, n_keys);
+            match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
+                None          => { state.pc = jump_target; }
+                Some(c) if c >= 0 => { state.pc = jump_target; }
+                _             => { state.pc = state.pc + 1; }
             }
             Yield
         }
 
         IdxLT(cursor_id, jump_target, key_reg, n_keys) => {
-            let _ = key_reg; let _ = n_keys;
-            if !state.cursors.has_more(cursor_id) {
-                state.pc = jump_target;
-            } else {
-                state.pc = state.pc + 1;
+            let key_vals = collect_key_values(state, key_reg, n_keys);
+            match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
+                None          => { state.pc = jump_target; }
+                Some(c) if c < 0  => { state.pc = jump_target; }
+                _             => { state.pc = state.pc + 1; }
             }
             Yield
         }
 
         IdxLE(cursor_id, jump_target, key_reg, n_keys) => {
-            let _ = key_reg; let _ = n_keys;
-            if !state.cursors.has_more(cursor_id) {
-                state.pc = jump_target;
-            } else {
-                state.pc = state.pc + 1;
+            let key_vals = collect_key_values(state, key_reg, n_keys);
+            match state.cursors.cmp_current_key_to(cursor_id, &key_vals, n_keys) {
+                None          => { state.pc = jump_target; }
+                Some(c) if c <= 0 => { state.pc = jump_target; }
+                _             => { state.pc = state.pc + 1; }
             }
             Yield
         }

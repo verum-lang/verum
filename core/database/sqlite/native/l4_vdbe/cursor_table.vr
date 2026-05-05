@@ -595,6 +595,44 @@ implement CursorTable {
         out
     }
 
+    /// Compare the cursor's current key (first `n_keys` columns of
+    /// the current row) against `key_values`.  Returns `Maybe::None`
+    /// if the cursor is exhausted or the slot is invalid; otherwise
+    /// `Some(c)` where c is -1 / 0 / +1 from comparing column-by-
+    /// column under the type-class ordering used by `cmp_register`
+    /// (NULL < numeric < text < blob, with int/real promoted via
+    /// Float64 widening).  `n_keys` is clamped to the row's column
+    /// count and the key_values list length — short prefixes match.
+    ///
+    /// Used by Idx{GT,GE,LT,LE} opcodes for index range-scan upper-
+    /// bound checks (#164).  The interpreter compares against the
+    /// returned sign:
+    ///   * IdxGT: jump if c > 0 (cursor.key > bound)
+    ///   * IdxGE: jump if c >= 0
+    ///   * IdxLT: jump if c < 0
+    ///   * IdxLE: jump if c <= 0
+    /// A `None` return is interpreted as "past EOF" — every Idx*
+    /// variant jumps so the loop terminates cleanly.
+    public fn cmp_current_key_to(
+        &self,
+        cursor_id: Int,
+        key_values: &List<Register>,
+        n_keys: Int,
+    ) -> Maybe<Int> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return None; }
+        let s = &self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return None; }
+        let row = &s.rows[s.pos];
+        let mut k: Int = 0;
+        while k < n_keys {
+            if k >= row.len() || k >= key_values.len() { break; }
+            let c = cmp_register(&row[k], &key_values[k]);
+            if c != 0 { return Some(c); }
+            k = k + 1;
+        }
+        Some(0)
+    }
+
     /// The rowid that would be assigned to the next appended row.
     /// NewRowid opcode reads this.
     public fn peek_next_rowid(&self, cursor_id: Int) -> Int64 {
