@@ -3,12 +3,19 @@
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling — dump / restore)
 //
-
-// Export modules don't take a hard dependency on l4_vdbe register
-// types. Instead they consume `SqlValue`, a five-variant sum that
+// Export modules consume `ExportValue`, a five-variant sum that
 // matches SQLite storage classes (NULL / INTEGER / REAL / TEXT /
-// BLOB). The host adapter converts l4_vdbe registers into
-// `SqlValue` once.
+// BLOB) with the ROLE of textual SQL-literal rendering.  Distinct
+// from `l6_session::sql_value::SqlValue` (the SQLite-C-API-shaped
+// value used by `sqlite3_column_*` / `sqlite3_bind_*`); the
+// `from_sql_value` adapter at the bottom of this file lifts the
+// canonical SqlValue into ExportValue for dump-pipeline use.
+//
+// Renamed from `SqlValue` (#162) to eliminate the variant-name
+// clash with `l6_session::sql_value::SqlValue` — pattern-matching
+// across modules used to dispatch unpredictably depending on
+// import order.  Each type now reflects its role: SqlValue = API
+// surface, ExportValue = rendering surface.
 // =============================================================================
 
 module core.database.sqlite.native.export.value;
@@ -18,37 +25,46 @@ mount base.{Text, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// SqlValue
+// ExportValue — rendering-surface SQL value
 // -----------------------------------------------------------------------------
 
-public type SqlValue is
-      SvNull
-    | SvInteger(Int64)
-    | SvReal(Float64)
-    | SvText(Text)
-    | SvBlob(List<Byte>);
+public type ExportValue is
+      EvNull
+    | EvInteger(Int64)
+    | EvReal(Float64)
+    | EvText(Text)
+    | EvBlob(List<Byte>);
 
-public fn sv_kind_name(v: &SqlValue) -> Text {
+/// Back-compat type alias — older callers still importing
+/// `SqlValue` resolve through this until they migrate to the
+/// `ExportValue` name.  Will be removed in a follow-up sweep
+/// once every consumer is renamed.
+public type SqlValue is ExportValue;
+
+public fn ev_kind_name(v: &ExportValue) -> Text {
     match v {
-        SvNull       => "NULL".clone(),
-        SvInteger(_) => "INTEGER".clone(),
-        SvReal(_)    => "REAL".clone(),
-        SvText(_)    => "TEXT".clone(),
-        SvBlob(_)    => "BLOB".clone(),
+        EvNull       => "NULL".clone(),
+        EvInteger(_) => "INTEGER".clone(),
+        EvReal(_)    => "REAL".clone(),
+        EvText(_)    => "TEXT".clone(),
+        EvBlob(_)    => "BLOB".clone(),
     }
 }
+
+/// Back-compat alias for sv_kind_name.
+public fn sv_kind_name(v: &ExportValue) -> Text { ev_kind_name(v) }
 
 // -----------------------------------------------------------------------------
 // SQL literal rendering — used by the INSERT-statement emitter
 // -----------------------------------------------------------------------------
 
-public fn render_sql_literal(v: &SqlValue) -> Text {
+public fn render_sql_literal(v: &ExportValue) -> Text {
     match v {
-        SvNull       => "NULL".clone(),
-        SvInteger(n) => render_int64(*n),
-        SvReal(f)    => render_float(*f),
-        SvText(t)    => quote_sql_text(t),
-        SvBlob(b)    => render_blob_x(b),
+        EvNull       => "NULL".clone(),
+        EvInteger(n) => render_int64(*n),
+        EvReal(f)    => render_float(*f),
+        EvText(t)    => quote_sql_text(t),
+        EvBlob(b)    => render_blob_x(b),
     }
 }
 
@@ -149,4 +165,26 @@ fn push(dst: &mut Text, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+// -----------------------------------------------------------------------------
+// Bridge from the canonical L6 SqlValue (#162)
+// -----------------------------------------------------------------------------
+
+/// Lift a canonical `l6_session::sql_value::SqlValue` into the
+/// rendering-surface `ExportValue`.  The conversion is structural
+/// + total — every variant maps 1-to-1.  Use this at the dump-
+/// pipeline boundary to keep the rendering layer decoupled from
+/// the SQLite-API surface (which evolves to track sqlite3_*
+/// behaviour) while sharing the underlying value carriers.
+public fn from_sql_value(
+    v: &core.database.sqlite.native.l6_session.sql_value.SqlValue,
+) -> ExportValue {
+    match v {
+        core.database.sqlite.native.l6_session.sql_value.VNull    => EvNull,
+        core.database.sqlite.native.l6_session.sql_value.VInt(i)  => EvInteger(i),
+        core.database.sqlite.native.l6_session.sql_value.VReal(x) => EvReal(x),
+        core.database.sqlite.native.l6_session.sql_value.VText(ref t) => EvText(t.clone()),
+        core.database.sqlite.native.l6_session.sql_value.VBlob(ref b) => EvBlob(b.clone()),
+    }
 }

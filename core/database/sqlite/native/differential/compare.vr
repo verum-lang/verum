@@ -15,7 +15,7 @@ mount core.*;
 mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.export.value.{
-    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob, render_sql_literal,
+    ExportValue, EvNull, EvInteger, EvReal, EvText, EvBlob, render_sql_literal,
 };
 mount core.database.sqlite.native.differential.case.{
     CaseMode, CmExactRows, CmRowsetEquivalent, CmErrorClass, CmSideEffect,
@@ -178,26 +178,26 @@ fn rows_equal(a: &DifferentialResultRow, b: &DifferentialResultRow) -> Bool {
     true
 }
 
-fn value_equal(a: &SqlValue, b: &SqlValue) -> Bool {
+fn value_equal(a: &ExportValue, b: &ExportValue) -> Bool {
     match a {
-        SvNull => match b {
-            SvNull => true,
+        EvNull => match b {
+            EvNull => true,
             _      => false,
         },
-        SvInteger(x) => match b {
-            SvInteger(y) => *x == *y,
+        EvInteger(x) => match b {
+            EvInteger(y) => *x == *y,
             _            => false,
         },
-        SvReal(x) => match b {
-            SvReal(y) => *x == *y,
+        EvReal(x) => match b {
+            EvReal(y) => *x == *y,
             _         => false,
         },
-        SvText(x) => match b {
-            SvText(y) => x == y,
+        EvText(x) => match b {
+            EvText(y) => x == y,
             _         => false,
         },
-        SvBlob(x) => match b {
-            SvBlob(y) => bytes_equal(x, y),
+        EvBlob(x) => match b {
+            EvBlob(y) => bytes_equal(x, y),
             _         => false,
         },
     }
