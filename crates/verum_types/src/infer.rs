@@ -64926,18 +64926,14 @@ fn collect_named_types_from_function_body(
 /// type's variants without walking the entire stdlib.  Mirrors the
 /// eager loader's behaviour for that single type.
 fn register_variant_signature_for_lazy(
-    _checker: &mut TypeChecker,
-    _name: &Text,
+    checker: &mut TypeChecker,
+    name: &Text,
     _type_desc: &crate::core_metadata::TypeDescriptor,
     cases: &List<crate::core_metadata::VariantCase>,
     pending: &mut Vec<Text>,
 ) {
-    // Variant payload type names → pending so the lazy loader
-    // closure picks them up.  The variant signature itself is
-    // computed by the eager loader's existing logic in
-    // `load_stdlib_from_metadata`; for V0 we reuse the typechecker's
-    // own variant inference once the parent type and its payload
-    // types are present in `ctx.type_defs`.
+    // Push payload type names → pending so the lazy loader
+    // closure picks them up.
     for case in cases.iter() {
         if let Maybe::Some(payload) = &case.payload {
             match payload {
@@ -64958,4 +64954,103 @@ fn register_variant_signature_for_lazy(
             }
         }
     }
+
+    // Register variant signature + constructor parent mappings +
+    // unit-variant values in env, mirroring the eager
+    // `load_stdlib_from_metadata` block at lines ~1717-1731.
+    // Without this, `Ok(x)` / `Err(x)` / `None` / `Some(x)` etc. are
+    // unbound at user-code call sites despite the parent Result/
+    // Maybe type being registered.
+    use indexmap::IndexMap;
+    let mut variant_map: IndexMap<Text, Type> = IndexMap::new();
+    for case in cases.iter() {
+        let payload_ty = match &case.payload {
+            Maybe::None => Type::Unit,
+            Maybe::Some(crate::core_metadata::VariantPayload::Tuple(types)) => {
+                if types.len() == 1 {
+                    Type::Named {
+                        path: TypeChecker::text_to_path(&types[0]),
+                        args: List::new(),
+                    }
+                } else {
+                    Type::Tuple(
+                        types
+                            .iter()
+                            .map(|t| Type::Named {
+                                path: TypeChecker::text_to_path(t),
+                                args: List::new(),
+                            })
+                            .collect(),
+                    )
+                }
+            }
+            Maybe::Some(crate::core_metadata::VariantPayload::Record(fields)) => {
+                let field_map: IndexMap<Text, Type> = fields
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.name.clone(),
+                            Type::Named {
+                                path: TypeChecker::text_to_path(&f.ty),
+                                args: List::new(),
+                            },
+                        )
+                    })
+                    .collect();
+                Type::Record(field_map)
+            }
+        };
+        variant_map.insert(case.name.clone(), payload_ty);
+    }
+
+    let variant_type = Type::Variant(variant_map.clone());
+    if let Some(sig) = TypeChecker::variant_type_signature(&variant_type) {
+        checker.register_variant_type_name_first_wins(sig.clone(), name.clone());
+        if let Some(relaxed) = TypeChecker::variant_type_signature_relaxed(&variant_type) {
+            if relaxed != sig {
+                checker.register_variant_type_name_first_wins(relaxed, name.clone());
+            }
+        }
+    }
+
+    // Variant constructor parent mappings.
+    for (vname, _payload_ty) in &variant_map {
+        let parents = checker
+            .variant_constructor_parents
+            .entry(vname.clone())
+            .or_default();
+        if !parents.iter().any(|p| p == name) {
+            parents.push(name.clone());
+        }
+    }
+
+    // Register unit-variant constructors as env values (so `None`,
+    // `Less`, `Greater`, … resolve as expressions) and ALWAYS the
+    // qualified `Type.Variant` form.
+    for (vname, payload_ty) in &variant_map {
+        if *payload_ty == Type::Unit {
+            if checker.ctx.env.lookup(vname.as_str()).is_none() {
+                checker
+                    .ctx
+                    .env
+                    .insert_mono(vname.clone(), variant_type.clone());
+            }
+        }
+        let qualified_name: Text = format!("{}.{}", name, vname).into();
+        checker
+            .ctx
+            .env
+            .insert_mono(qualified_name, variant_type.clone());
+    }
+
+    // Payload-bearing variant constructors are NOT registered as
+    // env functions here.  The eager `load_stdlib_from_metadata`
+    // path (lines 1717-1731) doesn't register them either —
+    // dispatch goes through `variant_constructor_parents` (set
+    // above) and the typechecker's own variant-resolution path.
+    // Pre-fix attempt to register them as `fn(T) -> Variant`
+    // typed env entries broke method dispatch on generics
+    // (`list.len()`, `maybe.unwrap_or(0)`, …) because the
+    // constructor's typed shape interfered with the type-method
+    // resolution path.
 }
