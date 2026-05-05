@@ -39,7 +39,7 @@ mount core.database.sqlite.native.l4_vdbe.opcode.{
     If, IfNot, IfNull, NotNull,
     Rewind, Last, Next, Prev,
     SeekGE, SeekGT, SeekLE, SeekLT,
-    Found, NotFound, SorterNext
+    Found, NotFound, IdxGT, IdxGE, IdxLT, IdxLE, SorterNext
 };
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw};
 
@@ -196,6 +196,10 @@ fn jump_targets_of(op: &Opcode) -> List<Int> {
         SeekLT(_, _, _, t)   => { out.push(t); }
         Found(_, t, _, _)    => { out.push(t); }
         NotFound(_, t, _, _) => { out.push(t); }
+        IdxGT(_, t, _, _)    => { out.push(t); }
+        IdxGE(_, t, _, _)    => { out.push(t); }
+        IdxLT(_, t, _, _)    => { out.push(t); }
+        IdxLE(_, t, _, _)    => { out.push(t); }
         SorterNext(_, t)     => { out.push(t); }
         _ => {}
     }
@@ -233,6 +237,10 @@ fn is_control_flow(op: &Opcode) -> Bool {
         SeekLT(_, _, _, _)   => true,
         Found(_, _, _, _)    => true,
         NotFound(_, _, _, _) => true,
+        IdxGT(_, _, _, _)    => true,
+        IdxGE(_, _, _, _)    => true,
+        IdxLT(_, _, _, _)    => true,
+        IdxLE(_, _, _, _)    => true,
         SorterNext(_, _)     => true,
         _ => false,
     }

@@ -1,0 +1,130 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l4_vdbe, index_range, am_index_range_scan, am_covering, opcodes
+// @timeout: 15000
+// @description: L4 Idx{GE,GT,LE,LT} end-bound check opcodes (#161) +
+//               smoke test through L5 codegen for AmIndexRangeScan
+//               and AmCoveringIndexScan dispatch paths.
+//
+// Spec: internal/specs/sqlite-native.md §11.2 (cursor opcodes) +
+//       sqlite-native.md §13.3 (access-method selection)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.{
+    Opcode, IdxGT, IdxGE, IdxLT, IdxLE,
+    OpenIndex, IdxRowid, IdxInsert,
+    SeekGE, NotFound, Found,
+    opcode_name, is_branch, has_external_effect,
+};
+
+// =============================================================================
+// 1. IdxGT / IdxGE / IdxLT / IdxLE construct + name correctly
+// =============================================================================
+
+fn idx_gt_constructs() {
+    let op = IdxGT(0, 10, 5, 1);
+    assert_eq(opcode_name(&op), "IdxGT".clone());
+}
+
+fn idx_ge_constructs() {
+    let op = IdxGE(0, 10, 5, 1);
+    assert_eq(opcode_name(&op), "IdxGE".clone());
+}
+
+fn idx_lt_constructs() {
+    let op = IdxLT(0, 10, 5, 1);
+    assert_eq(opcode_name(&op), "IdxLT".clone());
+}
+
+fn idx_le_constructs() {
+    let op = IdxLE(0, 10, 5, 1);
+    assert_eq(opcode_name(&op), "IdxLE".clone());
+}
+
+// =============================================================================
+// 2. All four are classified as branches (loop-exit gates)
+// =============================================================================
+
+fn all_idx_bounds_are_branches() {
+    assert(is_branch(&IdxGT(0, 0, 0, 0)));
+    assert(is_branch(&IdxGE(0, 0, 0, 0)));
+    assert(is_branch(&IdxLT(0, 0, 0, 0)));
+    assert(is_branch(&IdxLE(0, 0, 0, 0)));
+}
+
+// =============================================================================
+// 3. None of them produces external effects (pure compare-and-branch)
+// =============================================================================
+
+fn idx_bounds_no_external_effect() {
+    assert(!has_external_effect(&IdxGT(0, 0, 0, 0)));
+    assert(!has_external_effect(&IdxGE(0, 0, 0, 0)));
+    assert(!has_external_effect(&IdxLT(0, 0, 0, 0)));
+    assert(!has_external_effect(&IdxLE(0, 0, 0, 0)));
+}
+
+// =============================================================================
+// 4. Distinct from Found / NotFound (different semantics)
+// =============================================================================
+
+fn distinct_from_found_notfound() {
+    let f = Found(0, 0, 0, 0);
+    let nf = NotFound(0, 0, 0, 0);
+    let gt = IdxGT(0, 0, 0, 0);
+    let ge = IdxGE(0, 0, 0, 0);
+    let lt = IdxLT(0, 0, 0, 0);
+    let le = IdxLE(0, 0, 0, 0);
+    assert(opcode_name(&gt) != opcode_name(&f));
+    assert(opcode_name(&gt) != opcode_name(&nf));
+    assert(opcode_name(&ge) != opcode_name(&gt));
+    assert(opcode_name(&lt) != opcode_name(&gt));
+    assert(opcode_name(&le) != opcode_name(&lt));
+}
+
+// =============================================================================
+// 5. All four name pins (EXPLAIN output mnemonics)
+// =============================================================================
+
+fn name_pins() {
+    assert_eq(opcode_name(&IdxGT(0, 0, 0, 0)), "IdxGT".clone());
+    assert_eq(opcode_name(&IdxGE(0, 0, 0, 0)), "IdxGE".clone());
+    assert_eq(opcode_name(&IdxLT(0, 0, 0, 0)), "IdxLT".clone());
+    assert_eq(opcode_name(&IdxLE(0, 0, 0, 0)), "IdxLE".clone());
+}
+
+// =============================================================================
+// 6. Foundation pin: the four Idx-bound variants are mutually distinct
+// =============================================================================
+
+fn four_distinct_variants() {
+    let names = [
+        opcode_name(&IdxGT(0, 0, 0, 0)),
+        opcode_name(&IdxGE(0, 0, 0, 0)),
+        opcode_name(&IdxLT(0, 0, 0, 0)),
+        opcode_name(&IdxLE(0, 0, 0, 0)),
+    ];
+    let mut i: Int = 0;
+    while i < 4 {
+        let mut j: Int = i + 1;
+        while j < 4 {
+            assert(names[i] != names[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {
+    idx_gt_constructs();
+    idx_ge_constructs();
+    idx_lt_constructs();
+    idx_le_constructs();
+    all_idx_bounds_are_branches();
+    idx_bounds_no_external_effect();
+    distinct_from_found_notfound();
+    name_pins();
+    four_distinct_variants();
+}

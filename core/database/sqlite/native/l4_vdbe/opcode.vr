@@ -109,6 +109,26 @@ public type Opcode is
     | SeekLT(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
     | Found(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
     | NotFound(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    /// Index range-scan end-bound checks (#161).  Compare the
+    /// cursor's CURRENT key (not a target seek key) against the
+    /// value(s) at `key_reg .. key_reg + n_keys`; jump to
+    /// `jump_target` when the comparison succeeds.  These are the
+    /// "loop-exit" guards in the range-scan opcode shape:
+    ///
+    ///   * `IdxGT` — jump if current key > value (exit when past
+    ///     `WHERE col < V` upper bound under ascending scan).
+    ///   * `IdxGE` — jump if current key >= value (exclusive end).
+    ///   * `IdxLT` — jump if current key < value (exit at lower
+    ///     bound during descending scan).
+    ///   * `IdxLE` — jump if current key <= value (exclusive end
+    ///     during descending scan).
+    ///
+    /// Distinct from `Found / NotFound` (equality match) and from
+    /// the `Seek*` family (positioning ops, not in-place compare).
+    | IdxGT(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    | IdxGE(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    | IdxLT(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    | IdxLE(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
     /// Insert a key into an index B-tree (#160).  `record_reg`
     /// holds the encoded record (key columns + trailing rowid).
     /// Used by codegen when an INSERT into a base table also
@@ -242,6 +262,10 @@ public fn opcode_name(op: &Opcode) -> Text {
         SeekLT(_, _, _, _) => "SeekLT".clone(),
         Found(_, _, _, _)    => "Found".clone(),
         NotFound(_, _, _, _) => "NotFound".clone(),
+        IdxGT(_, _, _, _)    => "IdxGT".clone(),
+        IdxGE(_, _, _, _)    => "IdxGE".clone(),
+        IdxLT(_, _, _, _)    => "IdxLT".clone(),
+        IdxLE(_, _, _, _)    => "IdxLE".clone(),
         IdxInsert(_, _)    => "IdxInsert".clone(),
         Insert(_, _, _, _) => "Insert".clone(),
         Delete(_)          => "Delete".clone(),
@@ -299,6 +323,8 @@ public fn is_branch(op: &Opcode) -> Bool {
         | SeekGE(_, _, _, _) | SeekGT(_, _, _, _)
         | SeekLE(_, _, _, _) | SeekLT(_, _, _, _)
         | Found(_, _, _, _) | NotFound(_, _, _, _)
+        | IdxGT(_, _, _, _) | IdxGE(_, _, _, _)
+        | IdxLT(_, _, _, _) | IdxLE(_, _, _, _)
         | SorterNext(_, _) => true,
         _ => false,
     }
