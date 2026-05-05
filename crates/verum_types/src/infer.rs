@@ -47681,20 +47681,44 @@ impl TypeChecker {
                 // Check if this implementation has the method directly
                 let method_ty_opt = impl_.methods.get(&method_name).cloned();
 
-                // CRITICAL FIX: Also check superprotocol methods.
-                // When a type implements Eq (which extends PartialEq), the methods from
-                // PartialEq (like eq, ne) should also be available.
+                // #129 — protocol-default-method dispatch. When the impl
+                // block doesn't override the method, the protocol's OWN
+                // declaration may carry a default body (the canonical
+                // shape for Iterator's `map`/`filter`/`collect`,
+                // Functor's `map`, Monad's `flatten`, etc.). Pre-fix
+                // this branch only checked `impl_.methods` (overrides)
+                // and fell straight through to `find_superprotocol_method`
+                // which walks the SUPERPROTOCOL chain — skipping the
+                // impl's own protocol's `methods` table entirely.
+                //
+                // Closes the canonical
+                // `xs.into_iter().map(f).collect()` failure: IntoList
+                // implements Iterator but doesn't override `map`; the
+                // method lives in `Iterator::methods` as a default.
+                //
+                // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+                // the lookup is keyed by `impl_.protocol` (a property
+                // of the registered impl), not a hardcoded list of
+                // protocols/methods. Adding `Functor::map` works the
+                // same way without compiler change.
+                let proto_name_str = impl_
+                    .protocol
+                    .as_ident()
+                    .map(|id| id.name.as_str().to_string());
                 let method_ty_with_source = if let Some(ty) = method_ty_opt {
                     Some((ty, impl_.protocol.clone()))
+                } else if let Some(name) = proto_name_str.as_ref().and_then(|n| {
+                    protocol_checker_guard
+                        .get_protocol_definition(n)
+                        .and_then(|p| p.methods.get(&method_name))
+                        .map(|m| m.ty.clone())
+                }) {
+                    Some((name, impl_.protocol.clone()))
                 } else {
                     // Look in superprotocol hierarchy for this method (recursive BFS).
                     // When Eq extends PartialEq, and PartialEq extends some other protocol,
                     // methods from any ancestor should be available.
-                    let proto_name = impl_
-                        .protocol
-                        .as_ident()
-                        .map(|id| id.name.as_str().to_string());
-                    if let Some(name) = proto_name {
+                    if let Some(name) = proto_name_str {
                         if let Some(proto_def) =
                             protocol_checker_guard.get_protocol_definition(&name)
                         {
