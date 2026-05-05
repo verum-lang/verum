@@ -1185,11 +1185,49 @@ impl VbcCodegen {
         functions: &std::collections::HashMap<String, FunctionInfo>,
     ) {
         self.ctx.import_functions(functions);
-        // Update next_func_id to avoid ID conflicts
-        if let Some(max_id) = functions.values().map(|f| f.id.0).max()
+        // Update next_func_id to avoid ID conflicts.
+        //
+        // Filter out the `u32::MAX` sentinel that
+        // `register_single_ffi_function` stamps on FFI
+        // FunctionInfos (mod.rs:5754).  Without this filter the
+        // sentinel saturates `next_func_id` on the first
+        // `import_functions` call that pulls in any FFI entry, and
+        // every subsequent `register_function` allocation also
+        // returns `u32::MAX` — collapsing dozens of distinct
+        // function bodies (closures, inherent methods, …) onto a
+        // single id which `build_module`'s id-dedup then keeps just
+        // one of.  In stdlib bootstrap this dropped the per-stdlib-
+        // module function count from ~4500 effective to ~570 and
+        // produced the missing-`Text.with_capacity` /
+        // missing-`List.iter` symptom in user code.
+        // Filter sentinel ids.  Multiple sentinels exist in the
+        // codegen registry — `u32::MAX` (FFI extern,
+        // `register_single_ffi_function`), `u32::MAX / 2` (newtype
+        // constructor, `expressions.rs:1331`/`:3599`), and any
+        // future high-bit-set sentinel that downstream gates check
+        // via `id == sentinel`.  Any sentinel leaking into the
+        // max() saturates `next_func_id` and collapses every
+        // subsequent allocation (closures, impl methods, …) onto
+        // a single id which `build_module`'s id-dedup then keeps
+        // just one of.  Cap the threshold at the lowest known
+        // sentinel boundary (`u32::MAX / 4` ≈ 1B) — legitimate
+        // FunctionIds never approach this in stdlib + cog
+        // compilation (~30K functions max even for the full
+        // stdlib).  Using a single threshold instead of an
+        // explicit sentinel list is robust to new sentinels added
+        // upstream.
+        const SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        if let Some(max_id) = functions
+            .values()
+            .map(|f| f.id.0)
+            .filter(|&id| id < SENTINEL_THRESHOLD)
+            .max()
             && max_id >= self.next_func_id
         {
             self.next_func_id = max_id.saturating_add(1);
+        }
+        if std::env::var("VERUM_TRACE_NEXT_FUNC_ID").is_ok() {
+            eprintln!("[import_functions] {} entries, next_func_id={}", functions.len(), self.next_func_id);
         }
     }
 
@@ -4591,6 +4629,42 @@ impl VbcCodegen {
         self.compile_pending_tls_inits()?;
 
         // Build the VBC module
+        self.build_module()
+    }
+
+    /// Compile a module's items into the codegen's accumulated state
+    /// WITHOUT producing a finalised `VbcModule`.  Pairs with
+    /// [`Self::finalize_module_from_state`] for the multi-file
+    /// stdlib-bootstrap path: all files in one stdlib module share a
+    /// single string pool, type table, and bytecode block, so a final
+    /// `finalize_module_from_state` call emits ONE coherent
+    /// `VbcModule`.  Replaces the per-file `compile_function_bodies →
+    /// merge_stdlib_vbc_modules` pattern that silently dropped
+    /// inherent-method bodies (StringIds in function descriptors and
+    /// bytecode operands point at SOURCE-local string offsets that
+    /// the post-merge string-pool re-intern doesn't remap).
+    ///
+    /// Drains pending constants + TLS inits at the end of each file
+    /// to mirror `compile_function_bodies`'s flow (their
+    /// registrations happen during item processing; per-file flush
+    /// keeps the bookkeeping symmetric with the old path).
+    pub fn compile_items_into_state(&mut self, module: &Module) -> CodegenResult<()> {
+        for item in module.items.iter() {
+            if self.should_compile_item(item) {
+                self.compile_item(item)?;
+            }
+        }
+        self.compile_pending_constants()?;
+        self.compile_pending_tls_inits()?;
+        Ok(())
+    }
+
+    /// Emit a single coherent `VbcModule` from the codegen's
+    /// accumulated types/functions/bytecode/strings.  Used by the
+    /// stdlib-bootstrap path after `compile_items_into_state` calls
+    /// have run for every file in the module — one finalize pass
+    /// replaces the per-file `build_module + merge` chain.
+    pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
         self.build_module()
     }
 

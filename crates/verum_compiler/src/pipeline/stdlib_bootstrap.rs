@@ -949,7 +949,11 @@ impl<'s> CompilationPipeline<'s> {
         // This handles cross-file imports within the same module
         codegen.resolve_pending_imports();
 
-        // Pass 2: Compile all function bodies and merge
+        // Pass 2: Compile all function bodies and merge.  Each
+        // per-file `compile_function_bodies` produces a fresh
+        // VbcModule with that file's bodies; `merge_stdlib_vbc_modules`
+        // remaps StringIds so descriptor names + bytecode operands
+        // stay valid through the string-pool union.
         let mut total_func_count = 0;
         let mut merged_vbc = verum_vbc::VbcModule::new(module.name.clone());
 
@@ -960,12 +964,7 @@ impl<'s> CompilationPipeline<'s> {
                     self.merge_stdlib_vbc_modules(&mut merged_vbc, compiled_module)?;
                 }
                 Err(e) => {
-                    // Check if this is a forward reference to a module compiled later.
-                    // If so, suppress the warning - the function will be available at runtime.
                     let is_forward_ref = if let Some(func_name) = e.undefined_function_name() {
-                        // Extract the module prefix from the function path
-                        // e.g., "darwin::tls::init_main_thread_tls" -> check "sys.darwin"
-                        // e.g., "mem::heap::init_thread_heap" -> check "mem"
                         Self::is_forward_reference_to_later_module(
                             func_name,
                             &module.name,
@@ -976,8 +975,6 @@ impl<'s> CompilationPipeline<'s> {
                     };
 
                     if !is_forward_ref {
-                        // Use IntrinsicDiagnostics for configurable severity
-                        // Include span info in error message since we don't have file_id for Span construction
                         let error_msg = if let Some(ref s) = e.span {
                             format!("{} (byte {}-{})", e, s.start, s.end)
                         } else {
@@ -996,7 +993,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
 
-                    // Create stub functions
+                    // Create stub functions for items in the failing file.
                     for item in &ast_module.items {
                         if let verum_ast::ItemKind::Function(func) = &item.kind {
                             total_func_count += 1;

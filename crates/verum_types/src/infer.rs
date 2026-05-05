@@ -1370,9 +1370,6 @@ impl TypeChecker {
         name: &Text,
         pending: &mut Vec<Text>,
     ) {
-        if self.ctx.lookup_type(name.as_str()).is_some() {
-            return;
-        }
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m.clone(),
             Maybe::None => return,
@@ -1381,47 +1378,55 @@ impl TypeChecker {
             Some(td) => td.clone(),
             None => return,
         };
-        // Convert + register this single type.  Mirror of the body
-        // of `load_stdlib_from_metadata` reduced to one entry.
-        let ty = self.type_descriptor_to_type(&type_desc);
-        self.ctx.define_type(name.clone(), ty.clone());
-        self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
+        // For built-in primitive types (Text, Int, Float, Bool, …)
+        // already registered by `register_builtins`, the type
+        // definition does NOT need re-registration — but its
+        // inherent-method bucket DOES need population from
+        // `core_metadata`, otherwise method-call typecheck
+        // (`text.push_str(...)`, `text.trim()`, …) fails despite
+        // the bodies being present in the precompiled archive.
+        // Run the type-definition registration only when the type
+        // isn't yet in ctx, but ALWAYS run inherent-method
+        // registration (which is idempotent — skips already-
+        // populated method names).
+        if self.ctx.lookup_type(name.as_str()).is_none() {
+            // Convert + register this single type.  Mirror of the body
+            // of `load_stdlib_from_metadata` reduced to one entry.
+            let ty = self.type_descriptor_to_type(&type_desc);
+            self.ctx.define_type(name.clone(), ty.clone());
+            self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
 
-        // Variant signatures — same logic as the eager loader, gated
-        // to this single type.  Pushes payload type names into
-        // `pending` so the loop registers them too.
-        if let crate::core_metadata::TypeDescriptorKind::Variant { cases } = &type_desc.kind {
-            register_variant_signature_for_lazy(self, name, &type_desc, cases, pending);
-        }
-        // Record fields — push field type names into `pending`.
-        if let crate::core_metadata::TypeDescriptorKind::Record { fields } = &type_desc.kind {
-            for f in fields.iter() {
-                if !f.ty.is_empty() {
-                    pending.push(f.ty.clone());
+            // Variant signatures — same logic as the eager loader, gated
+            // to this single type.  Pushes payload type names into
+            // `pending` so the loop registers them too.
+            if let crate::core_metadata::TypeDescriptorKind::Variant { cases } = &type_desc.kind {
+                register_variant_signature_for_lazy(self, name, &type_desc, cases, pending);
+            }
+            // Record fields — push field type names into `pending`.
+            if let crate::core_metadata::TypeDescriptorKind::Record { fields } = &type_desc.kind {
+                for f in fields.iter() {
+                    if !f.ty.is_empty() {
+                        pending.push(f.ty.clone());
+                    }
+                }
+            }
+            // Generic param defaults — also dependencies.
+            for gp in type_desc.generic_params.iter() {
+                if let Maybe::Some(default_text) = &gp.default {
+                    pending.push(default_text.clone());
                 }
             }
         }
-        // Generic param defaults — also dependencies.
-        for gp in type_desc.generic_params.iter() {
-            if let Maybe::Some(default_text) = &gp.default {
-                pending.push(default_text.clone());
-            }
-        }
 
-        // Inherent methods from `implement Type { ... }` blocks.
-        // Pre-fix: the source-driven typecheck registered these via
-        // `import_impl_blocks` / `register_inherent_blanket_impl`,
-        // walking the parsed AST.  The archive-driven path skipped
-        // it entirely — every `Text.with_capacity` style call
-        // failed `no method named ...` lookup despite the body
-        // existing in the precompiled VBC.
-        //
-        // The precompiler now stamps `parent_type` onto every
-        // function descriptor and mirrors the function name into
-        // its parent type's `methods` list.  Walk that list here
-        // and register each method as a TypeScheme on the
-        // type's inherent-method table — same structure
-        // `import_impl_blocks` populates from AST.
+        // ALWAYS register inherent methods, even when the type
+        // itself was already in ctx (e.g. primitives like Text,
+        // List, Map registered via `register_builtins`).  Without
+        // this unconditional pass, every `text.push_str(...)` /
+        // `list.iter()` / `map.get()` call site fails `no method
+        // named …` typecheck despite the bodies being in the
+        // precompiled archive.  The pass is idempotent — skips
+        // method names already populated in the
+        // inherent_methods bucket.
         self.register_inherent_methods_from_metadata(name, &type_desc, &metadata);
     }
 
@@ -1455,29 +1460,41 @@ impl TypeChecker {
             if bucket.get(method_name).is_some() {
                 continue;
             }
-            let fn_desc = match metadata.functions.get(method_name) {
+            // Prefer qualified `Type.method` lookup so a simple name
+            // shared across multiple types (e.g. `with_capacity` on
+            // Text + TextBuilder + List) resolves to the descriptor
+            // belonging to THIS type.  Fall back to the bare simple
+            // name for free functions / single-type methods.
+            let qualified: Text = format!("{}.{}", type_name, method_name).into();
+            let fn_desc = match metadata.functions.get(&qualified) {
                 Some(d) => d,
-                None => continue,
+                None => match metadata.functions.get(method_name) {
+                    Some(d) => d,
+                    None => continue,
+                },
             };
             // Build the function type from the descriptor.  Param +
             // return types are stored as bare type-name `Text`
-            // strings — the same shape
-            // `load_stdlib_from_metadata`'s protocol-method path
-            // uses (lines 1750-1789).  Generic instantiation is
-            // deferred to call sites; lookup-time we just need an
-            // approximate signature so method resolution succeeds.
-            let params: List<Type> = fn_desc
-                .params
-                .iter()
-                .map(|p| Type::Named {
-                    path: Self::text_to_path(&p.ty),
-                    args: List::new(),
-                })
-                .collect();
-            let return_ty = Type::Named {
-                path: Self::text_to_path(&fn_desc.return_type),
-                args: List::new(),
+            // strings.  Special-case Unit/empty so methods with
+            // `-> ()` signatures (push, push_str, etc.) typecheck
+            // without a `Type mismatch: expected 'Unit', found
+            // 'Text'` error at every call site that discards the
+            // value.  Other type names (Text, List, Maybe, …) flow
+            // through `Type::Named` which the unifier resolves
+            // against ctx.type_defs.
+            let to_type = |s: &Text| -> Type {
+                let raw = s.as_str();
+                if raw.is_empty() || raw == "Unit" || raw == "()" {
+                    Type::Unit
+                } else {
+                    Type::Named {
+                        path: Self::text_to_path(s),
+                        args: List::new(),
+                    }
+                }
             };
+            let params: List<Type> = fn_desc.params.iter().map(|p| to_type(&p.ty)).collect();
+            let return_ty = to_type(&fn_desc.return_type);
             let fn_ty = Type::function(params, return_ty);
             bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty));
         }
