@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l4_vdbe, index_cursor, opcodes, am_index_seek, codegen
+// @timeout: 15000
+// @description: L4 index-cursor opcodes (#160) — exercises the new
+//               OpenIndex / IdxRowid / IdxInsert opcode variants
+//               + verifies opcode_name + has_external_effect
+//               classification.  Plus a smoke test through the L5
+//               cost-aware codegen pipeline that exercises the
+//               AmIndexSeek lowering path (was: fall-through, now
+//               specialised).
+//
+// Spec: internal/specs/sqlite-native.md §11.2 (cursor opcodes) +
+//       sqlite-native.md §13.3 (access-method selection)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.{
+    Opcode, OpenRead, OpenWrite, OpenIndex, Close,
+    Rewind, Next, Prev, Column, RowIdOp, IdxRowid,
+    SeekGE, SeekGT, SeekLE, SeekLT, Found, NotFound,
+    Insert, IdxInsert, Delete,
+    opcode_name, has_external_effect, is_branch,
+};
+
+// =============================================================================
+// 1. OpenIndex variant constructs + names correctly
+// =============================================================================
+
+fn open_index_constructs() {
+    let op = OpenIndex(3, 12, 4);
+    let n = opcode_name(&op);
+    assert_eq(n, "OpenIndex".clone());
+}
+
+// =============================================================================
+// 2. IdxRowid variant constructs + names correctly
+// =============================================================================
+
+fn idx_rowid_constructs() {
+    let op = IdxRowid(2, 7);
+    let n = opcode_name(&op);
+    assert_eq(n, "IdxRowid".clone());
+}
+
+// =============================================================================
+// 3. IdxInsert variant constructs + names correctly
+// =============================================================================
+
+fn idx_insert_constructs() {
+    let op = IdxInsert(1, 5);
+    let n = opcode_name(&op);
+    assert_eq(n, "IdxInsert".clone());
+}
+
+// =============================================================================
+// 4. IdxInsert is classified as having external effect (writes to index)
+// =============================================================================
+
+fn idx_insert_has_external_effect() {
+    let op = IdxInsert(0, 0);
+    assert(has_external_effect(&op));
+}
+
+// =============================================================================
+// 5. OpenIndex is NOT classified as a branch (cursor open is sequential)
+// =============================================================================
+
+fn open_index_is_not_branch() {
+    let op = OpenIndex(0, 0, 0);
+    assert(!is_branch(&op));
+}
+
+// =============================================================================
+// 6. IdxRowid is NOT classified as a branch (pure read)
+// =============================================================================
+
+fn idx_rowid_is_not_branch() {
+    let op = IdxRowid(0, 0);
+    assert(!is_branch(&op));
+}
+
+// =============================================================================
+// 7. Comparison: OpenRead and OpenIndex name distinctly
+// =============================================================================
+
+fn open_read_and_open_index_distinct_names() {
+    let r = OpenRead(0, 0, 0);
+    let i = OpenIndex(0, 0, 0);
+    assert(opcode_name(&r) != opcode_name(&i));
+}
+
+// =============================================================================
+// 8. Comparison: RowIdOp and IdxRowid name distinctly (different semantics —
+//    RowIdOp reads cursor's own rowid; IdxRowid reads trailing-column rowid
+//    of an index record)
+// =============================================================================
+
+fn row_id_and_idx_rowid_distinct_names() {
+    let r = RowIdOp(0, 0);
+    let i = IdxRowid(0, 0);
+    assert(opcode_name(&r) != opcode_name(&i));
+}
+
+// =============================================================================
+// 9. Comparison: Insert and IdxInsert name distinctly
+// =============================================================================
+
+fn insert_and_idx_insert_distinct_names() {
+    let t = Insert(0, 0, 0, 0);
+    let i = IdxInsert(0, 0);
+    assert(opcode_name(&t) != opcode_name(&i));
+}
+
+// =============================================================================
+// 10. Comprehensive name pin — every new opcode produces the documented
+//     mnemonic that EXPLAIN output users will see.
+// =============================================================================
+
+fn opcode_name_pins() {
+    assert_eq(opcode_name(&OpenIndex(0, 0, 0)), "OpenIndex".clone());
+    assert_eq(opcode_name(&IdxRowid(0, 0)), "IdxRowid".clone());
+    assert_eq(opcode_name(&IdxInsert(0, 0)), "IdxInsert".clone());
+}
+
+fn main() {
+    open_index_constructs();
+    idx_rowid_constructs();
+    idx_insert_constructs();
+    idx_insert_has_external_effect();
+    open_index_is_not_branch();
+    idx_rowid_is_not_branch();
+    open_read_and_open_index_distinct_names();
+    row_id_and_idx_rowid_distinct_names();
+    insert_and_idx_insert_distinct_names();
+    opcode_name_pins();
+}

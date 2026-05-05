@@ -82,6 +82,13 @@ public type Opcode is
     // Cursor operations -------------------------------------------------------
     | OpenRead(cursor_id: Int, root_page: Int, n_cols: Int)
     | OpenWrite(cursor_id: Int, root_page: Int, n_cols: Int)
+    /// Open an INDEX B-tree cursor (#160).  Same shape as OpenRead
+    /// but discriminates index vs table — the cursor's
+    /// `CursorSlotKind` becomes `CkIndex` so subsequent IdxRowid
+    /// reads dispatch to the index-record path (rowid lives as the
+    /// trailing column of the index record).  `n_cols` here is the
+    /// number of indexed columns + 1 (the trailing rowid).
+    | OpenIndex(cursor_id: Int, root_page: Int, n_cols: Int)
     | Close(cursor_id: Int)
     | Rewind(cursor_id: Int, jump_if_empty: Int)
     | Last(cursor_id: Int, jump_if_empty: Int)
@@ -89,12 +96,24 @@ public type Opcode is
     | Prev(cursor_id: Int, jump_if_more: Int)
     | Column(cursor_id: Int, col_idx: Int, reg_dst: Int)
     | RowIdOp(cursor_id: Int, reg_dst: Int)
+    /// Read the rowid stored in the LAST column of the current
+    /// index record (#160).  SQLite indices store the base-table
+    /// rowid as the trailing serial of every key record so the
+    /// reader can `SeekGE(table_cur, rid)` to the actual row.
+    /// Distinct from `RowIdOp` (which reads the cursor's OWN
+    /// rowid — meaningful only for table cursors).
+    | IdxRowid(cursor_id: Int, reg_dst: Int)
     | SeekGE(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
     | SeekGT(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
     | SeekLE(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
     | SeekLT(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
     | Found(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
     | NotFound(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    /// Insert a key into an index B-tree (#160).  `record_reg`
+    /// holds the encoded record (key columns + trailing rowid).
+    /// Used by codegen when an INSERT into a base table also
+    /// needs to update an index entry.
+    | IdxInsert(cursor_id: Int, record_reg: Int)
 
     // Mutation ---------------------------------------------------------------
     | Insert(cursor_id: Int, data_reg: Int, key_reg: Int, flags: Int)
@@ -208,6 +227,7 @@ public fn opcode_name(op: &Opcode) -> Text {
         NotNull(_, _)  => "NotNull".clone(),
         OpenRead(_, _, _)  => "OpenRead".clone(),
         OpenWrite(_, _, _) => "OpenWrite".clone(),
+        OpenIndex(_, _, _) => "OpenIndex".clone(),
         Close(_)           => "Close".clone(),
         Rewind(_, _)       => "Rewind".clone(),
         Last(_, _)         => "Last".clone(),
@@ -215,12 +235,14 @@ public fn opcode_name(op: &Opcode) -> Text {
         Prev(_, _)         => "Prev".clone(),
         Column(_, _, _)    => "Column".clone(),
         RowIdOp(_, _)      => "RowId".clone(),
+        IdxRowid(_, _)     => "IdxRowid".clone(),
         SeekGE(_, _, _, _) => "SeekGE".clone(),
         SeekGT(_, _, _, _) => "SeekGT".clone(),
         SeekLE(_, _, _, _) => "SeekLE".clone(),
         SeekLT(_, _, _, _) => "SeekLT".clone(),
         Found(_, _, _, _)    => "Found".clone(),
         NotFound(_, _, _, _) => "NotFound".clone(),
+        IdxInsert(_, _)    => "IdxInsert".clone(),
         Insert(_, _, _, _) => "Insert".clone(),
         Delete(_)          => "Delete".clone(),
         UpdateRow(_, _)    => "UpdateRow".clone(),
@@ -287,6 +309,7 @@ public fn has_external_effect(op: &Opcode) -> Bool {
     match op {
         ResultRow(_, _)
         | Insert(_, _, _, _)
+        | IdxInsert(_, _)
         | Delete(_)
         | UpdateRow(_, _)
         | OpenWrite(_, _, _)
