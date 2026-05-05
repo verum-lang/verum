@@ -1357,6 +1357,21 @@ impl TypeChecker {
             }
             self.ensure_stdlib_type_loaded(&name, &mut to_load);
         }
+
+        // Register inductive constructors for pattern matching.
+        // The eager `load_stdlib_from_metadata` calls this at the end
+        // of its single-pass walk; the lazy path needs the same hook
+        // so `match res { Ok(p) => …, Err(e) => … }` patterns
+        // resolve against Result's variant body, and `Ok(x)` /
+        // `Err(e)` / `Some(x)` value-position uses bind to the
+        // constructor.  Without this, every pattern match on
+        // Result/Maybe/IoResult fails `Pattern expects a variant
+        // type, but scrutinee has type Result/IoResult`.
+        let metadata = match &self.core_metadata {
+            Maybe::Some(m) => m.clone(),
+            Maybe::None => return,
+        };
+        self.register_stdlib_constructors_from_metadata(&metadata);
     }
 
     /// Register a single stdlib type from `core_metadata` if it's
@@ -1473,24 +1488,33 @@ impl TypeChecker {
                     None => continue,
                 },
             };
-            // Build the function type from the descriptor.  Param +
-            // return types are stored as bare type-name `Text`
-            // strings.  Special-case Unit/empty so methods with
-            // `-> ()` signatures (push, push_str, etc.) typecheck
-            // without a `Type mismatch: expected 'Unit', found
-            // 'Text'` error at every call site that discards the
-            // value.  Other type names (Text, List, Maybe, …) flow
-            // through `Type::Named` which the unifier resolves
-            // against ctx.type_defs.
+            // Build the function type from the descriptor.  Map
+            // every primitive type name back to its corresponding
+            // `Type::*` variant so the unifier sees them as the
+            // same kind the user-side typechecker registered via
+            // `register_primitives` — without this, a method
+            // signature like `Text.push(c: Char)` ends up as
+            // `fn(Type::Named{Int}, …)` (VBC stores Char as Int)
+            // and fails to unify with the call-site `Char` value.
+            //
+            // Maps `"Int"` / `"Float"` / `"Bool"` / `"Char"` /
+            // `"Text"` / `"Unit"` / `"Byte"` / `"()"` / `""` to
+            // their respective `Type::*` variants.  Other names
+            // flow through `Type::Named` which the unifier
+            // resolves against `ctx.type_defs`.
             let to_type = |s: &Text| -> Type {
                 let raw = s.as_str();
-                if raw.is_empty() || raw == "Unit" || raw == "()" {
-                    Type::Unit
-                } else {
-                    Type::Named {
+                match raw {
+                    "" | "Unit" | "()" => Type::Unit,
+                    "Bool" => Type::Bool,
+                    "Int" => Type::Int,
+                    "Float" => Type::Float,
+                    "Char" => Type::Char,
+                    "Text" => Type::Text,
+                    _ => Type::Named {
                         path: Self::text_to_path(s),
                         args: List::new(),
-                    }
+                    },
                 }
             };
             // Skip the `self` receiver parameter when present.  VBC
