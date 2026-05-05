@@ -1478,7 +1478,62 @@ impl TypeChecker {
         // precompiled archive.  The pass is idempotent — skips
         // method names already populated in the
         // inherent_methods bucket.
-        self.register_inherent_methods_from_metadata(name, &type_desc, &metadata);
+        //
+        // Method signatures push their referenced type names into
+        // `pending` so dependent stdlib types (Path, Metadata,
+        // IoResult, …) load transitively — needed for alias
+        // resolution + variant pattern matching at user-code
+        // call sites.
+        let referenced = self.register_inherent_methods_from_metadata(name, &type_desc, &metadata);
+        for r in referenced {
+            pending.push(r);
+        }
+    }
+
+    /// Walk a parsed Type and push every named-type reference
+    /// (Type::Named, Type::Generic.name, Type::Reference.inner …)
+    /// into the lazy-loader's pending set.  Ensures that methods
+    /// whose signatures reference stdlib type aliases (e.g.
+    /// `fs_metadata(p: &Path) -> IoResult<Metadata>`) trigger
+    /// loading of IoResult, Metadata, and Path so their alias
+    /// targets and inductive-constructor registrations are
+    /// available when the user code matches against them.
+    fn push_referenced_type_names(ty: &Type, out: &mut Vec<Text>) {
+        match ty {
+            Type::Named { path, args } => {
+                if let Some(seg) = path.segments.last() {
+                    if let verum_ast::ty::PathSegment::Name(id) = seg {
+                        out.push(Text::from(id.name.as_str()));
+                    }
+                }
+                for a in args.iter() {
+                    Self::push_referenced_type_names(a, out);
+                }
+            }
+            Type::Generic { name, args } => {
+                out.push(name.clone());
+                for a in args.iter() {
+                    Self::push_referenced_type_names(a, out);
+                }
+            }
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
+                Self::push_referenced_type_names(inner, out)
+            }
+            Type::Tuple(elems) => {
+                for e in elems.iter() {
+                    Self::push_referenced_type_names(e, out);
+                }
+            }
+            Type::Function { params, return_type, .. } => {
+                for p in params.iter() {
+                    Self::push_referenced_type_names(p, out);
+                }
+                Self::push_referenced_type_names(return_type, out);
+            }
+            _ => {}
+        }
     }
 
     /// Lazy counterpart of the AST-driven `import_impl_blocks` pass.
@@ -1501,9 +1556,10 @@ impl TypeChecker {
         type_name: &Text,
         type_desc: &crate::core_metadata::TypeDescriptor,
         metadata: &crate::core_metadata::CoreMetadata,
-    ) {
+    ) -> Vec<Text> {
+        let mut referenced: Vec<Text> = Vec::new();
         if type_desc.methods.is_empty() {
-            return;
+            return referenced;
         }
         let mut methods_guard = self.inherent_methods.write();
         let bucket = methods_guard.entry(type_name.clone()).or_default();
@@ -1524,35 +1580,16 @@ impl TypeChecker {
                     None => continue,
                 },
             };
-            // Build the function type from the descriptor.  Map
-            // every primitive type name back to its corresponding
-            // `Type::*` variant so the unifier sees them as the
-            // same kind the user-side typechecker registered via
-            // `register_primitives` — without this, a method
-            // signature like `Text.push(c: Char)` ends up as
-            // `fn(Type::Named{Int}, …)` (VBC stores Char as Int)
-            // and fails to unify with the call-site `Char` value.
-            //
-            // Maps `"Int"` / `"Float"` / `"Bool"` / `"Char"` /
-            // `"Text"` / `"Unit"` / `"Byte"` / `"()"` / `""` to
-            // their respective `Type::*` variants.  Other names
-            // flow through `Type::Named` which the unifier
-            // resolves against `ctx.type_defs`.
-            let to_type = |s: &Text| -> Type {
-                let raw = s.as_str();
-                match raw {
-                    "" | "Unit" | "()" => Type::Unit,
-                    "Bool" => Type::Bool,
-                    "Int" => Type::Int,
-                    "Float" => Type::Float,
-                    "Char" => Type::Char,
-                    "Text" => Type::Text,
-                    _ => Type::Named {
-                        path: Self::text_to_path(s),
-                        args: List::new(),
-                    },
-                }
-            };
+            // Build the function type from the descriptor.
+            // `parse_descriptor_type_string` handles primitives,
+            // bare names, generic instantiations
+            // (`IoResult<Metadata>`), and references (`&Text`)
+            // — required because `archive_metadata::type_ref_to_text`
+            // serialises VBC TypeRefs as joined strings, and a
+            // naive `Type::Named { path: "IoResult<Metadata>" }`
+            // would never unify with the call-site
+            // `Type::Generic { name: "IoResult", args: [Metadata] }`.
+            let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
             // Skip the `self` receiver parameter when present.  VBC
             // stores method descriptors with the receiver as the
             // first parameter (named `"self"`) but its `type_ref`
@@ -1577,9 +1614,17 @@ impl TypeChecker {
                 })
                 .collect();
             let return_ty = to_type(&fn_desc.return_type);
+            // Recursively collect referenced type names so the
+            // lazy loader registers any types this method's
+            // signature touches (Path, Metadata, IoResult, …).
+            for p in params.iter() {
+                Self::push_referenced_type_names(p, &mut referenced);
+            }
+            Self::push_referenced_type_names(&return_ty, &mut referenced);
             let fn_ty = Type::function(params, return_ty);
             bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty));
         }
+        referenced
     }
 
     /// Convert a StageError from the stage checker to a TypeError.
@@ -65007,6 +65052,99 @@ fn collect_named_types_from_function_body(
 /// `load_stdlib_from_metadata` so the lazy loader can register one
 /// type's variants without walking the entire stdlib.  Mirrors the
 /// eager loader's behaviour for that single type.
+/// Parse a `archive_metadata::type_ref_to_text` output string
+/// back into a structured `Type`.
+///
+/// **Stdlib-agnostic**: no hardcoded type names.  Built-in
+/// primitive type names (`Int`, `Float`, `Bool`, `Char`, `Text`,
+/// `Unit`, …) are registered as `Type::*` variants in
+/// `ctx.type_defs` by `register_primitives`; user-side resolution
+/// via `Type::Named` lookup recovers them at unify time.  This
+/// parser is a pure structural decoder for compound type strings:
+///
+/// * empty / `"()"` → `Type::Unit` (the single language-level
+///   special case — `()` is a sigil, not a type name);
+/// * `"&T"` / `"&mut T"` → `Type::Reference` over the parsed
+///   inner type;
+/// * `"Base<arg1, arg2, …>"` → `Type::Generic` with parsed args
+///   (top-level commas only, nested generics handled via
+///   depth counter);
+/// * bare identifiers → `Type::Named` — the unifier's
+///   `try_expand_alias` and `ctx.lookup_type` resolve these
+///   against the user's type registry.
+///
+/// Without this parser, signatures stored as compound strings
+/// degrade to opaque `Type::Named { path: "IoResult<Metadata>" }`
+/// blobs that never unify with `Type::Generic { name: "IoResult",
+/// args: [Type::Named { Metadata }] }` at call sites.
+fn parse_descriptor_type_string(raw: &str) -> Type {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "()" {
+        return Type::Unit;
+    }
+    // References: "&mut T" / "&T".
+    if let Some(rest) = trimmed.strip_prefix("&mut ") {
+        return Type::Reference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: true,
+        };
+    }
+    if let Some(rest) = trimmed.strip_prefix('&') {
+        return Type::Reference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: false,
+        };
+    }
+    // Generic instantiation: "Base<arg1, arg2, ...>".
+    if let Some(open) = trimmed.find('<') {
+        if trimmed.ends_with('>') {
+            let base = &trimmed[..open];
+            let inside = &trimmed[open + 1..trimmed.len() - 1];
+            let args = split_top_level_commas(inside)
+                .into_iter()
+                .map(|s| parse_descriptor_type_string(s.trim()))
+                .collect();
+            return Type::Generic {
+                name: Text::from(base),
+                args,
+            };
+        }
+    }
+    // Bare name → Type::Named.  Resolution of primitive aliases
+    // (Int → Type::Int, Text → Type::Text, …) flows through the
+    // unifier's lookup against `ctx.type_defs` populated by
+    // `register_primitives`; we don't second-guess that registry
+    // here.
+    Type::Named {
+        path: TypeChecker::text_to_path(&Text::from(trimmed)),
+        args: List::new(),
+    }
+}
+
+/// Split a string on commas at depth=0 (top-level), respecting
+/// nesting in `<>`/`()`/`[]`.  Used by
+/// `parse_descriptor_type_string` for generic-arg lists.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut depth: i32 = 0;
+    let mut start = 0;
+    let mut out = Vec::new();
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start < s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
 fn register_variant_signature_for_lazy(
     checker: &mut TypeChecker,
     name: &Text,
