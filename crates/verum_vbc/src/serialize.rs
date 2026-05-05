@@ -376,6 +376,15 @@ impl Serializer {
             }
         }
 
+        // Alias target (TypeKind::Alias only — encoded for every
+        // descriptor as Option<TypeRef> for forward-compatibility).
+        if let Some(ref target) = desc.alias_target {
+            self.output.push(1);
+            self.serialize_type_ref(target)?;
+        } else {
+            self.output.push(0);
+        }
+
         Ok(())
     }
 
