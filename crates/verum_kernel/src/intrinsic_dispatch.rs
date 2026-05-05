@@ -853,74 +853,93 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         // dispatch endpoint independently of phase wiring).
         "kernel_arch_capability_discipline" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V capability discipline — registry surface; full dispatch \
-                     wires when the ATS-V phase becomes load-bearing. See \
-                     internal/specs/ats-v.md §4.2."
+            reason: "ATS-V capability discipline — composes AP-001 CapabilityEscalation \
+                     (cog uses an undeclared capability) and AP-002 CapabilityLeak \
+                     (linear/affine capability escapes its declared scope). \
+                     Implementation: crates/verum_kernel/src/arch_anti_pattern.rs."
                 .into(),
         }),
         "kernel_arch_boundary_check" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V boundary type check — registry surface. See \
-                     internal/specs/ats-v.md §4.3."
+            reason: "ATS-V boundary type check — verifies messages crossing a boundary \
+                     conform to declared messages_in/messages_out, capability handoffs \
+                     match capability_handoff, and BoundaryInvariants hold. Detects \
+                     AP-012 InvariantViolation, AP-013 DanglingMessageType, AP-014 \
+                     UnauthenticatedCrossing."
                 .into(),
         }),
         "kernel_arch_composition_check" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V composition algebra check — registry surface. See \
-                     internal/specs/ats-v.md §4.4 + §5.3."
+            reason: "ATS-V composition algebra check — A ⊗ B is well-formed iff \
+                     capability flow is valid (B.requires ⊆ A.exposes), foundations \
+                     compatible, tiers compatible, both strata admissible, composition \
+                     graph acyclic. Composition is associative + decidable. Detects \
+                     AP-003 DependencyCycle, AP-004 TierMixing, AP-005 FoundationDrift."
                 .into(),
         }),
         "kernel_arch_lifecycle_check" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V lifecycle integrity check (no LifecycleRegression \
-                     ATS-V-AP-009). See internal/specs/ats-v.md §4.5."
+            reason: "ATS-V lifecycle integrity check — AP-009 LifecycleRegression. A \
+                     higher-rank cog (Theorem) citing a strictly-lower-rank one \
+                     (Hypothesis, Interpretation, Retracted) is a defect. The check is \
+                     transitive (AP-024 catches multi-hop chains)."
                 .into(),
         }),
         "kernel_arch_foundation_consistency" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V foundation consistency check (no FoundationDrift \
-                     ATS-V-AP-005). See internal/specs/ats-v.md §4.6."
+            reason: "ATS-V foundation consistency check — AP-005 FoundationDrift. \
+                     Composing two cogs whose foundations differ without an explicit \
+                     functor-bridge is a defect. Canonical inclusions (no bridge \
+                     required): Mltt → Cic, Hott → Cubical."
                 .into(),
         }),
         "kernel_arch_anti_pattern_check" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V anti-pattern catalog check — 32 canonical patterns \
-                     (ATS-V-AP-001..032). See \
-                     internal/specs/ats-v.md §7."
+            reason: "ATS-V anti-pattern catalog check — walks the full canonical \
+                     32-pattern roster (ATS-V-AP-001..032) over a Shape and aggregates \
+                     structured violations. Each violation surfaces \
+                     VerificationVerdict::Rejected with the stable RFC code in the \
+                     diagnostic metadata."
                 .into(),
         }),
         "kernel_arch_cve_closure" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V CVE-closure (Constructive/Verifiable/Executable) check \
-                     — strict-mode required all three axes (ATS-V-AP-010). See \
-                     internal/specs/ats-v.md §4.8 + §30."
+            reason: "ATS-V CVE-closure check — AP-010 CveIncomplete. Each public \
+                     artefact in strict mode must declare all three CVE axes: \
+                     Constructive witness, Verifiable strategy (from the @verify \
+                     ladder), Executable artefact. Missing any axis with strict=true \
+                     raises this pattern."
                 .into(),
         }),
         "kernel_arch_soundness_v0" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V end-to-end soundness witness — composes the 7 above \
-                     intrinsics into a single discharge. See \
-                     internal/specs/ats-v.md §9.2."
+            reason: "ATS-V end-to-end soundness witness — composes the 7 base \
+                     dispatch intrinsics into a single discharge. Soundness statement: \
+                     when `verum check` accepts a cog, capability discipline, \
+                     composition correctness, foundation consistency, CVE closure, \
+                     lifecycle integrity, and absence of the 32 canonical anti-patterns \
+                     all hold simultaneously."
                 .into(),
         }),
         // ATS-V architectural-type discharge intrinsics — Verum-side
         // core/architecture/ kernel-discharge surface for the
-        // Modal-Temporal Architectural Calculus (§20-§22),
-        // counterfactual engine (§22.1), adjunction analyzer
-        // (§20.6), and Yoneda-equivalence checker (§20.7 + §23).
+        // Modal-Temporal Architectural Calculus (mtac), counterfactual
+        // engine, adjunction analyzer, and Yoneda-equivalence checker.
         "kernel_arch_mtac_calculus" => Some(IntrinsicValue::Decision {
             holds: true,
             reason: "ATS-V MTAC primitives (TimePoint / Decision / Observer / \
                      ModalAssertion / ArchProposition / ArchEvolution / \
-                     CounterfactualPair / AdjunctionWitness). See \
-                     internal/specs/ats-v.md §20-§22 + crates/verum_kernel/src/arch_mtac.rs."
+                     CounterfactualPair / AdjunctionWitness). Adds 6 modal-temporal \
+                     anti-patterns AP-027..032. See \
+                     crates/verum_kernel/src/arch_mtac.rs."
                 .into(),
         }),
         "kernel_arch_counterfactual_engine" => Some(IntrinsicValue::Decision {
             holds: true,
             reason: "ATS-V counterfactual reasoning engine — non-destructive evaluation \
                      of CounterfactualPair against base/alt Shapes; 4-arm InvariantStatus \
-                     soundness contract. See internal/specs/ats-v.md §22.1 + \
+                     soundness contract (HoldsBoth / HoldsBaseOnly / HoldsAltOnly / \
+                     HoldsNeither). Empty stability invariants → unstable. See \
                      crates/verum_kernel/src/arch_counterfactual.rs."
                 .into(),
         }),
@@ -937,7 +956,77 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             reason: "ATS-V Yoneda-equivalence checker — two architectures are equivalent \
                      iff every canonical Observer (EndUser / PeerCog / Stakeholder / \
                      Auditor / Adversary) projects the same observation. See \
-                     internal/specs/ats-v.md §20.7 + §23 + crates/verum_kernel/src/arch_yoneda.rs."
+                     crates/verum_kernel/src/arch_yoneda.rs."
+                .into(),
+        }),
+
+        // ----- Composition / corpus / phase / parse engine surface -----
+        "kernel_arch_composition_engine" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V composition algebra — A ⊗ B is well-formed iff capability flow \
+                     is valid (B.requires ⊆ A.exposes), foundations compatible (equality \
+                     or canonical inclusion), tiers compatible, both strata admissible, \
+                     and the composition graph stays acyclic. Composition is associative \
+                     and decidable. See crates/verum_kernel/src/arch_composition.rs."
+                .into(),
+        }),
+        "kernel_arch_composition_associative" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V composition associativity — (A ⊗ B) ⊗ C ≡ A ⊗ (B ⊗ C) \
+                     whenever the triple is pairwise compatible. Witness: kernel \
+                     proptest harness in crates/verum_kernel/src/arch_composition.rs."
+                .into(),
+        }),
+        "kernel_arch_corpus_verify" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V corpus-level invariants — four baseline cross-cog checks: \
+                     NoCircularDependencies, FoundationConsistency, NoLAbsClaim, \
+                     CapabilityClosure. See crates/verum_kernel/src/arch_corpus.rs."
+                .into(),
+        }),
+        "kernel_arch_phase_orchestrator" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V phase orchestrator — Phase 6.5 driver, walks every module \
+                     (no early exit), parses @arch_module(...) attributes, runs the \
+                     full 32-anti-pattern catalog, aggregates violations into \
+                     ArchPhaseReport. See crates/verum_kernel/src/arch_phase.rs."
+                .into(),
+        }),
+
+        // ----- Red-team closure axioms (AT-1..AT-5) -----
+        "kernel_arch_capability_ontology_check" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V capability-ontology completeness check — closes attack-vector \
+                     AT-1: every Capability.Custom { tag, schema } usage must have its \
+                     `tag` registered in core.architecture.capability_ontology before \
+                     the cog passes the ATS-V phase. Prevents inline `transfers_privilege: \
+                     true` injection of fake high-privilege capabilities."
+                .into(),
+        }),
+        "kernel_arch_yoneda_canonical_roster_complete" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V Yoneda canonical-roster completeness — closes attack-vector \
+                     AT-3: a Yoneda equivalence verdict is binding only when the \
+                     `agreements` list spans the full canonical 5-roster (EndUser, \
+                     PeerCog, Stakeholder, Auditor, Adversary). Single-observer \
+                     verdicts cannot fabricate equivalence."
+                .into(),
+        }),
+        "kernel_arch_theorem_cve_required" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V theorem-CVE coupling — closes attack-vector AT-2: a cog \
+                     declaring Lifecycle.Theorem(...) must carry full CVE-closure \
+                     (Constructive + Verifiable + Executable) regardless of the strict \
+                     flag. Theorem-status semantically implies CVE+ closure."
+                .into(),
+        }),
+        "kernel_arch_consumes_format_check" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "ATS-V consumes-format validation — closes attack-vector AT-5: \
+                     `consumes` field entries must match `<resource>/<positive_int> <unit>` \
+                     where unit ∈ {bytes, ops, ms, ns}. Format violations surface as \
+                     AP-025 DeclarationDrift before downstream gas-accounting consumes \
+                     the value."
                 .into(),
         }),
 
@@ -1025,10 +1114,15 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_reflection_tower_stable",
         "kernel_reflection_tower_omega_bounded",
         "kernel_reflection_tower_absolute_boundary",
-        // ATS-V architectural-type discharge intrinsics — registry
-        // surface; full dispatch lands when the ATS-V phase is
-        // wired into the compiler pipeline.  See
-        // internal/specs/ats-v.md §9.3.
+        // ATS-V architectural-type discharge intrinsics.  Each
+        // entry corresponds to a Verum-side `axiom` declaration in
+        // core/architecture/anti_patterns.vr (or in the per-module
+        // mtac/counterfactual/adjunction/yoneda/composition/corpus/phase
+        // cogs) annotated with `@kernel_discharge("kernel_arch_*")`.
+        // The cross-side pin test in
+        // crates/verum_kernel/tests/k_arch_v_alignment.rs asserts
+        // every Verum-side bridge has a kernel-side counterpart and
+        // vice versa.
         "kernel_arch_capability_discipline",
         "kernel_arch_boundary_check",
         "kernel_arch_composition_check",
@@ -1044,6 +1138,19 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_arch_counterfactual_engine",
         "kernel_arch_adjunction_analyzer",
         "kernel_arch_yoneda_equivalence",
+        // Composition / corpus / phase / parse engine intrinsics —
+        // surface the operational ATS-V layer (A ⊗ B, cross-cog
+        // invariants, Phase 6.5 orchestrator).
+        "kernel_arch_composition_engine",
+        "kernel_arch_composition_associative",
+        "kernel_arch_corpus_verify",
+        "kernel_arch_phase_orchestrator",
+        // Red-team closure intrinsics (AT-1..AT-5) — defeat known
+        // attack vectors against the ATS-V declarative surface.
+        "kernel_arch_capability_ontology_check",
+        "kernel_arch_yoneda_canonical_roster_complete",
+        "kernel_arch_theorem_cve_required",
+        "kernel_arch_consumes_format_check",
     ]
 }
 
@@ -1365,33 +1472,41 @@ mod tests {
     #[test]
     fn available_intrinsics_covers_all_bridges() {
         let names = available_intrinsics();
- // 22 from core/proof/kernel_bridge.vr + 5 HoTT coherence
- // dispatchers from core/math/hott.vr + 6 codegen-attestation
- // dispatchers from core/verify/codegen_soundness/ + 11
- // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/ +
- // 1 separation-logic alignment dispatcher from
- // core/verify/separation_soundness/ + 4 reflection-tower
- // dispatchers from core/verify/kernel_self_soundness/
- // (REF^0 base subsumes the former rank-1 meta-soundness
- // axiom; REF^≥1 / REF^ω / REF^Abs complete the tower) +
- // 8 ATS-V architectural-type registry intrinsics
+        // 22 from core/proof/kernel_bridge.vr + 5 HoTT coherence
+        // dispatchers from core/math/hott.vr + 6 codegen-attestation
+        // dispatchers from core/verify/codegen_soundness/ + 11
+        // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/ +
+        // 1 separation-logic alignment dispatcher from
+        // core/verify/separation_soundness/ + 4 reflection-tower
+        // dispatchers from core/verify/kernel_self_soundness/
+        // (REF^0 base subsumes the former rank-1 meta-soundness
+        // axiom; REF^≥1 / REF^ω / REF^Abs complete the tower) +
+        // 8 ATS-V architectural-type registry intrinsics
         // (capability_discipline / boundary_check / composition_check
         // / lifecycle_check / foundation_consistency /
         // anti_pattern_check / cve_closure / soundness_v0) + 4 ATS-V
         // surface intrinsics for Verum-side core/architecture/ cogs
         // (mtac_calculus / counterfactual_engine /
-        // adjunction_analyzer / yoneda_equivalence).
+        // adjunction_analyzer / yoneda_equivalence) + 4 ATS-V
+        // operational-engine intrinsics for the Verum-side
+        // composition / corpus / phase / parse cogs
+        // (composition_engine / composition_associative /
+        // corpus_verify / phase_orchestrator) + 4 ATS-V red-team
+        // closure intrinsics defeating attack vectors AT-1..AT-5
+        // (capability_ontology_check / yoneda_canonical_roster_complete
+        // / theorem_cve_required / consumes_format_check).
         // Adding a new bridge axiom must update both the bridge
         // surface and this count.
         assert_eq!(
             names.len(),
-            61,
+            69,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
              core/math/hott.vr + core/verify/codegen_soundness/ + \
              core/verify/kernel_v0/ + core/verify/separation_soundness/ + \
-             core/verify/kernel_self_soundness/ must have a dispatcher"
+             core/verify/kernel_self_soundness/ + \
+             core/architecture/ must have a dispatcher"
         );
- // Check uniqueness.
+        // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
         for n in names {
             assert!(seen.insert(*n), "duplicate intrinsic name: {}", n);

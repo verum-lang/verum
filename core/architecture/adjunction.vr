@@ -4,31 +4,47 @@
 //
 // **Verum-native mirror of `verum_kernel::arch_adjunction`.**
 //
-// Per `internal/specs/ats-v.md` §20.6, every refactoring is a pair
-// of functors `(F, G)` where `F: Old → New` ⊣ `G: New → Old`
-// (left adjoint).  ATS-V accepts a refactoring as a typed
-// transformation **only if** a valid adjoint pair exists,
-// eliminating anti-patterns like "split modules without
-// preservation invariants".
+// ## Refactoring as adjunction
 //
-// **Canonical adjunctions** (spec §20.6):
+// Every architectural refactoring is a pair of functors `(F, G)`
+// where `F: Old → New` ⊣ `G: New → Old` — the left-adjoint
+// notation that captures: "F goes one way, G undoes it, and the
+// pair is canonical (universal up to isomorphism)."  ATS-V accepts
+// a refactoring as a typed transformation only if a valid adjoint
+// pair exists, eliminating anti-patterns like "split a module
+// without declaring the inverse merge" (AP-029 MissedAdjoint).
 //
-// | Forward (F)  | Backward (G)  | Recogniser                     |
-// |--------------|---------------|--------------------------------|
-// | Inline       | Extract       | composition_degree decreases   |
-// | Specialise   | Generalise    | foundation/stratum stable      |
-// | Decompose    | Compose       | composes_with grows            |
-// | Strengthen   | Weaken        | preserves grows                |
+// ## Canonical adjunctions (the four spec-stable recognisers)
 //
-// **Pipeline** (kernel side):
-//   1. `classify_refactoring` — recogniser dispatch on shape-delta.
-//   2. `verify_adjoint_pair` — `is_adjoint_of` mirror check.
-//   3. `analyze_refactoring` — walk preserved/gained → verdict.
-//   4. `analyze_chain` — adjunctions compose `(F ∘ F') ⊣ (G' ∘ G)`.
+// | Forward (F)  | Backward (G)  | Shape-delta recogniser           |
+// |--------------|---------------|----------------------------------|
+// | Inline       | Extract       | `composition_degree` decreases   |
+// | Specialise   | Generalise    | foundation / stratum stable      |
+// | Decompose    | Compose       | `composes_with` grows            |
+// | Strengthen   | Weaken        | `preserves` grows                |
 //
-// **Self-attestation**: this cog is itself ATS-V-typed via the
-// `@arch_module(...)` declaration below — dogfood for the
-// architectural type system.
+// User-declared refactorings outside this roster classify as
+// `CustomAdjunction(<name>)` and are accepted iff the witness
+// still forms a valid adjoint pair (the structural mirror check
+// below).
+//
+// ## Pipeline (kernel side)
+//
+//   1. `classify_refactoring` — dispatch on the before/after
+//      shape-delta to one of the four canonical recognisers (or
+//      Custom).
+//   2. `verify_adjoint_pair` — `is_adjoint_of` mirror equality
+//      check (forward_name ↔ backward_name).
+//   3. `analyze_refactoring` — walk preserved/gained propositions,
+//      emit per-property coverage records, aggregate to verdict.
+//   4. `analyze_chain` — adjunctions compose: `(F ∘ F') ⊣ (G' ∘ G)`,
+//      so a chain of refactorings is accepted iff every step is
+//      individually accepted.
+//
+// ## Self-attestation
+//
+// This cog is itself ATS-V-typed via the `@arch_module(...)`
+// declaration below — dogfood for the architectural type system.
 // =============================================================================
 
 @arch_module(
@@ -46,10 +62,12 @@ mount super.mtac.{AdjunctionWitness, ArchProposition};
 // CanonicalAdjunction — the four spec-§20.6 recognisers
 // =============================================================================
 
-/// Recognised canonical adjunction from spec §20.6.  `Custom`
+/// Recognised canonical adjunction.  Four standard arms cover the
+/// dominant refactoring shapes (Inline⊣Extract, Specialise⊣Generalise,
+/// Decompose⊣Compose, Strengthen⊣Weaken).  `CustomAdjunction(name)`
 /// captures user-declared refactorings outside the canonical
 /// roster — accepted iff the witness still forms a valid adjoint
-/// pair.
+/// pair under the `is_adjoint_of` mirror check.
 public type CanonicalAdjunction is
     | InlineExtract
     | SpecialiseGeneralise
@@ -144,12 +162,21 @@ public type ChainAnalysis is {
 
 /// **Adjunction analyzer — refactoring as typed transformation.**
 ///
-/// Discharges the kernel-side `arch_adjunction` module's
-/// soundness contracts: 4 canonical adjunction recognisers each
-/// pin a distinct shape-delta pattern; 4-arm verdict (Accepted /
-/// BrokenAdjointPair / PreservationFailure / GainClaimFailure)
-/// covers every refactoring outcome.
-@framework(ats_v, "ATS-V adjunction analyzer (spec internal/specs/ats-v.md §20.6). 4 canonical adjunctions: Inline⊣Extract / Specialise⊣Generalise / Decompose⊣Compose / Strengthen⊣Weaken. Implementation: crates/verum_kernel/src/arch_adjunction.rs.")
+/// Discharges the kernel-side adjunction module's soundness
+/// contracts:
+///   * Four canonical adjunction recognisers each pin a distinct
+///     shape-delta pattern (composition-degree decrease for
+///     Inline⊣Extract, foundation/stratum stability for
+///     Specialise⊣Generalise, etc.).
+///   * Four-arm verdict (Accepted / BrokenAdjointPair /
+///     PreservationFailure / GainClaimFailure) covers every
+///     refactoring outcome — there is no "ambiguous" residual
+///     state.
+///   * Chain composition is associative: a refactoring chain is
+///     accepted iff every step is individually accepted; empty
+///     chains rejected (refusal to claim acceptance from absence
+///     of evidence).
+@framework(ats_v, "ATS-V adjunction analyzer — four canonical adjunctions Inline⊣Extract / Specialise⊣Generalise / Decompose⊣Compose / Strengthen⊣Weaken plus user-declared customs. Kernel implementation: crates/verum_kernel/src/arch_adjunction.rs.")
 @kernel_discharge("kernel_arch_adjunction_analyzer")
 public axiom kernel_arch_adjunction_analyzer() -> Bool
     ensures true;

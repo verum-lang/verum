@@ -4,13 +4,17 @@
 //
 // **Verum-native mirror of `verum_kernel::arch_yoneda`.**
 //
-// Per `internal/specs/ats-v.md` §20.7 + §23, two architectures are
-// equivalent iff every `Observer` in the canonical roster
-// (EndUser / PeerCog / Stakeholder / Auditor / Adversary) projects
-// the same observation.  Algorithmic Yoneda lemma — `Hom(-, X)`
-// projected onto the observer-functor.
+// ## Yoneda equivalence
 //
-// **Per-observer projection** (what each Observer "sees"):
+// Two architectures are equivalent iff every `Observer` in the
+// canonical roster (EndUser / PeerCog / Stakeholder / Auditor /
+// Adversary) projects the same observation.  This is the
+// algorithmic Yoneda lemma applied to architecture: an object `X`
+// of category `C` is uniquely determined by its representable
+// functor `Hom(-, X) : C^op → Set`.  In ATS-V terms: a cog is
+// uniquely determined by what every observer sees of it.
+//
+// ## Per-observer projection (what each Observer is sensitive to)
 //
 // | Observer    | Sees                                                    |
 // |-------------|---------------------------------------------------------|
@@ -20,12 +24,21 @@
 // | Auditor     | full Shape projection (strictest observer)              |
 // | Adversary   | attack_surface = exposes + outbound network/exec        |
 //
-// **Engine guarantee** (per §20.7): a refactoring is **trivially
-// safe** iff its before/after shapes are Yoneda-equivalent.
+// ## Engine guarantee
 //
-// **Self-attestation**: this cog is itself ATS-V-typed via the
-// `@arch_module(...)` declaration below — dogfood for the
-// architectural type system.
+// A refactoring is **trivially safe** iff its before/after shapes
+// are Yoneda-equivalent (every observer agrees).  The Auditor —
+// strictest observer — agreeing alone is necessary but not
+// sufficient: an attacker submitting a curated `agreements: [auditor_only]`
+// would otherwise pass without testing the easier observers.  The
+// red-team closure axiom `kernel_arch_yoneda_canonical_roster_complete`
+// in `core.architecture.anti_patterns` requires the full 5-roster
+// be walked before any equivalence verdict is binding.
+//
+// ## Self-attestation
+//
+// This cog is itself ATS-V-typed via the `@arch_module(...)`
+// declaration below — dogfood for the architectural type system.
 // =============================================================================
 
 @arch_module(
@@ -105,9 +118,12 @@ public type ObserverAgreement is {
 // YonedaVerdict — equivalence outcome
 // =============================================================================
 
-/// Aggregate Yoneda-equivalence verdict per spec §20.7 + §23.
-/// `equivalent` iff every observer agrees AND `agreements` non-
-/// empty (refusal to claim equivalence from absence of evidence).
+/// Aggregate Yoneda-equivalence verdict.  `equivalent` iff every
+/// observer in the canonical 5-roster agrees AND `agreements` is
+/// non-empty (refusal to claim equivalence from absence of
+/// evidence).  The kernel-discharge axiom enforces full-roster
+/// completeness so an attacker cannot fabricate equivalence by
+/// submitting a single (e.g. auditor-only) agreement.
 public type YonedaVerdict is {
     schema_version: Int,
     agreements: List<ObserverAgreement>,
@@ -121,11 +137,18 @@ public type YonedaVerdict is {
 
 /// **Yoneda-equivalence checker — algorithmic Yoneda lemma.**
 ///
-/// Discharges the kernel-side `arch_yoneda` module's structural
-/// guarantees: each `Observer` projection is deterministic
-/// (`Hom(-, X)(X) ≅ id_X`); two shapes are Yoneda-equivalent iff
-/// their projections agree across every canonical observer.
-@framework(ats_v, "ATS-V Yoneda-equivalence checker (spec internal/specs/ats-v.md §20.7 + §23). Two architectures equivalent iff every canonical Observer projects same observation. Implementation: crates/verum_kernel/src/arch_yoneda.rs.")
+/// Discharges the kernel-side Yoneda module's structural
+/// guarantees:
+///   * Each `Observer` projection is deterministic
+///     (`Hom(-, X)(X) ≅ id_X` — observing a shape from itself
+///     yields the identity observation).
+///   * Two shapes are Yoneda-equivalent iff their projections
+///     agree across every canonical observer.
+///   * The verdict is sound only when the agreement list spans
+///     the full canonical-5 roster — partial agreements cannot
+///     fabricate equivalence (red-team closure
+///     `kernel_arch_yoneda_canonical_roster_complete`).
+@framework(ats_v, "ATS-V Yoneda-equivalence checker — two architectures equivalent iff every canonical Observer (EndUser / PeerCog / Stakeholder / Auditor / Adversary) projects the same observation.  Kernel implementation: crates/verum_kernel/src/arch_yoneda.rs.")
 @kernel_discharge("kernel_arch_yoneda_equivalence")
 public axiom kernel_arch_yoneda_equivalence() -> Bool
     ensures true;

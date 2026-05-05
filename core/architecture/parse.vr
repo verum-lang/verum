@@ -1,0 +1,117 @@
+// =============================================================================
+// core.architecture.parse — ATS-V @arch_module(...) parser surface
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch_parse`.**
+//
+// The parser converts the AST representation of `@arch_module(...)`
+// named-args into a canonical `Shape`.  This cog mirrors only the
+// **error type** — the actual parser operates over the AST
+// expression representation which is kernel-internal.
+//
+// ## Why mirror the error type
+//
+// Agents that surface ATS-V parse errors (LSP hover, audit
+// bundle, `verum arch explain`) need a stable Verum-side enum to
+// pattern-match against.  The kernel-side `ArchParseError` is
+// the source of truth; this Verum-side mirror is the consumption
+// surface.  Pinned by the cross-side alignment test.
+//
+// ## Canonical-field roster
+//
+// `arch_module_canonical_fields()` returns the 13 field names the
+// parser recognises in `@arch_module(...)`.  Drift between this
+// list and the parser breaks declarations from Verum source
+// (parsing fails with `UnknownField`).  The pin invariant
+// `arch_module_field_count_invariant()` asserts the roster size.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.architecture.parse;
+
+mount core.prelude.{Bool, Maybe, Text};
+
+// =============================================================================
+// ArchParseError — 5 canonical variants
+// =============================================================================
+
+/// Errors produced by `parse_arch_module` on malformed
+/// `@arch_module(...)` argument lists.  Mirrors
+/// `verum_kernel::arch_parse::ArchParseError`.
+public type ArchParseError is
+    /// Field name not in the canonical roster.  `suggestion` is a
+    /// Levenshtein-style hint when the parser found a near-miss.
+    | UnknownField {
+        name: Text,
+        suggestion: Maybe<Text>,
+      }
+    /// Field value has wrong AST shape — e.g. `at_tier = 42` where
+    /// `at_tier` expects a `Tier` variant.
+    | InvalidValue {
+        field: Text,
+        expected: Text,
+      }
+    /// Required field missing in strict mode.
+    | MissingRequired {
+        field: Text,
+      }
+    /// Capability variant references unknown `ResourceTag` /
+    /// `ExecTarget` / `PrivilegeRealm` / etc.
+    | UnknownVariant {
+        kind: Text,
+        value: Text,
+      }
+    /// Generic AST mismatch — caller passed an expression that is
+    /// not an `@arch_module(...)` call.
+    | NotAnArchModuleAttribute;
+
+/// Stable diagnostic tag.
+public fn arch_parse_error_tag(e: ArchParseError) -> Text {
+    match e {
+        UnknownField { name: _, suggestion: _ }    => "unknown_field",
+        InvalidValue { field: _, expected: _ }     => "invalid_value",
+        MissingRequired { field: _ }               => "missing_required",
+        UnknownVariant { kind: _, value: _ }       => "unknown_variant",
+        NotAnArchModuleAttribute                   => "not_an_arch_module_attribute",
+    }
+}
+
+// =============================================================================
+// Canonical field roster — pinned for parser cross-side alignment
+// =============================================================================
+
+/// Full canonical list of `@arch_module(...)` field names.  The
+/// parser at `arch_parse::parse_arch_module` matches on these
+/// strings; any drift between this list and the parser breaks
+/// `@arch_module(...)` declarations from Verum source.  Pinned by
+/// `crates/verum_kernel/tests/k_arch_v_alignment.rs`.
+public fn arch_module_canonical_fields() -> List<Text> {
+    [
+        "exposes",
+        "requires",
+        "preserves",
+        "consumes",
+        "at_tier",
+        "foundation",
+        "stratum",
+        "lifecycle",
+        "cve_closure_C",
+        "cve_closure_V_strategy",
+        "cve_closure_E",
+        "composes_with",
+        "strict",
+    ]
+}
+
+mount core.prelude.{Int, List};
+
+/// **Pin**: exactly 13 canonical fields in `@arch_module(...)`.
+/// Adding a 14th requires kernel parser update + this pin bump +
+/// spec §4.1 update.
+public fn arch_module_field_count_invariant() -> Bool {
+    arch_module_canonical_fields().len() == 13
+}

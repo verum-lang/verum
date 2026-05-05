@@ -4,21 +4,33 @@
 //
 // **Canonical registry of user-defined Custom capabilities.**
 //
-// Per `internal/specs/ats-v.md` §17.4 + RT2.4 (red-team pass on
-// capability ontology drift), every `Capability::CustomCapability(name)`
-// usage MUST appear in this registry. The kernel-side ATS-V phase
-// validates declared Custom capabilities against this ontology;
-// unknown names produce a compile error in strict mode (warning
-// in soft mode).
+// Every `Capability.CustomCapability(name)` usage MUST appear in
+// this registry (or a corpus-extended one declared via
+// `@arch_corpus(...)`).  The ATS-V phase validates declared
+// Custom capabilities against this ontology: unknown names produce
+// a compile error in strict mode and a warning in soft mode.
 //
-// **Architectural rationale**: prevents capability namespace drift —
-// distinct cogs declaring slightly-different names ("logger" vs
-// "log" vs "logging") for the same conceptual capability. Single
-// source of truth.
+// ## Architectural rationale
 //
-// ** scope**: registry surface only. wires the
-// ATS-V phase to validate against this list during architectural
-// type checking.
+// Without a registry, capability namespace drift is inevitable —
+// distinct cogs declare slightly-different names ("logger" vs
+// "log" vs "logging") for the same conceptual capability, and the
+// composition check `B.requires ⊆ A.exposes` fails on string
+// equality even though the intent matches.  This registry is the
+// single source of truth: every Custom-tagged capability has a
+// canonical name, a description, a privilege-transfer flag, and a
+// deprecation slot.
+//
+// ## Red-team angle (AT-1 closure)
+//
+// A malicious cog declaring `Capability.Custom("admin")` with an
+// inline schema claiming `transfers_privilege: true` would
+// otherwise fabricate a high-privilege capability the rest of the
+// corpus accepts.  The kernel-discharge axiom
+// `kernel_arch_capability_ontology_check` in
+// `core.architecture.anti_patterns` ensures any Custom tag is
+// registered before the cog passes the ATS-V phase, blocking the
+// injection.
 // =============================================================================
 
 module core.architecture.capability_ontology;

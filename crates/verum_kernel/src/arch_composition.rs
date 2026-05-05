@@ -1,12 +1,12 @@
-//! ATS-V composition algebra — Shape ⊗ Shape per spec §5.3.
+//! ATS-V composition algebra — Shape ⊗ Shape.
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §4.4 + §5.3, composition is a
-//! **typed operation**: `compose(A, B)` either yields a new
-//! [`crate::arch::Shape`] for the composed unit, or rejects with
-//! a structured anti-pattern violation.  Compiler refuses
-//! incompatible compositions at type-check time, not at runtime.
+//! Composition is a **typed operation**: `compose(A, B)` either
+//! yields a new [`crate::arch::Shape`] for the composed unit, or
+//! rejects with a structured anti-pattern violation.  The compiler
+//! refuses incompatible compositions at type-check time, never at
+//! runtime.
 //!
 //! ## Composition rules (spec §5.3)
 //!

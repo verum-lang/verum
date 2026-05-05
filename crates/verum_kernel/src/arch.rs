@@ -2,13 +2,12 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §4 (Architectural primitives) +
-//! §17 (Reuse compliance), ATS-V is a strict extension of Verum
-//! through ONE typed attribute (`@arch_module(...)`) plus library
-//! types in `core/architecture/`. This module ships the kernel-
-//! side mirror of those library types — Rust `enum`s and `struct`s
-//! that the ATS-V phase (Phase 6.5 per §3) consumes during
-//! architectural type checking.
+//! ATS-V is a strict extension of Verum through ONE typed
+//! attribute (`@arch_module(...)`) plus library types in
+//! `core/architecture/`.  This module ships the kernel-side mirror
+//! of those library types — Rust `enum`s and `struct`s that the
+//! ATS-V phase (Phase 6.5, sitting between type inference and VBC
+//! codegen) consumes during architectural type checking.
 //!
 //! ## Why mirrors live in the kernel
 //!
@@ -892,6 +891,143 @@ impl Shape {
 }
 
 // =============================================================================
+// Auxiliary typed attributes — @bridge_tier / @deterministic /
+// @mtac_decision / @arch_corpus
+// =============================================================================
+//
+// These attributes complement `@arch_module(...)` with focused,
+// orthogonal annotations.  They use the same generic
+// `attribute_args = named_arg_list` grammar form — no new grammar
+// production is required; the parser at `arch_parse.rs` dispatches
+// on attribute name.
+
+/// `@bridge_tier(from: Tier.X, to: Tier.Y)` — annotates a function
+/// that legitimately crosses the X→Y tier boundary.  Lifts the
+/// AP-004 TierMixing ban for *this specific call site*; the audit
+/// chronicle records every bridge for review.
+///
+/// Soundness contract: a bridge does not eliminate the cost of
+/// the cross-tier transition; it merely declares it intentional.
+/// The runtime inserts the appropriate transition (Interp-call
+/// from Aot, GPU-launch from Aot, etc.) at the call site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BridgeTier {
+    /// Source tier the call originates from.
+    pub from: Tier,
+    /// Destination tier the call lands in.
+    pub to: Tier,
+}
+
+impl BridgeTier {
+    /// True iff the bridge connects two distinct tiers — a no-op
+    /// bridge (same tier on both sides) is itself an architectural
+    /// defect (use the bare call site instead).
+    pub fn is_load_bearing(&self) -> bool {
+        self.from != self.to
+    }
+}
+
+/// `@deterministic` — marker attribute (no args) declaring that a
+/// function MUST produce identical output on identical inputs
+/// across runs / hosts / clock domains.
+///
+/// The marker is consumed by AP-015 DeterministicViolation:
+/// invocations of non-deterministic primitives (Random, SystemTime,
+/// FilesystemMtime, network) within the marked function raise the
+/// violation.  Determinism is the foundation of replay verification
+/// and DST testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeterministicMarker;
+
+impl DeterministicMarker {
+    /// Stable diagnostic tag for audit JSON.
+    pub fn tag(&self) -> &'static str {
+        "deterministic"
+    }
+}
+
+/// `@mtac_decision { point: TimePoint.X, by_observer: Observer.Y,
+/// proposition: ArchProposition.Z, modality: ModalAssertion.W }` —
+/// attaches a typed Modal-Temporal Architectural Calculus claim to
+/// a function or cog.  The ATS-V phase records the claim for the
+/// MTAC anti-pattern checks (AP-027 TemporalInconsistency, AP-028
+/// CounterfactualBrittleness, AP-031 PhantomEvolution).
+///
+/// Each MtacDecision is a dated, observer-witnessed, modally-typed
+/// architectural commitment — the unit of historical record in the
+/// MTAC corpus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MtacDecisionAttr {
+    /// When the decision applies in the time category.
+    pub point: crate::arch_mtac::TimePoint,
+    /// Which observer canonically witnesses the decision.
+    pub by_observer: crate::arch_mtac::Observer,
+    /// What architectural proposition the decision asserts.
+    pub proposition: crate::arch_mtac::ArchProposition,
+    /// Under which modal operator the proposition holds.
+    pub modality: MtacModality,
+}
+
+/// Single-token modality the `@mtac_decision { modality: ... }`
+/// field accepts.  This is a flattened projection of the six
+/// canonical `ModalAssertion` operators; the typed-attribute parser
+/// reads a bare path like `ModalAssertion.Necessity` and emits the
+/// matching `MtacModality` arm.  The ATS-V phase reconstructs the
+/// full propositional content from the `proposition` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MtacModality {
+    /// `□ A` — A holds in every possible future / decision branch.
+    Necessity,
+    /// `◇ A` — A holds in some possible future / decision branch.
+    Possibility,
+    /// `◇F A` — A holds in some future time-point.
+    Eventually,
+    /// `□G A` — A holds in every future time-point.
+    Always,
+    /// `A U B` — temporal Until.  Used only in `@mtac_decision { proposition }`
+    /// when paired with a follow-up `Until` chain; standalone use is the
+    /// `Necessity` shadow.
+    Until,
+    /// `A ⇨ B` — counterfactual conditional.
+    Counterfactual,
+}
+
+impl MtacModality {
+    /// Stable diagnostic tag.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            MtacModality::Necessity => "necessity",
+            MtacModality::Possibility => "possibility",
+            MtacModality::Eventually => "eventually",
+            MtacModality::Always => "always",
+            MtacModality::Until => "until",
+            MtacModality::Counterfactual => "counterfactual",
+        }
+    }
+}
+
+/// `@arch_corpus(invariants: [...], foundation_bridges: [...])` —
+/// scope attribute for cross-cog invariants.  Mirrors
+/// `core.architecture.corpus.CorpusInvariant`.
+///
+/// Where `@arch_module(...)` describes a single cog's Shape,
+/// `@arch_corpus(...)` describes properties holding over the
+/// entire corpus — composition graph acyclic, foundations
+/// consistent, no cog claims `LAbs`, every required capability
+/// has a producer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ArchCorpusAttr {
+    /// Which corpus invariants the attribute opts into checking.
+    /// Empty list means "default 4-roster" (all baseline invariants).
+    pub invariants: Vec<crate::arch_corpus::CorpusInvariant>,
+    /// Foundation bridges the corpus declares — pairs of
+    /// (`peer_cog`, `framework_corpus_label`) declaring an explicit
+    /// translation between the two foundations.  When present,
+    /// AP-005 FoundationDrift suppresses for the bridged pair.
+    pub foundation_bridges: Vec<(String, String)>,
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -1114,9 +1250,10 @@ mod tests {
     #[test]
     fn architectural_pin_capability_tags_documented_in_spec() {
  // Pin: every Capability tag here matches the canonical
- // surface in `internal/specs/ats-v.md` §4.2. Adding a
- // new variant requires updating both this enum and the
- // spec table.
+ // surface (Read / Write / Exec / Escalate / Spawn / TimeBound /
+ // Persist / Network / Custom).  Adding a new variant requires
+ // updating both this enum and the cross-side pin test in
+ // crates/verum_kernel/tests/k_arch_v_alignment.rs.
         let documented_tags: std::collections::BTreeSet<&'static str> = [
             "read",
             "write",

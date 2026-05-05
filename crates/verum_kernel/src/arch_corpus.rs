@@ -2,11 +2,11 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §11.3 ( deliverable) +
-//! §16 RFC ATS-V-001, individual `@arch_module(...)` declarations
-//! cover per-cog invariants. Cross-cog invariants — properties
-//! that hold over the entire corpus, not any single cog —
-//! require a separate scope: `@arch_corpus(...)`.
+//! Individual `@arch_module(...)` declarations cover per-cog
+//! invariants — capability discipline, lifecycle integrity, etc.
+//! Cross-cog invariants — properties that hold over the entire
+//! corpus, not any single cog — require a separate scope:
+//! `@arch_corpus(...)` covering the full mounted module graph.
 //!
 //! ## Canonical corpus invariants
 //!
@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Stable enumeration of corpus-level invariants. Each variant
 /// has a check function returning structured violations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CorpusInvariant {
     /// No circular dependencies in the cross-cog mount graph (AP-003).
     NoCircularDependencies,

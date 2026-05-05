@@ -1,0 +1,143 @@
+// =============================================================================
+// core.architecture.corpus — ATS-V cross-cog corpus invariants
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch_corpus`.**
+//
+// Individual `@arch_module(...)` declarations cover per-cog
+// invariants — capability discipline, lifecycle integrity, etc.
+// Cross-cog invariants — properties that hold over the entire
+// corpus, not any single cog — require a separate scope:
+// `@arch_corpus(...)` covering the full mounted module graph.
+//
+// ## Canonical corpus invariants (4 baseline)
+//
+// 1. **NoCircularDependencies** — composition graph acyclic
+//    (transitive across all cogs).
+// 2. **FoundationConsistency** — all cogs share a foundation, OR
+//    pairs with different foundations have explicit
+//    `@framework(bridge_corpus, ...)` declarations.
+// 3. **NoLAbsClaim** — no cog declares `stratum = LAbs` (sanity
+//    net for AFN-T α boundary closure; AP-011 handles per-cog).
+// 4. **CapabilityClosure** — for every cog A, every capability A
+//    requires either has a producer cog (some B with that capability
+//    in B.exposes) OR is registered as `transfers_privilege: true`
+//    in `core.architecture.capability_ontology`.
+//
+// **Self-attestation**: this cog is itself ATS-V-typed via the
+// `@arch_module(...)` declaration below.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.architecture.corpus;
+
+mount core.prelude.{Bool, Int, List, Text};
+
+// =============================================================================
+// CorpusInvariant — kinds of cross-cog invariants
+// =============================================================================
+
+/// Stable enumeration of corpus-level invariants.  Mirrors
+/// `verum_kernel::arch_corpus::CorpusInvariant`.
+public type CorpusInvariant is
+    | NoCircularDependencies
+    | FoundationConsistency
+    | NoLAbsClaim
+    | CapabilityClosure;
+
+/// Stable diagnostic tag.
+public fn corpus_invariant_tag(c: CorpusInvariant) -> Text {
+    match c {
+        NoCircularDependencies => "no_circular_dependencies",
+        FoundationConsistency  => "foundation_consistency",
+        NoLAbsClaim            => "no_l_abs_claim",
+        CapabilityClosure      => "capability_closure",
+    }
+}
+
+/// Human-friendly name (matches kernel-side `name()` method).
+public fn corpus_invariant_name(c: CorpusInvariant) -> Text {
+    match c {
+        NoCircularDependencies => "NoCircularDependencies",
+        FoundationConsistency  => "FoundationConsistency",
+        NoLAbsClaim            => "NoLAbsClaim",
+        CapabilityClosure      => "CapabilityClosure",
+    }
+}
+
+/// Full canonical list — exactly 4 entries.  Adding a 5th requires
+/// RFC ATS-V-008 + kernel-side enum bump + pin-test bump.
+public fn corpus_invariant_full_list() -> List<CorpusInvariant> {
+    [
+        CorpusInvariant.NoCircularDependencies,
+        CorpusInvariant.FoundationConsistency,
+        CorpusInvariant.NoLAbsClaim,
+        CorpusInvariant.CapabilityClosure,
+    ]
+}
+
+/// **Pin**: roster size is exactly 4.  Mirrors kernel-side test.
+public fn corpus_invariant_roster_size_invariant() -> Bool {
+    corpus_invariant_full_list().len() == 4
+}
+
+// =============================================================================
+// CorpusViolation — structured diagnostic
+// =============================================================================
+
+/// Structured diagnostic produced when a corpus invariant fails.
+public type CorpusViolation is {
+    invariant: CorpusInvariant,
+    summary: Text,
+    human_message: Text,
+    affected_cogs: List<Text>,
+};
+
+// =============================================================================
+// CorpusReport — aggregate report
+// =============================================================================
+
+/// Aggregated cross-cog verification report.  Mirrors
+/// `verum_kernel::arch_corpus::CorpusReport`.
+public type CorpusReport is {
+    total_cogs: Int,
+    violations: List<CorpusViolation>,
+};
+
+/// Empty report — used as the corpus-walker initial accumulator.
+public fn corpus_report_empty() -> CorpusReport {
+    CorpusReport {
+        total_cogs: 0,
+        violations: [],
+    }
+}
+
+/// True iff no corpus invariant violated — the audit-gate
+/// load-bearing predicate.
+public fn corpus_report_is_load_bearing(r: CorpusReport) -> Bool {
+    r.violations.len() == 0
+}
+
+// =============================================================================
+// Kernel-discharge bridge — corpus-walker engine
+// =============================================================================
+
+/// **Corpus-level architectural verification.**
+///
+/// Discharges `verum_kernel::arch_corpus::verify_corpus` —
+/// walks every (cog_name, Shape) pair through all 4 baseline
+/// invariants and aggregates structured violations.
+///
+/// **Soundness contract** (spec §11.3): if `verify_corpus` returns
+/// an empty `CorpusReport.violations`, then the corpus is
+/// architecturally sound at the cross-cog level — every per-cog
+/// `@arch_module(...)` already passed AP-001..032; this dispatch
+/// covers the gaps that only manifest across the corpus.
+@framework(ats_v, "ATS-V corpus-level invariants — four baseline cross-cog checks: NoCircularDependencies (composition graph acyclic across the entire corpus), FoundationConsistency (all cogs share a foundation OR pairs with different foundations have explicit @framework(bridge_corpus, ...)), NoLAbsClaim (no cog declares stratum=LAbs, sanity net for AFN-T α boundary closure), CapabilityClosure (every required capability is exposed by some cog OR registered as transfers_privilege:true in capability_ontology). Kernel implementation: crates/verum_kernel/src/arch_corpus.rs.")
+@kernel_discharge("kernel_arch_corpus_verify")
+public axiom kernel_arch_corpus_verify() -> Bool
+    ensures true;

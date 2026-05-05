@@ -2,27 +2,25 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §20-§23 (fundamental rethinking of
-//! architectural types), classical static notations like C4/UML
-//! treat architecture as a **point** in shape-space. Real
-//! architecture is a **functor** from time × decisions × observers
-//! to shape:
+//! Classical static notations (C4, UML, ArchiMate) treat
+//! architecture as a **point** in shape-space.  Real architecture
+//! is a **functor** from time × decisions × observers to shape:
 //!
 //! `arch_type<C>: TimeCategory × DecisionCategory × ObserverCategory → ShapeCategory`
 //!
-//! MTAC primitives establish the categories that this functor maps
-//! between. ships them as data types; + wires them
-//! into anti-pattern checks (TemporalInconsistency,
-//! CounterfactualBrittleness, etc. — AP-027..032 already in the
-//! catalog).
+//! MTAC primitives establish the categories this functor maps
+//! between.  This module ships them as data types; the
+//! `arch_anti_pattern` module wires them into anti-pattern checks
+//! (TemporalInconsistency, CounterfactualBrittleness, etc. —
+//! AP-027..032 in the canonical catalog).
 //!
-//! ## Why Verum, not Coq/Lean
+//! ## Why Verum, not Coq / Lean
 //!
-//! No production proof assistant treats architecture as a
-//! functor over time + decisions + observers. Coq/Lean stop at
-//! single-shape types. Verum's MTAC is the first attempt to
-//! make modal-temporal reasoning about architecture compile-time
-//! enforceable per spec §32.
+//! No production proof assistant treats architecture as a functor
+//! over time + decisions + observers.  Coq and Lean stop at
+//! single-shape types.  Verum's MTAC is the first attempt to make
+//! modal-temporal reasoning about architecture compile-time
+//! enforceable through the dual-audience contract.
 
 use serde::{Deserialize, Serialize};
 

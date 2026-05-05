@@ -1,0 +1,893 @@
+//! Cross-side ATS-V alignment pin test.
+//!
+//! Holds the Verum-side `core/architecture/*.vr` declarations in
+//! lockstep with the Rust-side `verum_kernel::arch*` enums.  Drift
+//! in either direction fails this test with a concrete message
+//! naming the missing or mismatched element.
+//!
+//! ## What this test pins
+//!
+//! 1. **Variant tag rosters** — every enum the kernel exposes
+//!    through a `tag()` / `code()` / `name()` method has its
+//!    canonical tag set hard-pinned here.  Adding or removing a
+//!    variant on the kernel side requires updating this test.
+//! 2. **Roster sizes** — every full-roster constant
+//!    (`Observer::full_canonical_roster`, the 32-pattern
+//!    AntiPatternCode list, the canonical-field roster) is pinned
+//!    by size.
+//! 3. **Verum-side variant presence** — the test reads every
+//!    `core/architecture/*.vr` file as text and asserts that each
+//!    canonical variant appears as a declaration token.
+//! 4. **Verum-side helper presence** — the test asserts that each
+//!    canonical helper name appears as a `pub fn` declaration on
+//!    the Verum side.  This guarantees the operationalisation
+//!    surface stays available to Verum cogs.
+//!
+//! ## Workflow when adding a variant
+//!
+//! 1. Update the kernel-side enum + impl method in
+//!    `crates/verum_kernel/src/arch*.rs`.
+//! 2. Update the Verum-side type + helper in
+//!    `core/architecture/*.vr`.
+//! 3. Update the canonical roster in this test.
+//!
+//! Skipping any step fails this test, blocking the change-set
+//! from landing.
+
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
+
+use verum_kernel::arch::*;
+use verum_kernel::arch_anti_pattern::AntiPatternCode;
+use verum_kernel::arch_mtac::*;
+
+// =============================================================================
+// Path resolution — find the workspace's core/ directory
+// =============================================================================
+
+fn workspace_core_architecture_dir() -> PathBuf {
+    // CARGO_MANIFEST_DIR points at crates/verum_kernel; walk up two
+    // levels to reach the workspace root, then descend into core/.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable from crates/verum_kernel");
+    workspace_root.join("core").join("architecture")
+}
+
+fn read_vr(name: &str) -> String {
+    let path = workspace_core_architecture_dir().join(name);
+    fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "failed to read {} for cross-side pin: {} (cwd: {:?})",
+            path.display(),
+            e,
+            std::env::current_dir(),
+        )
+    })
+}
+
+fn assert_variant_in(text: &str, variant: &str, in_file: &str) {
+    // The Verum-side .vr files declare variants either as
+    //   | VariantName            (bare)
+    //   | VariantName(...)       (tuple-style)
+    //   | VariantName { ... }    (struct-style)
+    // and reference them as `EnumName.VariantName`.  We accept any
+    // of these surface forms.
+    let surfaces = [
+        format!("| {}", variant),
+        format!("|{}", variant),
+        format!(".{}", variant),
+    ];
+    let found = surfaces.iter().any(|s| text.contains(s));
+    assert!(
+        found,
+        "Verum-side {}: missing variant `{}`. Expected one of declaration `| {}` or reference `.{}`.",
+        in_file, variant, variant, variant,
+    );
+}
+
+fn assert_helper_in(text: &str, name: &str, in_file: &str) {
+    // Verum surface form: `public fn <name>` (the canonical visibility
+    // marker is `public`, not Rust's `pub`).
+    let needle = format!("public fn {}", name);
+    assert!(
+        text.contains(&needle),
+        "Verum-side {}: missing `public fn {}` helper.  Operationalisation surface must mirror kernel-side `impl`.",
+        in_file, name,
+    );
+}
+
+// =============================================================================
+// 1. Tier — 5 variants
+// =============================================================================
+
+#[test]
+fn pin_tier_variants_aligned() {
+    let kernel_tags: BTreeSet<&'static str> = [
+        Tier::Interp.tag(),
+        Tier::Aot.tag(),
+        Tier::Gpu.tag(),
+        Tier::Check.tag(),
+        Tier::MultiTier { allowed: vec![] }.tag(),
+    ]
+    .iter()
+    .copied()
+    .collect();
+    assert_eq!(kernel_tags.len(), 5, "Tier has 5 distinct tags");
+
+    let expected = [
+        "interp",
+        "aot",
+        "gpu",
+        "check",
+        "multi_tier",
+    ]
+    .iter()
+    .copied()
+    .collect::<BTreeSet<_>>();
+    assert_eq!(
+        kernel_tags, expected,
+        "Tier kernel tags drifted from canonical roster"
+    );
+
+    let vr = read_vr("types.vr");
+    for v in &["Interp", "Aot", "Gpu", "Check", "MultiTier"] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (Tier)");
+    }
+    // Critical: TierCheck must NOT be present (was renamed to Check).
+    assert!(
+        !vr.contains("| TierCheck"),
+        "Verum-side types.vr still declares `| TierCheck` — must be `| Check` for parser compatibility"
+    );
+}
+
+// =============================================================================
+// 2. MsfsStratum — 4 variants
+// =============================================================================
+
+#[test]
+fn pin_msfs_stratum_variants_aligned() {
+    let kernel_tags: BTreeSet<&'static str> = [
+        MsfsStratum::LFnd.tag(),
+        MsfsStratum::LCls.tag(),
+        MsfsStratum::LClsTop.tag(),
+        MsfsStratum::LAbs.tag(),
+    ]
+    .iter()
+    .copied()
+    .collect();
+    let expected: BTreeSet<&'static str> =
+        ["l_fnd", "l_cls", "l_cls_top", "l_abs"].iter().copied().collect();
+    assert_eq!(kernel_tags, expected, "MsfsStratum kernel tags drifted");
+
+    let vr = read_vr("types.vr");
+    for v in &["LFnd", "LCls", "LClsTop", "LAbs"] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (MsfsStratum)");
+    }
+    assert_helper_in(&vr, "stratum_is_admissible", "types.vr");
+    assert_helper_in(&vr, "stratum_tag", "types.vr");
+}
+
+// =============================================================================
+// 3. Foundation — 7 variants
+// =============================================================================
+
+#[test]
+fn pin_foundation_variants_aligned() {
+    let kernel_tags: BTreeSet<&'static str> = [
+        Foundation::ZfcTwoInacc.tag(),
+        Foundation::Hott.tag(),
+        Foundation::Cubical.tag(),
+        Foundation::Cic.tag(),
+        Foundation::Mltt.tag(),
+        Foundation::Eff.tag(),
+        Foundation::Custom {
+            name: "x".into(),
+            framework_corpus: "y".into(),
+        }
+        .tag(),
+    ]
+    .iter()
+    .copied()
+    .collect();
+    let expected: BTreeSet<&'static str> = [
+        "zfc_two_inacc", "hott", "cubical", "cic", "mltt", "eff", "custom",
+    ]
+    .iter()
+    .copied()
+    .collect();
+    assert_eq!(kernel_tags, expected, "Foundation kernel tags drifted");
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "ZfcTwoInacc",
+        "Hott",
+        "Cubical",
+        "Cic",
+        "Mltt",
+        "Eff",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (Foundation)");
+    }
+    assert_helper_in(&vr, "foundation_directly_subsumed_by", "types.vr");
+}
+
+// =============================================================================
+// 4. Lifecycle — 9 variants
+// =============================================================================
+
+#[test]
+fn pin_lifecycle_variants_aligned() {
+    let kernel_tags: BTreeSet<&'static str> = [
+        Lifecycle::Hypothesis {
+            confidence: ConfidenceLevel::Medium,
+        }
+        .tag(),
+        Lifecycle::Plan {
+            target_completion: "x".into(),
+        }
+        .tag(),
+        Lifecycle::Postulate {
+            citation: "x".into(),
+        }
+        .tag(),
+        Lifecycle::Definition.tag(),
+        Lifecycle::Conditional { conditions: vec![] }.tag(),
+        Lifecycle::Theorem {
+            since: "v0.1".into(),
+        }
+        .tag(),
+        Lifecycle::Interpretation {
+            reason: "x".into(),
+        }
+        .tag(),
+        Lifecycle::Retracted {
+            reason: "x".into(),
+            replacement: None,
+        }
+        .tag(),
+        Lifecycle::Obsolete {
+            deprecation_reason: "x".into(),
+            replacement: None,
+        }
+        .tag(),
+    ]
+    .iter()
+    .copied()
+    .collect();
+    assert_eq!(kernel_tags.len(), 9, "Lifecycle has 9 distinct tags");
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "Hypothesis",
+        "Plan",
+        "Postulate",
+        "Definition",
+        "Conditional",
+        "Theorem",
+        "Interpretation",
+        "Retracted",
+        "Obsolete",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (Lifecycle)");
+    }
+    assert_helper_in(&vr, "lifecycle_rank", "types.vr");
+    assert_helper_in(&vr, "lifecycle_cve_glyph", "types.vr");
+    assert_helper_in(&vr, "lifecycle_is_mature_corpus_forbidden", "types.vr");
+}
+
+// =============================================================================
+// 5. Capability — 9 variants
+// =============================================================================
+
+#[test]
+fn pin_capability_variants_aligned() {
+    let kernel_tags: BTreeSet<&'static str> = [
+        Capability::Read {
+            resource: ResourceTag::Logger,
+        }
+        .tag(),
+        Capability::Write {
+            resource: ResourceTag::Logger,
+        }
+        .tag(),
+        Capability::Exec {
+            target: ExecTarget::Custom("x".into()),
+        }
+        .tag(),
+        Capability::Escalate {
+            realm: PrivilegeRealm::Admin,
+        }
+        .tag(),
+        Capability::Spawn {
+            lifetime: TaskLifetime::Detached,
+        }
+        .tag(),
+        Capability::TimeBound {
+            until: ExpirationPolicy::AfterDuration { milliseconds: 1 },
+        }
+        .tag(),
+        Capability::Persist {
+            medium: PersistenceMedium::Disk { path: "/x".into() },
+        }
+        .tag(),
+        Capability::Network {
+            protocol: NetProtocol::Tcp,
+            direction: NetDirection::Inbound,
+        }
+        .tag(),
+        Capability::Custom {
+            tag: "x".into(),
+            schema: CapabilitySchema {
+                description: "x".into(),
+                transfers_privilege: false,
+                subsumed_by: vec![],
+            },
+        }
+        .tag(),
+    ]
+    .iter()
+    .copied()
+    .collect();
+    assert_eq!(kernel_tags.len(), 9, "Capability has 9 distinct tags");
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "Read",
+        "Write",
+        "Exec",
+        "Escalate",
+        "Spawn",
+        "TimeBound",
+        "Persist",
+        "Network",
+        "CustomCapability",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (Capability)");
+    }
+    assert_helper_in(&vr, "capability_tag", "types.vr");
+    // CapabilitySchema mirror present.
+    assert!(
+        vr.contains("CapabilitySchema"),
+        "Verum-side types.vr missing CapabilitySchema type"
+    );
+}
+
+// =============================================================================
+// 6. VerifyStrategy — 9 levels strictly ordered
+// =============================================================================
+
+#[test]
+fn pin_verify_strategy_aligned() {
+    let order = [
+        VerifyStrategy::Runtime,
+        VerifyStrategy::Static,
+        VerifyStrategy::Fast,
+        VerifyStrategy::Formal,
+        VerifyStrategy::Proof,
+        VerifyStrategy::Thorough,
+        VerifyStrategy::Reliable,
+        VerifyStrategy::Certified,
+        VerifyStrategy::Synthesize,
+    ];
+    for window in order.windows(2) {
+        assert!(
+            window[0].rank() < window[1].rank(),
+            "VerifyStrategy rank not strictly increasing: {:?} >= {:?}",
+            window[0],
+            window[1]
+        );
+    }
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "Runtime",
+        "Static",
+        "Fast",
+        "Formal",
+        "Proof",
+        "Thorough",
+        "Reliable",
+        "Certified",
+        "Synthesize",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (VerifyStrategy)");
+    }
+    assert_helper_in(&vr, "verify_strategy_rank", "types.vr");
+}
+
+// =============================================================================
+// 7. AntiPatternCode — 32 canonical codes
+// =============================================================================
+
+#[test]
+fn pin_anti_pattern_code_count_thirty_two() {
+    let all = AntiPatternCode::full_list();
+    assert_eq!(
+        all.len(),
+        32,
+        "Kernel-side AntiPatternCode roster size drifted from canonical 32"
+    );
+
+    let codes: BTreeSet<&'static str> = all.iter().map(|c| c.code()).collect();
+    assert_eq!(codes.len(), 32, "AntiPatternCode codes not unique");
+
+    // Verify the AP-001..AP-032 pattern is fully covered.
+    for n in 1..=32 {
+        let expected = format!("ATS-V-AP-{:03}", n);
+        assert!(
+            codes.contains(expected.as_str()),
+            "Missing AntiPatternCode {}",
+            expected
+        );
+    }
+
+    let vr = read_vr("anti_patterns.vr");
+    let names = [
+        "CapabilityEscalation",
+        "CapabilityLeak",
+        "DependencyCycle",
+        "TierMixing",
+        "FoundationDrift",
+        "RegisterMixing",
+        "TxStraddling",
+        "ResourceStraddling",
+        "LifecycleRegression",
+        "CveIncomplete",
+        "AbsoluteBoundaryAttempt",
+        "InvariantViolation",
+        "DanglingMessageType",
+        "UnauthenticatedCrossing",
+        "DeterministicViolation",
+        "CapabilityDuplication",
+        "OrphanCapability",
+        "MissingHandoff",
+        "FoundationDowngrade",
+        "TimeBoundLeakage",
+        "PersistenceMismatch",
+        "CapabilityLaundering",
+        "FoundationForgery",
+        "TransitiveLifecycleRegression",
+        "DeclarationDrift",
+        "FoundationContentMismatch",
+        "TemporalInconsistency",
+        "CounterfactualBrittleness",
+        "MissedAdjoint",
+        "UniversalPropertyViolation",
+        "PhantomEvolution",
+        "YonedaInequivalentRefactor",
+    ];
+    for n in &names {
+        assert_variant_in(&vr, n, "core/architecture/anti_patterns.vr (AntiPatternCode)");
+    }
+    assert_helper_in(&vr, "anti_pattern_code_str", "anti_patterns.vr");
+    assert_helper_in(&vr, "anti_pattern_full_roster", "anti_patterns.vr");
+}
+
+// =============================================================================
+// 8. Observer — canonical 5-roster
+// =============================================================================
+
+#[test]
+fn pin_observer_canonical_roster_size_five() {
+    let roster = Observer::full_canonical_roster();
+    assert_eq!(
+        roster.len(),
+        5,
+        "Observer canonical roster size drifted from 5 (the Yoneda invariant)"
+    );
+
+    let tags: BTreeSet<&'static str> = roster.iter().map(|o| o.tag()).collect();
+    let expected: BTreeSet<&'static str> = [
+        "end_user",
+        "peer_cog",
+        "stakeholder",
+        "auditor",
+        "adversary",
+    ]
+    .iter()
+    .copied()
+    .collect();
+    assert_eq!(tags, expected, "Observer roster tags drifted");
+
+    let vr = read_vr("mtac.vr");
+    for v in &["EndUser", "PeerCog", "Stakeholder", "Auditor", "Adversary"] {
+        assert_variant_in(&vr, v, "core/architecture/mtac.vr (Observer)");
+    }
+    assert_helper_in(&vr, "observer_full_canonical_roster", "mtac.vr");
+    assert_helper_in(&vr, "observer_roster_size_invariant", "mtac.vr");
+}
+
+// =============================================================================
+// 9. ModalAssertion — 6 operators with disjoint modal/temporal sets
+// =============================================================================
+
+#[test]
+fn pin_modal_assertion_six_operators() {
+    let probes = [
+        ModalAssertion::Necessity {
+            proposition: ArchProposition::FoundationStable,
+        },
+        ModalAssertion::Possibility {
+            proposition: ArchProposition::FoundationStable,
+        },
+        ModalAssertion::Eventually {
+            proposition: ArchProposition::FoundationStable,
+        },
+        ModalAssertion::Always {
+            proposition: ArchProposition::FoundationStable,
+        },
+        ModalAssertion::Until {
+            first: ArchProposition::FoundationStable,
+            second: ArchProposition::FoundationStable,
+        },
+        ModalAssertion::Counterfactual {
+            antecedent: ArchProposition::FoundationStable,
+            consequent: ArchProposition::FoundationStable,
+        },
+    ];
+    let tags: BTreeSet<&'static str> = probes.iter().map(|p| p.tag()).collect();
+    assert_eq!(tags.len(), 6, "ModalAssertion 6 operators distinct");
+
+    // Modal and temporal arms are disjoint.
+    let n = &probes[0];
+    let e = &probes[2];
+    assert!(n.is_modal() && !n.is_temporal());
+    assert!(e.is_temporal() && !e.is_modal());
+
+    let vr = read_vr("mtac.vr");
+    for v in &[
+        "Necessity",
+        "Possibility",
+        "Eventually",
+        "Always",
+        "Until",
+        "CounterfactualImpl",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/mtac.vr (ModalAssertion)");
+    }
+    assert_helper_in(&vr, "modal_is_temporal", "mtac.vr");
+    assert_helper_in(&vr, "modal_is_modal", "mtac.vr");
+}
+
+// =============================================================================
+// 10. CveClosure — 0..=3 degree
+// =============================================================================
+
+#[test]
+fn pin_cve_closure_degree_count_arms() {
+    let full = CveClosure {
+        constructive: Some("c".into()),
+        verifiable_strategy: Some(VerifyStrategy::Certified),
+        executable: Some("e".into()),
+    };
+    assert_eq!(full.closure_degree(), 3);
+    assert!(full.is_fully_closed());
+
+    let none = CveClosure {
+        constructive: None,
+        verifiable_strategy: None,
+        executable: None,
+    };
+    assert_eq!(none.closure_degree(), 0);
+
+    let vr = read_vr("types.vr");
+    assert_helper_in(&vr, "cve_closure_degree", "types.vr");
+    assert_helper_in(&vr, "cve_closure_is_fully_closed", "types.vr");
+}
+
+// =============================================================================
+// 11. Composition / corpus / phase / parse modules — presence
+// =============================================================================
+
+#[test]
+fn pin_composition_module_present() {
+    let vr = read_vr("composition.vr");
+    assert!(
+        vr.contains("CompositionResult"),
+        "core/architecture/composition.vr missing CompositionResult type"
+    );
+    assert!(
+        vr.contains("kernel_arch_composition_engine"),
+        "core/architecture/composition.vr missing kernel_arch_composition_engine axiom"
+    );
+    assert!(
+        vr.contains("kernel_arch_composition_associative"),
+        "core/architecture/composition.vr missing kernel_arch_composition_associative axiom"
+    );
+    assert_helper_in(&vr, "composition_result_is_composed", "composition.vr");
+}
+
+#[test]
+fn pin_corpus_module_present() {
+    let vr = read_vr("corpus.vr");
+    for v in &[
+        "NoCircularDependencies",
+        "FoundationConsistency",
+        "NoLAbsClaim",
+        "CapabilityClosure",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/corpus.vr (CorpusInvariant)");
+    }
+    assert_helper_in(&vr, "corpus_invariant_full_list", "corpus.vr");
+    assert_helper_in(&vr, "corpus_invariant_roster_size_invariant", "corpus.vr");
+}
+
+#[test]
+fn pin_phase_module_present() {
+    let vr = read_vr("phase.vr");
+    assert!(
+        vr.contains("ArchPhaseReport"),
+        "core/architecture/phase.vr missing ArchPhaseReport type"
+    );
+    assert!(
+        vr.contains("ModuleArchResult"),
+        "core/architecture/phase.vr missing ModuleArchResult type"
+    );
+    assert_helper_in(&vr, "arch_phase_report_is_load_bearing", "phase.vr");
+    assert_helper_in(&vr, "module_arch_result_is_load_bearing", "phase.vr");
+}
+
+#[test]
+fn pin_parse_module_present() {
+    let vr = read_vr("parse.vr");
+    for v in &[
+        "UnknownField",
+        "InvalidValue",
+        "MissingRequired",
+        "UnknownVariant",
+        "NotAnArchModuleAttribute",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/parse.vr (ArchParseError)");
+    }
+    assert_helper_in(&vr, "arch_module_canonical_fields", "parse.vr");
+    assert_helper_in(&vr, "arch_module_field_count_invariant", "parse.vr");
+}
+
+// =============================================================================
+// 12. Red-team closure axioms — must exist on Verum side
+// =============================================================================
+
+#[test]
+fn pin_red_team_closure_axioms_present() {
+    let vr = read_vr("anti_patterns.vr");
+    for axiom in &[
+        "kernel_arch_capability_ontology_check",
+        "kernel_arch_yoneda_canonical_roster_complete",
+        "kernel_arch_theorem_cve_required",
+        "kernel_arch_consumes_format_check",
+    ] {
+        assert!(
+            vr.contains(axiom),
+            "core/architecture/anti_patterns.vr missing red-team closure axiom `{}` — \
+             attack vectors AT-1/AT-2/AT-3/AT-5 require all four declarations",
+            axiom,
+        );
+    }
+}
+
+// =============================================================================
+// 13. mod.vr — re-exports the full surface
+// =============================================================================
+
+#[test]
+fn pin_mod_re_exports_full_surface() {
+    let vr = read_vr("mod.vr");
+    let expected_modules = [
+        "super.types",
+        "super.anti_patterns",
+        "super.composition",
+        "super.corpus",
+        "super.phase",
+        "super.parse",
+        "super.mtac",
+        "super.counterfactual",
+        "super.adjunction",
+        "super.yoneda",
+    ];
+    for m in &expected_modules {
+        assert!(
+            vr.contains(m),
+            "core/architecture/mod.vr does not re-export {} — full ATS-V surface must be visible from `core.architecture.mod`",
+            m,
+        );
+    }
+}
+
+// =============================================================================
+// 14. Anti-pattern check-function coverage — all 32 codes must have an impl
+// =============================================================================
+
+#[test]
+fn pin_all_thirty_two_codes_have_check_function() {
+    // For every AntiPatternCode, a `check_*` function must exist on
+    // the kernel side that fires the violation under at least one
+    // input.  The pin test does not invoke the dispatcher — it
+    // enumerates the canonical roster against a hand-pinned list of
+    // `check_*` function names that the source must contain.
+    let kernel_arch_anti_pattern_src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_anti_pattern.rs"),
+    )
+    .expect("kernel source readable");
+
+    // Mapping: AntiPatternCode → expected `pub fn check_*` name.
+    // When two codes share a common dispatcher (e.g. AT-1 surfaces
+    // under CapabilityEscalation), the corresponding check function
+    // is deliberately listed twice.
+    let expected_fns: &[(AntiPatternCode, &str)] = &[
+        (AntiPatternCode::CapabilityEscalation, "check_capability_escalation"),
+        (AntiPatternCode::CapabilityLeak, "check_capability_leak"),
+        (AntiPatternCode::DependencyCycle, "check_dependency_cycle"),
+        (AntiPatternCode::TierMixing, "check_tier_mixing"),
+        (AntiPatternCode::FoundationDrift, "check_foundation_drift"),
+        (AntiPatternCode::RegisterMixing, "check_register_mixing"),
+        (AntiPatternCode::TxStraddling, "check_tx_straddling"),
+        (AntiPatternCode::ResourceStraddling, "check_resource_straddling"),
+        (AntiPatternCode::LifecycleRegression, "check_lifecycle_regression"),
+        (AntiPatternCode::CveIncomplete, "check_cve_incomplete"),
+        (AntiPatternCode::AbsoluteBoundaryAttempt, "check_stratum_admissible"),
+        (AntiPatternCode::InvariantViolation, "check_invariant_violation"),
+        (AntiPatternCode::DanglingMessageType, "check_dangling_message_type"),
+        (AntiPatternCode::UnauthenticatedCrossing, "check_unauthenticated_crossing"),
+        (AntiPatternCode::DeterministicViolation, "check_deterministic_violation"),
+        (AntiPatternCode::CapabilityDuplication, "check_capability_duplication"),
+        (AntiPatternCode::OrphanCapability, "check_orphan_capability"),
+        (AntiPatternCode::MissingHandoff, "check_missing_handoff"),
+        (AntiPatternCode::FoundationDowngrade, "check_foundation_downgrade"),
+        (AntiPatternCode::TimeBoundLeakage, "check_time_bound_leakage"),
+        (AntiPatternCode::PersistenceMismatch, "check_persistence_mismatch"),
+        (AntiPatternCode::CapabilityLaundering, "check_capability_laundering"),
+        (AntiPatternCode::FoundationForgery, "check_foundation_forgery"),
+        (
+            AntiPatternCode::TransitiveLifecycleRegression,
+            "check_transitive_lifecycle_regression",
+        ),
+        (AntiPatternCode::DeclarationDrift, "check_declaration_drift"),
+        (
+            AntiPatternCode::FoundationContentMismatch,
+            "check_foundation_content_mismatch",
+        ),
+        (AntiPatternCode::TemporalInconsistency, "check_temporal_inconsistency"),
+        (
+            AntiPatternCode::CounterfactualBrittleness,
+            "check_counterfactual_brittleness",
+        ),
+        (AntiPatternCode::MissedAdjoint, "check_missed_adjoint"),
+        (
+            AntiPatternCode::UniversalPropertyViolation,
+            "check_universal_property_violation",
+        ),
+        (AntiPatternCode::PhantomEvolution, "check_phantom_evolution"),
+        (
+            AntiPatternCode::YonedaInequivalentRefactor,
+            "check_yoneda_inequivalent_refactor",
+        ),
+    ];
+    assert_eq!(
+        expected_fns.len(),
+        32,
+        "Expected mapping must cover all 32 AntiPatternCode variants"
+    );
+
+    for (code, fn_name) in expected_fns {
+        let needle = format!("pub fn {}", fn_name);
+        assert!(
+            kernel_arch_anti_pattern_src.contains(&needle),
+            "AntiPatternCode::{:?} ({}) has no `{}` implementation",
+            code,
+            code.code(),
+            fn_name,
+        );
+    }
+}
+
+#[test]
+fn pin_red_team_check_functions_present() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_anti_pattern.rs"),
+    )
+    .expect("kernel source readable");
+    for needle in &[
+        "pub fn check_capability_ontology_v",
+        "pub fn check_theorem_cve_required_v",
+        "pub fn check_yoneda_canonical_roster_complete_v",
+        "pub fn check_consumes_format_v",
+    ] {
+        assert!(
+            src.contains(needle),
+            "Red-team closure check missing: {} (AT-1..AT-5 require all four)",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_typed_attribute_parsers_present() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_parse.rs"),
+    )
+    .expect("kernel source readable");
+    for needle in &[
+        "pub fn parse_arch_module",
+        "pub fn parse_bridge_tier",
+        "pub fn parse_deterministic",
+        "pub fn parse_mtac_decision",
+        "pub fn parse_arch_corpus",
+    ] {
+        assert!(
+            src.contains(needle),
+            "Typed-attribute parser missing: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_auxiliary_attribute_types_present() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch.rs"),
+    )
+    .expect("kernel source readable");
+    for needle in &[
+        "pub struct BridgeTier",
+        "pub struct DeterministicMarker",
+        "pub struct MtacDecisionAttr",
+        "pub struct ArchCorpusAttr",
+        "pub enum MtacModality",
+    ] {
+        assert!(
+            src.contains(needle),
+            "Auxiliary attribute type missing: {}",
+            needle,
+        );
+    }
+}
+
+// =============================================================================
+// 15. Internal/ references must NOT appear in any architecture .vr file
+// =============================================================================
+
+#[test]
+fn pin_no_internal_references_in_arch_vr() {
+    // The user-visible `.vr` files in core/architecture/ must be
+    // self-sufficient — no dangling references to `internal/specs/...`
+    // or `internal/holon/...` paths.  Detailed exposition lives
+    // inline; the website mirrors the same content.
+    for file in &[
+        "types.vr",
+        "mtac.vr",
+        "counterfactual.vr",
+        "adjunction.vr",
+        "yoneda.vr",
+        "anti_patterns.vr",
+        "capability_ontology.vr",
+        "composition.vr",
+        "corpus.vr",
+        "phase.vr",
+        "parse.vr",
+        "mod.vr",
+    ] {
+        let vr = read_vr(file);
+        assert!(
+            !vr.contains("internal/specs"),
+            "core/architecture/{} contains a forbidden reference to `internal/specs/...` — replace with detailed inline exposition",
+            file,
+        );
+        assert!(
+            !vr.contains("internal/holon"),
+            "core/architecture/{} contains a forbidden reference to `internal/holon/...` — replace with detailed inline exposition",
+            file,
+        );
+    }
+}

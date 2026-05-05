@@ -2,12 +2,12 @@
 //!
 //! ## Architectural role
 //!
-//! Per `internal/specs/ats-v.md` §8 (syntax integration), the
-//! `@arch_module(...)` typed attribute uses the existing generic
-//! `attribute_args = named_arg_list` form (verum.ebnf:438-441).
-//! The parser sees a list of `NamedArg { name, value }` pairs;
-//! this module converts them into the typed [`crate::arch::Shape`]
-//! struct that the ATS-V phase consumes.
+//! The `@arch_module(...)` typed attribute uses the existing
+//! generic `attribute_args = named_arg_list` grammar form — no new
+//! grammar production was introduced for ATS-V.  The parser sees a
+//! list of `NamedArg { name, value }` pairs and converts them into
+//! the typed [`crate::arch::Shape`] struct that the ATS-V phase
+//! consumes.
 //!
 //! ## Reuse over invention
 //!
@@ -744,6 +744,311 @@ fn parse_verify_strategy(expr: &Expr) -> Result<VerifyStrategy, ArchParseError> 
             });
         }
     })
+}
+
+// =============================================================================
+// @bridge_tier(from: Tier, to: Tier) — auxiliary typed attribute
+// =============================================================================
+
+/// Parse `@bridge_tier(from: Tier.X, to: Tier.Y)` named-args into a
+/// typed `BridgeTier`.  Lifts the AP-004 TierMixing ban for the
+/// annotated function.  No-op bridges (`from == to`) are accepted
+/// at parse time but flagged by the architectural type-checker
+/// (use the bare call site instead).
+pub fn parse_bridge_tier(args: &[Expr]) -> Result<crate::arch::BridgeTier, ArchParseError> {
+    let mut from: Option<Tier> = None;
+    let mut to: Option<Tier> = None;
+    for arg in args {
+        let (name, value) = extract_named_arg(arg)?;
+        match name.as_str() {
+            "from" => from = Some(parse_tier(value)?),
+            "to" => to = Some(parse_tier(value)?),
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                })
+            }
+        }
+    }
+    let from = from.ok_or(ArchParseError::MissingRequired { field: "from" })?;
+    let to = to.ok_or(ArchParseError::MissingRequired { field: "to" })?;
+    Ok(crate::arch::BridgeTier { from, to })
+}
+
+// =============================================================================
+// @deterministic — marker attribute, no args
+// =============================================================================
+
+/// Parse `@deterministic` (no args) into a marker.  Returns `Ok(_)`
+/// for a well-formed marker and `Err(InvalidValue)` if the source
+/// passed positional or named arguments — the marker is strictly
+/// argument-less.
+pub fn parse_deterministic(args: &[Expr]) -> Result<crate::arch::DeterministicMarker, ArchParseError> {
+    if !args.is_empty() {
+        return Err(ArchParseError::InvalidValue {
+            field: "<deterministic-args>".to_string(),
+            expected: "no arguments — `@deterministic` is a marker attribute",
+        });
+    }
+    Ok(crate::arch::DeterministicMarker)
+}
+
+// =============================================================================
+// @mtac_decision { point, by_observer, proposition, modality }
+// =============================================================================
+
+/// Parse `@mtac_decision { point: TimePoint.X, by_observer: Observer.Y,
+/// proposition: ArchProposition.Z, modality: ModalAssertion.W }`.
+/// The four fields are required; missing any raises
+/// `MissingRequired`.
+pub fn parse_mtac_decision(args: &[Expr]) -> Result<crate::arch::MtacDecisionAttr, ArchParseError> {
+    let mut point: Option<crate::arch_mtac::TimePoint> = None;
+    let mut by_observer: Option<crate::arch_mtac::Observer> = None;
+    let mut proposition: Option<crate::arch_mtac::ArchProposition> = None;
+    let mut modality: Option<crate::arch::MtacModality> = None;
+    for arg in args {
+        let (name, value) = extract_named_arg(arg)?;
+        match name.as_str() {
+            "point" => point = Some(parse_time_point(value)?),
+            "by_observer" => by_observer = Some(parse_observer(value)?),
+            "proposition" => proposition = Some(parse_arch_proposition(value)?),
+            "modality" => modality = Some(parse_mtac_modality(value)?),
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                })
+            }
+        }
+    }
+    Ok(crate::arch::MtacDecisionAttr {
+        point: point.ok_or(ArchParseError::MissingRequired { field: "point" })?,
+        by_observer: by_observer
+            .ok_or(ArchParseError::MissingRequired { field: "by_observer" })?,
+        proposition: proposition
+            .ok_or(ArchParseError::MissingRequired { field: "proposition" })?,
+        modality: modality.ok_or(ArchParseError::MissingRequired { field: "modality" })?,
+    })
+}
+
+fn parse_time_point(expr: &Expr) -> Result<crate::arch_mtac::TimePoint, ArchParseError> {
+    let path = parse_path_string(expr, "point")?;
+    let last = path.split('.').last().unwrap_or(&path);
+    Ok(match last {
+        "Now" => crate::arch_mtac::TimePoint::Now,
+        // Past / Future / Counterfactual carry payloads — keep the
+        // decision-attribute surface to bare-name forms; payloads
+        // can be encoded via the generic parse_arch_module path or
+        // future v2 of the @mtac_decision parser.
+        other => {
+            return Err(ArchParseError::UnknownVariant {
+                kind: "TimePoint",
+                value: other.to_string(),
+            });
+        }
+    })
+}
+
+fn parse_observer(expr: &Expr) -> Result<crate::arch_mtac::Observer, ArchParseError> {
+    let path = parse_path_string(expr, "by_observer")?;
+    let last = path.split('.').last().unwrap_or(&path);
+    Ok(match last {
+        "EndUser" => crate::arch_mtac::Observer::EndUser {
+            kind: "default".into(),
+        },
+        "PeerCog" => crate::arch_mtac::Observer::PeerCog {
+            module_path: "<any>".into(),
+        },
+        "Stakeholder" => crate::arch_mtac::Observer::Stakeholder {
+            role: "operator".into(),
+        },
+        "Auditor" => crate::arch_mtac::Observer::Auditor {
+            audit_kind: "compliance".into(),
+        },
+        "Adversary" => crate::arch_mtac::Observer::Adversary {
+            threat_model: "external".into(),
+        },
+        other => {
+            return Err(ArchParseError::UnknownVariant {
+                kind: "Observer",
+                value: other.to_string(),
+            });
+        }
+    })
+}
+
+fn parse_arch_proposition(
+    expr: &Expr,
+) -> Result<crate::arch_mtac::ArchProposition, ArchParseError> {
+    let path = parse_path_string(expr, "proposition")?;
+    let last = path.split('.').last().unwrap_or(&path);
+    Ok(match last {
+        "FoundationStable" => crate::arch_mtac::ArchProposition::FoundationStable,
+        "PublicApiUnchanged" => crate::arch_mtac::ArchProposition::PublicApiUnchanged,
+        // HasCapability / Custom carry payloads — bare-name path
+        // restricts the attribute surface to the parametric-free
+        // arms; payloads via the generic parse_arch_module surface.
+        other => {
+            return Err(ArchParseError::UnknownVariant {
+                kind: "ArchProposition",
+                value: other.to_string(),
+            });
+        }
+    })
+}
+
+fn parse_mtac_modality(expr: &Expr) -> Result<crate::arch::MtacModality, ArchParseError> {
+    let path = parse_path_string(expr, "modality")?;
+    let last = path.split('.').last().unwrap_or(&path);
+    Ok(match last {
+        "Necessity" => crate::arch::MtacModality::Necessity,
+        "Possibility" => crate::arch::MtacModality::Possibility,
+        "Eventually" => crate::arch::MtacModality::Eventually,
+        "Always" => crate::arch::MtacModality::Always,
+        "Until" => crate::arch::MtacModality::Until,
+        // `Counterfactual` is the bare-name form; the kernel-side
+        // ModalAssertion::Counterfactual is the structured arm.
+        "Counterfactual" => crate::arch::MtacModality::Counterfactual,
+        // Aliases recognised at parse time.
+        "CounterfactualImpl" => crate::arch::MtacModality::Counterfactual,
+        other => {
+            return Err(ArchParseError::UnknownVariant {
+                kind: "MtacModality",
+                value: other.to_string(),
+            });
+        }
+    })
+}
+
+// =============================================================================
+// @arch_corpus(invariants: [...], foundation_bridges: [...])
+// =============================================================================
+
+/// Parse `@arch_corpus(invariants: [CorpusInvariant.X, ...],
+/// foundation_bridges: [...])` into a typed `ArchCorpusAttr`.
+/// Both fields are optional; missing fields default to "use the
+/// canonical 4-roster" / "no bridges declared".
+pub fn parse_arch_corpus(args: &[Expr]) -> Result<crate::arch::ArchCorpusAttr, ArchParseError> {
+    let mut out = crate::arch::ArchCorpusAttr::default();
+    for arg in args {
+        let (name, value) = extract_named_arg(arg)?;
+        match name.as_str() {
+            "invariants" => out.invariants = parse_corpus_invariant_list(value)?,
+            "foundation_bridges" => out.foundation_bridges = parse_string_pair_list(value)?,
+            other => {
+                return Err(ArchParseError::UnknownField {
+                    name: other.to_string(),
+                    suggestion: None,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn parse_corpus_invariant_list(
+    expr: &Expr,
+) -> Result<Vec<crate::arch_corpus::CorpusInvariant>, ArchParseError> {
+    use verum_ast::expr::ArrayExpr;
+    match &expr.kind {
+        ExprKind::Array(ArrayExpr::List(items)) => {
+            items.iter().map(parse_corpus_invariant).collect()
+        }
+        _ => Err(ArchParseError::InvalidValue {
+            field: "invariants".to_string(),
+            expected: "array literal `[CorpusInvariant.X, ...]`",
+        }),
+    }
+}
+
+fn parse_corpus_invariant(
+    expr: &Expr,
+) -> Result<crate::arch_corpus::CorpusInvariant, ArchParseError> {
+    let path = parse_path_string(expr, "invariants")?;
+    let last = path.split('.').last().unwrap_or(&path);
+    Ok(match last {
+        "NoCircularDependencies" => crate::arch_corpus::CorpusInvariant::NoCircularDependencies,
+        "FoundationConsistency" => crate::arch_corpus::CorpusInvariant::FoundationConsistency,
+        "NoLAbsClaim" => crate::arch_corpus::CorpusInvariant::NoLAbsClaim,
+        "CapabilityClosure" => crate::arch_corpus::CorpusInvariant::CapabilityClosure,
+        other => {
+            return Err(ArchParseError::UnknownVariant {
+                kind: "CorpusInvariant",
+                value: other.to_string(),
+            });
+        }
+    })
+}
+
+fn parse_string_pair_list(expr: &Expr) -> Result<Vec<(String, String)>, ArchParseError> {
+    use verum_ast::expr::ArrayExpr;
+    match &expr.kind {
+        ExprKind::Array(ArrayExpr::List(items)) => items.iter().map(parse_string_pair).collect(),
+        _ => Err(ArchParseError::InvalidValue {
+            field: "foundation_bridges".to_string(),
+            expected: "array literal `[(\"peer\", \"corpus_label\"), ...]`",
+        }),
+    }
+}
+
+fn parse_string_pair(expr: &Expr) -> Result<(String, String), ArchParseError> {
+    use verum_ast::expr::ArrayExpr;
+    match &expr.kind {
+        ExprKind::Tuple(items) | ExprKind::Array(ArrayExpr::List(items)) if items.len() == 2 => {
+            let a = parse_path_string(&items[0], "foundation_bridges[0]")?;
+            let b = parse_path_string(&items[1], "foundation_bridges[1]")?;
+            Ok((a, b))
+        }
+        _ => Err(ArchParseError::InvalidValue {
+            field: "foundation_bridges_pair".to_string(),
+            expected: "(peer_cog, corpus_label) two-element tuple",
+        }),
+    }
+}
+
+// =============================================================================
+// Helper — extract NamedArg / Binary{Assign} unifying surface
+// =============================================================================
+
+fn extract_named_arg(arg: &Expr) -> Result<(String, &Expr), ArchParseError> {
+    match &arg.kind {
+        ExprKind::NamedArg { name, value } => Ok((name.name.as_str().to_string(), value.as_ref())),
+        ExprKind::Binary {
+            op: verum_ast::expr::BinOp::Assign,
+            left,
+            right,
+        } => match &left.kind {
+            ExprKind::Path(p) => {
+                let name = p
+                    .segments
+                    .iter()
+                    .filter_map(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => {
+                            Some(ident.name.as_str().to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(".");
+                if name.is_empty() {
+                    return Err(ArchParseError::InvalidValue {
+                        field: "<binary-assign-lhs>".to_string(),
+                        expected: "named argument with single-segment ident on LHS",
+                    });
+                }
+                Ok((name, right.as_ref()))
+            }
+            _ => Err(ArchParseError::InvalidValue {
+                field: "<binary-assign-lhs>".to_string(),
+                expected: "named argument with Path on LHS",
+            }),
+        },
+        _ => Err(ArchParseError::InvalidValue {
+            field: "<positional>".to_string(),
+            expected: "named argument `name: value` or `name = value`",
+        }),
+    }
 }
 
 // =============================================================================
