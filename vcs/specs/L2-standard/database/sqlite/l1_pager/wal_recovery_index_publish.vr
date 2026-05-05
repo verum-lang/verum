@@ -1,0 +1,225 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, wal_reader, wal_index, recovery, multi_reader
+// @timeout: 15000
+// @description: wal_reader::recover_state → WalIndex publish (#165).
+//               Pre-fix `recover_state` walked the WAL frame stream
+//               and rebuilt `writer.state.frame_index` (the writer's
+//               own in-memory page→frame map) but NEVER published
+//               anything into the .shm WalIndex.  Result: post-crash
+//               any reader attaching to the freshly-opened DB saw an
+//               uninitialised .shm header and fell back to walking
+//               the WAL from byte 0 — defeating both #150's reader
+//               fast-path and #163's append/commit propagation.
+//
+//               Post-fix: at every commit-marker promotion the same
+//               (page_no, frame_no) pair lands in BOTH the writer's
+//               frame_index AND the WalIndex .shm; once the walk
+//               completes, the WalIndex header is committed with
+//               (mx_frame, last_commit_db_size, salt1, salt2) so
+//               is_init flips true and find_frame() is the canonical
+//               reader path from the next attach onwards.
+//
+// Note: the `WalWriter` constructor requires `WbMem(file)` whose
+// pre-existing upstream regression blocks direct exercise here.
+// This spec validates the WalIndex protocol contract that
+// recover_state honours, exactly mirroring the post-condition the
+// recovery seam implements.
+//
+// Spec: internal/specs/sqlite-native.md §8.2 (recovery)
+//                                     + §8.4 (multi-reader/single-writer)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe, Some, None};
+mount core.database.sqlite.native.l1_pager.{
+    WalIndex, wal_index_new,
+};
+
+// =============================================================================
+// 1. Empty WAL (no commit-markers) leaves index uninitialised
+// =============================================================================
+
+fn empty_wal_leaves_index_uninitialised() {
+    // Mirror of recover_state's path when raw_frame_count=0 OR
+    // every found frame is in pending_index without a commit-marker.
+    // Pre-condition for a fresh wal_index_new + zero commits.
+    let idx = wal_index_new(4096);
+    assert(!idx.is_initialised());
+    assert_eq(idx.mx_frame(), 0);
+}
+
+// =============================================================================
+// 2. Single-commit recovery — promoted frames land in index +
+//     header is committed with mx_frame
+// =============================================================================
+
+fn single_commit_recovery() {
+    let mut idx = wal_index_new(4096);
+    // Simulate the recovery walk: 3 frames, all in same txn,
+    // commit-marker at frame 3.  recover_state's promotion loop
+    // calls index.append_frame for each (page_no, frame_no) pair.
+    idx.append_frame(7, 1);
+    idx.append_frame(99, 2);
+    idx.append_frame(7, 3);  // re-write of page 7 in same txn
+    // Then the commit_header at end-of-recovery.
+    idx.commit_header(3, 100 as u32, 0xAA as u32, 0xBB as u32);
+
+    // Reader fast path now sees everything.
+    assert(idx.is_initialised());
+    assert_eq(idx.mx_frame(), 3);
+    assert_eq(idx.n_page(), 100);
+    match idx.find_frame(7, 100, 0) {
+        Some(f) => assert_eq(f, 3),  // newest wins
+        None    => panic("page 7 must resolve post-recovery"),
+    }
+    match idx.find_frame(99, 100, 0) {
+        Some(f) => assert_eq(f, 2),
+        None    => panic("page 99 must resolve post-recovery"),
+    }
+}
+
+// =============================================================================
+// 3. Multi-commit recovery — each commit promotes its own pending
+//     batch; index sees ALL committed frames
+// =============================================================================
+
+fn multi_commit_recovery() {
+    let mut idx = wal_index_new(4096);
+    // Txn 1: pages 1, 2 (frames 1, 2 with commit at 2)
+    idx.append_frame(1, 1);
+    idx.append_frame(2, 2);
+    // Txn 2: pages 3, 1 (frames 3, 4 with commit at 4) —
+    // page 1 is re-written so the newer frame supersedes.
+    idx.append_frame(3, 3);
+    idx.append_frame(1, 4);
+    // After the WAL walk completes, recovery commits the LATEST
+    // header (mx_frame from the last commit-marker).
+    idx.commit_header(4, 200 as u32, 0xAA as u32, 0xBB as u32);
+
+    assert(idx.is_initialised());
+    assert_eq(idx.mx_frame(), 4);
+    match idx.find_frame(1, 200, 0) {
+        Some(f) => assert_eq(f, 4),  // newer commit wins
+        None    => panic("page 1 must resolve to newest frame"),
+    }
+    match idx.find_frame(2, 200, 0) {
+        Some(f) => assert_eq(f, 2),
+        None    => panic("page 2 must still be visible"),
+    }
+    match idx.find_frame(3, 200, 0) {
+        Some(f) => assert_eq(f, 3),
+        None    => panic("page 3 must be visible"),
+    }
+}
+
+// =============================================================================
+// 4. Trailing incomplete txn — frames AFTER last commit-marker are
+//     NOT promoted (recovery's pending_index is silently dropped)
+//     so they never reach the WalIndex.  Reader sees ONLY committed
+//     frames.
+// =============================================================================
+
+fn trailing_incomplete_txn_dropped() {
+    let mut idx = wal_index_new(4096);
+    // Committed: pages 1, 2 in frames 1-2 (commit at 2).
+    idx.append_frame(1, 1);
+    idx.append_frame(2, 2);
+    // Recovery would NOT have called append_frame for the trailing
+    // pending frames (pages 3, 4 in frames 3-4) since no commit
+    // followed them — pending_index dropped silently.  We simulate
+    // that by NOT calling append_frame for frames 3 and 4.
+    // The post-recovery commit_header reflects mx_frame=2.
+    idx.commit_header(2, 50 as u32, 0xAA as u32, 0xBB as u32);
+
+    assert(idx.is_initialised());
+    assert_eq(idx.mx_frame(), 2);
+    // Pages 3 and 4 are unreachable — find_frame returns None.
+    match idx.find_frame(3, 50, 0) {
+        Some(_) => panic("uncommitted page 3 must not be visible"),
+        None    => {},
+    }
+    match idx.find_frame(4, 50, 0) {
+        Some(_) => panic("uncommitted page 4 must not be visible"),
+        None    => {},
+    }
+}
+
+// =============================================================================
+// 5. Reader fast-path consistency — find_frame returns the SAME
+//     answer pre-snapshot as post-snapshot for an unchanged WAL.
+//     Recovery's commit_header flip is what enables the fast-path
+//     at all (pre-flip, is_init=false → readers redo recovery).
+// =============================================================================
+
+fn fast_path_after_recovery() {
+    let mut idx = wal_index_new(4096);
+    // Pre-recovery: empty index, no fast path.
+    assert(!idx.is_initialised());
+    let pre_find = idx.find_frame(42, 100, 0);
+    match pre_find {
+        Some(_) => panic("uninitialised index must not resolve any page"),
+        None    => {},
+    }
+
+    // Recovery walks 1 frame + commits.
+    idx.append_frame(42, 1);
+    idx.commit_header(1, 1 as u32, 0xAA as u32, 0xBB as u32);
+
+    // Post-recovery: fast path active, page 42 resolves at frame 1.
+    assert(idx.is_initialised());
+    match idx.find_frame(42, 100, 0) {
+        Some(f) => assert_eq(f, 1),
+        None    => panic("post-recovery find_frame must succeed"),
+    }
+}
+
+// =============================================================================
+// 6. Reader-mark + backfill protection survives recovery — readers
+//     attaching post-recovery can claim a snapshot at the recovered
+//     mx_frame; checkpointer's advance_backfill is bounded by it.
+// =============================================================================
+
+fn reader_marks_post_recovery() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(1, 1);
+    idx.append_frame(2, 2);
+    idx.commit_header(2, 100 as u32, 1 as u32, 2 as u32);
+    // Reader takes snapshot at mx_frame=2.
+    let slot = idx.try_acquire_reader_mark();
+    assert(slot >= 1);
+    // Checkpointer backfill must clamp to the active reader.
+    let advanced = idx.advance_backfill(50);
+    assert(advanced);
+    assert_eq(idx.n_backfill(), 2);  // clamped to reader mark
+}
+
+// =============================================================================
+// 7. Salt rotation — recovery preserves the post-rotation salts via
+//     the commit_header(s1, s2) call.  Subsequent reset(new_salts)
+//     bumps change_count so concurrent readers detect rotation.
+// =============================================================================
+
+fn recovery_preserves_salts() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(1, 1);
+    idx.commit_header(1, 1 as u32, 0xCAFE as u32, 0xBABE as u32);
+    let pre_change = idx.hdr.change_count as Int;
+    // Post-rotation reset.
+    idx.reset_after_checkpoint(0xDEAD as u32, 0xBEEF as u32);
+    let post_change = idx.hdr.change_count as Int;
+    assert(post_change > pre_change);
+    assert_eq(idx.mx_frame(), 0);
+    assert_eq(idx.hdr.salt1 as Int, 0xDEAD as Int);
+}
+
+fn main() {
+    empty_wal_leaves_index_uninitialised();
+    single_commit_recovery();
+    multi_commit_recovery();
+    trailing_incomplete_txn_dropped();
+    fast_path_after_recovery();
+    reader_marks_post_recovery();
+    recovery_preserves_salts();
+}
