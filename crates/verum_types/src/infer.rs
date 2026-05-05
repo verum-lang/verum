@@ -1493,7 +1493,29 @@ impl TypeChecker {
                     }
                 }
             };
-            let params: List<Type> = fn_desc.params.iter().map(|p| to_type(&p.ty)).collect();
+            // Skip the `self` receiver parameter when present.  VBC
+            // stores method descriptors with the receiver as the
+            // first parameter (named `"self"`) but its `type_ref`
+            // is a `TypeId::UNIT` sentinel — `type_ref_to_text`
+            // renders this as `"Unit"`, which would yield a method
+            // signature `fn(Unit, …) -> R`.  Verum dispatches the
+            // receiver separately during method resolution; the
+            // inherent_methods bucket should hold ONLY the
+            // call-site arg types.  Skipping `self` here aligns
+            // with how `import_impl_blocks` (the AST-driven path)
+            // populates the bucket.
+            let params: List<Type> = fn_desc
+                .params
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    if i == 0 && p.name.as_str() == "self" {
+                        None
+                    } else {
+                        Some(to_type(&p.ty))
+                    }
+                })
+                .collect();
             let return_ty = to_type(&fn_desc.return_type);
             let fn_ty = Type::function(params, return_ty);
             bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty));
