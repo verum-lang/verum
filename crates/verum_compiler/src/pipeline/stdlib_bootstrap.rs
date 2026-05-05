@@ -1086,29 +1086,88 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Merge a compiled VBC module into the main module.
+    ///
+    /// **StringId remap on descriptors**: target's `strings` dedups by
+    /// content, so source strings re-interned into target may land at
+    /// different byte offsets.  Build a `source_id → target_id` map up
+    /// front and rewrite descriptor StringId fields (function name,
+    /// param names, debug-var names, type/variant/field names) before
+    /// pushing them into target.  Bytecode operands are NOT remapped
+    /// here — they're inert at the metadata-extraction layer
+    /// (`archive_metadata.rs` reads only descriptors), and remapping
+    /// would require decode/encode of every function's bytecode which
+    /// has its own compatibility issues with the VBC linker's
+    /// round-trip path.
+    ///
+    /// Pre-fix the descriptor names pointed at SOURCE-local string
+    /// offsets, so `module.strings.get(fn.name)` returned garbage
+    /// content from target's union table — the panic-message string
+    /// `"called unwrap() on None"` showed up as a function name on
+    /// `Maybe`, garbage method `log_base` showed up on `Result`,
+    /// etc.  Method-name lookup at user-code call sites then either
+    /// failed or matched the wrong method.
     fn merge_stdlib_vbc_modules(
         &self,
         target: &mut verum_vbc::VbcModule,
         source: verum_vbc::VbcModule,
     ) -> Result<()> {
+        use std::collections::HashMap;
+        use verum_vbc::types::StringId;
+
         let bytecode_offset = target.bytecode.len() as u32;
         let func_id_base = target.functions.len() as u32;
 
-        // Merge function descriptors with adjusted offsets and function ID base
+        // Build source_string_id → target_string_id remap by
+        // re-interning every source string into target's pool.
+        let mut string_remap: HashMap<u32, u32> = HashMap::new();
+        for (s, source_id) in source.strings.iter() {
+            let target_id = target.intern_string(s);
+            string_remap.insert(source_id.0, target_id.0);
+        }
+        let remap_string = |sid: StringId| -> StringId {
+            string_remap
+                .get(&sid.0)
+                .copied()
+                .map(StringId)
+                .unwrap_or(sid)
+        };
+
+        // Merge function descriptors with adjusted offsets, function
+        // ID base, and remapped StringIds.
         for mut func in source.functions {
+            func.name = remap_string(func.name);
+            for param in func.params.iter_mut() {
+                param.name = remap_string(param.name);
+            }
+            for dv in func.debug_variables.iter_mut() {
+                dv.name = remap_string(dv.name);
+            }
             func.bytecode_offset += bytecode_offset;
             func.func_id_base = func_id_base;
             target.add_function(func);
         }
 
-        // Merge bytecode
+        // Merge bytecode verbatim.  Bytecode StringId operands stay
+        // at SOURCE-local offsets — fine for the metadata-extraction
+        // path which reads only descriptors, fine for the linker
+        // round-trip path which reads bytecode at original offsets.
+        // Cross-module dispatch via merged bytecode is a known V1
+        // limitation tracked separately.
         target.bytecode.extend_from_slice(&source.bytecode);
 
-        // Merge type descriptors, remapping FunctionIds in protocol impls
+        // Merge type descriptors with FunctionId + StringId remap.
         for ty in &source.types {
             let mut ty = ty.clone();
-            // Remap FunctionIds in protocol implementations to account for
-            // function table offset after merging with previous modules.
+            ty.name = remap_string(ty.name);
+            for f in ty.fields.iter_mut() {
+                f.name = remap_string(f.name);
+            }
+            for v in ty.variants.iter_mut() {
+                v.name = remap_string(v.name);
+                for vf in v.fields.iter_mut() {
+                    vf.name = remap_string(vf.name);
+                }
+            }
             for proto_impl in ty.protocols.iter_mut() {
                 for fn_id in proto_impl.methods.iter_mut() {
                     if *fn_id != u32::MAX {
@@ -1119,11 +1178,6 @@ impl<'s> CompilationPipeline<'s> {
             // Note: drop_fn and clone_fn are not remapped here because they
             // are not currently used from the merged module at runtime.
             target.add_type(ty);
-        }
-
-        // Merge string pool
-        for (s, _id) in source.strings.iter() {
-            target.intern_string(s);
         }
 
         // Merge constant pool
