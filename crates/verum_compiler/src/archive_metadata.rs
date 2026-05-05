@@ -115,6 +115,16 @@ fn register_module_metadata(
 
         let kind = match ty.kind {
             TypeKind::Record => {
+                // Generic record types (`type Pair<A,B> is { a: A, b: B }`)
+                // need the same TypeParamId → param-name map as Sum
+                // types so generic-param fields don't render as
+                // opaque `__generic_{idx}` placeholders.
+                let mut record_param_id_to_name: HashMap<u16, String> = HashMap::new();
+                for tp in ty.type_params.iter() {
+                    if let Some(n) = module.strings.get(tp.name) {
+                        record_param_id_to_name.insert(tp.id.0, n.to_string());
+                    }
+                }
                 let fields: List<FieldDescriptor> = ty
                     .fields
                     .iter()
@@ -124,9 +134,10 @@ fn register_module_metadata(
                             .get(f.name)
                             .map(Text::from)
                             .unwrap_or_default(),
-                        ty: Text::from(type_ref_to_text(
+                        ty: Text::from(type_ref_to_text_with_params(
                             &f.type_ref,
                             &type_id_to_name,
+                            &record_param_id_to_name,
                         )),
                         is_public: matches!(
                             f.visibility,
@@ -137,6 +148,20 @@ fn register_module_metadata(
                 TypeDescriptorKind::Record { fields }
             }
             TypeKind::Sum => {
+                // Build the parent's TypeParamId → param-name map so
+                // `TypeRef::Generic(idx)` slots in tuple/record
+                // variants render as the source-level name (T, E, K,
+                // V, …) instead of the opaque `__generic_{idx}`
+                // placeholder.  Required so the typechecker's
+                // structural parser can match the variant payload's
+                // type name back to the parent's `generic_params`
+                // entries at use sites.
+                let mut sum_param_id_to_name: HashMap<u16, String> = HashMap::new();
+                for tp in ty.type_params.iter() {
+                    if let Some(n) = module.strings.get(tp.name) {
+                        sum_param_id_to_name.insert(tp.id.0, n.to_string());
+                    }
+                }
                 let cases: List<VariantCase> = ty
                     .variants
                     .iter()
@@ -146,35 +171,33 @@ fn register_module_metadata(
                             VariantKind::Tuple => {
                                 let mut tys: List<Text> = List::new();
                                 if let Some(p) = &v.payload {
-                                    tys.push(Text::from(type_ref_to_text(
+                                    tys.push(Text::from(type_ref_to_text_with_params(
                                         p,
                                         &type_id_to_name,
+                                        &sum_param_id_to_name,
                                     )));
                                 }
                                 for f in v.fields.iter() {
-                                    tys.push(Text::from(type_ref_to_text(
+                                    tys.push(Text::from(type_ref_to_text_with_params(
                                         &f.type_ref,
                                         &type_id_to_name,
+                                        &sum_param_id_to_name,
                                     )));
                                 }
-                                // Generic-payload fallback: VBC
-                                // VariantDescriptor stores `arity`
-                                // (slot count) but for variants whose
-                                // payload depends on the parent's
-                                // generic parameters (e.g.
-                                // `Result<T,E>::Ok(T)`) the
-                                // `payload`/`fields` fields are
-                                // empty.  Without arity-padding the
-                                // constructor lands as 0-arity in
-                                // CoreMetadata — every `Ok(x)` /
-                                // `Some(x)` / `Err(e)` call site fails
-                                // typecheck with `accepts at most 0
-                                // arguments`.  Push the parent type's
-                                // first N generic-param names as
-                                // payload type tags; the typechecker
-                                // resolves them against the parent
-                                // type's generic environment at
-                                // call sites.
+                                // Generic-payload fallback: stale
+                                // archives compiled before tuple-
+                                // variant fields/payload were
+                                // populated may still have empty
+                                // `fields`/`payload` despite arity>0.
+                                // Pad with the parent type's
+                                // positional generic-param names so
+                                // the descriptor lands at the correct
+                                // arity.  Note: this fallback only
+                                // works correctly for variants whose
+                                // payloads happen to match positional
+                                // params (rare); the field-populated
+                                // path above is the load-bearing one
+                                // for fresh archives.
                                 if tys.is_empty() && v.arity > 0 {
                                     let arity = v.arity as usize;
                                     let mut filled = 0;
@@ -188,10 +211,6 @@ fn register_module_metadata(
                                         }
                                     }
                                     while filled < arity {
-                                        // No more generic params —
-                                        // fall back to a placeholder
-                                        // ("_") so arity is
-                                        // preserved.
                                         tys.push(Text::from("_"));
                                         filled += 1;
                                     }
@@ -208,9 +227,10 @@ fn register_module_metadata(
                                             .get(f.name)
                                             .map(Text::from)
                                             .unwrap_or_default(),
-                                        ty: Text::from(type_ref_to_text(
+                                        ty: Text::from(type_ref_to_text_with_params(
                                             &f.type_ref,
                                             &type_id_to_name,
+                                            &sum_param_id_to_name,
                                         )),
                                         is_public: matches!(
                                             f.visibility,

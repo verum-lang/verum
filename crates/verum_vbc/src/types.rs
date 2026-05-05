@@ -947,8 +947,9 @@ mod tests {
         assert!(TypeId::PTR.is_builtin());
         assert!(TypeId::RESERVED.is_builtin());
 
-        // User types should return false
-        assert!(!TypeId(16).is_builtin());
+        // User types should return false (FIRST_USER bumped from
+        // 16 to 17 when TypeId::CHAR was added at slot 16).
+        assert!(!TypeId(17).is_builtin());
         assert!(!TypeId(100).is_builtin());
         assert!(!TypeId(u32::MAX).is_builtin());
     }
@@ -1419,7 +1420,10 @@ mod tests {
 
     #[test]
     fn test_type_kind_try_from_invalid() {
-        assert_eq!(TypeKind::try_from(9), Err(9));
+        // 9 = Alias was added after this test was written; the
+        // first invalid discriminant is now 10.
+        assert_eq!(TypeKind::try_from(9), Ok(TypeKind::Alias));
+        assert_eq!(TypeKind::try_from(10), Err(10));
         assert_eq!(TypeKind::try_from(100), Err(100));
         assert_eq!(TypeKind::try_from(255), Err(255));
     }
@@ -2322,10 +2326,11 @@ mod tests {
 
     #[test]
     fn test_type_id_boundary_builtin() {
-        // TypeId 15 is the last builtin
-        assert!(TypeId(15).is_builtin());
-        // TypeId 16 is first user type
-        assert!(!TypeId(16).is_builtin());
+        // TypeId 16 is the last builtin (CHAR — added when the
+        // primitive set was extended from 15→16 builtins).
+        assert!(TypeId(16).is_builtin());
+        // TypeId 17 is first user type (FIRST_USER == 17).
+        assert!(!TypeId(17).is_builtin());
     }
 
     #[test]

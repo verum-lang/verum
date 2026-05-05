@@ -1439,6 +1439,22 @@ impl TypeChecker {
             self.ctx.define_type(name.clone(), ty.clone());
             self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
 
+            // Mirror the eager loader's `type_generics_count` write.
+            // Without this, `try_resolve_variant_constructor` falls
+            // into its `generics_count == 0` branch and synthesises
+            // bare `Type::Named { path: parent, args: [] }` for the
+            // constructor return — every `Ok(x)` / `Err(e)` /
+            // `Some(x)` value-position use against an expected
+            // `Result<T, E>` then fails unification with "found
+            // 'Result'" because the synthesised type carries no
+            // type arguments.  The eager loader ran this at
+            // `load_stdlib_from_metadata` (line 1981-1984); the
+            // lazy `ensure_stdlib_type_loaded` path missed it.
+            if !type_desc.generic_params.is_empty() {
+                self.type_generics_count
+                    .insert(name.clone(), type_desc.generic_params.len());
+            }
+
             // Type alias: also register in BOTH the ctx's alias
             // registry AND the unifier's alias registry so
             // `try_expand_alias` and the pattern matcher can resolve
@@ -42974,7 +42990,7 @@ impl TypeChecker {
 
     /// This is used for bidirectional type inference in generic struct instantiation.
     /// Given a type like `T` and a mapping `{T -> Int}`, returns `Int`.
-    fn substitute_type_params(
+    pub(crate) fn substitute_type_params(
         &self,
         ty: &Type,
         param_subst: &indexmap::IndexMap<verum_common::Text, Type>,
@@ -43744,11 +43760,11 @@ impl TypeChecker {
                 // Perform type argument substitution if we have args
                 if !args.is_empty() {
                     let type_params_key = format!("__type_params_{}", name);
+                    let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                        indexmap::IndexMap::new();
                     if let Option::Some(Type::Record(params_map)) =
                         self.ctx.lookup_type(type_params_key.as_str())
                     {
-                        let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                            indexmap::IndexMap::new();
                         for (i, (param_name, param_type)) in params_map.iter().enumerate() {
                             if let Some(arg) = args.get(i) {
                                 subst.insert(param_name.clone(), arg.clone());
@@ -43759,6 +43775,28 @@ impl TypeChecker {
                                 }
                             }
                         }
+                    }
+                    // CoreMetadata fallback: stdlib types lazy-loaded
+                    // via `ensure_stdlib_type_loaded` don't get
+                    // `__type_params_<name>` registered in
+                    // ctx.type_defs (only user-source types do).
+                    // Without this fallback, every stdlib variant
+                    // pattern (Result<T,E>, Maybe<T>) bound payload
+                    // patterns to raw T/E placeholders instead of
+                    // the concrete type args.
+                    if subst.is_empty() {
+                        if let Some(metadata) = self.core_metadata() {
+                            let gname = verum_common::Text::from(name);
+                            if let Some(td) = metadata.types.get(&gname) {
+                                for (gp, arg) in
+                                    td.generic_params.iter().zip(args.iter())
+                                {
+                                    subst.insert(gp.name.clone(), arg.clone());
+                                }
+                            }
+                        }
+                    }
+                    if !subst.is_empty() {
                         let mut substituted_variants = indexmap::IndexMap::new();
                         for (tag, payload_ty) in variants.iter() {
                             let subst_ty = self.substitute_type_params(payload_ty, &subst);
@@ -65226,11 +65264,29 @@ fn parse_descriptor_type_string(raw: &str) -> Type {
             };
         }
     }
-    // Bare name → Type::Named.  Resolution of primitive aliases
-    // (Int → Type::Int, Text → Type::Text, …) flows through the
-    // unifier's lookup against `ctx.type_defs` populated by
-    // `register_primitives`; we don't second-guess that registry
-    // here.
+    // Language primitives — these have dedicated `TypeKind`
+    // variants in the AST (`TypeKind::Bool`, `TypeKind::Int`, …)
+    // and dedicated `Type::Bool` / `Type::Int` / … sentinels in
+    // the type system.  They are NOT stdlib types — the grammar
+    // parses them as built-ins distinct from `TypeKind::Path`.
+    // Without this normalisation, archive_metadata's textual
+    // payloads ("Bool" / "Int" / …) round-trip through the
+    // structural parser as `Type::Named { path: "Bool" }` and
+    // every downstream check that branches on `Type::Bool`
+    // (logical NOT, integer arithmetic, etc.) misses them.
+    match trimmed {
+        "Bool" => return Type::Bool,
+        "Int" => return Type::Int,
+        "Float" => return Type::Float,
+        "Char" => return Type::Char,
+        "Text" => return Type::Text,
+        "Never" => return Type::Never,
+        "Unit" => return Type::Unit,
+        _ => {}
+    }
+    // Other named types → Type::Named.  Resolution flows
+    // through the unifier's lookup against `ctx.type_defs`
+    // populated by `register_primitives`.
     Type::Named {
         path: TypeChecker::text_to_path(&Text::from(trimmed)),
         args: List::new(),

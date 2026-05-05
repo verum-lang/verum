@@ -1011,8 +1011,49 @@ impl TypeChecker {
                     // Look up the Named type to see if it's a variant
                     if let Option::Some(def_ty) = self.ctx.lookup_type(named_type_name) {
                         if let Type::Variant(variants) = def_ty.clone() {
-                            let _ = args; // Type args handled in field binding
-                            expanded_ty = Type::Variant(variants);
+                            // Substitute parent type's generic params
+                            // when args are present (`Maybe<Int>` /
+                            // `Result<Text, E>` etc.).  Without this
+                            // substitution every variant payload that
+                            // references a parent generic
+                            // (`Some(T)` → `Some(Type::Named{T})`)
+                            // bound the pattern variable to the raw
+                            // generic placeholder, breaking
+                            // `m.method()` calls on bound vars.
+                            let cloned_args = args.clone();
+                            let substituted_variants = if !cloned_args.is_empty() {
+                                let metadata_subst = self.core_metadata().and_then(|md| {
+                                    md.types
+                                        .get(&verum_common::Text::from(named_type_name))
+                                        .map(|td| {
+                                            let mut s: indexmap::IndexMap<
+                                                verum_common::Text,
+                                                Type,
+                                            > = indexmap::IndexMap::new();
+                                            for (gp, arg) in
+                                                td.generic_params.iter().zip(cloned_args.iter())
+                                            {
+                                                s.insert(gp.name.clone(), arg.clone());
+                                            }
+                                            s
+                                        })
+                                });
+                                if let Some(subst) = metadata_subst {
+                                    let mut new_variants = indexmap::IndexMap::new();
+                                    for (vname, payload) in variants.iter() {
+                                        new_variants.insert(
+                                            vname.clone(),
+                                            self.substitute_type_params(payload, &subst),
+                                        );
+                                    }
+                                    new_variants
+                                } else {
+                                    variants
+                                }
+                            } else {
+                                variants
+                            };
+                            expanded_ty = Type::Variant(substituted_variants);
                         }
                     }
                 }
@@ -1495,13 +1536,64 @@ impl TypeChecker {
                                     // Unit variant (like None): no payload expected
                                     Ok(())
                                 } else if let Some(variant_data) = data {
-                                    // Data-carrying variant: bind pattern to the inner type
-                                    // Resolve type args: if variant payload is a type var, substitute with concrete args
-                                    let concrete_payload = if args.len() == 1 {
-                                        // For single-arg generics like Maybe<T>, the payload type T maps to args[0]
+                                    // Data-carrying variant: bind pattern to the
+                                    // inner type with positional generic
+                                    // substitution.  Build a name → arg map
+                                    // from the parent type's type_params (e.g.
+                                    // for `Result<Text, StreamError>`,
+                                    // `T → Text, E → StreamError`) and
+                                    // recursively rewrite the variant payload
+                                    // using that map.  Closes
+                                    // `m.len() / .find() / .as_path()` failures
+                                    // on `Ok(m)` patterns where m landed as
+                                    // raw `T` instead of the concrete arg.
+                                    let type_params_key =
+                                        format!("__type_params_{}", generic_name);
+                                    let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                                        indexmap::IndexMap::new();
+                                    if let Some(Type::Record(params_map)) =
+                                        self.ctx.lookup_type(type_params_key.as_str()).cloned()
+                                    {
+                                        for ((param_name, _param_ty), arg) in
+                                            params_map.iter().zip(args.iter())
+                                        {
+                                            subst.insert(param_name.clone(), arg.clone());
+                                        }
+                                    }
+                                    // Fallback: if no type_params recorded
+                                    // (lazy-loaded stdlib types), use the
+                                    // generic args' positional names
+                                    // T/E/K/V from the parent type's
+                                    // declared `generic_params` in
+                                    // CoreMetadata.  This is what the
+                                    // typechecker has at bind time when
+                                    // type_params_key isn't populated.
+                                    if subst.is_empty() {
+                                        if let Some(metadata) = self.core_metadata() {
+                                            let gname = verum_common::Text::from(
+                                                generic_name.as_str(),
+                                            );
+                                            if let Some(td) = metadata.types.get(&gname) {
+                                                for (gp, arg) in td
+                                                    .generic_params
+                                                    .iter()
+                                                    .zip(args.iter())
+                                                {
+                                                    subst.insert(gp.name.clone(), arg.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    let concrete_payload = if !subst.is_empty() {
+                                        self.substitute_type_params(&variant_payload, &subst)
+                                    } else if args.len() == 1 {
+                                        // Last-resort: single-arg
+                                        // positional substitution (the
+                                        // pre-existing fallback for
+                                        // `Maybe<T>` etc.).
                                         match &variant_payload {
                                             Type::Var(_) => args[0].clone(),
-                                            _ => args[0].clone(), // Simplification: first arg is the payload type
+                                            _ => args[0].clone(),
                                         }
                                     } else {
                                         variant_payload.clone()
