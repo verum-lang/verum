@@ -161,6 +161,8 @@ public mount .wal_writer.{
     wal_writer_create_with_random,
     wal_writer_reset_with_random,
     wal_writer_set_running, wal_writer_running,
+    // WalIndex integration (#163)
+    wal_writer_set_index, wal_writer_index_publish_frame,
 };
 
 public mount .wal_index.{
