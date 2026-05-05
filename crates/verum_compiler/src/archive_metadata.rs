@@ -157,6 +157,45 @@ fn register_module_metadata(
                                         &type_id_to_name,
                                     )));
                                 }
+                                // Generic-payload fallback: VBC
+                                // VariantDescriptor stores `arity`
+                                // (slot count) but for variants whose
+                                // payload depends on the parent's
+                                // generic parameters (e.g.
+                                // `Result<T,E>::Ok(T)`) the
+                                // `payload`/`fields` fields are
+                                // empty.  Without arity-padding the
+                                // constructor lands as 0-arity in
+                                // CoreMetadata — every `Ok(x)` /
+                                // `Some(x)` / `Err(e)` call site fails
+                                // typecheck with `accepts at most 0
+                                // arguments`.  Push the parent type's
+                                // first N generic-param names as
+                                // payload type tags; the typechecker
+                                // resolves them against the parent
+                                // type's generic environment at
+                                // call sites.
+                                if tys.is_empty() && v.arity > 0 {
+                                    let arity = v.arity as usize;
+                                    let mut filled = 0;
+                                    for gp in ty.type_params.iter() {
+                                        if filled >= arity {
+                                            break;
+                                        }
+                                        if let Some(name) = module.strings.get(gp.name) {
+                                            tys.push(Text::from(name));
+                                            filled += 1;
+                                        }
+                                    }
+                                    while filled < arity {
+                                        // No more generic params —
+                                        // fall back to a placeholder
+                                        // ("_") so arity is
+                                        // preserved.
+                                        tys.push(Text::from("_"));
+                                        filled += 1;
+                                    }
+                                }
                                 Maybe::Some(VariantPayload::Tuple(tys))
                             }
                             VariantKind::Record => {
