@@ -1098,9 +1098,25 @@ impl VbcCodegen {
                 m.insert("Tuple".to_string(), TypeId::TUPLE);
                 m.insert("Deque".to_string(), TypeId::DEQUE);
                 m.insert("Channel".to_string(), TypeId::CHANNEL);
-                // Pointer/wrapper types
-                m.insert("Heap".to_string(), TypeId::PTR);
-                m.insert("Shared".to_string(), TypeId::PTR);
+                // Pointer/wrapper types — bind to their dedicated
+                // semantic-collection TypeIds (HEAP=519, SHARED=520),
+                // NOT to the catch-all `PTR=14`.  Pre-fix both names
+                // mapped to PTR, which collapsed both user-declared
+                // types onto a single id; archive_metadata's
+                // `module.types` walk then deduplicated by id and
+                // dropped one of them — `Shared` lost the race
+                // (declared after `Heap` in `core/base/memory.vr`),
+                // disappeared from `metadata.types`, and every
+                // user-side `Shared<T>` reference died with
+                // "type not found: Shared".  The runtime side
+                // already uses the proper IDs (heap allocator stamps
+                // `TypeId::SHARED` on Shared boxes per
+                // `interpreter/dispatch_table/handlers/method_dispatch.rs:692`,
+                // disassembler maps both back per `disassemble.rs:207-208`),
+                // so swapping to dedicated IDs aligns codegen with
+                // the runtime contract.
+                m.insert("Heap".to_string(), TypeId::HEAP);
+                m.insert("Shared".to_string(), TypeId::SHARED);
                 m
             },
             // Collection type generic parameter name templates.
