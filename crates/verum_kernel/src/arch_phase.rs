@@ -178,6 +178,13 @@ pub struct PhaseInputs {
     /// each peer's `@arch_module(at_tier: ...)` declaration plus
     /// any direct callee resolution from body analysis.
     pub callee_tiers: Vec<(String, crate::arch::Tier)>,
+    /// Capabilities the body actually exercises, inferred by
+    /// walking the cog's AST and matching each call site against
+    /// the canonical ontology in
+    /// `crate::arch_capability_inference`.  Activates AP-001
+    /// CapabilityEscalation in production: any inferred capability
+    /// not declared in `Shape.requires` raises the violation.
+    pub inferred_used_capabilities: Vec<crate::arch::Capability>,
 }
 
 /// Run the phase for a single module with caller-supplied inputs.
@@ -219,6 +226,15 @@ pub fn run_arch_phase_one_with(
     ctx.composed_foundations = inputs.composed_foundations.clone();
     ctx.cited_lifecycles = inputs.cited_lifecycles.clone();
     ctx.callee_tiers = inputs.callee_tiers.clone();
+    // Body-level capability inference — activates AP-001
+    // CapabilityEscalation in production builds.  The compiler
+    // walks the cog's AST, matches each call site against
+    // `arch_capability_inference::canonical_ontology`, and supplies
+    // the inferred set here.  An empty list means either (a) the
+    // body uses no capability-relevant primitives, or (b) the
+    // walker hasn't been invoked.  Either way the silent path of
+    // AP-001 reports no violation, so no false-positive risk.
+    ctx.inferred_used_capabilities = inputs.inferred_used_capabilities.clone();
 
     let violations = check_all_anti_patterns(&shape_for_checks, &ctx);
 
