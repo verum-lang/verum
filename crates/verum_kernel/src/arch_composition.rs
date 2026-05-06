@@ -296,6 +296,17 @@ fn compose_shapes_unchecked(a: &Shape, b: &Shape) -> Shape {
     // strict: AND — composed cog is strict iff both sides are.
     let strict = a.strict && b.strict;
 
+    // declarations: compose conservatively — if either side carries
+    // a declarations record, the composed Shape inherits it; if both
+    // do, prefer the strict-mode side (or A if both equal). Per spec
+    // §14.6 the composed purpose is at most as permissive as the
+    // tighter side.
+    let declarations = match (&a.declarations, &b.declarations) {
+        (Some(d), None) | (None, Some(d)) => Some(d.clone()),
+        (Some(da), Some(db)) => Some(if a.strict { da.clone() } else { db.clone() }),
+        (None, None) => None,
+    };
+
     Shape {
         exposes,
         requires,
@@ -308,6 +319,7 @@ fn compose_shapes_unchecked(a: &Shape, b: &Shape) -> Shape {
         lifecycle,
         composes_with,
         strict,
+        declarations,
     }
 }
 

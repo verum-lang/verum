@@ -309,6 +309,7 @@ mod tests {
             lifecycle,
             composes_with,
             strict: false,
+            declarations: None,
         }
     }
 

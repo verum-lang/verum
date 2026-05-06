@@ -112,6 +112,26 @@ pub enum AntiPatternCode {
     PhantomEvolution,
     /// `ATS-V-AP-032` — refactor changes the observer-functor (Yoneda inequivalent).
     YonedaInequivalentRefactor,
+
+    // ----- CVE articulation-hygiene band (AP-033..039) — operationalises
+    //       cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16 -----
+    /// `ATS-V-AP-033` — citing a `[✗]` Retracted artefact (spec §3.5).
+    RetractedCitationUse,
+    /// `ATS-V-AP-034` — `[H]` Hypothesis without `@plan(...)` (spec §3.5).
+    HypothesisWithoutMaturationPlan,
+    /// `ATS-V-AP-035` — `[I]` Interpretation in mature/strict corpus (spec §3.4).
+    InterpretationInMatureCorpus,
+    /// `ATS-V-AP-036` — observer role mismatches assertion register (spec §6.7 L6).
+    ObserverImpersonation,
+    /// `ATS-V-AP-037` — strict-mode audit against Shape without declared
+    /// `Purpose` — boundless audit (spec §14.6).
+    BoundlessAudit,
+    /// `ATS-V-AP-038` — strict-mode `[T]` cog without declared
+    /// `CognitiveSubstrate` (spec §1.5 self-disclosure).
+    ImplicitSubstrate,
+    /// `ATS-V-AP-039` — formal claim outside CHL anchoring without
+    /// declared `FormalAnchoring` tradition (spec §4.5).
+    AnchoringOverextension,
 }
 
 impl AntiPatternCode {
@@ -150,10 +170,17 @@ impl AntiPatternCode {
             AntiPatternCode::UniversalPropertyViolation => "ATS-V-AP-030",
             AntiPatternCode::PhantomEvolution => "ATS-V-AP-031",
             AntiPatternCode::YonedaInequivalentRefactor => "ATS-V-AP-032",
+            AntiPatternCode::RetractedCitationUse => "ATS-V-AP-033",
+            AntiPatternCode::HypothesisWithoutMaturationPlan => "ATS-V-AP-034",
+            AntiPatternCode::InterpretationInMatureCorpus => "ATS-V-AP-035",
+            AntiPatternCode::ObserverImpersonation => "ATS-V-AP-036",
+            AntiPatternCode::BoundlessAudit => "ATS-V-AP-037",
+            AntiPatternCode::ImplicitSubstrate => "ATS-V-AP-038",
+            AntiPatternCode::AnchoringOverextension => "ATS-V-AP-039",
         }
     }
 
- /// Canonical short name (matches spec §7 + §26 catalog).
+ /// Canonical short name (matches spec §7 + §26 + §33 catalog).
     pub fn name(&self) -> &'static str {
         match self {
             AntiPatternCode::CapabilityEscalation => "CapabilityEscalation",
@@ -188,6 +215,13 @@ impl AntiPatternCode {
             AntiPatternCode::UniversalPropertyViolation => "UniversalPropertyViolation",
             AntiPatternCode::PhantomEvolution => "PhantomEvolution",
             AntiPatternCode::YonedaInequivalentRefactor => "YonedaInequivalentRefactor",
+            AntiPatternCode::RetractedCitationUse => "RetractedCitationUse",
+            AntiPatternCode::HypothesisWithoutMaturationPlan => "HypothesisWithoutMaturationPlan",
+            AntiPatternCode::InterpretationInMatureCorpus => "InterpretationInMatureCorpus",
+            AntiPatternCode::ObserverImpersonation => "ObserverImpersonation",
+            AntiPatternCode::BoundlessAudit => "BoundlessAudit",
+            AntiPatternCode::ImplicitSubstrate => "ImplicitSubstrate",
+            AntiPatternCode::AnchoringOverextension => "AnchoringOverextension",
         }
     }
 
@@ -227,6 +261,13 @@ impl AntiPatternCode {
             AntiPatternCode::UniversalPropertyViolation => 30,
             AntiPatternCode::PhantomEvolution => 31,
             AntiPatternCode::YonedaInequivalentRefactor => 32,
+            AntiPatternCode::RetractedCitationUse => 33,
+            AntiPatternCode::HypothesisWithoutMaturationPlan => 34,
+            AntiPatternCode::InterpretationInMatureCorpus => 35,
+            AntiPatternCode::ObserverImpersonation => 36,
+            AntiPatternCode::BoundlessAudit => 37,
+            AntiPatternCode::ImplicitSubstrate => 38,
+            AntiPatternCode::AnchoringOverextension => 39,
         };
         format!("https://verum.lang/docs/ats-v/ap-{:03}", n)
     }
@@ -247,8 +288,53 @@ impl AntiPatternCode {
             | AntiPatternCode::LifecycleRegression
             | AntiPatternCode::CveIncomplete => 1,
  // AP-011..032 (base + MTAC)
-            _ => 2,
+            AntiPatternCode::AbsoluteBoundaryAttempt
+            | AntiPatternCode::InvariantViolation
+            | AntiPatternCode::DanglingMessageType
+            | AntiPatternCode::UnauthenticatedCrossing
+            | AntiPatternCode::DeterministicViolation
+            | AntiPatternCode::CapabilityDuplication
+            | AntiPatternCode::OrphanCapability
+            | AntiPatternCode::MissingHandoff
+            | AntiPatternCode::FoundationDowngrade
+            | AntiPatternCode::TimeBoundLeakage
+            | AntiPatternCode::PersistenceMismatch
+            | AntiPatternCode::CapabilityLaundering
+            | AntiPatternCode::FoundationForgery
+            | AntiPatternCode::TransitiveLifecycleRegression
+            | AntiPatternCode::DeclarationDrift
+            | AntiPatternCode::FoundationContentMismatch
+            | AntiPatternCode::TemporalInconsistency
+            | AntiPatternCode::CounterfactualBrittleness
+            | AntiPatternCode::MissedAdjoint
+            | AntiPatternCode::UniversalPropertyViolation
+            | AntiPatternCode::PhantomEvolution
+            | AntiPatternCode::YonedaInequivalentRefactor => 2,
+ // AP-033..039 (CVE-AH band, season 3 — operationalises
+ // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16)
+            AntiPatternCode::RetractedCitationUse
+            | AntiPatternCode::HypothesisWithoutMaturationPlan
+            | AntiPatternCode::InterpretationInMatureCorpus
+            | AntiPatternCode::ObserverImpersonation
+            | AntiPatternCode::BoundlessAudit
+            | AntiPatternCode::ImplicitSubstrate
+            | AntiPatternCode::AnchoringOverextension => 3,
         }
+    }
+
+ /// True iff the pattern belongs to the CVE-AH band — operationalises
+ /// the cve-architecture spec primitives.
+    pub fn is_cve_ah(&self) -> bool {
+        matches!(
+            self,
+            AntiPatternCode::RetractedCitationUse
+                | AntiPatternCode::HypothesisWithoutMaturationPlan
+                | AntiPatternCode::InterpretationInMatureCorpus
+                | AntiPatternCode::ObserverImpersonation
+                | AntiPatternCode::BoundlessAudit
+                | AntiPatternCode::ImplicitSubstrate
+                | AntiPatternCode::AnchoringOverextension
+        )
     }
 
  /// True iff the pattern is MTAC-specific (modal-temporal,
@@ -265,10 +351,10 @@ impl AntiPatternCode {
         )
     }
 
- /// Full canonical list — = 32 patterns total.
-    pub fn full_list() -> [AntiPatternCode; 32] {
+ /// Full canonical list — = 39 patterns total.
+    pub fn full_list() -> [AntiPatternCode; 39] {
         [
- // (10)
+ // capability/composition core (10)
             AntiPatternCode::CapabilityEscalation,
             AntiPatternCode::CapabilityLeak,
             AntiPatternCode::DependencyCycle,
@@ -279,7 +365,7 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling,
             AntiPatternCode::LifecycleRegression,
             AntiPatternCode::CveIncomplete,
- // base (16)
+ // boundary / lifecycle / capability ontology (16)
             AntiPatternCode::AbsoluteBoundaryAttempt,
             AntiPatternCode::InvariantViolation,
             AntiPatternCode::DanglingMessageType,
@@ -296,13 +382,22 @@ impl AntiPatternCode {
             AntiPatternCode::TransitiveLifecycleRegression,
             AntiPatternCode::DeclarationDrift,
             AntiPatternCode::FoundationContentMismatch,
- // MTAC (6)
+ // MTAC modal-temporal (6)
             AntiPatternCode::TemporalInconsistency,
             AntiPatternCode::CounterfactualBrittleness,
             AntiPatternCode::MissedAdjoint,
             AntiPatternCode::UniversalPropertyViolation,
             AntiPatternCode::PhantomEvolution,
             AntiPatternCode::YonedaInequivalentRefactor,
+ // CVE articulation-hygiene band (7) — operationalises
+ // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16
+            AntiPatternCode::RetractedCitationUse,
+            AntiPatternCode::HypothesisWithoutMaturationPlan,
+            AntiPatternCode::InterpretationInMatureCorpus,
+            AntiPatternCode::ObserverImpersonation,
+            AntiPatternCode::BoundlessAudit,
+            AntiPatternCode::ImplicitSubstrate,
+            AntiPatternCode::AnchoringOverextension,
         ]
     }
 }
@@ -993,6 +1088,19 @@ pub struct DiagnosticContext {
     /// list claims `equivalent: true` (AT-3 input).  Each entry:
     /// `(verdict_label, observer_tags_in_agreement)`.
     pub yoneda_verdicts_claimed: Vec<(String, Vec<String>)>,
+    // ----- CVE articulation-hygiene band inputs (AP-033..039) -----
+    /// True iff the parser found a `@plan(...)` attribute on the cog
+    /// (AP-034 input). Default `false` is the conservative choice:
+    /// without explicit detection, every `[H]` triggers AP-034.
+    pub has_plan_attribute: bool,
+    /// True iff the cog is inside a corpus boundary declared mature
+    /// (AP-035 input). Mature corpora forbid `[I]` regardless of the
+    /// cog's own `strict` flag.
+    pub in_mature_corpus: bool,
+    /// Observer role-register mismatches found in the audit chronicle
+    /// prose attached to the cog (AP-036 input). Each entry is
+    /// `(observer_role, conflicting_register)`.
+    pub observer_role_register_mismatches: Vec<(String, String)>,
 }
 
 /// Structured description of how the inferred Shape diverges from
@@ -1953,6 +2061,270 @@ fn consumes_entry_well_formed(entry: &str, valid_units: &[&str]) -> bool {
     valid_units.iter().any(|u| *u == unit)
 }
 
+// =============================================================================
+// CVE articulation-hygiene band — check_* implementations (AP-033..039)
+// =============================================================================
+//
+// These operationalise the cve-architecture spec primitives. Each
+// check is local to a `Shape` and decidable from the surface
+// declarations (no kernel reflection required); the kernel-discharge
+// axioms in `core/architecture/anti_patterns.vr` admit the kernel
+// intrinsics that combine these into a unified ATS-V phase walker.
+
+/// AP-033 RetractedCitationUse — citing a `[✗]` Retracted artefact
+/// from any non-retracted lifecycle. The check enumerates
+/// `composes_with` edges and rejects when any cited cog is
+/// `Lifecycle::Retracted`. Distinct from AP-009 LifecycleRegression:
+/// AP-009 fires on rank regression generally; AP-033 fires
+/// specifically on `[✗]` regardless of citing rank.
+pub fn check_retracted_citation_use(
+    shape: &Shape,
+    cited_lifecycles: &[(String, Lifecycle)],
+) -> Option<AntiPatternViolation> {
+    if matches!(shape.lifecycle, Lifecycle::Retracted { .. }) {
+        return None; // [✗] cog citing [✗] is not a defect — chronicle linkage.
+    }
+    for (cited_name, cited_lc) in cited_lifecycles {
+        if matches!(cited_lc, Lifecycle::Retracted { .. }) {
+            return Some(AntiPatternViolation {
+                code: AntiPatternCode::RetractedCitationUse,
+                severity: Severity::Error,
+                summary: "AP-033 retracted-citation-use".to_string(),
+                human_message: format!(
+                    "Citing retracted cog `{}` from active lifecycle. \
+                     The retraction reason carries the substantive \
+                     content; silent citation defeats the negative-example \
+                     role of the audit chronicle (cve-architecture spec §3.5).",
+                    cited_name
+                ),
+                auto_fix_suggestion: Some(format!(
+                    "Remove the citation of `{}`, or migrate to its \
+                     replacement artefact if one is declared.",
+                    cited_name
+                )),
+            });
+        }
+    }
+    None
+}
+
+/// AP-034 HypothesisWithoutMaturationPlan — `[H]` Hypothesis without
+/// `@plan(...)` attribute. The kernel parser surfaces the absence
+/// of the plan attribute via `ctx.has_plan_attribute`; this check
+/// just inspects the lifecycle and the absence flag.
+pub fn check_hypothesis_without_maturation_plan(
+    shape: &Shape,
+    has_plan_attribute: bool,
+) -> Option<AntiPatternViolation> {
+    if matches!(shape.lifecycle, Lifecycle::Hypothesis { .. }) && !has_plan_attribute {
+        return Some(AntiPatternViolation {
+            code: AntiPatternCode::HypothesisWithoutMaturationPlan,
+            severity: if shape.strict {
+                Severity::Error
+            } else {
+                Severity::Warning
+            },
+            summary: "AP-034 hypothesis-without-maturation-plan".to_string(),
+            human_message:
+                "`[H]` Hypothesis without a maturation plan is operationally \
+                 equivalent to an `[I]` Interpretation — the missing plan \
+                 turns the hypothesis into a hidden CVE-violator \
+                 (cve-architecture spec §3.5)."
+                    .to_string(),
+            auto_fix_suggestion: Some(
+                "Add `@plan(target: \"...\", milestones: [...])` to the cog, \
+                 or downgrade `Lifecycle.Hypothesis(...)` to `Lifecycle.Interpretation(...)` \
+                 with an explicit reason."
+                    .to_string(),
+            ),
+        });
+    }
+    None
+}
+
+/// AP-035 InterpretationInMatureCorpus — `[I]` Interpretation in a
+/// strict-mode cog or within a mature corpus boundary.
+pub fn check_interpretation_in_mature_corpus(
+    shape: &Shape,
+    in_mature_corpus: bool,
+) -> Option<AntiPatternViolation> {
+    if matches!(shape.lifecycle, Lifecycle::Interpretation { .. })
+        && (shape.strict || in_mature_corpus)
+    {
+        return Some(AntiPatternViolation {
+            code: AntiPatternCode::InterpretationInMatureCorpus,
+            severity: Severity::Error,
+            summary: "AP-035 interpretation-in-mature-corpus".to_string(),
+            human_message:
+                "Mature/strict corpora must contain ZERO `[I]` Interpretation \
+                 entries (cve-architecture spec §3.4 + §6.7 L6). The `[I]` \
+                 status is the canonical CVE-violator — all three axes \
+                 absent and no plan to formalise."
+                    .to_string(),
+            auto_fix_suggestion: Some(
+                "Apply one of three transformations: prove → `[T]`/`[C]`, \
+                 downgrade → `[H]` with `@plan(...)`, or remove the cog."
+                    .to_string(),
+            ),
+        });
+    }
+    None
+}
+
+/// AP-036 ObserverImpersonation — observer role mismatches the
+/// register of the assertion content. The kernel-side observer
+/// dispatcher records the (role, register) pair; this check rejects
+/// when they disagree under the L6 register-prohibition rules.
+pub fn check_observer_impersonation(
+    shape: &Shape,
+    role_register_mismatches: &[(String, String)],
+) -> Option<AntiPatternViolation> {
+    let _ = shape;
+    if role_register_mismatches.is_empty() {
+        return None;
+    }
+    let (role, register) = &role_register_mismatches[0];
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::ObserverImpersonation,
+        severity: Severity::Error,
+        summary: "AP-036 observer-impersonation".to_string(),
+        human_message: format!(
+            "Observer role `{}` is making an assertion in register `{}` \
+             — a register collision per cve-architecture spec §6.7 L6. \
+             Distinct from AP-029 MissedAdjoint: AP-036 fires on \
+             audit-chronicle prose where the observer register and the \
+             assertion content disagree.",
+            role, register
+        ),
+        auto_fix_suggestion: Some(format!(
+            "Either narrow the observer role to one matching `{}`, or \
+             qualify the assertion to specify the layer it ranges over.",
+            register
+        )),
+    })
+}
+
+/// AP-037 BoundlessAudit — strict-mode audit invocation against a
+/// `Shape` with no declared `Purpose`. Per spec §14.6 the audit
+/// terminates relative to a declared purpose; without one the audit
+/// has no halting criterion.
+pub fn check_boundless_audit(shape: &Shape) -> Option<AntiPatternViolation> {
+    if !shape.strict {
+        return None;
+    }
+    let has_purpose = shape
+        .declarations
+        .as_ref()
+        .map(|d| d.purpose.is_some())
+        .unwrap_or(false);
+    if has_purpose {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::BoundlessAudit,
+        severity: Severity::Error,
+        summary: "AP-037 boundless-audit".to_string(),
+        human_message:
+            "Strict-mode audit invocation against a cog with no declared \
+             `Purpose` — boundless audit per cve-architecture spec §14.6. \
+             The audit has no termination criterion and degenerates into \
+             infinite polishing."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Add to `@arch_module(...)`: \
+             `declarations: ShapeDeclarations { purpose: Some(Purpose { \
+             role: \"...\", k_min: ..., v_min: ..., e_min: ... }), ... }`."
+                .to_string(),
+        ),
+    })
+}
+
+/// AP-038 ImplicitSubstrate — strict-mode `[T]` Theorem cog without
+/// a declared `CognitiveSubstrate`. Per spec §1.5, declaring the
+/// substrate is part of operational hygiene.
+pub fn check_implicit_substrate(shape: &Shape) -> Option<AntiPatternViolation> {
+    if !shape.strict {
+        return None;
+    }
+    if !matches!(shape.lifecycle, Lifecycle::Theorem { .. }) {
+        return None;
+    }
+    let has_substrate = shape
+        .declarations
+        .as_ref()
+        .map(|d| d.substrate.is_some())
+        .unwrap_or(false);
+    if has_substrate {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::ImplicitSubstrate,
+        severity: Severity::Error,
+        summary: "AP-038 implicit-substrate".to_string(),
+        human_message:
+            "Strict-mode `[T]` Theorem cog without declared cognitive \
+             substrate. Per cve-architecture spec §1.5, every architectural \
+             law-bearing cog must disclose its operational mode; absence \
+             is operationally indistinguishable from a vacuous claim of \
+             universality."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Add to `@arch_module(...)`: \
+             `declarations: ShapeDeclarations { substrate: Some(CognitiveSubstrate.AnalyticDecompositional), ... }`."
+                .to_string(),
+        ),
+    })
+}
+
+/// AP-039 AnchoringOverextension — `[T]` Theorem under non-CHL
+/// foundation without declared `FormalAnchoring`. Per spec §4.5.
+pub fn check_anchoring_overextension(shape: &Shape) -> Option<AntiPatternViolation> {
+    if !matches!(shape.lifecycle, Lifecycle::Theorem { .. }) {
+        return None;
+    }
+    let in_chl_domain = matches!(
+        shape.foundation,
+        Foundation::ZfcTwoInacc
+            | Foundation::Cic
+            | Foundation::Mltt
+            | Foundation::Hott
+            | Foundation::Cubical
+            | Foundation::Eff
+    );
+    if in_chl_domain {
+        return None;
+    }
+    let has_anchoring = shape
+        .declarations
+        .as_ref()
+        .map(|d| d.anchoring.is_some())
+        .unwrap_or(false);
+    if has_anchoring {
+        return None;
+    }
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::AnchoringOverextension,
+        severity: if shape.strict {
+            Severity::Error
+        } else {
+            Severity::Warning
+        },
+        summary: "AP-039 anchoring-overextension".to_string(),
+        human_message:
+            "`[T]` Theorem cog under non-CHL foundation without declared \
+             `FormalAnchoring`. Per cve-architecture spec §4.5, the CHL \
+             anchoring (logic ↔ types ↔ categories) is the eponym; \
+             extending the CVE law to other domains requires explicit \
+             declaration of the parallel anchoring tradition."
+                .to_string(),
+        auto_fix_suggestion: Some(
+            "Add to `@arch_module(...)`: \
+             `declarations: ShapeDeclarations { anchoring: Some(FormalAnchoring.AutomataTheory /* or appropriate */), ... }`."
+                .to_string(),
+        ),
+    })
+}
+
 /// Walk every canonical anti-pattern check; return all violations.
 /// Used by ATS-V phase + audit gate.
 pub fn check_all_anti_patterns(
@@ -2077,6 +2449,28 @@ pub fn check_all_anti_patterns(
         violations.push(v);
     }
     if let Some(v) = check_consumes_format_v(shape) {
+        violations.push(v);
+    }
+    // ----- CVE articulation-hygiene band — AP-033..039 -----
+    if let Some(v) = check_retracted_citation_use(shape, &ctx.cited_lifecycles) {
+        violations.push(v);
+    }
+    if let Some(v) = check_hypothesis_without_maturation_plan(shape, ctx.has_plan_attribute) {
+        violations.push(v);
+    }
+    if let Some(v) = check_interpretation_in_mature_corpus(shape, ctx.in_mature_corpus) {
+        violations.push(v);
+    }
+    if let Some(v) = check_observer_impersonation(shape, &ctx.observer_role_register_mismatches) {
+        violations.push(v);
+    }
+    if let Some(v) = check_boundless_audit(shape) {
+        violations.push(v);
+    }
+    if let Some(v) = check_implicit_substrate(shape) {
+        violations.push(v);
+    }
+    if let Some(v) = check_anchoring_overextension(shape) {
         violations.push(v);
     }
     violations
@@ -2298,22 +2692,31 @@ mod tests {
     }
 
     #[test]
-    fn architectural_pin_32_total_codes_reserved() {
- // catalog completion: 32 canonical patterns total.
- // Adding more requires RFC ATS-V-006 + community review per
- // spec §29.2. Cap=30 in spec §7.1; current 32 includes
- // 6 MTAC patterns (§26) which are spec-introduced.
+    fn architectural_pin_39_total_codes_reserved() {
+ // catalog completion: 39 canonical patterns total.
+ // 32 base + MTAC + 7 CVE-articulation-hygiene patterns
+ // (AP-033..AP-039) operationalising cve-architecture spec
+ // §1.5, §2.3.0, §3.5, §4.5, §14.6, §16. Adding more requires
+ // RFC ATS-V-008 + kernel-side enum bump + pin-test bump.
         let codes = AntiPatternCode::full_list();
-        assert_eq!(codes.len(), 32);
+        assert_eq!(codes.len(), 39);
         assert_eq!(codes[0].code(), "ATS-V-AP-001");
         assert_eq!(codes[31].code(), "ATS-V-AP-032");
+        assert_eq!(codes[38].code(), "ATS-V-AP-039");
     }
 
     #[test]
     fn season_attribution_correct() {
- // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2.
+ // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2;
+ // AP-033..039 are Season 3 (CVE articulation-hygiene band).
         for (i, code) in AntiPatternCode::full_list().iter().enumerate() {
-            let expected = if i < 10 { 1 } else { 2 };
+            let expected = if i < 10 {
+                1
+            } else if i < 32 {
+                2
+            } else {
+                3
+            };
             assert_eq!(
                 code.season(),
                 expected,
@@ -2343,12 +2746,13 @@ mod tests {
     #[test]
     fn all_codes_have_distinct_docs_urls() {
  // Pin: every code's docs_url() is distinct. Catches off-by-one
- // bugs in the URL generation (AP-NNN format).
+ // bugs in the URL generation (AP-NNN format). 32 base + 7
+ // CVE-AH band = 39 total.
         let urls: std::collections::BTreeSet<_> = AntiPatternCode::full_list()
             .iter()
             .map(|c| c.docs_url())
             .collect();
-        assert_eq!(urls.len(), 32);
+        assert_eq!(urls.len(), 39);
  // Spot-check format.
         assert_eq!(
             AntiPatternCode::CapabilityEscalation.docs_url(),
@@ -3029,6 +3433,7 @@ mod tests {
             },
             composes_with: vec![],
             strict: false,
+            declarations: None,
         };
         let ctx = DiagnosticContext {
             cog_name: "evil".into(),

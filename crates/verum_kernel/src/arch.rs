@@ -857,6 +857,323 @@ impl VerifyStrategy {
 }
 
 // =============================================================================
+// CVE-architecture spec primitives — operationalisation of cve-architecture.md
+// =============================================================================
+//
+// Mirrors the Verum-side block in `core/architecture/types.vr`. Every
+// type, every variant, every helper here has a 1:1 counterpart on the
+// Verum side; the cross-side pin test in
+// `crates/verum_kernel/tests/k_arch_v_alignment.rs` enforces alignment.
+
+/// The three senses of executability that the CVE-E axis disambiguates.
+/// CVE-E refers EXCLUSIVELY to `StructuralReadiness`.
+///
+/// Per spec §2.3.0, conflating these is a register collision: an
+/// artefact "executed yesterday" (`PostFactumChronicle`) is not
+/// thereby "structurally ready to run today" (`StructuralReadiness`),
+/// and an artefact "currently running" (`CurrentExecution`) is not
+/// thereby "deployable to a new environment".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExecutabilitySense {
+    /// THE canonical content of CVE-E: the artefact admits a
+    /// working representation deployable in a suitable environment.
+    StructuralReadiness,
+    /// The artefact is presently running. Stronger than E; relevant
+    /// to L0 maturity but not to the E axis itself.
+    CurrentExecution,
+    /// Accumulated history of past execution. Material for §15
+    /// antifragility chronicle, NOT for the E axis.
+    PostFactumChronicle,
+}
+
+impl ExecutabilitySense {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            ExecutabilitySense::StructuralReadiness => "structural_readiness",
+            ExecutabilitySense::CurrentExecution => "current_execution",
+            ExecutabilitySense::PostFactumChronicle => "post_factum_chronicle",
+        }
+    }
+
+    /// True iff the sense is the canonical content of CVE-E.
+    /// Soundness pin: exactly one of three senses anchors the E axis.
+    pub fn is_canonical_e(&self) -> bool {
+        matches!(self, ExecutabilitySense::StructuralReadiness)
+    }
+}
+
+/// The cognitive mode under which a knowledge artefact is articulated.
+/// CVE itself operates under `AnalyticDecompositional`; alternatives
+/// are co-equal in their proper domains per spec §1.5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CognitiveSubstrate {
+    /// CVE's own substrate: K/V/E projections evaluated separately.
+    /// Default for `@arch_module(...)`.
+    AnalyticDecompositional,
+    /// Holistic-relational mode: artefact evaluated as a node in
+    /// a network of relations.
+    HolisticRelational,
+    /// Action-centric mode: the action IS the artefact (craft
+    /// mastery, performance disciplines).
+    ActionCentric,
+    /// Tradition-transmitting mode: identity preserved through
+    /// multi-generational reproduction.
+    TraditionTransmitting,
+}
+
+impl CognitiveSubstrate {
+    /// Stable diagnostic tag.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CognitiveSubstrate::AnalyticDecompositional => "analytic_decompositional",
+            CognitiveSubstrate::HolisticRelational => "holistic_relational",
+            CognitiveSubstrate::ActionCentric => "action_centric",
+            CognitiveSubstrate::TraditionTransmitting => "tradition_transmitting",
+        }
+    }
+
+    /// Default substrate for ATS-V annotations.
+    pub fn default_for_ats_v() -> Self {
+        CognitiveSubstrate::AnalyticDecompositional
+    }
+}
+
+/// The formal tradition anchoring a tri-axis closure. CHL is the
+/// most-developed; parallel anchorings on different stages of
+/// formalisation are registered per spec §4.5.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FormalAnchoring {
+    /// Curry-Howard-Lawvere — logic ↔ types ↔ categories.  The
+    /// canonical anchoring for mathematical and SE artefacts.
+    CurryHowardLawvere,
+    /// Grammars ↔ automata ↔ languages.
+    AutomataTheory,
+    /// State equations ↔ transfer functions ↔ realisations.
+    ControlTheory,
+    /// Specifications ↔ execution models ↔ observable traces.
+    DistributedProtocols,
+    /// Afferent synthesis ↔ action program ↔ result acceptor.
+    FunctionalSystems,
+    /// Normative structure ↔ decision procedure ↔ stabilised practices.
+    InstitutionalDesign,
+    /// User-registered anchoring.
+    CustomAnchoring(String),
+}
+
+impl FormalAnchoring {
+    /// Stable diagnostic tag.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            FormalAnchoring::CurryHowardLawvere => "curry_howard_lawvere",
+            FormalAnchoring::AutomataTheory => "automata_theory",
+            FormalAnchoring::ControlTheory => "control_theory",
+            FormalAnchoring::DistributedProtocols => "distributed_protocols",
+            FormalAnchoring::FunctionalSystems => "functional_systems",
+            FormalAnchoring::InstitutionalDesign => "institutional_design",
+            FormalAnchoring::CustomAnchoring(_) => "custom_anchoring",
+        }
+    }
+
+    /// Default anchoring for Verum-native artefacts.
+    pub fn default_for_ats_v() -> Self {
+        FormalAnchoring::CurryHowardLawvere
+    }
+}
+
+/// Threshold on the K (Constructive) axis. Per spec §14.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CveThresholdK {
+    /// Explicit, computable, first-class witness; no holes.
+    FullWitness,
+    /// Schema-with-typed-parameters is sufficient.
+    TypedSchema,
+    /// Reference implementation bounded to a stated domain is sufficient.
+    ReferenceImplBounded,
+}
+
+impl CveThresholdK {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CveThresholdK::FullWitness => "full_witness",
+            CveThresholdK::TypedSchema => "typed_schema",
+            CveThresholdK::ReferenceImplBounded => "reference_impl_bounded",
+        }
+    }
+}
+
+/// Threshold on the V (Verifiable) axis. Per spec §14.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CveThresholdV {
+    /// Kernel-checked machine proof in the chosen meta-theory.
+    FullFormalProof,
+    /// Typechecker + named test battery with declared coverage.
+    TypecheckPlusTests,
+    /// Passage of a named certification (audit, conformance suite).
+    NamedCertification,
+}
+
+impl CveThresholdV {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CveThresholdV::FullFormalProof => "full_formal_proof",
+            CveThresholdV::TypecheckPlusTests => "typecheck_plus_tests",
+            CveThresholdV::NamedCertification => "named_certification",
+        }
+    }
+}
+
+/// Threshold on the E (Executable, in `StructuralReadiness` sense) axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CveThresholdE {
+    /// Deployable in any environment of the declared class.
+    StructurallyReady,
+    /// One specific environment is sufficient.
+    DeployedInOneEnv,
+    /// A functor in a category is sufficient.
+    FunctorialOnly,
+}
+
+impl CveThresholdE {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CveThresholdE::StructurallyReady => "structurally_ready",
+            CveThresholdE::DeployedInOneEnv => "deployed_in_one_env",
+            CveThresholdE::FunctorialOnly => "functorial_only",
+        }
+    }
+}
+
+/// Declared purpose of an architectural artefact. The audit
+/// terminates when configuration meets thresholds (spec §14.6 —
+/// avoids the "boundless audit" anti-pattern).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Purpose {
+    /// Short label of the role the artefact serves.
+    pub role: String,
+    /// Minimum K threshold sufficient for the role.
+    pub k_min: CveThresholdK,
+    /// Minimum V threshold sufficient for the role.
+    pub v_min: CveThresholdV,
+    /// Minimum E threshold (in `StructuralReadiness` sense) for the role.
+    pub e_min: CveThresholdE,
+}
+
+impl Purpose {
+    /// Default purpose for cogs without an explicit declaration.
+    pub fn default_unspecified() -> Self {
+        Purpose {
+            role: "unspecified".to_string(),
+            k_min: CveThresholdK::FullWitness,
+            v_min: CveThresholdV::TypecheckPlusTests,
+            e_min: CveThresholdE::StructurallyReady,
+        }
+    }
+}
+
+/// Architectural defect kind, per spec §20.4.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DefectKind {
+    /// Systematic rejection of artefacts that turned out mature.
+    FalseRejection,
+    /// Systematic acceptance of artefacts that turned out unstable.
+    FalseAcceptance,
+    /// Inter-layer leak unresolved by current stratification.
+    InterLayerLeak,
+    /// Defect outside the three canonical kinds; carries free-form description.
+    OtherDefect(String),
+}
+
+impl DefectKind {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            DefectKind::FalseRejection => "false_rejection",
+            DefectKind::FalseAcceptance => "false_acceptance",
+            DefectKind::InterLayerLeak => "inter_layer_leak",
+            DefectKind::OtherDefect(_) => "other_defect",
+        }
+    }
+}
+
+/// Resolution path for a registered architectural defect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Resolution {
+    /// Modify the architectural law itself (L4 — rare).
+    L4Revision,
+    /// Adjust the methodology layer without touching the architectural law (typical).
+    L2Refinement,
+    /// Resolution outside the two canonical paths; carries free-form description.
+    OtherResolution(String),
+}
+
+impl Resolution {
+    /// Stable diagnostic tag used in audit JSON.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Resolution::L4Revision => "l4_revision",
+            Resolution::L2Refinement => "l2_refinement",
+            Resolution::OtherResolution(_) => "other_resolution",
+        }
+    }
+}
+
+/// Architectural defect record, per spec §20.4.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchitecturalDefect {
+    /// Short label identifying the defect.
+    pub short_name: String,
+    /// Architecture version against which the defect was filed.
+    pub arch_version: String,
+    /// Absolute date of submission (ISO format).
+    pub submitted_on: String,
+    /// Identifier of the submitter.
+    pub submitter: String,
+    /// Type of defect — false rejection / false acceptance / inter-layer leak / other.
+    pub kind: DefectKind,
+    /// Reference to a concrete artefact demonstrating the defect.
+    pub witness_artefact: String,
+    /// Domain and task in which the defect manifested.
+    pub application_context: String,
+    /// What happened when the principle was applied.
+    pub observed_result: String,
+    /// What the correct outcome would have been absent the defect.
+    pub expected_result: String,
+    /// Proposed resolution path.
+    pub proposed_resolution: Resolution,
+}
+
+/// Optional declarations packaged into a `Shape`. Carries the four
+/// CVE-architecture spec concepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShapeDeclarations {
+    /// Declared purpose terminating the audit (spec §14.6).
+    pub purpose: Option<Purpose>,
+    /// Declared cognitive substrate (spec §1.5).
+    pub substrate: Option<CognitiveSubstrate>,
+    /// Declared formal anchoring (spec §4.5).
+    pub anchoring: Option<FormalAnchoring>,
+    /// Declared executability sense (spec §2.3.0).
+    pub e_sense: Option<ExecutabilitySense>,
+}
+
+impl ShapeDeclarations {
+    /// Empty declarations record — every field unspecified, the
+    /// architectural type-checker fills defaults at audit time.
+    pub fn empty() -> Self {
+        ShapeDeclarations {
+            purpose: None,
+            substrate: None,
+            anchoring: None,
+            e_sense: None,
+        }
+    }
+}
+
+// =============================================================================
 // Shape — main carrier per `@arch_module(...)`
 // =============================================================================
 
@@ -889,6 +1206,13 @@ pub struct Shape {
     pub composes_with: Vec<String>,
  /// Strict mode flag (compile errors vs warnings).
     pub strict: bool,
+ /// Optional CVE-architecture spec declarations: purpose
+ /// (terminates audit per §14.6), cognitive substrate (per §1.5),
+ /// formal anchoring (per §4.5), executability sense (per §2.3.0).
+ /// Absence in strict mode triggers the CVE-AH band anti-patterns
+ /// (AP-037..AP-039).
+    #[serde(default)]
+    pub declarations: Option<ShapeDeclarations>,
 }
 
 impl Shape {
@@ -916,6 +1240,7 @@ impl Shape {
             },
             composes_with: Vec::new(),
             strict: false,
+            declarations: None,
         }
     }
 }

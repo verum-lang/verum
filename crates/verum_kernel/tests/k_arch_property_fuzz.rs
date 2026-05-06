@@ -123,6 +123,7 @@ fn arb_shape() -> impl Strategy<Value = Shape> {
                 lifecycle,
                 composes_with: vec![],
                 strict,
+                declarations: None,
             },
         )
 }

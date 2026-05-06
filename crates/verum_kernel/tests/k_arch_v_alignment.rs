@@ -400,23 +400,23 @@ fn pin_verify_strategy_aligned() {
 }
 
 // =============================================================================
-// 7. AntiPatternCode — 32 canonical codes
+// 7. AntiPatternCode — 39 canonical codes (32 base + 7 CVE-AH band)
 // =============================================================================
 
 #[test]
-fn pin_anti_pattern_code_count_thirty_two() {
+fn pin_anti_pattern_code_count_canonical() {
     let all = AntiPatternCode::full_list();
     assert_eq!(
         all.len(),
-        32,
-        "Kernel-side AntiPatternCode roster size drifted from canonical 32"
+        39,
+        "Kernel-side AntiPatternCode roster size drifted from canonical 39"
     );
 
     let codes: BTreeSet<&'static str> = all.iter().map(|c| c.code()).collect();
-    assert_eq!(codes.len(), 32, "AntiPatternCode codes not unique");
+    assert_eq!(codes.len(), 39, "AntiPatternCode codes not unique");
 
-    // Verify the AP-001..AP-032 pattern is fully covered.
-    for n in 1..=32 {
+    // Verify the AP-001..AP-039 pattern is fully covered.
+    for n in 1..=39 {
         let expected = format!("ATS-V-AP-{:03}", n);
         assert!(
             codes.contains(expected.as_str()),
@@ -427,6 +427,7 @@ fn pin_anti_pattern_code_count_thirty_two() {
 
     let vr = read_vr("anti_patterns.vr");
     let names = [
+        // Capability / composition core (AP-001..010)
         "CapabilityEscalation",
         "CapabilityLeak",
         "DependencyCycle",
@@ -437,6 +438,7 @@ fn pin_anti_pattern_code_count_thirty_two() {
         "ResourceStraddling",
         "LifecycleRegression",
         "CveIncomplete",
+        // Boundary / lifecycle / capability ontology (AP-011..026)
         "AbsoluteBoundaryAttempt",
         "InvariantViolation",
         "DanglingMessageType",
@@ -453,18 +455,232 @@ fn pin_anti_pattern_code_count_thirty_two() {
         "TransitiveLifecycleRegression",
         "DeclarationDrift",
         "FoundationContentMismatch",
+        // MTAC modal-temporal (AP-027..032)
         "TemporalInconsistency",
         "CounterfactualBrittleness",
         "MissedAdjoint",
         "UniversalPropertyViolation",
         "PhantomEvolution",
         "YonedaInequivalentRefactor",
+        // CVE articulation-hygiene band (AP-033..039) —
+        // operationalises cve-architecture spec §1.5, §2.3.0, §3.5,
+        // §4.5, §14.6, §16.
+        "RetractedCitationUse",
+        "HypothesisWithoutMaturationPlan",
+        "InterpretationInMatureCorpus",
+        "ObserverImpersonation",
+        "BoundlessAudit",
+        "ImplicitSubstrate",
+        "AnchoringOverextension",
     ];
     for n in &names {
         assert_variant_in(&vr, n, "core/architecture/anti_patterns.vr (AntiPatternCode)");
     }
     assert_helper_in(&vr, "anti_pattern_code_str", "anti_patterns.vr");
     assert_helper_in(&vr, "anti_pattern_full_roster", "anti_patterns.vr");
+}
+
+// =============================================================================
+// 7b. CVE-architecture spec primitives — Verum/kernel alignment
+// =============================================================================
+
+#[test]
+fn pin_executability_sense_three_canonical() {
+    use verum_kernel::arch::ExecutabilitySense;
+    let canonical = [
+        ExecutabilitySense::StructuralReadiness,
+        ExecutabilitySense::CurrentExecution,
+        ExecutabilitySense::PostFactumChronicle,
+    ];
+    let tags: BTreeSet<&'static str> = canonical.iter().map(|s| s.tag()).collect();
+    assert_eq!(tags.len(), 3, "ExecutabilitySense tags not unique");
+    // Soundness pin (cve-architecture spec §2.3.0): exactly one
+    // sense (StructuralReadiness) is the canonical content of CVE-E.
+    assert!(ExecutabilitySense::StructuralReadiness.is_canonical_e());
+    assert!(!ExecutabilitySense::CurrentExecution.is_canonical_e());
+    assert!(!ExecutabilitySense::PostFactumChronicle.is_canonical_e());
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "StructuralReadiness",
+        "CurrentExecution",
+        "PostFactumChronicle",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (ExecutabilitySense)");
+    }
+    assert_helper_in(&vr, "executability_sense_tag", "types.vr");
+    assert_helper_in(&vr, "executability_sense_is_canonical_e", "types.vr");
+    assert_helper_in(&vr, "executability_sense_canonical_unique", "types.vr");
+}
+
+#[test]
+fn pin_cognitive_substrate_four_canonical() {
+    use verum_kernel::arch::CognitiveSubstrate;
+    let canonical = [
+        CognitiveSubstrate::AnalyticDecompositional,
+        CognitiveSubstrate::HolisticRelational,
+        CognitiveSubstrate::ActionCentric,
+        CognitiveSubstrate::TraditionTransmitting,
+    ];
+    let tags: BTreeSet<&'static str> = canonical.iter().map(|s| s.tag()).collect();
+    assert_eq!(tags.len(), 4, "CognitiveSubstrate tags not unique");
+    // Soundness pin (cve-architecture spec §1.5): the default for
+    // ATS-V is AnalyticDecompositional.
+    assert_eq!(
+        CognitiveSubstrate::default_for_ats_v(),
+        CognitiveSubstrate::AnalyticDecompositional
+    );
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "AnalyticDecompositional",
+        "HolisticRelational",
+        "ActionCentric",
+        "TraditionTransmitting",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (CognitiveSubstrate)");
+    }
+    assert_helper_in(&vr, "cognitive_substrate_tag", "types.vr");
+    assert_helper_in(&vr, "cognitive_substrate_default", "types.vr");
+}
+
+#[test]
+fn pin_formal_anchoring_seven_variants() {
+    use verum_kernel::arch::FormalAnchoring;
+    let canonical = [
+        FormalAnchoring::CurryHowardLawvere,
+        FormalAnchoring::AutomataTheory,
+        FormalAnchoring::ControlTheory,
+        FormalAnchoring::DistributedProtocols,
+        FormalAnchoring::FunctionalSystems,
+        FormalAnchoring::InstitutionalDesign,
+        FormalAnchoring::CustomAnchoring("custom".to_string()),
+    ];
+    let tags: BTreeSet<&'static str> = canonical.iter().map(|s| s.tag()).collect();
+    assert_eq!(
+        tags.len(),
+        7,
+        "FormalAnchoring tags must be 7 distinct (CHL + 5 parallel anchorings + Custom)"
+    );
+    // Soundness pin (cve-architecture spec §4.5): the default
+    // anchoring is the CHL eponym.
+    assert_eq!(
+        FormalAnchoring::default_for_ats_v(),
+        FormalAnchoring::CurryHowardLawvere
+    );
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "CurryHowardLawvere",
+        "AutomataTheory",
+        "ControlTheory",
+        "DistributedProtocols",
+        "FunctionalSystems",
+        "InstitutionalDesign",
+        "CustomAnchoring",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (FormalAnchoring)");
+    }
+    assert_helper_in(&vr, "formal_anchoring_tag", "types.vr");
+    assert_helper_in(&vr, "formal_anchoring_default", "types.vr");
+}
+
+#[test]
+fn pin_purpose_threshold_axes() {
+    use verum_kernel::arch::{
+        CveThresholdE, CveThresholdK, CveThresholdV, Purpose,
+    };
+    // K threshold has 3 modes, V has 3, E has 3 — 3³ = 27 cells of
+    // declared-purpose space (cve-architecture spec §14.6).
+    assert_eq!(CveThresholdK::FullWitness.tag(), "full_witness");
+    assert_eq!(CveThresholdK::TypedSchema.tag(), "typed_schema");
+    assert_eq!(
+        CveThresholdK::ReferenceImplBounded.tag(),
+        "reference_impl_bounded"
+    );
+    assert_eq!(CveThresholdV::FullFormalProof.tag(), "full_formal_proof");
+    assert_eq!(
+        CveThresholdV::TypecheckPlusTests.tag(),
+        "typecheck_plus_tests"
+    );
+    assert_eq!(
+        CveThresholdV::NamedCertification.tag(),
+        "named_certification"
+    );
+    assert_eq!(CveThresholdE::StructurallyReady.tag(), "structurally_ready");
+    assert_eq!(CveThresholdE::DeployedInOneEnv.tag(), "deployed_in_one_env");
+    assert_eq!(CveThresholdE::FunctorialOnly.tag(), "functorial_only");
+
+    let p = Purpose::default_unspecified();
+    assert_eq!(p.role, "unspecified");
+    assert_eq!(p.k_min, CveThresholdK::FullWitness);
+    assert_eq!(p.v_min, CveThresholdV::TypecheckPlusTests);
+    assert_eq!(p.e_min, CveThresholdE::StructurallyReady);
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "FullWitness",
+        "TypedSchema",
+        "ReferenceImplBounded",
+        "FullFormalProof",
+        "TypecheckPlusTests",
+        "NamedCertification",
+        "StructurallyReady",
+        "DeployedInOneEnv",
+        "FunctorialOnly",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (CveThreshold*)");
+    }
+    assert_helper_in(&vr, "purpose_default", "types.vr");
+}
+
+#[test]
+fn pin_shape_declarations_extension() {
+    use verum_kernel::arch::ShapeDeclarations;
+    let empty = ShapeDeclarations::empty();
+    assert!(empty.purpose.is_none());
+    assert!(empty.substrate.is_none());
+    assert!(empty.anchoring.is_none());
+    assert!(empty.e_sense.is_none());
+    let vr = read_vr("types.vr");
+    assert_helper_in(&vr, "shape_declarations_empty", "types.vr");
+}
+
+#[test]
+fn pin_architectural_defect_format() {
+    use verum_kernel::arch::{
+        ArchitecturalDefect, DefectKind, Resolution,
+    };
+    // Pin: cve-architecture spec §20.4 record format — name, version,
+    // submitted_on, submitter, kind, witness, context, observed,
+    // expected, resolution.
+    let d = ArchitecturalDefect {
+        short_name: "test".into(),
+        arch_version: "v0.1".into(),
+        submitted_on: "2026-05-06".into(),
+        submitter: "auditor".into(),
+        kind: DefectKind::FalseRejection,
+        witness_artefact: "cog::x".into(),
+        application_context: "ATS-V phase".into(),
+        observed_result: "rejected".into(),
+        expected_result: "accepted".into(),
+        proposed_resolution: Resolution::L2Refinement,
+    };
+    assert_eq!(d.kind.tag(), "false_rejection");
+    assert_eq!(d.proposed_resolution.tag(), "l2_refinement");
+
+    let vr = read_vr("types.vr");
+    for v in &[
+        "FalseRejection",
+        "FalseAcceptance",
+        "InterLayerLeak",
+        "OtherDefect",
+        "L4Revision",
+        "L2Refinement",
+        "OtherResolution",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (DefectKind/Resolution)");
+    }
 }
 
 // =============================================================================
@@ -702,7 +918,7 @@ fn pin_mod_re_exports_full_surface() {
 // =============================================================================
 
 #[test]
-fn pin_all_thirty_two_codes_have_check_function() {
+fn pin_all_canonical_codes_have_check_function() {
     // For every AntiPatternCode, a `check_*` function must exist on
     // the kernel side that fires the violation under at least one
     // input.  The pin test does not invoke the dispatcher — it
@@ -767,11 +983,41 @@ fn pin_all_thirty_two_codes_have_check_function() {
             AntiPatternCode::YonedaInequivalentRefactor,
             "check_yoneda_inequivalent_refactor",
         ),
+        // CVE articulation-hygiene band (AP-033..039) — operationalises
+        // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16.
+        (
+            AntiPatternCode::RetractedCitationUse,
+            "check_retracted_citation_use",
+        ),
+        (
+            AntiPatternCode::HypothesisWithoutMaturationPlan,
+            "check_hypothesis_without_maturation_plan",
+        ),
+        (
+            AntiPatternCode::InterpretationInMatureCorpus,
+            "check_interpretation_in_mature_corpus",
+        ),
+        (
+            AntiPatternCode::ObserverImpersonation,
+            "check_observer_impersonation",
+        ),
+        (
+            AntiPatternCode::BoundlessAudit,
+            "check_boundless_audit",
+        ),
+        (
+            AntiPatternCode::ImplicitSubstrate,
+            "check_implicit_substrate",
+        ),
+        (
+            AntiPatternCode::AnchoringOverextension,
+            "check_anchoring_overextension",
+        ),
     ];
     assert_eq!(
         expected_fns.len(),
-        32,
-        "Expected mapping must cover all 32 AntiPatternCode variants"
+        39,
+        "Expected mapping must cover all 39 AntiPatternCode variants"
     );
 
     for (code, fn_name) in expected_fns {
@@ -1875,6 +2121,7 @@ fn pin_transitive_resolver_correctness() {
         },
         composes_with,
         strict: false,
+        declarations: None,
     };
     let mut hypothesis_shape = theorem_shape(vec![]);
     hypothesis_shape.lifecycle = Lifecycle::Hypothesis {

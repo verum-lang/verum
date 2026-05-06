@@ -19,7 +19,7 @@
 // code so both human reviewers and agents can pattern-match
 // (dual-audience contract).
 //
-// ## 32-pattern roster (full canonical catalog)
+// ## 39-pattern roster (full canonical catalog)
 //
 // **Capability / composition core (AP-001..010):**
 //   AP-001 CapabilityEscalation     undeclared capability used
@@ -59,20 +59,46 @@
 //   AP-031 PhantomEvolution           unsatisfiable trigger
 //   AP-032 YonedaInequivalentRefactor observer-functor changes
 //
-// ## Discharge through 8 base + 4 red-team kernel intrinsics
+// **CVE articulation-hygiene band (AP-033..039):**
+//   These operationalise the CVE-architecture spec primitives:
+//   ExecutabilitySense (§2.3.0), CognitiveSubstrate (§1.5),
+//   FormalAnchoring (§4.5), Purpose (§14.6), the [I]/[H]/[✗]
+//   discipline of §3.5, and the L6 register prohibitions of §16.
+//
+//   AP-033 RetractedCitationUse       citing a [✗] Retracted artefact
+//   AP-034 HypothesisWithoutMaturationPlan  [H] cog without @plan(...)
+//   AP-035 InterpretationInMatureCorpus     [I] in mature/strict corpus
+//   AP-036 ObserverImpersonation      observer role mismatches assertion
+//                                     register (L6 register collision)
+//   AP-037 BoundlessAudit             strict-mode audit invocation
+//                                     against a Shape with no declared
+//                                     Purpose (§14.6 termination)
+//   AP-038 ImplicitSubstrate          [T] in strict mode without declared
+//                                     CognitiveSubstrate (§1.5 self-disclosure)
+//   AP-039 AnchoringOverextension     formal claim outside CHL domain
+//                                     without declared FormalAnchoring (§4.5)
+//
+// ## Discharge through 8 base + 4 red-team + 7 CVE-AH kernel intrinsics
 //
 // * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
 // * `kernel_arch_boundary_check` — invariants across boundaries.
 // * `kernel_arch_composition_check` — composition algebra.
 // * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
 // * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
-// * `kernel_arch_anti_pattern_check` — generic dispatcher (32 patterns).
+// * `kernel_arch_anti_pattern_check` — generic dispatcher (39 patterns).
 // * `kernel_arch_cve_closure` — AP-010 CveIncomplete.
 // * `kernel_arch_soundness_v0` — composes the 7 above.
 // * `kernel_arch_capability_ontology_check` — AT-1 attack closure.
 // * `kernel_arch_yoneda_canonical_roster_complete` — AT-3 attack closure.
 // * `kernel_arch_theorem_cve_required` — AT-2 attack closure.
 // * `kernel_arch_consumes_format_check` — AT-5 attack closure.
+// * `kernel_arch_retracted_citation_check`           — AP-033.
+// * `kernel_arch_hypothesis_plan_check`              — AP-034.
+// * `kernel_arch_interpretation_in_mature_check`     — AP-035.
+// * `kernel_arch_observer_impersonation_check`       — AP-036.
+// * `kernel_arch_boundless_audit_check`              — AP-037.
+// * `kernel_arch_implicit_substrate_check`           — AP-038.
+// * `kernel_arch_anchoring_overextension_check`      — AP-039.
 // =============================================================================
 
 module core.architecture.anti_patterns;
@@ -80,16 +106,18 @@ module core.architecture.anti_patterns;
 mount core.prelude.{Bool, Int, Maybe, List, Text};
 
 // =============================================================================
-// AntiPatternCode — stable RFC code, 32-pattern canonical roster
+// AntiPatternCode — stable RFC code, 39-pattern canonical roster
 // =============================================================================
 
 /// Stable RFC error code `ATS-V-AP-NNN` per spec §32.4.
 /// Pattern-matchable by agents; documented on docs site.
 ///
-/// **32 canonical variants**:
+/// **39 canonical variants**:
 ///   * AP-001..010 — capability/composition core
 ///   * AP-011..026 — boundary/lifecycle/capability ontology extensions
 ///   * AP-027..032 — MTAC modal-temporal arms
+///   * AP-033..039 — CVE articulation-hygiene band (cve-architecture
+///                    spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16)
 ///
 /// **Stability**: codes never get re-used; removing a pattern
 /// requires deprecation cycle ≥ 2 minor versions per spec §29.5.
@@ -129,7 +157,15 @@ public type AntiPatternCode is
     | MissedAdjoint
     | UniversalPropertyViolation
     | PhantomEvolution
-    | YonedaInequivalentRefactor;
+    | YonedaInequivalentRefactor
+    // ----- CVE articulation-hygiene band (AP-033..039) -----
+    | RetractedCitationUse
+    | HypothesisWithoutMaturationPlan
+    | InterpretationInMatureCorpus
+    | ObserverImpersonation
+    | BoundlessAudit
+    | ImplicitSubstrate
+    | AnchoringOverextension;
 
 /// Stable error code string `ATS-V-AP-NNN` for agent surfaces.
 /// Mirrors `verum_kernel::arch_anti_pattern::AntiPatternCode::code`.
@@ -167,10 +203,17 @@ public fn anti_pattern_code_str(c: AntiPatternCode) -> Text {
         UniversalPropertyViolation       => "ATS-V-AP-030",
         PhantomEvolution                 => "ATS-V-AP-031",
         YonedaInequivalentRefactor       => "ATS-V-AP-032",
+        RetractedCitationUse             => "ATS-V-AP-033",
+        HypothesisWithoutMaturationPlan  => "ATS-V-AP-034",
+        InterpretationInMatureCorpus     => "ATS-V-AP-035",
+        ObserverImpersonation            => "ATS-V-AP-036",
+        BoundlessAudit                   => "ATS-V-AP-037",
+        ImplicitSubstrate                => "ATS-V-AP-038",
+        AnchoringOverextension           => "ATS-V-AP-039",
     }
 }
 
-/// Canonical short name (matches spec §7 + §26 catalog).
+/// Canonical short name (matches spec §7 + §26 + §33 catalog).
 public fn anti_pattern_name(c: AntiPatternCode) -> Text {
     match c {
         CapabilityEscalation             => "CapabilityEscalation",
@@ -205,11 +248,18 @@ public fn anti_pattern_name(c: AntiPatternCode) -> Text {
         UniversalPropertyViolation       => "UniversalPropertyViolation",
         PhantomEvolution                 => "PhantomEvolution",
         YonedaInequivalentRefactor       => "YonedaInequivalentRefactor",
+        RetractedCitationUse             => "RetractedCitationUse",
+        HypothesisWithoutMaturationPlan  => "HypothesisWithoutMaturationPlan",
+        InterpretationInMatureCorpus     => "InterpretationInMatureCorpus",
+        ObserverImpersonation            => "ObserverImpersonation",
+        BoundlessAudit                   => "BoundlessAudit",
+        ImplicitSubstrate                => "ImplicitSubstrate",
+        AnchoringOverextension           => "AnchoringOverextension",
     }
 }
 
-/// Full canonical roster — exactly 32 entries.  Adding a 33rd
-/// requires RFC ATS-V-007 + kernel-side enum bump + pin-test bump.
+/// Full canonical roster — exactly 39 entries.  Adding a 40th
+/// requires RFC ATS-V-008 + kernel-side enum bump + pin-test bump.
 /// Used by `verum audit --bundle` to walk every code at runtime.
 public fn anti_pattern_full_roster() -> List<AntiPatternCode> {
     [
@@ -245,13 +295,20 @@ public fn anti_pattern_full_roster() -> List<AntiPatternCode> {
         AntiPatternCode.UniversalPropertyViolation,
         AntiPatternCode.PhantomEvolution,
         AntiPatternCode.YonedaInequivalentRefactor,
+        AntiPatternCode.RetractedCitationUse,
+        AntiPatternCode.HypothesisWithoutMaturationPlan,
+        AntiPatternCode.InterpretationInMatureCorpus,
+        AntiPatternCode.ObserverImpersonation,
+        AntiPatternCode.BoundlessAudit,
+        AntiPatternCode.ImplicitSubstrate,
+        AntiPatternCode.AnchoringOverextension,
     ]
 }
 
-/// **Pin**: roster size is exactly 32.  Mirrors kernel-side test
+/// **Pin**: roster size is exactly 39.  Mirrors kernel-side test
 /// `architectural_pin_anti_pattern_count`.
 public fn anti_pattern_roster_size_invariant() -> Bool {
-    anti_pattern_full_roster().len() == 32
+    anti_pattern_full_roster().len() == 39
 }
 
 // =============================================================================
@@ -438,7 +495,7 @@ public axiom kernel_arch_cve_closure() -> Bool
 /// * Foundation consistency
 /// * CVE closure (strict mode)
 /// * Lifecycle integrity
-/// * Anti-pattern absence (32 canonical patterns)
+/// * Anti-pattern absence (39 canonical patterns)
 /// hold.
 @framework(ats_v, "ATS-V end-to-end soundness witness. Composes the 7 base dispatch intrinsics (capability_discipline, boundary_check, composition_check, lifecycle_check, foundation_consistency, anti_pattern_check, cve_closure) into a single discharge. Soundness statement: when `verum check` accepts a cog with arch_type T, all of capability discipline, composition correctness, foundation consistency, CVE closure (strict mode), lifecycle integrity, and absence of the 32 canonical anti-patterns hold simultaneously. Eventually self-hosted as a CVE-closed Verum cog itself.")
 @kernel_discharge("kernel_arch_soundness_v0")
@@ -504,4 +561,104 @@ public axiom kernel_arch_theorem_cve_required() -> Bool
 @framework(ats_v, "ATS-V consumes-format validation (spec §4.1 consumes field). Closes attack-vector AT-5: free-form Text field gains a canonical resource-grammar; format violations surface as DeclarationDrift (AP-025) at ATS-V phase.")
 @kernel_discharge("kernel_arch_consumes_format_check")
 public axiom kernel_arch_consumes_format_check() -> Bool
+    ensures true;
+
+// =============================================================================
+// CVE articulation-hygiene band — kernel-discharge bridges (AP-033..039)
+// =============================================================================
+//
+// One bridge per anti-pattern in the CVE-AH band.  The bridges
+// operationalise the cve-architecture spec's load-bearing
+// concepts (§§1.5, 2.3.0, 3.5, 4.5, 14.6, 16) via the same
+// `@kernel_discharge(<intrinsic>)` pattern the base + red-team
+// arms use, with one intrinsic per check.
+
+/// **AP-033 closure**: citing a `[✗]` Retracted artefact from any
+/// non-retracted lifecycle.  The discharge enumerates every
+/// `composes_with` edge and every imported function and rejects
+/// the build when any cited cog has `Lifecycle.Retracted(...)`.
+/// Distinct from AP-009 LifecycleRegression: AP-009 fires on rank
+/// regression (`[T]` → `[H]`); AP-033 specifically fires on `[✗]`
+/// citation regardless of the rank of the citing artefact, because
+/// `[✗]` carries an explicit retraction reason that the citing
+/// artefact MUST acknowledge.
+@framework(ats_v, "ATS-V retracted-citation closure (cve-architecture spec §3.5 [✗] discipline). Citing a `Lifecycle.Retracted(...)` cog from any active lifecycle is a defect even when the citing cog is itself low-rank — the retraction's reason field is meant to be load-bearing, and silent citation defeats the negative-example role of the audit chronicle.")
+@kernel_discharge("kernel_arch_retracted_citation_check")
+public axiom kernel_arch_retracted_citation_check() -> Bool
+    ensures true;
+
+/// **AP-034 closure**: a `Lifecycle.Hypothesis(...)` cog without a
+/// `@plan(...)` attribute. Per spec §3.5 the `[H]` status carries
+/// the structural commitment to an articulated maturation path;
+/// without a plan it degrades to `[I]` Interpretation.  This
+/// discharge rejects the cog at ATS-V phase when no plan is found.
+@framework(ats_v, "ATS-V hypothesis-plan closure (cve-architecture spec §3.5 [H] discipline). A `[H]` Hypothesis without an articulated maturation plan is operationally an [I] Interpretation; the missing plan turns the cog into a hidden CVE-violator.  This discharge requires every `[H]` cog to carry a `@plan(target_completion: ..., milestones: ...)` attribute.")
+@kernel_discharge("kernel_arch_hypothesis_plan_check")
+public axiom kernel_arch_hypothesis_plan_check() -> Bool
+    ensures true;
+
+/// **AP-035 closure**: `Lifecycle.Interpretation(...)` in a cog
+/// declared mature/strict.  Per spec §3.4, the `[I]` status is
+/// PERMITTED only as a transitional marker; mature corpora must
+/// contain ZERO `[I]` entries.  This discharge fires in every
+/// `strict: true` cog whose lifecycle is `Interpretation`, and in
+/// every cog within a mature corpus boundary (declared via
+/// `@arch_corpus(maturity: Mature)`).
+@framework(ats_v, "ATS-V interpretation-in-mature closure (cve-architecture spec §3.4 + §6.7 L6 register prohibition). The [I] status is the canonical CVE-violator: all three axes absent and no plan to formalise. Mature corpora must close it at every cog by one of three transformations — proof (→ [T]/[C]), downgrade (→ [H] with plan), removal.")
+@kernel_discharge("kernel_arch_interpretation_in_mature_check")
+public axiom kernel_arch_interpretation_in_mature_check() -> Bool
+    ensures true;
+
+/// **AP-036 closure**: an `Observer` role attached to an assertion
+/// whose register does not match the role.  Per spec §16 + §6.7 L6,
+/// register collisions across observer roles (e.g. an
+/// `Observer.EndUser` assertion attached to an architectural-shape
+/// claim that lives in `Observer.Architect` register) are silent
+/// defects in the audit chronicle.  This discharge inspects every
+/// `Observer`-tagged emit and confirms register alignment.
+@framework(ats_v, "ATS-V observer-impersonation closure (cve-architecture spec §16 articulation hygiene + §6.7 L6 register prohibition). Distinct from AP-029 MissedAdjoint: AP-029 fires on architectural decisions; AP-036 fires on audit-chronicle prose where the observer register and the assertion content disagree.")
+@kernel_discharge("kernel_arch_observer_impersonation_check")
+public axiom kernel_arch_observer_impersonation_check() -> Bool
+    ensures true;
+
+/// **AP-037 closure**: a strict-mode audit invocation against a
+/// `Shape` that has `declarations: None` or `declarations.purpose: None`.
+/// Per spec §14.6, the audit terminates relative to a declared
+/// purpose; without one the audit has no halting criterion and
+/// degenerates into infinite polishing.  This discharge requires
+/// every strict-mode `@arch_module(...)` to carry a `purpose: { ... }`
+/// declaration.
+@framework(ats_v, "ATS-V boundless-audit closure (cve-architecture spec §14.6 audit termination). An audit without a declared purpose tries to drive every artefact toward unattainable absolute closure — for Turing-complete systems forbidden by Rice's theorem, for trained models forbidden by the natural opacity of high-dimensional weights. Termination through declared purpose is load-bearing; without it, the protocol is not an audit but perennial critique.")
+@kernel_discharge("kernel_arch_boundless_audit_check")
+public axiom kernel_arch_boundless_audit_check() -> Bool
+    ensures true;
+
+/// **AP-038 closure**: a `Lifecycle.Theorem(...)` cog in strict
+/// mode without a declared `CognitiveSubstrate` in its
+/// `ShapeDeclarations`.  Per spec §1.5, declaring the cognitive
+/// substrate is part of operational hygiene — CVE knows its mode
+/// and does not masquerade as a universal neutral apparatus.  The
+/// default substrate (`AnalyticDecompositional`) MUST be either
+/// declared explicitly or accepted by the cog explicitly via
+/// `Shape.declarations = Some(_)` even with substrate omitted; a
+/// fully `None` declarations field on a strict `[T]` cog is the
+/// implicit-substrate defect.
+@framework(ats_v, "ATS-V implicit-substrate closure (cve-architecture spec §1.5 cognitive substrate disclosure). A strict-mode `[T]` cog must declare its operational mode; absence is operationally indistinguishable from a vacuous claim of universality.")
+@kernel_discharge("kernel_arch_implicit_substrate_check")
+public axiom kernel_arch_implicit_substrate_check() -> Bool
+    ensures true;
+
+/// **AP-039 closure**: a `Foundation` outside the CHL anchoring
+/// domain (e.g. a cog whose foundation is `CustomFoundation(...)`
+/// or whose body inhabits an institutional / control-theoretic /
+/// distributed-protocol register) without a declared
+/// `FormalAnchoring` in its `ShapeDeclarations`.  Per spec §4.5,
+/// the architectural law applies in both regimes — methodological
+/// CVE (before formal anchoring) and anchored-formal CVE (after) —
+/// but the distinction must be explicit. AP-039 fires when an
+/// artefact claims `[T]` Theorem under a non-CHL foundation
+/// without naming its anchoring tradition.
+@framework(ats_v, "ATS-V anchoring-overextension closure (cve-architecture spec §4.5 formal anchoring boundary). The CHL anchoring is the most-developed; extending the CVE law to other domains (automata theory, control theory, distributed protocols, functional systems, institutional design) requires explicit declaration of the parallel anchoring, otherwise the artefact silently inherits CHL semantics it does not satisfy.")
+@kernel_discharge("kernel_arch_anchoring_overextension_check")
+public axiom kernel_arch_anchoring_overextension_check() -> Bool
     ensures true;
