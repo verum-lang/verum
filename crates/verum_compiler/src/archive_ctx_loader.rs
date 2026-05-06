@@ -666,8 +666,346 @@ fn collect_referenced_function_names(
     out: &mut std::collections::HashSet<String>,
 ) {
     use verum_ast::ItemKind;
-    if let ItemKind::Mount(mount_decl) = &item.kind {
-        collect_mount_names(&mount_decl.tree, &[], out);
+    match &item.kind {
+        ItemKind::Mount(mount_decl) => {
+            collect_mount_names(&mount_decl.tree, &[], out);
+        }
+        ItemKind::Function(func) => {
+            harvest_names_in_function(func, out);
+        }
+        ItemKind::Impl(impl_decl) => {
+            harvest_names_in_impl(impl_decl, out);
+        }
+        ItemKind::Const(decl) => {
+            harvest_names_in_type(&decl.ty, out);
+            harvest_names_in_expr(&decl.value, out);
+        }
+        ItemKind::Static(decl) => {
+            harvest_names_in_type(&decl.ty, out);
+            harvest_names_in_expr(&decl.value, out);
+        }
+        _ => {}
+    }
+}
+
+/// Walk a function declaration harvesting every identifier in its
+/// signature + body that could refer to a stdlib symbol.  The
+/// archive-load filter (`register_module_filtered`) gates loading
+/// on this set: a function whose simple/qualified name is not
+/// here AND whose parent type is not here gets skipped.
+fn harvest_names_in_function(
+    func: &verum_ast::decl::FunctionDecl,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_common::Maybe;
+    use verum_ast::decl::{FunctionBody, FunctionParamKind};
+    for param in func.params.iter() {
+        if let FunctionParamKind::Regular { ty, .. } = &param.kind {
+            harvest_names_in_type(ty, out);
+        }
+    }
+    if let Maybe::Some(ret) = &func.return_type {
+        harvest_names_in_type(ret, out);
+    }
+    if let Maybe::Some(body) = &func.body {
+        match body {
+            FunctionBody::Block(block) => harvest_names_in_block(block, out),
+            FunctionBody::Expr(expr) => harvest_names_in_expr(expr, out),
+        }
+    }
+}
+
+fn harvest_names_in_impl(
+    impl_decl: &verum_ast::decl::ImplDecl,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+    match &impl_decl.kind {
+        ImplKind::Inherent(for_type) => harvest_names_in_type(for_type, out),
+        ImplKind::Protocol {
+            protocol, for_type, ..
+        } => {
+            harvest_names_in_path(protocol, out);
+            harvest_names_in_type(for_type, out);
+        }
+    }
+    for impl_item in impl_decl.items.iter() {
+        if let ImplItemKind::Function(func) = &impl_item.kind {
+            harvest_names_in_function(func, out);
+        }
+    }
+}
+
+fn harvest_names_in_block(
+    block: &verum_ast::expr::Block,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_common::Maybe;
+    for stmt in block.stmts.iter() {
+        harvest_names_in_stmt(stmt, out);
+    }
+    if let Maybe::Some(tail) = &block.expr {
+        harvest_names_in_expr(tail, out);
+    }
+}
+
+fn harvest_names_in_stmt(
+    stmt: &verum_ast::Stmt,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_common::Maybe;
+    use verum_ast::stmt::StmtKind;
+    match &stmt.kind {
+        StmtKind::Let { ty, value, .. } => {
+            if let Maybe::Some(t) = ty {
+                harvest_names_in_type(t, out);
+            }
+            if let Maybe::Some(v) = value {
+                harvest_names_in_expr(v, out);
+            }
+        }
+        StmtKind::LetElse {
+            ty,
+            value,
+            else_block,
+            ..
+        } => {
+            if let Maybe::Some(t) = ty {
+                harvest_names_in_type(t, out);
+            }
+            harvest_names_in_expr(value, out);
+            harvest_names_in_block(else_block, out);
+        }
+        StmtKind::Expr { expr, .. } => harvest_names_in_expr(expr, out),
+        StmtKind::Item(item) => collect_referenced_function_names(item, out),
+        StmtKind::Defer(e) | StmtKind::Errdefer(e) => harvest_names_in_expr(e, out),
+        StmtKind::Provide { value, .. } => harvest_names_in_expr(value, out),
+        StmtKind::ProvideScope { value, block, .. } => {
+            harvest_names_in_expr(value, out);
+            harvest_names_in_expr(block, out);
+        }
+        _ => {}
+    }
+}
+
+/// The expression walker.  Pushes:
+///   * Every segment of every Path expression (so `Text` from
+///     `Text.with_capacity` lands in `wanted` and the
+///     `is_method_of_wanted_type` filter in
+///     `register_module_filtered` triggers).
+///   * The full dotted form of multi-segment Paths.
+///   * For `MethodCall { receiver: Path(p), method }`, the
+///     qualified `<last_seg(p)>.<method>` so static-method
+///     dispatch (`Text.with_capacity(64)`) finds the function in
+///     the archive's `simple_name = "Text.with_capacity"` slot.
+///   * Every type-expression encountered in `as` / `cast` / type
+///     args.
+///
+/// Over-inclusion is harmless (extra archive lookups skip
+/// quickly via the wanted-set hash); under-inclusion fails the
+/// build with `no method named X found for type Y`.
+fn harvest_names_in_expr(
+    expr: &verum_ast::Expr,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_common::Maybe;
+    use verum_ast::expr::ExprKind;
+    match &expr.kind {
+        ExprKind::Literal(_) => {}
+        ExprKind::Path(path) => harvest_names_in_path(path, out),
+        ExprKind::Binary { left, right, .. } => {
+            harvest_names_in_expr(left, out);
+            harvest_names_in_expr(right, out);
+        }
+        ExprKind::Unary { expr, .. } => harvest_names_in_expr(expr, out),
+        ExprKind::NamedArg { value, .. } => harvest_names_in_expr(value, out),
+        ExprKind::Call { func, type_args, args } => {
+            harvest_names_in_expr(func, out);
+            for ga in type_args.iter() {
+                harvest_names_in_generic_arg(ga, out);
+            }
+            for a in args.iter() {
+                harvest_names_in_expr(a, out);
+            }
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
+            // Static-method qualified form: when the receiver is a
+            // path (`Text`), the archive carries the inherent
+            // method as `simple_name = "Text.with_capacity"`,
+            // and `register_module_filtered` registers it only if
+            // either `simple_name` itself is in `wanted` OR the
+            // parent type is.  Push BOTH to handle either gate.
+            if let ExprKind::Path(path) = &receiver.kind {
+                if let Some(last) = last_path_name(path) {
+                    out.insert(format!("{}.{}", last, method.name));
+                }
+            }
+            harvest_names_in_expr(receiver, out);
+            for ga in type_args.iter() {
+                harvest_names_in_generic_arg(ga, out);
+            }
+            for a in args.iter() {
+                harvest_names_in_expr(a, out);
+            }
+        }
+        ExprKind::Field { expr, .. }
+        | ExprKind::OptionalChain { expr, .. }
+        | ExprKind::TupleIndex { expr, .. } => harvest_names_in_expr(expr, out),
+        ExprKind::Index { expr, index } => {
+            harvest_names_in_expr(expr, out);
+            harvest_names_in_expr(index, out);
+        }
+        ExprKind::Pipeline { left, right } | ExprKind::NullCoalesce { left, right } => {
+            harvest_names_in_expr(left, out);
+            harvest_names_in_expr(right, out);
+        }
+        ExprKind::Cast { expr, ty } => {
+            harvest_names_in_expr(expr, out);
+            harvest_names_in_type(ty, out);
+        }
+        ExprKind::Try(e) | ExprKind::TryBlock(e) => harvest_names_in_expr(e, out),
+        ExprKind::Block(block) => harvest_names_in_block(block, out),
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            harvest_names_in_block(then_branch, out);
+            if let Maybe::Some(eb) = else_branch {
+                harvest_names_in_expr(eb, out);
+            }
+        }
+        ExprKind::Match { expr, arms } => {
+            harvest_names_in_expr(expr, out);
+            for arm in arms.iter() {
+                if let Maybe::Some(g) = &arm.guard {
+                    harvest_names_in_expr(g, out);
+                }
+                harvest_names_in_expr(&arm.body, out);
+            }
+        }
+        ExprKind::Loop { body, .. } => harvest_names_in_block(body, out),
+        ExprKind::While {
+            condition, body, ..
+        } => {
+            harvest_names_in_expr(condition, out);
+            harvest_names_in_block(body, out);
+        }
+        ExprKind::For { iter, body, .. } => {
+            harvest_names_in_expr(iter, out);
+            harvest_names_in_block(body, out);
+        }
+        ExprKind::Closure { body, .. } => harvest_names_in_expr(body, out),
+        ExprKind::Return(e) => {
+            if let Maybe::Some(e) = e {
+                harvest_names_in_expr(e, out);
+            }
+        }
+        ExprKind::Tuple(items) => {
+            for e in items.iter() {
+                harvest_names_in_expr(e, out);
+            }
+        }
+        ExprKind::Async(block) | ExprKind::Unsafe(block) => harvest_names_in_block(block, out),
+        ExprKind::Await(e) | ExprKind::Throw(e) | ExprKind::Yield(e) | ExprKind::Typeof(e) => {
+            harvest_names_in_expr(e, out);
+        }
+        ExprKind::Break { value, .. } => {
+            if let Maybe::Some(v) = value {
+                harvest_names_in_expr(v, out);
+            }
+        }
+        ExprKind::TypeExpr(ty) => harvest_names_in_type(ty, out),
+        // Other expression forms (interpolation, generators, …)
+        // are walked best-effort — over-inclusion is harmless.
+        _ => {}
+    }
+}
+
+fn harvest_names_in_path(
+    path: &verum_ast::ty::Path,
+    out: &mut std::collections::HashSet<String>,
+) {
+    let segs: Vec<String> = path
+        .segments
+        .iter()
+        .filter_map(|seg| match seg {
+            verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
+            _ => None,
+        })
+        .collect();
+    for s in &segs {
+        out.insert(s.clone());
+    }
+    if segs.len() > 1 {
+        out.insert(segs.join("."));
+    }
+}
+
+fn last_path_name(path: &verum_ast::ty::Path) -> Option<String> {
+    path.segments.iter().rev().find_map(|seg| match seg {
+        verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
+        _ => None,
+    })
+}
+
+fn harvest_names_in_type(
+    ty: &verum_ast::ty::Type,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::ty::TypeKind;
+    match &ty.kind {
+        TypeKind::Path(path) => harvest_names_in_path(path, out),
+        TypeKind::Generic { base, args } => {
+            harvest_names_in_type(base, out);
+            for ga in args.iter() {
+                harvest_names_in_generic_arg(ga, out);
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => harvest_names_in_type(inner, out),
+        TypeKind::Tuple(items) => {
+            for t in items.iter() {
+                harvest_names_in_type(t, out);
+            }
+        }
+        TypeKind::Array { element, .. } => harvest_names_in_type(element, out),
+        TypeKind::Slice(elem) => harvest_names_in_type(elem, out),
+        TypeKind::Function {
+            params, return_type, ..
+        } => {
+            for p in params.iter() {
+                harvest_names_in_type(p, out);
+            }
+            harvest_names_in_type(return_type, out);
+        }
+        TypeKind::Qualified {
+            self_ty,
+            trait_ref,
+            ..
+        } => {
+            harvest_names_in_type(self_ty, out);
+            harvest_names_in_path(trait_ref, out);
+        }
+        TypeKind::AssociatedType { base, .. } => harvest_names_in_type(base, out),
+        _ => {}
+    }
+}
+
+fn harvest_names_in_generic_arg(
+    ga: &verum_ast::ty::GenericArg,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::ty::GenericArg;
+    match ga {
+        GenericArg::Type(ty) => harvest_names_in_type(ty, out),
+        _ => {}
     }
 }
 
