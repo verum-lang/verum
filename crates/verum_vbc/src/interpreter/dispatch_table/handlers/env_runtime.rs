@@ -100,16 +100,30 @@ pub(in super::super) fn try_intercept_env_runtime(
             // needing a qualifier check (which fails for unqualified
             // call sites where the codegen registers the function
             // under just `args`).
+            //
+            // Script-level vs system-level disambiguation:
+            //   * `core.shell.script.args()` strips argv[0] (the
+            //     program name) — script's user-supplied args only.
+            //   * `std.env.args()` returns the full host argv
+            //     (program name included).
+            // Both share the bare name `args` so qualifier inspection
+            // is the only signal we have.  Strips when the qualified
+            // name is in the `script` namespace.
             if arg_count != 0 {
                 return Ok(None);
             }
-            intercept_args(state)
+            let strip_argv0 = func_name.contains("script.args")
+                || func_name.contains("shell.script");
+            intercept_args(state, strip_argv0)
         }
         "args_count" => {
             if arg_count != 0 {
                 return Ok(None);
             }
-            Ok(Some(Value::from_i64(std::env::args().count() as i64)))
+            let strip_argv0 = func_name.contains("script");
+            let count = std::env::args().count();
+            let adjusted = if strip_argv0 && count > 0 { count - 1 } else { count };
+            Ok(Some(Value::from_i64(adjusted as i64)))
         }
         "arg" => {
             // Same reasoning as `args` — 1-arg variant. Collisions
@@ -293,8 +307,34 @@ fn intercept_set_current_dir(
     }
 }
 
-fn intercept_args(state: &mut InterpreterState) -> InterpreterResult<Option<Value>> {
-    let argv: Vec<String> = std::env::args().collect();
+fn intercept_args(
+    state: &mut InterpreterState,
+    strip_argv0: bool,
+) -> InterpreterResult<Option<Value>> {
+    let mut argv: Vec<String> = std::env::args().collect();
+    if strip_argv0 && !argv.is_empty() {
+        // Script-level args() strips the program name (argv[0]).
+        //
+        // Under `verum run script.vr -- a b c`, the verum CLI passes
+        // ["a", "b", "c"] as the script's args via `pipeline.run_compiled_vbc`.
+        // But std::env::args() reflects the verum process's own argv:
+        // ["./target/release/verum", "run", "script.vr", "--", "a", "b", "c"].
+        // Walk past the verum subcommand args so the script sees ITS args,
+        // not the verum invocation chain.  The reliable separator is
+        // either the `--` token or the script-path token (containing
+        // `/` or ending in `.vr`); after that everything is the script's.
+        if let Some(idx) = argv.iter().position(|a| a == "--") {
+            argv.drain(0..=idx);
+        } else if let Some(idx) = argv.iter().position(|a| a.ends_with(".vr")) {
+            // Script path arg without `--` separator — keep everything
+            // AFTER the script path; argv[0] (program name) plus any
+            // verum-flags before the script path are dropped.
+            argv.drain(0..=idx);
+        } else {
+            // Fallback: just strip argv[0] (program name).
+            argv.remove(0);
+        }
+    }
     let mut text_values: Vec<Value> = Vec::with_capacity(argv.len());
     for s in &argv {
         text_values.push(alloc_string_value(state, s)?);
