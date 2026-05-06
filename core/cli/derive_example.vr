@@ -1,0 +1,78 @@
+// =============================================================================
+// cli/derive_example.vr — End-to-end demo of the @command derive macro
+// =============================================================================
+// Layer: 5 (CLI)
+// Spec: internal/specs/cli-framework.md §4
+// =============================================================================
+//
+
+// Demonstrates the canonical user-facing surface for vcli: a record
+// type decorated with `@command(...)` whose fields carry `@flag(...)`
+// or `@arg(...)` attributes. The compiler's `DeriveCommand` macro pass
+// (in `verum_compiler::derives::cli_command`) lowers the type into a
+// freestanding `__cli_spec_for_<TypeName>() -> CommandSpec` factory.
+//
+// Once macro expansion is wired through the full pipeline the user
+// can write:
+//
+//     let app = App.from_spec(__cli_spec_for_DemoCli());
+//
+// and have the same `CommandSpec` they would have built by hand using
+// `AppBuilder` — but with zero builder boilerplate.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module derive_example;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.cli.spec.CommandSpec;
+mount core.cli.runtime.{App, HandlerContext};
+mount core.cli.error.ExitCode;
+
+// =============================================================================
+// The decorated type — meta1 will rewrite this into AppBuilder calls
+// =============================================================================
+
+@command(
+    name = "demo",
+    version = "1.0.0",
+    about = "Demo CLI built via the @command derive",
+)
+public type DemoCli is {
+    @flag(short = 'v', long = "verbose", help = "Enable verbose output")
+    verbose: Bool,
+
+    @flag(long = "config", env = "DEMO_CONFIG", help = "Config file")
+    config: Maybe<Text>,
+
+    @flag(long = "tag", help = "Repeatable tag")
+    tags: List<Text>,
+
+    @arg(help = "Build target")
+    target: Text,
+};
+
+// =============================================================================
+// Handler bound to the generated spec — runtime calls this after parsing
+// =============================================================================
+
+public fn demo_handler(ctx: &HandlerContext) -> ExitCode {
+    let target = ctx.arg_value(&"target".to_text())
+        .unwrap_or("unspecified".to_text());
+    let verbose = ctx.switch_set(&"verbose".to_text());
+
+    if verbose {
+        let cfg = ctx.flag_value(&"config".to_text())
+            .unwrap_or("(none)".to_text());
+        print(f"[demo] target={target} verbose=true config={cfg}");
+    } else {
+        print(f"target={target}");
+    }
+    ExitCode.ok()
+}

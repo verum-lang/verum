@@ -1640,9 +1640,17 @@ impl MacroExpansionPhase {
     /// Extract derive names from attributes
     ///
 
-    /// Parses @derive(Debug, Clone, Serialize) style attributes
+    /// Parses @derive(Debug, Clone, Serialize) style attributes.
+    ///
+    /// Special-case: `@command(...)` on a type implicitly requests
+    /// `Command` derive without the user having to write
+    /// `@derive(Command)` separately. The `@command` attribute carries
+    /// the configuration args (name, version, about, ...); the derive
+    /// itself reads those via `type_decl.attributes`. Spec:
+    /// internal/specs/cli-framework.md §4.
     fn extract_derive_names(&self, attributes: &[Attribute]) -> List<Text> {
         let mut derives = List::new();
+        let mut saw_command = false;
 
         for attr in attributes {
             if attr.name.as_str() == "derive" {
@@ -1652,11 +1660,19 @@ impl MacroExpansionPhase {
                         // Each arg should be a Path expression like "Debug" or "Clone"
                         if let ExprKind::Path(path) = &arg.kind {
                             if let Some(ident) = path.as_ident() {
-                                derives.push(Text::from(ident.as_str()));
+                                let n = Text::from(ident.as_str());
+                                if n.as_str() == "Command" {
+                                    saw_command = true;
+                                }
+                                derives.push(n);
                             }
                         }
                     }
                 }
+            }
+            if attr.name.as_str() == "command" && !saw_command {
+                derives.push(Text::from("Command"));
+                saw_command = true;
             }
         }
 
