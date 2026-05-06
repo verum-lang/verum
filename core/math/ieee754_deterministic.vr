@@ -1,0 +1,279 @@
+// =============================================================================
+// ieee754_deterministic.vr — bit-for-bit reproducible FP transcendentals
+// =============================================================================
+// Layer: 0 (Foundation)
+// Dependencies: core, core.math.ieee754
+// =============================================================================
+//
+
+// Canonical *correctly-rounded* libm subset for use under the
+// `@deterministic_fp` attribute (`crates/verum_ast::attr::DeterministicFpAttr`).
+//
+
+// # The problem with system libm
+//
+
+// IEEE 754 specifies the result of basic operations (`+ − × ÷ √`) to
+// the bit, but does **not** specify transcendentals. Consequently:
+//
+
+//   * glibc's `sin(0.1)` and macOS-libm's `sin(0.1)` can differ in
+//     the last bit (last ulp).
+//   * Two LLVM AOT builds on the same source can pick different
+//     `expf` lowerings (vfabi vs system-libm) and produce divergent
+//     bytes.
+//   * GPU `expf` kernels typically have ~1-3 ulp error budget,
+//     wildly different from CPU libm.
+//
+
+// For a blockchain validator running consensus, a CPTP channel
+// computing a holon's Lindbladian step, or a STARK prover laying
+// out trace polynomials, that bit-for-bit divergence is a soundness
+// fault — different validators sign different state-roots and the
+// chain forks.
+//
+
+// # The solution
+//
+
+// This module exposes a closed set of **correctly-rounded**
+// transcendentals: every output is `round-to-nearest-even` of the
+// infinite-precision result, identical on every conformant
+// implementation regardless of CPU / GPU / OS / libm vendor.
+//
+
+// The implementations are derived from the **CORE-MATH** project
+// (Sibidanov, Zimmermann et al., INRIA; <https://core-math.gitlabpages.inria.fr/>)
+// which provides the most extensively-tested correctly-rounded
+// library available today (covers Binary32 + Binary64 with proofs
+// of correct rounding for every input).
+//
+
+// # The deterministic call discipline
+//
+
+// Functions in this module are the **only** transcendentals callable
+// from a `@deterministic_fp` body. The compiler enforces this:
+//
+
+//   1. `@deterministic_fp` body calling `core.math.ieee754_deterministic.*`
+//      → no diagnostic.
+//   2. `@deterministic_fp` body calling another `@deterministic_fp`
+//      function that internally calls only this module → no diagnostic
+//      (transitively safe).
+//   3. `@deterministic_fp` body calling system libm (`Float.sin`,
+//      `Float.cos`, …) → diagnostic (warning under default strictness,
+//      error under `(strict)`).
+//
+
+// # FMA discipline (also enforced by `@deterministic_fp`)
+//
+
+// FMA contraction is forbidden by `@deterministic_fp` regardless of
+// hardware. Functions in this module emit separate mul + add even
+// where the LLVM target has native FMA — the compile-time guarantee
+// is "every `@deterministic_fp` build, on every architecture, gets
+// the same bytes".
+//
+
+// # Performance trade-off
+//
+
+// Correctly-rounded transcendentals run ~1.2–3× slower than
+// system-libm. For consensus paths and proof-system trace
+// generation, that overhead is acceptable. For UI rendering or
+// numerical-simulation hot loops, callers stay on the system path
+// (these functions are *opt-in* via `@deterministic_fp`, not the
+// default).
+//
+
+// # Reference
+//
+
+//   * Sibidanov, Zimmermann, "Towards a correctly-rounded and fast
+//     power function in binary64 arithmetic", 2024.
+//   * IEEE 754-2019 Annex F (recommended correctly-rounded operations).
+//   * `verum.libm_deterministic.*` runtime intrinsics (CORE-MATH-derived
+//     backend).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.math.ieee754_deterministic;
+
+mount core.*;
+
+// =============================================================================
+// Binary64 (Float / Float64) — correctly-rounded
+// =============================================================================
+
+/// `√x` — already correctly-rounded under IEEE-754; this is just an
+/// alias kept here so a `@deterministic_fp` body has a single
+/// canonical import point for *all* its FP needs.
+@deterministic_fp(strict)
+public fn sqrt(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.sqrt", x)
+}
+
+/// Correctly-rounded `sin(x)` — returns `round-to-nearest-even` of
+/// the infinite-precision sin. Bit-identical on every implementation.
+@deterministic_fp(strict)
+public fn sin(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.sin", x)
+}
+
+/// Correctly-rounded `cos(x)`.
+@deterministic_fp(strict)
+public fn cos(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.cos", x)
+}
+
+/// Correctly-rounded `tan(x)`. Diverges at π/2 + k·π — caller is
+/// responsible for staying inside a finite domain.
+@deterministic_fp(strict)
+public fn tan(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.tan", x)
+}
+
+/// Correctly-rounded `asin(x)` for `x ∈ [-1, 1]`. Returns NaN outside
+/// the domain.
+@deterministic_fp(strict)
+public fn asin(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.asin", x)
+}
+
+/// Correctly-rounded `acos(x)`.
+@deterministic_fp(strict)
+public fn acos(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.acos", x)
+}
+
+/// Correctly-rounded `atan(x)` over the entire real line.
+@deterministic_fp(strict)
+public fn atan(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.atan", x)
+}
+
+/// Correctly-rounded `atan2(y, x)`.
+@deterministic_fp(strict)
+public fn atan2(y: Float, x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.atan2", y, x)
+}
+
+/// Correctly-rounded `sinh(x)`.
+@deterministic_fp(strict)
+public fn sinh(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.sinh", x)
+}
+
+/// Correctly-rounded `cosh(x)`.
+@deterministic_fp(strict)
+public fn cosh(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.cosh", x)
+}
+
+/// Correctly-rounded `tanh(x)`.
+@deterministic_fp(strict)
+public fn tanh(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.tanh", x)
+}
+
+/// Correctly-rounded `e^x`.
+@deterministic_fp(strict)
+public fn exp(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.exp", x)
+}
+
+/// Correctly-rounded `2^x`.
+@deterministic_fp(strict)
+public fn exp2(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.exp2", x)
+}
+
+/// Correctly-rounded `e^x − 1` — accurate for small `x` where direct
+/// `exp(x) - 1` cancels.
+@deterministic_fp(strict)
+public fn expm1(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.expm1", x)
+}
+
+/// Correctly-rounded natural logarithm. Returns NaN for `x < 0`,
+/// −∞ for `x == 0`.
+@deterministic_fp(strict)
+public fn ln(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.ln", x)
+}
+
+/// Correctly-rounded `log_2(x)`.
+@deterministic_fp(strict)
+public fn log2(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.log2", x)
+}
+
+/// Correctly-rounded `log_10(x)`.
+@deterministic_fp(strict)
+public fn log10(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.log10", x)
+}
+
+/// Correctly-rounded `ln(1 + x)` — accurate for small `x` where
+/// direct `ln(1+x)` loses bits.
+@deterministic_fp(strict)
+public fn ln1p(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.ln1p", x)
+}
+
+/// Correctly-rounded `x^y`. Three special cases per IEEE 754-2019
+/// Annex F:
+///   * `pow(0, 0) == 1`
+///   * `pow(±0, y < 0) == ±∞`
+///   * `pow(NaN, 0) == 1`  (vs `pow(NaN, anything else) == NaN`)
+@deterministic_fp(strict)
+public fn pow(x: Float, y: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.pow", x, y)
+}
+
+/// Correctly-rounded `√(x² + y²)` without intermediate overflow /
+/// underflow. Used in geometric / linear-algebra paths.
+@deterministic_fp(strict)
+public fn hypot(x: Float, y: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.hypot", x, y)
+}
+
+/// Correctly-rounded `cbrt(x)` — cube root, defined for all x ∈ ℝ
+/// (no domain branch).
+@deterministic_fp(strict)
+public fn cbrt(x: Float) -> Float {
+    @intrinsic("verum.libm_deterministic.cbrt", x)
+}
+
+// =============================================================================
+// Binary32 (Float32) — correctly-rounded
+// =============================================================================
+
+@deterministic_fp(strict) public fn sqrtf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.sqrtf", x) }
+@deterministic_fp(strict) public fn sinf(x: Float32)  -> Float32 { @intrinsic("verum.libm_deterministic.sinf", x) }
+@deterministic_fp(strict) public fn cosf(x: Float32)  -> Float32 { @intrinsic("verum.libm_deterministic.cosf", x) }
+@deterministic_fp(strict) public fn tanf(x: Float32)  -> Float32 { @intrinsic("verum.libm_deterministic.tanf", x) }
+@deterministic_fp(strict) public fn asinf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.asinf", x) }
+@deterministic_fp(strict) public fn acosf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.acosf", x) }
+@deterministic_fp(strict) public fn atanf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.atanf", x) }
+@deterministic_fp(strict) public fn atan2f(y: Float32, x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.atan2f", y, x) }
+@deterministic_fp(strict) public fn sinhf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.sinhf", x) }
+@deterministic_fp(strict) public fn coshf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.coshf", x) }
+@deterministic_fp(strict) public fn tanhf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.tanhf", x) }
+@deterministic_fp(strict) public fn expf(x: Float32)  -> Float32 { @intrinsic("verum.libm_deterministic.expf", x) }
+@deterministic_fp(strict) public fn exp2f(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.exp2f", x) }
+@deterministic_fp(strict) public fn expm1f(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.expm1f", x) }
+@deterministic_fp(strict) public fn lnf(x: Float32)   -> Float32 { @intrinsic("verum.libm_deterministic.lnf", x) }
+@deterministic_fp(strict) public fn log2f(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.log2f", x) }
+@deterministic_fp(strict) public fn log10f(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.log10f", x) }
+@deterministic_fp(strict) public fn ln1pf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.ln1pf", x) }
+@deterministic_fp(strict) public fn powf(x: Float32, y: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.powf", x, y) }
+@deterministic_fp(strict) public fn hypotf(x: Float32, y: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.hypotf", x, y) }
+@deterministic_fp(strict) public fn cbrtf(x: Float32) -> Float32 { @intrinsic("verum.libm_deterministic.cbrtf", x) }
