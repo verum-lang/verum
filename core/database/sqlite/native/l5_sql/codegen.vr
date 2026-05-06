@@ -3533,6 +3533,11 @@ type IndexSeekPrologue is {
     idx_cur: Int,
     key_reg: Int,
     n_keys: Int,
+    /// Register holding the rowid extracted from the current index
+    /// entry via `IdxRowid`.  THIS — not `key_reg` — is what the
+    /// base-table SeekGE consumes; the epilogue's table_seek patch
+    /// MUST reference it (#166).
+    rid_reg: Int,
     seek_idx: Int,           // SeekGE(idx_cur) instruction index
     loop_top: Int,           // first PC after seek
     not_found_idx: Int,      // NotFound(idx_cur) — patched to end_loop
@@ -3566,8 +3571,10 @@ fn emit_index_seek_prologue(
     let _ = st.program.emit(OpenRead(t_cur, 0, n_cols));
     let _ = st.program.emit(OpenIndex(idx_cur, p.index_root_page, n_keys + 1));
 
-    // Materialise seek key(s) — for n_keys=1 (foundation pass)
-    // this is one emit_expr.
+    // Materialise seek key(s).  Allocates n_keys consecutive
+    // registers; emits one expr per key in index-column order.
+    // Composite indices land via the planner's match_one_index
+    // longest-equality-prefix pass.
     let key_reg = st.regs.alloc_n(n_keys);
     let mut k: Int = 0;
     while k < n_keys {
@@ -3593,6 +3600,7 @@ fn emit_index_seek_prologue(
         idx_cur: idx_cur,
         key_reg: key_reg,
         n_keys: n_keys,
+        rid_reg: rid_reg,
         seek_idx: seek_idx,
         loop_top: loop_top,
         not_found_idx: not_found_idx,
@@ -3614,9 +3622,11 @@ fn emit_index_seek_epilogue(st: &mut CgState, pro: IndexSeekPrologue) {
     // Patch jump targets.
     st.program.replace(pro.seek_idx, SeekGE(pro.idx_cur, pro.key_reg, pro.n_keys, end_loop));
     st.program.replace(pro.not_found_idx, NotFound(pro.idx_cur, end_loop, pro.key_reg, pro.n_keys));
-    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.key_reg, 1, skip_row_target));
-    // ^ table_seek_idx jumps to skip_row (the Next opcode) on miss
-    //   — that advances the index and re-checks NotFound.
+    // table_seek_idx seeks the BASE TABLE by rowid (extracted via
+    // IdxRowid into rid_reg) — NOT by the index key (#166).  On
+    // miss jump to skip_row (the Next opcode) which advances the
+    // index and re-checks NotFound.
+    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.rid_reg, 1, skip_row_target));
 
     // Patch any pending LIMIT early-exits to land at end_loop.
     emit_limit_finalize_patches(st, end_loop);
@@ -3660,8 +3670,21 @@ type IndexRangeScanPrologue is {
     idx_cur: Int,
     start_reg: Int,
     end_reg: Int,           // -1 when no upper bound
+    /// Register holding the rowid extracted from the current index
+    /// entry via `IdxRowid`.  THIS — not `start_reg` — is what the
+    /// base-table SeekGE consumes; the epilogue's table_seek patch
+    /// MUST reference it (#166).
+    rid_reg: Int,
     seek_idx: Int,
     end_check_idx: Int,     // -1 when no upper bound check emitted
+    /// Original RangeOp from the AccessPlan's range_upper.  The
+    /// epilogue uses this to pick the correct Idx{GT,GE,LT,LE}
+    /// opcode when patching end_check_idx — the original choice
+    /// (RoLt → IdxGE / RoLe → IdxGT / RoGt → IdxLE / RoGe → IdxLT)
+    /// must round-trip through the patch.  Set to RoLt when no
+    /// upper bound exists; the patch is skipped via end_check_idx
+    /// = -1 in that case (#166).
+    end_op: RangeOp,
     table_seek_idx: Int,
     loop_top: Int,
 };
@@ -3758,6 +3781,7 @@ fn emit_range_scan_prologue(
     // Optional upper-bound check.
     let mut end_reg: Int = -1;
     let mut end_check_idx: Int = -1;
+    let mut end_op: RangeOp = RoLt;  // sentinel when no bound; epilogue gates on end_check_idx
     match &p.range_upper {
         Some(bound) => {
             let er = st.regs.alloc();
@@ -3768,9 +3792,11 @@ fn emit_range_scan_prologue(
             // Pick the right end-bound opcode based on the range
             // operator.  RoLt → IdxGE (jump if cursor >= V means
             // we've gone past the < V bound).  RoLe → IdxGT.
-            // RoGt / RoGe (descending walks) reuse IdxLT / IdxLE
-            // — codegen here only ships ascending range scans;
-            // descending lands in a follow-up.
+            // RoGt → IdxLE / RoGe → IdxLT for descending walks.
+            // Capture the op into the prologue so the epilogue's
+            // jump-target patch can re-emit the SAME opcode kind
+            // (#166 — pre-fix the patch always emitted IdxGT,
+            // silently degrading RoLt/RoGt/RoGe queries).
             let op_idx: Int = match &bound.op {
                 RoLt => st.program.emit(IdxGE(idx_cur, 0, end_reg, 1)),
                 RoLe => st.program.emit(IdxGT(idx_cur, 0, end_reg, 1)),
@@ -3778,6 +3804,7 @@ fn emit_range_scan_prologue(
                 RoGe => st.program.emit(IdxLT(idx_cur, 0, end_reg, 1)),
             };
             end_check_idx = op_idx;
+            end_op = *(&bound.op);
         }
         None => {},
     }
@@ -3792,8 +3819,10 @@ fn emit_range_scan_prologue(
         idx_cur: idx_cur,
         start_reg: start_reg,
         end_reg: end_reg,
+        rid_reg: rid_reg,
         seek_idx: seek_idx,
         end_check_idx: end_check_idx,
+        end_op: end_op,
         table_seek_idx: table_seek_idx,
         loop_top: loop_top,
     })
@@ -3808,16 +3837,21 @@ fn emit_range_scan_epilogue(st: &mut CgState, pro: IndexRangeScanPrologue) {
     st.program.replace(pro.seek_idx, SeekGE(pro.idx_cur, pro.start_reg, 1, end_loop));
     if pro.end_check_idx >= 0 {
         // Re-emit the end-bound check with the patched target.
-        // We can't read the original op back without the affine-
-        // analyser flagging a co-borrow, so rely on the fact that
-        // every RangeOp bakes one of the four Idx* variants —
-        // re-emit the IdxGT shape (the most common case) since
-        // both RoLt and RoLe map to it for the patch surface.
-        // Foundation pass: this assumes the planner emits RoLt /
-        // RoLe; descending range scans land later.
-        st.program.replace(pro.end_check_idx, IdxGT(pro.idx_cur, end_loop, pro.end_reg, 1));
+        // Use pro.end_op (captured at prologue time) to pick the
+        // SAME Idx* variant the planner originally chose — the
+        // RoLt → IdxGE, RoLe → IdxGT, RoGt → IdxLE, RoGe → IdxLT
+        // mapping must round-trip through the patch (#166).
+        let patched = match &pro.end_op {
+            RoLt => IdxGE(pro.idx_cur, end_loop, pro.end_reg, 1),
+            RoLe => IdxGT(pro.idx_cur, end_loop, pro.end_reg, 1),
+            RoGt => IdxLE(pro.idx_cur, end_loop, pro.end_reg, 1),
+            RoGe => IdxLT(pro.idx_cur, end_loop, pro.end_reg, 1),
+        };
+        st.program.replace(pro.end_check_idx, patched);
     }
-    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.start_reg, 1, skip_row_target));
+    // Base-table SeekGE consumes the rowid (extracted via IdxRowid
+    // into rid_reg) — NOT the index seek key (#166).
+    st.program.replace(pro.table_seek_idx, SeekGE(pro.t_cur, pro.rid_reg, 1, skip_row_target));
 
     emit_limit_finalize_patches(st, end_loop);
     let _ = st.program.emit(Close(pro.t_cur));
