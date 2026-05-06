@@ -9802,10 +9802,69 @@ impl VbcCodegen {
                         for g in &impl_const_generics {
                             self.ctx.const_generic_params.insert(g.clone());
                         }
-                        self.compile_function(func, type_name.as_ref())?;
+                        // Per-method error containment.  Pre-fix the
+                        // `compile_function(...)?` propagated any single
+                        // method's compile error up through the impl
+                        // block's for-loop AND out of the surrounding
+                        // `compile_item`, aborting every subsequent
+                        // method in this impl block AND every
+                        // subsequent `ItemKind::Impl` in the same
+                        // module file.
+                        //
+                        // Concrete impact on `core/base/memory.vr`:
+                        // `Heap.into_inner` (or another mid-impl-block
+                        // method using a not-yet-supported expression
+                        // form) failed and short-circuited the
+                        // remaining 30+ Heap.* methods AND every
+                        // `Shared.*` / `Weak.*` method in the same file.
+                        // Symptom: `metadata.functions` had only the
+                        // first 7 Heap.* entries, and every user-side
+                        // `Shared<T>.new(...)` died at typecheck with
+                        // "no method named 'new' found for type
+                        // 'Shared<Int>'" despite the source being
+                        // present.
+                        //
+                        // The per-file `compile_function_bodies` already
+                        // contains a stub-on-failure mechanism that
+                        // operates at FILE level — but that recovery
+                        // only fires when the FILE-level `?` propagates
+                        // out of a function-body chain.  Containing the
+                        // error at the per-method granularity here
+                        // preserves every body that compiles correctly
+                        // and lets `emit_missing_stub_descriptors`
+                        // fill placeholders for the dropped methods.
+                        // Pure recovery improvement; no successful
+                        // body is lost.  Pattern matches the existing
+                        // containment at compile_item_lenient
+                        // (~line 3276) and the per-default-method
+                        // containment at compile_pending_default_methods
+                        // (~line 1725).
+                        if let Err(e) =
+                            self.compile_function(func, type_name.as_ref())
+                        {
+                            tracing::trace!(
+                                "[compile_item Impl] {}.{} body compile failed: {}",
+                                type_name.as_deref().unwrap_or("?"),
+                                func.name.name.as_str(),
+                                e
+                            );
+                            // Don't propagate — let subsequent siblings
+                            // compile.  emit_missing_stub_descriptors
+                            // at file-level produces a panicking-stub
+                            // body for the dropped function so dispatch
+                            // by id still finds something callable.
+                        }
                         // Compile any nested functions in this function's body
                         if let verum_common::Maybe::Some(ref body) = func.body {
-                            self.compile_nested_functions(body)?;
+                            // Same containment for nested-fn compilation.
+                            if let Err(e) = self.compile_nested_functions(body) {
+                                tracing::trace!(
+                                    "[compile_item Impl] {}.{} nested-fn compile failed: {}",
+                                    type_name.as_deref().unwrap_or("?"),
+                                    func.name.name.as_str(),
+                                    e
+                                );
+                            }
                         }
                     }
                 }
