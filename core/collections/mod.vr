@@ -13,6 +13,7 @@
 // - list.vr: Dynamic array (List<T>)
 // - map.vr: Hash map (Map<K, V>)
 // - set.vr: Hash set (Set<T>)
+// - multiset.vr: Hash bag (Multiset<T>) — strictly-positive multiplicities
 // - deque.vr: Double-ended queue (Deque<T>)
 // - heap.vr: Binary heap (priority queue)
 // - btree.vr: B-tree map and set (BTreeMap, BTreeSet)
@@ -30,6 +31,7 @@ public module slice;
 public module list;
 public module map;
 public module set;
+public module multiset;
 public module deque;
 public module heap;
 public module btree;
@@ -89,6 +91,11 @@ public mount .set.SetIter;
 public mount .set.SetIntoIter;
 public mount .set.SetDrain;
 public mount .set.set;
+
+// From multiset
+public mount .multiset.Multiset;
+public mount .multiset.MultisetIter;
+public mount .multiset.MultisetDistinctIter;
 
 // From deque
 public mount .deque.Deque;

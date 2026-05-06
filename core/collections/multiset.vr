@@ -1,0 +1,533 @@
+// =============================================================================
+// multiset.vr — Multiset / bag (Multiset<T>)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, collections/map
+// =============================================================================
+//
+
+// `Multiset<T>` (also called a *bag*) is a generalisation of `Set<T>`:
+// every element carries an integer **multiplicity** ≥ 1. Inserting an
+// element that is already present increments its count; removing
+// decrements; reaching count 0 evicts the entry. The structure is
+// thin-wrapper-isomorphic to `Map<T, Int>` exactly the way `Set<T>` is
+// thin-wrapper-isomorphic to `Map<T, ()>` — every primitive operation
+// pushes through the same Robin-Hood hash table that backs Map / Set,
+// so amortised O(1) holds for the per-element ops.
+//
+
+// # Distinct-vs-cardinality discipline
+//
+
+// Multisets have two natural "size" notions:
+//
+
+//  * `distinct_len()` — number of *unique* elements (= Map.len).
+//  Constant time.
+//  * `cardinality()` — sum of multiplicities (= |bag| with repetitions).
+//  Maintained incrementally — also constant time.
+//
+
+// Both are exposed; callers pick by intent. The deprecated `len()` is
+// **not** provided to force the choice — `Set.len()` has only one
+// answer, `Multiset.len()` would have two.
+//
+
+// # Algebraic operations
+//
+
+// The four standard multiset operations follow Knuth (TAOCP §4.6.3) and
+// the unique-extension property over (ℕ, +, max, min):
+//
+
+//  | Op | Per-element semantics | Notation |
+//  |--------------|----------------------------------|---------|
+//  | `union` | max(count_a, count_b) | A ∪ B |
+//  | `intersection`| min(count_a, count_b) | A ∩ B |
+//  | `sum` | count_a + count_b | A ⊎ B |
+//  | `difference` | max(0, count_a − count_b) | A − B |
+//
+
+// All four are pure (return new multiset) and run in
+// O(min(distinct(A), distinct(B))) for intersection, O(distinct(A)
+// + distinct(B)) for union / sum, O(distinct(A)) for difference.
+//
+
+// # Equivalence
+//
+
+// Two multisets are equal iff every element has the same count in
+// both. This is the multiset-equality relation; `==` and `Eq` are
+// implemented in those terms.
+//
+
+// # When to choose Multiset vs Set
+//
+
+// * Set: identity / membership only; "is x present?".
+// * Multiset: frequency counting; "how many times has x occurred?".
+// Statistical aggregations, deduplication-with-counts, MVCC bag
+// semantics, simplicial-multiset structures, fractal-holon
+// sub-holon multisets.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.collections.multiset;
+mount core.*;
+mount .map.*;
+
+// =============================================================================
+// Multiset<T>
+// =============================================================================
+
+/// Multiset (bag) of `T`-values. Every key carries a strictly
+/// positive multiplicity; entries reaching zero are evicted to keep
+/// the underlying Map tight.
+///
+
+/// Two-counter discipline: the inner Map holds (T → Int) for per-key
+/// multiplicity; a separate `cardinality` field caches Σ counts so the
+/// total size is O(1). Both counters are kept in lock-step by every
+/// mutator — the invariant `cardinality == sum(inner.values())` holds
+/// after every public method returns.
+public type Multiset<T: Hash + Eq> is {
+    inner: Map<T, Int>,
+    cardinality: Int,
+};
+
+implement<T: Hash + Eq> Multiset<T> {
+    // ─── Construction ────────────────────────────────────────────────────
+
+    /// Empty multiset.
+    @inline(always)
+    public fn new() -> Multiset<T> {
+        Multiset { inner: Map.new(), cardinality: 0 }
+    }
+
+    /// Empty multiset with pre-allocated capacity for `capacity`
+    /// distinct elements. Panics on allocation failure; see
+    /// `try_with_capacity` for the fallible form.
+    public fn with_capacity(capacity: Int) -> Multiset<T> {
+        Multiset { inner: Map.with_capacity(capacity), cardinality: 0 }
+    }
+
+    /// Fallible counterpart to `with_capacity`.
+    public fn try_with_capacity(capacity: Int) -> Result<Multiset<T>, AllocError> {
+        match Map.try_with_capacity(capacity) {
+            Ok(inner) => Ok(Multiset { inner, cardinality: 0 }),
+            Err(e)    => Err(e),
+        }
+    }
+
+    /// Build a multiset from an array literal — duplicates accumulate.
+    ///
+
+    /// ```verum
+    /// let m = Multiset.from([1, 2, 2, 3, 3, 3]);
+    /// assert_eq(m.distinct_len(), 3);
+    /// assert_eq(m.cardinality(), 6);
+    /// assert_eq(m.count(&2), 2);
+    /// assert_eq(m.count(&3), 3);
+    /// ```
+    public fn from(values: [T; _]) -> Multiset<T> {
+        let mut m = Multiset.with_capacity(values.len());
+        for item in values {
+            m.insert(item);
+        }
+        m
+    }
+
+    /// Build from `(element, multiplicity)` pairs. Multiplicities ≤ 0
+    /// are silently dropped — the multiset invariant is "every key has
+    /// strictly positive count".
+    public fn from_counts(pairs: [(T, Int); _]) -> Multiset<T> {
+        let mut m = Multiset.with_capacity(pairs.len());
+        for (item, k) in pairs {
+            if k > 0 { m.insert_n(item, k); }
+        }
+        m
+    }
+
+    // ─── Sizes ───────────────────────────────────────────────────────────
+
+    /// Number of *distinct* elements (= |support|).
+    @inline(always)
+    public fn distinct_len(&self) -> Int { self.inner.len() }
+
+    /// Total cardinality — Σ multiplicities. Constant time (cached).
+    @inline(always)
+    public fn cardinality(&self) -> Int { self.cardinality }
+
+    /// True iff no elements at all (cardinality == 0).
+    @inline(always)
+    public fn is_empty(&self) -> Bool { self.cardinality == 0 }
+
+    /// Underlying Map capacity — diagnostic only.
+    @inline(always)
+    public fn capacity(&self) -> Int { self.inner.capacity() }
+
+    // ─── Element access ──────────────────────────────────────────────────
+
+    /// Multiplicity of `value`. Zero when absent.
+    public fn count(&self, value: &T) -> Int {
+        match self.inner.get(value) {
+            None    => 0,
+            Some(k) => *k,
+        }
+    }
+
+    /// True iff `value` has multiplicity ≥ 1.
+    @inline(always)
+    public fn contains(&self, value: &T) -> Bool {
+        self.inner.contains_key(value)
+    }
+
+    // ─── Insertion ───────────────────────────────────────────────────────
+
+    /// Insert one occurrence of `value`. Returns the *new* multiplicity.
+    public fn insert(&mut self, value: T) -> Int {
+        self.insert_n(value, 1)
+    }
+
+    /// Insert `n` occurrences. `n ≤ 0` is a no-op (returns the existing
+    /// multiplicity unchanged); the multiset invariant rejects negative
+    /// counts at the API boundary rather than via panic.
+    public fn insert_n(&mut self, value: T, n: Int) -> Int {
+        if n <= 0 { return self.count(&value); }
+        let next = match self.inner.get(&value) {
+            None    => n,
+            Some(k) => *k + n,
+        };
+        self.inner.insert(value, next);
+        self.cardinality = self.cardinality + n;
+        next
+    }
+
+    /// Fallible counterpart to `insert`.
+    public fn try_insert(&mut self, value: T) -> Result<Int, AllocError> {
+        self.try_insert_n(value, 1)
+    }
+
+    public fn try_insert_n(&mut self, value: T, n: Int) -> Result<Int, AllocError> {
+        if n <= 0 { return Ok(self.count(&value)); }
+        let next = match self.inner.get(&value) {
+            None    => n,
+            Some(k) => *k + n,
+        };
+        match self.inner.try_insert(value, next) {
+            Ok(_)  => {
+                self.cardinality = self.cardinality + n;
+                Ok(next)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // ─── Removal ─────────────────────────────────────────────────────────
+
+    /// Remove one occurrence of `value`. Returns the *new* multiplicity
+    /// (0 if the entry was evicted, > 0 otherwise). No-op if absent.
+    public fn remove(&mut self, value: &T) -> Int {
+        self.remove_n(value, 1)
+    }
+
+    /// Remove up to `n` occurrences. The decrement saturates: trying to
+    /// remove more than is present evicts the entry rather than going
+    /// negative. Returns the post-decrement multiplicity (0 if evicted).
+    public fn remove_n(&mut self, value: &T, n: Int) -> Int {
+        if n <= 0 { return self.count(value); }
+        let cur = self.count(value);
+        if cur == 0 { return 0; }
+        let dec = if n >= cur { cur } else { n };
+        self.cardinality = self.cardinality - dec;
+        let next = cur - dec;
+        if next == 0 {
+            self.inner.remove(value);
+            0
+        } else {
+            self.inner.insert(value.clone(), next);
+            next
+        }
+    }
+
+    /// Remove every occurrence of `value`. Returns the multiplicity that
+    /// was evicted (0 if absent).
+    public fn remove_all(&mut self, value: &T) -> Int {
+        match self.inner.remove(value) {
+            None    => 0,
+            Some(k) => {
+                self.cardinality = self.cardinality - k;
+                k
+            }
+        }
+    }
+
+    /// Drop every element.
+    public fn clear(&mut self) {
+        self.inner.clear();
+        self.cardinality = 0;
+    }
+
+    /// Reserve capacity for `additional` more *distinct* elements.
+    public fn reserve(&mut self, additional: Int) {
+        self.inner.reserve(additional);
+    }
+
+    public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        self.inner.try_reserve(additional)
+    }
+
+    public fn shrink_to_fit(&mut self) { self.inner.shrink_to_fit(); }
+
+    // ─── Iteration ───────────────────────────────────────────────────────
+
+    /// Iterate over `(element_ref, multiplicity)` pairs. Each distinct
+    /// element appears once.
+    public fn iter(&self) -> MultisetIter<T> {
+        MultisetIter { inner: self.inner.iter() }
+    }
+
+    /// Iterate over distinct elements, ignoring multiplicity.
+    public fn distinct_iter(&self) -> MultisetDistinctIter<T> {
+        MultisetDistinctIter { inner: self.inner.keys() }
+    }
+
+    /// Retain elements satisfying `pred(element, count)`. Predicate
+    /// returning `false` evicts the entry entirely (regardless of its
+    /// multiplicity); this matches `Map.retain` semantics. The
+    /// cardinality counter is rebuilt during the pass.
+    public fn retain<F: fn(&T, Int) -> Bool>(&mut self, pred: F) {
+        let mut new_card: Int = 0;
+        self.inner.retain(|k, v| {
+            let keep = pred(k, *v);
+            if keep { new_card = new_card + *v; }
+            keep
+        });
+        self.cardinality = new_card;
+    }
+
+    // ─── Algebraic operations ────────────────────────────────────────────
+
+    /// `A ∪ B` — per-element multiplicity max(count_A, count_B).
+    public fn union(&self, other: &Multiset<T>) -> Multiset<T>
+    where T: Clone
+    {
+        let mut res = self.clone();
+        let mut iter = other.iter();
+        while let Some((k, v)) = iter.next() {
+            let cur = res.count(k);
+            if v > cur {
+                res.cardinality = res.cardinality + (v - cur);
+                res.inner.insert(k.clone(), v);
+            }
+        }
+        res
+    }
+
+    /// `A ∩ B` — per-element multiplicity min(count_A, count_B).
+    public fn intersection(&self, other: &Multiset<T>) -> Multiset<T>
+    where T: Clone
+    {
+        // Iterate the smaller side for fewer probes
+        let (small, large) = if self.distinct_len() <= other.distinct_len() {
+            (self, other)
+        } else { (other, self) };
+
+        let mut res = Multiset.with_capacity(small.distinct_len());
+        let mut iter = small.iter();
+        while let Some((k, v)) = iter.next() {
+            let other_v = large.count(k);
+            if other_v == 0 { continue; }
+            let m = if v <= other_v { v } else { other_v };
+            res.inner.insert(k.clone(), m);
+            res.cardinality = res.cardinality + m;
+        }
+        res
+    }
+
+    /// `A ⊎ B` — multiset sum (per-element count_A + count_B).
+    /// Distinct from `union`: elements present in both sides accumulate
+    /// their multiplicities rather than being max-clamped.
+    public fn sum(&self, other: &Multiset<T>) -> Multiset<T>
+    where T: Clone
+    {
+        let mut res = self.clone();
+        let mut iter = other.iter();
+        while let Some((k, v)) = iter.next() {
+            res.insert_n(k.clone(), v);
+        }
+        res
+    }
+
+    /// `A − B` — per-element max(0, count_A − count_B). Saturates at 0.
+    public fn difference(&self, other: &Multiset<T>) -> Multiset<T>
+    where T: Clone
+    {
+        let mut res = Multiset.with_capacity(self.distinct_len());
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            let sub = other.count(k);
+            if v > sub {
+                let m = v - sub;
+                res.inner.insert(k.clone(), m);
+                res.cardinality = res.cardinality + m;
+            }
+        }
+        res
+    }
+
+    /// `A ⊆ B` (multiset sense) — every element of `self` has multiplicity
+    /// ≤ corresponding multiplicity in `other`.
+    public fn is_subset(&self, other: &Multiset<T>) -> Bool {
+        if self.cardinality > other.cardinality { return false; }
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            if other.count(k) < v { return false; }
+        }
+        true
+    }
+
+    /// `A ⊇ B` — superset test.
+    @inline(always)
+    public fn is_superset(&self, other: &Multiset<T>) -> Bool {
+        other.is_subset(self)
+    }
+
+    /// True iff `A ∩ B = ∅` — no shared support.
+    public fn is_disjoint(&self, other: &Multiset<T>) -> Bool {
+        let (small, large) = if self.distinct_len() <= other.distinct_len() {
+            (self, other)
+        } else { (other, self) };
+        let mut iter = small.distinct_iter();
+        while let Some(k) = iter.next() {
+            if large.contains(k) { return false; }
+        }
+        true
+    }
+
+    // ─── Conversion ──────────────────────────────────────────────────────
+
+    /// Flatten to a `List<T>` repeating each element by its multiplicity.
+    /// Element order is unspecified; call sites needing canonical order
+    /// should sort separately.
+    public fn to_list(&self) -> List<T>
+    where T: Clone
+    {
+        let mut out: List<T> = List.with_capacity(self.cardinality);
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            let mut i: Int = 0;
+            while i < v {
+                out.push(k.clone());
+                i = i + 1;
+            }
+        }
+        out
+    }
+
+    /// Convert to `(element, multiplicity)` list — preserves multiplicity
+    /// without expansion.
+    public fn to_count_list(&self) -> List<(T, Int)>
+    where T: Clone
+    {
+        let mut out: List<(T, Int)> = List.with_capacity(self.distinct_len());
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            out.push((k.clone(), v));
+        }
+        out
+    }
+
+    // ─── Most-common analytics (stat-style) ──────────────────────────────
+
+    /// Return the element with the largest multiplicity, ties broken
+    /// arbitrarily. None when the multiset is empty.
+    public fn mode(&self) -> Maybe<&T> {
+        let mut best: Maybe<(&T, Int)> = None;
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            best = match best {
+                None        => Some((k, v)),
+                Some((_, b)) => if v > b { Some((k, v)) } else { best },
+            };
+        }
+        match best {
+            None         => None,
+            Some((k, _)) => Some(k),
+        }
+    }
+}
+
+// =============================================================================
+// Iterators
+// =============================================================================
+
+/// Yields `(element_ref, multiplicity)` pairs.
+public type MultisetIter<T: Hash + Eq> is {
+    inner: MapIter<T, Int>,
+};
+
+implement<T: Hash + Eq> Iterator for MultisetIter<T> {
+    type Item = (&T, Int);
+
+    fn next(&mut self) -> Maybe<Self.Item> {
+        match self.inner.next() {
+            None    => None,
+            Some(p) => Some((p.0, *p.1)),
+        }
+    }
+}
+
+/// Yields distinct elements only.
+public type MultisetDistinctIter<T: Hash + Eq> is {
+    inner: MapKeys<T, Int>,
+};
+
+implement<T: Hash + Eq> Iterator for MultisetDistinctIter<T> {
+    type Item = &T;
+
+    fn next(&mut self) -> Maybe<Self.Item> { self.inner.next() }
+}
+
+// =============================================================================
+// Trait implementations
+// =============================================================================
+
+implement<T: Hash + Eq + Clone> Clone for Multiset<T> {
+    fn clone(&self) -> Multiset<T> {
+        Multiset { inner: self.inner.clone(), cardinality: self.cardinality }
+    }
+}
+
+/// Multiset equality: same support and per-element multiplicity.
+implement<T: Hash + Eq> Eq for Multiset<T> {
+    fn eq(&self, other: &Multiset<T>) -> Bool {
+        if self.cardinality != other.cardinality { return false; }
+        if self.distinct_len() != other.distinct_len() { return false; }
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            if other.count(k) != v { return false; }
+        }
+        true
+    }
+}
+
+implement<T: Hash + Eq + Debug> Debug for Multiset<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("Multiset {")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            if !first { f.write_str(", ")?; }
+            first = false;
+            f.write_str(&f"{k:?}×{v}")?;
+        }
+        f.write_str("}")
+    }
+}
