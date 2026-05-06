@@ -44,6 +44,7 @@
 //! and FatRef (24 bytes) reference types.
 
 pub mod builder;
+pub mod cli_command;
 pub mod clone;
 pub mod debug;
 pub mod default;
@@ -67,6 +68,7 @@ use verum_ast::{Literal, LiteralKind, Span};
 use verum_common::{Heap, List, Maybe, Text};
 
 pub use builder::DeriveBuilder;
+pub use cli_command::DeriveCommand;
 pub use clone::DeriveClone;
 pub use common::{DeriveContext, DeriveError, FieldInfo, TypeInfo, VariantInfo, path_from_str};
 pub use debug::DeriveDebug;
@@ -122,6 +124,12 @@ impl DeriveRegistry {
         // MySQL-side `core.database.mysql.typed_row.MysqlTypedRow`
         // protocol (different method name, different cell type).
         registry.register("MysqlTypedRow", Box::new(DeriveMysqlTypedRow));
+        // Command — vcli @command derive: lower a `@command`-decorated
+        // record type to a CommandSpec factory function. Triggered by
+        // the `@command(...)` attribute itself (see `extract_derive_names`)
+        // or via explicit `@derive(Command)`. Spec:
+        // internal/specs/cli-framework.md §4.
+        registry.register("Command", Box::new(DeriveCommand));
 
         registry
     }

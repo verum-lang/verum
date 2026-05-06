@@ -73,6 +73,7 @@ public module plugin;
 public module json_schema;
 public module tainted;
 public module example;
+public module derive_example;
 public module prelude;
 
 // =============================================================================
