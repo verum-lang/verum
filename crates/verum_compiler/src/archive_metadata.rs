@@ -40,8 +40,8 @@ use std::collections::HashMap;
 use verum_common::{List, Maybe, OrderedMap, Text};
 use verum_types::core_metadata::{
     CoreMetadata, FieldDescriptor, FunctionDescriptor, GenericParam,
-    ImplementationDescriptor, ParamDescriptor, ProtocolDescriptor, TypeDescriptor,
-    TypeDescriptorKind, VariantCase, VariantPayload,
+    ImplementationDescriptor, MethodSignature, ParamDescriptor, ProtocolDescriptor,
+    ReceiverKind, TypeDescriptor, TypeDescriptorKind, VariantCase, VariantPayload,
 };
 use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
@@ -254,22 +254,153 @@ fn register_module_metadata(
                 TypeDescriptorKind::Variant { cases }
             }
             TypeKind::Protocol => {
+                // #130 Layer D — extract method signatures from the
+                // protocol type's `variants` field.  Codegen at
+                // `verum_vbc/src/codegen/mod.rs:8326-8367` encodes
+                // each protocol method as a `VariantDescriptor`
+                // whose `name` is the method name and whose `payload`
+                // is `Some(TypeRef::Function { params, return_type, contexts })`.
+                // Pre-fix `meta.protocols[name].required_methods` +
+                // `default_methods` were hardcoded `List::new()` so
+                // the eager `load_stdlib_from_metadata` path
+                // (infer.rs:2178+) registered every protocol with an
+                // empty methods map — `xs.into_iter().map(f)` then
+                // failed at typecheck because `map` couldn't be
+                // resolved as an Iterator method.
+                //
+                // We can't distinguish required vs default methods
+                // from the VBC archive (codegen drops the
+                // distinction at line 8326 — both default-body and
+                // required-no-body items become variants with the
+                // same shape).  Routing every method through
+                // `required_methods` is correct for typecheck: the
+                // `is_default` flag in `ProtocolMethod` only affects
+                // whether the method is callable without an impl
+                // override at compile time, and the typechecker's
+                // `methods.get(name).map(|m| m.ty.clone())` lookup
+                // ignores it — see infer.rs:#129 fallback branch at
+                // ~line 47680.  Stdlib-agnostic per
+                // `crates/verum_types/src/CLAUDE.md`: every method
+                // signature comes from the protocol's own variants,
+                // not a hardcoded list.
+                let proto_param_id_to_name: HashMap<u16, String> =
+                    ty.type_params
+                        .iter()
+                        .filter_map(|tp| {
+                            module.strings.get(tp.name).map(|n| (tp.id.0, n.to_string()))
+                        })
+                        .collect();
+                let required_methods: List<MethodSignature> = ty
+                    .variants
+                    .iter()
+                    .filter_map(|v| {
+                        let method_name = module
+                            .strings
+                            .get(v.name)
+                            .map(Text::from)?;
+                        let payload = v.payload.as_ref()?;
+                        let (param_refs, ret_ref, ctx_refs) = match payload {
+                            TypeRef::Function {
+                                params,
+                                return_type,
+                                contexts,
+                            } => (params.as_slice(), return_type.as_ref(), contexts.as_slice()),
+                            _ => return None,
+                        };
+                        let params: List<ParamDescriptor> = param_refs
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, p_ref)| ParamDescriptor {
+                                // VBC drops protocol-method param
+                                // names at codegen time; positional
+                                // synthetic names round-trip enough
+                                // info for the typechecker (which
+                                // matches by ordinal position, not
+                                // name).
+                                name: Text::from(format!("p{}", idx)),
+                                ty: Text::from(type_ref_to_text_with_params(
+                                    p_ref,
+                                    &type_id_to_name,
+                                    &proto_param_id_to_name,
+                                )),
+                            })
+                            .collect();
+                        let return_type = Text::from(type_ref_to_text_with_params(
+                            ret_ref,
+                            &type_id_to_name,
+                            &proto_param_id_to_name,
+                        ));
+                        let contexts: List<Text> = ctx_refs
+                            .iter()
+                            .filter_map(|cref| {
+                                module
+                                    .context_names
+                                    .get(cref.0 as usize)
+                                    .and_then(|sid| module.strings.get(*sid))
+                                    .map(Text::from)
+                            })
+                            .collect();
+                        Some(MethodSignature {
+                            name: method_name,
+                            // VBC erases self-receiver kind at
+                            // codegen time (codegen/mod.rs:8343
+                            // skips self params).  SelfRef is the
+                            // most common shape for protocol-
+                            // declared methods and round-trips for
+                            // the typechecker, which dispatches
+                            // receivers separately from method
+                            // params anyway.
+                            receiver: ReceiverKind::SelfRef,
+                            params,
+                            return_type,
+                            contexts,
+                            // is_async also lost at codegen time
+                            // (TypeRef::Function carries no async
+                            // bit).  Best-effort default; affects
+                            // computational-property propagation
+                            // only.  Safe default for non-async
+                            // protocols (the majority).
+                            is_async: false,
+                        })
+                    })
+                    .collect();
+                let default_method_names: List<Text> = ty
+                    .variants
+                    .iter()
+                    .filter_map(|v| module.strings.get(v.name).map(Text::from))
+                    .collect();
+
+                // Resolve super-protocol names via type_id_to_name
+                // (VBC encodes super-protocol references in
+                // protocol-types' own `protocols` field per
+                // codegen/mod.rs:8316-8322).  Stdlib-agnostic — names
+                // come from the type table.
+                let super_protocols: List<Text> = ty
+                    .protocols
+                    .iter()
+                    .filter_map(|pi| {
+                        type_id_to_name
+                            .get(&pi.protocol.0)
+                            .map(|s| Text::from(s.as_str()))
+                    })
+                    .collect();
+
                 meta.protocols.entry(type_name.clone()).or_insert_with(|| {
                     ProtocolDescriptor {
                         name: type_name.clone(),
                         module_path: module_path.clone(),
                         generic_params: convert_generic_params(&ty.type_params, module),
-                        super_protocols: List::new(),
+                        super_protocols: super_protocols.clone(),
                         associated_types: List::new(),
-                        required_methods: List::new(),
+                        required_methods: required_methods.clone(),
                         default_methods: List::new(),
                     }
                 });
                 TypeDescriptorKind::Protocol {
-                    super_protocols: List::new(),
+                    super_protocols,
                     associated_types: List::new(),
-                    required_methods: List::new(),
-                    default_methods: List::new(),
+                    required_methods,
+                    default_methods: default_method_names,
                 }
             }
             TypeKind::Newtype | TypeKind::Tuple | TypeKind::Unit
