@@ -1,0 +1,192 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l1_pager, wal_pager, wal_index, fast_path, multi_reader
+// @timeout: 15000
+// @description: wal_pager_read routes through WalIndex.find_frame (#167).
+//
+//               Pre-#167 the entire #150 / #163 / #165 chain shipped
+//               the WalIndex .shm protocol, propagated writer
+//               mutations into it, and rebuilt it from disk during
+//               recovery — but NOTHING called find_frame.  The live
+//               reader path in wal_pager.vr still walked
+//               `WalState.frame_index.newest_frame_for`.  Every
+//               find_frame micro-optimisation in the protocol was
+//               dead weight at runtime.
+//
+//               Post-#167: wal_pager_read consults
+//               `p.wal.index().find_frame(page_no, mx, n_backfill)`
+//               directly — O(1) hash lookup keyed by page_no,
+//               clamped by the writer's mx_frame (no future frames)
+//               and n_backfill (no checkpointed frames).  Snapshots
+//               stay on the frozen frame_index per their salt-
+//               rotation isolation contract.
+//
+//               This spec exercises the WalIndex.find_frame
+//               protocol contract that wal_pager_read now relies on,
+//               pinning the same edge cases the read path delegates
+//               to: clamp-by-mx_frame, clamp-by-n_backfill, miss-
+//               returns-None (fall-through to base pager), newest-
+//               frame-wins on rewrite collisions.
+//
+// Spec: internal/specs/sqlite-native.md §8.4 (multi-reader/single-writer)
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe, Some, None};
+mount core.database.sqlite.native.l1_pager.{
+    WalIndex, wal_index_new,
+};
+
+// =============================================================================
+// 1. find_frame on uninitialised index returns None
+//     wal_pager_read falls through to base pager — correct on cold
+//     start before any writes.
+// =============================================================================
+
+fn cold_index_returns_none() {
+    let idx = wal_index_new(4096);
+    let r = idx.find_frame(7, 1000, 0);
+    match r {
+        Some(_) => panic("cold index must not resolve any page"),
+        None    => {},
+    }
+}
+
+// =============================================================================
+// 2. After append + commit, find_frame resolves to the newest frame
+//     wal_pager_read returns the WAL frame's payload via read_frame.
+// =============================================================================
+
+fn appended_frame_resolves() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(7, 1);
+    idx.commit_header(1, 100 as u32, 0xAA as u32, 0xBB as u32);
+    match idx.find_frame(7, 1, 0) {
+        Some(f) => assert_eq(f, 1),
+        None    => panic("page 7 must resolve at frame 1"),
+    }
+}
+
+// =============================================================================
+// 3. mx_frame_clamp filters out frames newer than the clamp
+//     wal_pager_read uses writer.mx_frame as the clamp — readers
+//     never see frames a transaction hasn't committed yet.
+// =============================================================================
+
+fn mx_frame_clamp_filters_future() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(7, 1);
+    idx.append_frame(7, 5);  // newer rewrite of page 7
+    idx.commit_header(5, 100 as u32, 0xAA as u32, 0xBB as u32);
+    // Reader at mx_frame=3 must NOT see frame 5.
+    match idx.find_frame(7, 3, 0) {
+        Some(f) => assert_eq(f, 1),  // older frame visible
+        None    => panic("page 7 must still resolve to frame 1 below clamp"),
+    }
+    // Reader at mx_frame=5 sees the newest.
+    match idx.find_frame(7, 5, 0) {
+        Some(f) => assert_eq(f, 5),
+        None    => panic("page 7 must resolve to newest at mx_frame=5"),
+    }
+}
+
+// =============================================================================
+// 4. n_backfill_clamp filters out checkpointed frames
+//     wal_pager_read uses writer.n_backfill as the clamp — pages
+//     with WAL frames already drained to the main DB go through the
+//     base pager, NOT through read_frame.
+// =============================================================================
+
+fn n_backfill_clamp_filters_drained() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(7, 1);
+    idx.append_frame(8, 2);
+    idx.append_frame(7, 3);
+    idx.commit_header(3, 100 as u32, 0xAA as u32, 0xBB as u32);
+    // Mark frames 1-2 as backfilled.  Frame 3 is still live.
+    let _ = idx.advance_backfill(2);
+    // Page 7 at mx_frame=3, n_backfill=2: only frame 3 visible
+    // (frame 1 is ≤ n_backfill, filtered out).
+    match idx.find_frame(7, 3, 2) {
+        Some(f) => assert_eq(f, 3),
+        None    => panic("page 7 must resolve at frame 3 (post-backfill)"),
+    }
+    // Page 8 at mx_frame=3, n_backfill=2: frame 2 is filtered out
+    // (no live WAL version) — wal_pager_read falls through to base.
+    match idx.find_frame(8, 3, 2) {
+        Some(_) => panic("page 8 must not resolve — its only frame ≤ n_backfill"),
+        None    => {},
+    }
+}
+
+// =============================================================================
+// 5. Clamp interaction — both clamps active simultaneously
+//     wal_pager_read passes both mx_frame and n_backfill from the
+//     same writer state in a single call.
+// =============================================================================
+
+fn both_clamps_simultaneous() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(42, 1);
+    idx.append_frame(42, 4);
+    idx.append_frame(42, 7);
+    idx.commit_header(7, 100 as u32, 0xAA as u32, 0xBB as u32);
+    // Reader: mx_frame=5, n_backfill=2.  Visible frames: (2, 5] →
+    // frame 4 is the newest hit.  Frame 7 > mx_frame, frame 1 ≤
+    // n_backfill — both filtered.
+    match idx.find_frame(42, 5, 2) {
+        Some(f) => assert_eq(f, 4),
+        None    => panic("page 42 must resolve at frame 4 with both clamps"),
+    }
+}
+
+// =============================================================================
+// 6. Page miss with active index returns None (fall-through to base)
+//     wal_pager_read takes the `None => pager_read(&mut p.base, ...)`
+//     branch — correct for pages that never had a WAL version.
+// =============================================================================
+
+fn miss_falls_through() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(1, 1);
+    idx.commit_header(1, 100 as u32, 0xAA as u32, 0xBB as u32);
+    // Page 99 was never written — find_frame returns None.
+    match idx.find_frame(99, 1, 0) {
+        Some(_) => panic("never-written page must miss in the index"),
+        None    => {},
+    }
+}
+
+// =============================================================================
+// 7. Post-checkpoint reset clears the index — wal_pager_read falls
+//     through to base for everything until the next write.
+// =============================================================================
+
+fn reset_clears_routing() {
+    let mut idx = wal_index_new(4096);
+    idx.append_frame(1, 1);
+    idx.commit_header(1, 100 as u32, 0xAA as u32, 0xBB as u32);
+    // Pre-reset: page 1 routes to WAL frame.
+    match idx.find_frame(1, 1, 0) {
+        Some(f) => assert_eq(f, 1),
+        None    => panic("pre-reset page 1 must resolve"),
+    }
+    // Reset clears everything.
+    idx.reset_after_checkpoint(0xCC as u32, 0xDD as u32);
+    // Post-reset: page 1 misses → wal_pager_read falls through to base.
+    match idx.find_frame(1, 1, 0) {
+        Some(_) => panic("post-reset must miss every page"),
+        None    => {},
+    }
+}
+
+fn main() {
+    cold_index_returns_none();
+    appended_frame_resolves();
+    mx_frame_clamp_filters_future();
+    n_backfill_clamp_filters_drained();
+    both_clamps_simultaneous();
+    miss_falls_through();
+    reset_clears_routing();
+}

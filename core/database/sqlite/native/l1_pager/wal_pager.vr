@@ -106,6 +106,22 @@ implement WalPager {
 /// Read page `page_no` honouring the WAL frame index.  If the page
 /// has a WAL version newer than `n_backfill`, return the WAL frame's
 /// payload; otherwise fall through to the base pager (main DB file).
+///
+/// Resolution path (#167):
+///   1. Pending in-txn write   — read-your-writes wins
+///   2. WalIndex.find_frame    — .shm fast path, O(1) hash lookup
+///                                (#150 protocol + #163 writer
+///                                propagation + #165 recovery
+///                                publish keep this consistent)
+///   3. Base pager             — main DB file fall-through
+///
+/// Pre-#167 step 2 used `WalState.frame_index.newest_frame_for`,
+/// which walked a `Map<Int, Int>` — correct, but defeated every
+/// micro-optimisation the .shm protocol shipped.  Post-#167 the
+/// live reader path is the canonical .shm consumer; the writer's
+/// frame_index stays as authoritative bookkeeping + the source for
+/// `WalReaderSnapshot::frame_index` (snapshots intentionally use
+/// the frozen map for salt-rotation isolation, not .shm).
 public fn wal_pager_read(
     p: &mut WalPager,
     page_no: Int,
@@ -123,7 +139,13 @@ public fn wal_pager_read(
         None => {}
     }
 
-    match p.wal.state().newest_frame_for(page_no) {
+    // WalIndex fast path — O(1) hash lookup keyed by page_no,
+    // clamped by the writer's mx_frame (no future frames) and
+    // n_backfill (no checkpointed frames; those go to base).
+    let mx = p.wal.mx_frame();
+    let n_bk = p.wal.n_backfill();
+    let found = p.wal.index().find_frame(page_no, mx, n_bk);
+    match found {
         Some(frame_no) => {
             match read_frame(&mut p.wal, frame_no) {
                 Ok(read) => Ok(PageFrame {
