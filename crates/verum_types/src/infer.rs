@@ -1634,54 +1634,15 @@ impl TypeChecker {
         // descriptor-string parser handles primitives, bare names,
         // generic instantiations (`Maybe<T>`), references (`&T`),
         // function types, and the `__opaque_type_N` /
-        // `__generic_N` placeholders (mapped to fresh TypeVars) —
-        // the same parser used by
-        // `register_inherent_methods_from_metadata`.  Without
-        // structural parsing, `text_to_path("List<T>")` yields a
-        // single-identifier `Type::Named { path: "List<T>", args: [] }`
-        // which never unifies with the structural `Type::Generic
-        // { name: "List", args: [T] }` produced at call sites.
-        //
-        // Cap regression risk: if any param-type string looks like
-        // a concrete TypeRef::Concrete(...) reference that the
-        // protocol-method-variant codegen path resolved to a
-        // wrong-arity built-in (`"Heap"`/`"List"` rendered for what
-        // should be a `Self.Item`-projection generic param — Layer E
-        // gap), wrap the parsed Type into a fresh `TypeVar`.  This
-        // routes the broken rendering through unifier-friendly
-        // shape (anything-unifies-with-it) instead of an active
-        // arity mismatch with user code.  Conservative for the
-        // typecheck path: fresh TypeVars unify with anything, so
-        // method-resolution is permissive but never produces a
-        // false-positive type error.
-        let to_type = |s: &Text| -> Type {
-            let parsed = parse_descriptor_type_string(s.as_str());
-            // Generic-name shapes that the codegen produces only
-            // when it lost the source-level generic param identity
-            // (i.e. `Self.Item` / `Self` rendered as a wrong-arity
-            // concrete type like bare `Heap` or `List`).  These
-            // never appear as well-formed user-side concrete
-            // shapes: `Heap` always carries 1 arg, `List` always
-            // carries 1 arg, etc.  When we see them with 0 args at
-            // a method-signature site, route them through a fresh
-            // TypeVar — pessimistic but unifier-safe.
-            match &parsed {
-                Type::Named { path, args } if args.is_empty() => {
-                    if let Some(id) = path.as_ident() {
-                        let n = id.as_str();
-                        if matches!(
-                            n,
-                            "Heap" | "Shared" | "List" | "Map" | "Set"
-                                | "Maybe" | "Result" | "Range" | "Iterator"
-                        ) {
-                            return Type::Var(crate::ty::TypeVar::fresh());
-                        }
-                    }
-                }
-                _ => {}
-            }
-            parsed
-        };
+        // `__generic_N` placeholders (mapped to fresh TypeVars).
+        // After #131 Layer E landed, codegen emits proper
+        // `TypeRef::Generic` for protocol-level params, method-
+        // local params, AND associated-type projections
+        // (`Self.Item`) — archive_metadata renders the unresolved
+        // ones as `__generic_N` placeholders that the parser
+        // converts to fresh TypeVars.  No additional safety guard
+        // needed at this site.
+        let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
         let mut methods = verum_common::Map::new();
         for m in protocol_desc.required_methods.iter() {
             let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
