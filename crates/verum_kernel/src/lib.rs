@@ -118,6 +118,7 @@ pub mod arch_mtac; // ATS-V Modal-Temporal Architectural Calculus primitives
 pub mod arch_counterfactual; // ATS-V counterfactual reasoning engine + metric extraction
 pub mod arch_adjunction; // ATS-V adjunction analyzer for refactoring
 pub mod arch_yoneda; // ATS-V Yoneda-equivalence checker
+pub mod arch_capability_inference; // ATS-V capability ontology — primitive-call → Capability
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type

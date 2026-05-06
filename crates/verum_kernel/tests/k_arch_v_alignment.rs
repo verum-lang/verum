@@ -1640,7 +1640,117 @@ fn pin_compiler_phase_aggregates_module_wide_framework_citations() {
 }
 
 // =============================================================================
-// 26. Internal/ references must NOT appear in any architecture .vr file
+// 26. Q5 — body-level capability inference wiring (AP-001 production)
+// =============================================================================
+
+#[test]
+fn pin_capability_inference_ontology_present() {
+    // The kernel-side capability ontology resolves primitive call
+    // paths to Capability values.  AP-001 CapabilityEscalation
+    // consumes the inferred set in production builds.
+    let count = verum_kernel::arch_capability_inference::ontology_size();
+    assert!(
+        count >= 30,
+        "capability inference ontology size pinned to >= 30 entries; got {}",
+        count
+    );
+
+    // Sample a few load-bearing entries.
+    let must_have_paths: &[&str] = &[
+        "core.io.fs.read_file",
+        "core.io.fs.write_file",
+        "core.net.http.get",
+        "core.net.tcp.connect",
+        "core.net.tcp.listen",
+        "core.shell.exec",
+        "core.security.random.bytes",
+        "core.metrics.counter",
+        "core.tracing.span",
+        "core.diagnostics.log",
+    ];
+    for p in must_have_paths {
+        assert!(
+            verum_kernel::arch_capability_inference::lookup_capability(p).is_some(),
+            "ontology missing canonical entry: {}",
+            p,
+        );
+    }
+
+    // Unknown paths fall through silently — no false attribution.
+    assert!(
+        verum_kernel::arch_capability_inference::lookup_capability("not.a.path").is_none()
+    );
+}
+
+#[test]
+fn pin_phase_inputs_inferred_used_capabilities_present() {
+    // PhaseInputs gained `inferred_used_capabilities` in Q5 to
+    // carry the body-level capability inference result.  AP-001
+    // CapabilityEscalation consumes ctx.inferred_used_capabilities
+    // through check_capability_escalation.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_phase.rs"),
+    )
+    .expect("read arch_phase.rs");
+    assert!(
+        src.contains("pub inferred_used_capabilities:"),
+        "PhaseInputs missing inferred_used_capabilities field"
+    );
+    assert!(
+        src.contains("ctx.inferred_used_capabilities = inputs.inferred_used_capabilities.clone()"),
+        "run_arch_phase_one_with not propagating inferred_used_capabilities into ctx"
+    );
+}
+
+#[test]
+fn pin_compiler_phase_walks_body_for_capability_inference() {
+    // Q5 walker lives in compiler-side ats_v_phase.rs.  This pin
+    // asserts the walker exists and is invoked from phase_ats_v
+    // for both module-level and per-item paths.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let phase_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("pipeline")
+            .join("ats_v_phase.rs"),
+    )
+    .expect("read ats_v_phase.rs");
+
+    for needle in &[
+        // The two entry points (module-wide + per-item).
+        "pub(crate) fn infer_used_capabilities(",
+        "pub(crate) fn infer_used_capabilities_in_item(",
+        // The recursive walkers.
+        "fn walk_item_body_for_caps(",
+        "fn walk_block_for_caps(",
+        "fn walk_stmt_for_caps(",
+        "fn walk_expr_for_caps(",
+        // The path resolver.
+        "fn expr_to_dotted_path(",
+        // The ontology dispatch site.
+        "verum_kernel::arch_capability_inference::lookup_capability(",
+        // Wired into phase_ats_v.
+        "infer_used_capabilities(module)",
+        "infer_used_capabilities_in_item(item)",
+    ] {
+        assert!(
+            phase_src.contains(needle),
+            "ats_v_phase.rs missing capability-inference surface: {}",
+            needle,
+        );
+    }
+}
+
+// =============================================================================
+// 27. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

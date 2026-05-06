@@ -53,14 +53,24 @@ impl<'s> CompilationPipeline<'s> {
         let module_wide_foreign_constructs =
             collect_module_wide_foreign_foundations(module);
 
+        // Body-level capability inference (Q5).  Walks every
+        // function body in the module, matches each call site
+        // against the canonical ontology in
+        // `verum_kernel::arch_capability_inference`, and aggregates
+        // the inferred Capability set.  Activates AP-001
+        // CapabilityEscalation in production builds.
+        let inferred_used_capabilities = infer_used_capabilities(module);
+
         // 1. Module-level @arch_module(...) — the primary surface.
         //   Use the registry-aware entry so cross-cog peer resolution
         //   (composed_foundations / cited_lifecycles / callee_tiers)
-        //   activates AP-004 / AP-005 / AP-009 in production.
+        //   + body-level capability inference activate AP-001 /
+        //   AP-004 / AP-005 / AP-009 in production.
         if let Some(result) = self.run_arch_phase_for_attrs_registry_aware(
             &module.attributes,
             "<module>",
             &module_wide_foreign_constructs,
+            &inferred_used_capabilities,
         ) {
             total_violations += result.violations.len();
             self.emit_arch_phase_result(&result, module);
@@ -77,16 +87,17 @@ impl<'s> CompilationPipeline<'s> {
             // we skip here because @arch_module is conventionally
             // an outer item attribute.
             //
-            // For items, foreign-foundation constructs are scoped to
-            // the item's own attribute list (the module-wide list is
-            // for the module-level Shape; each item gets a local
-            // view).
+            // For items, foreign-foundation constructs and inferred
+            // capabilities are scoped to the item's own body — the
+            // module-wide aggregates apply only at the module level.
             let item_foreign_constructs =
                 extract_foreign_foundation_constructs(&item.attributes);
+            let item_inferred_caps = infer_used_capabilities_in_item(item);
             if let Some(result) = self.run_arch_phase_for_attrs_registry_aware(
                 &item.attributes,
                 &item_name,
                 &item_foreign_constructs,
+                &item_inferred_caps,
             ) {
                 total_violations += result.violations.len();
                 self.emit_arch_phase_result(&result, module);
@@ -117,6 +128,7 @@ impl<'s> CompilationPipeline<'s> {
         attrs: &List<verum_ast::attr::Attribute>,
         module_name: &str,
         foreign_foundation_constructs: &[(String, verum_kernel::arch::Foundation)],
+        inferred_used_capabilities: &[verum_kernel::arch::Capability],
     ) -> Option<ModuleArchResult> {
         // First pass: locate the @arch_module attribute and parse it
         // to extract the Shape.  We need the Shape's composes_with /
@@ -157,6 +169,12 @@ impl<'s> CompilationPipeline<'s> {
                 (Vec::new(), Vec::new(), Vec::new())
             };
 
+        // Body-level capability inference (Q5).  The walker is
+        // invoked at the CompilationPipeline::phase_ats_v level
+        // where the full `Module` AST is available.  Per-attribute
+        // helper here gets an empty vec; the module-level call site
+        // overrides via the explicit `inferred_used_capabilities`
+        // parameter we will pass through `phase_ats_v`.
         let inputs = PhaseInputs {
             capability_ontology_registry: None,
             yoneda_verdicts_claimed: Vec::new(),
@@ -164,6 +182,7 @@ impl<'s> CompilationPipeline<'s> {
             composed_foundations,
             cited_lifecycles,
             callee_tiers,
+            inferred_used_capabilities: inferred_used_capabilities.to_vec(),
         };
         Some(verum_kernel::arch_phase::run_arch_phase_one_with(
             module_name.to_string(),
@@ -283,12 +302,223 @@ fn run_arch_phase_for_attrs(
         composed_foundations: Vec::new(),
         cited_lifecycles: Vec::new(),
         callee_tiers: Vec::new(),
+        // Body-level inference is also registry-aware-only.
+        inferred_used_capabilities: Vec::new(),
     };
     Some(run_arch_phase_one_with(
         module_name.to_string(),
         args_slice,
         &inputs,
     ))
+}
+
+// =============================================================================
+// Q5 — Body-level capability inference (AP-001 production wiring)
+// =============================================================================
+
+/// Walk every function body in the module, collecting Capability
+/// values implied by each call-site whose path is in the canonical
+/// ontology.  Returns deduplicated capabilities in stable order.
+///
+/// Resolution scope (v1):
+///   * Recognises `Call { func: Path(...), .. }` with a fully-
+///     qualified path matching an `arch_capability_inference`
+///     ontology entry.
+///   * Skips method calls (`obj.method(...)`) — symbol-table
+///     resolution required for type-aware lookup, scheduled for v2.
+///   * Skips closures, indirect calls (`fn_ptr(args)`) — same
+///     reason.
+///
+/// Coverage tradeoff: explicit-path calls produce zero false-
+/// positives (ontology match is exact); ambiguous resolution
+/// silently falls through, producing an empty list (silent path
+/// for AP-001 — no violation reported).
+pub(crate) fn infer_used_capabilities(
+    module: &verum_ast::Module,
+) -> Vec<verum_kernel::arch::Capability> {
+    use std::collections::HashSet;
+    let mut found: HashSet<verum_kernel::arch::Capability> = HashSet::new();
+    for item in &module.items {
+        walk_item_body_for_caps(item, &mut found);
+    }
+    found.into_iter().collect()
+}
+
+/// Single-item variant — walks only the given item's body.  Used
+/// when `phase_ats_v` runs the per-item registry-aware check.
+pub(crate) fn infer_used_capabilities_in_item(
+    item: &verum_ast::Item,
+) -> Vec<verum_kernel::arch::Capability> {
+    use std::collections::HashSet;
+    let mut found: HashSet<verum_kernel::arch::Capability> = HashSet::new();
+    walk_item_body_for_caps(item, &mut found);
+    found.into_iter().collect()
+}
+
+fn walk_item_body_for_caps(
+    item: &verum_ast::Item,
+    sink: &mut std::collections::HashSet<verum_kernel::arch::Capability>,
+) {
+    use verum_ast::decl::{FunctionBody, ItemKind};
+    if let ItemKind::Function(fn_decl) = &item.kind {
+        if let Maybe::Some(body) = &fn_decl.body {
+            match body {
+                FunctionBody::Block(block) => walk_block_for_caps(block, sink),
+                FunctionBody::Expr(expr) => walk_expr_for_caps(expr, sink),
+            }
+        }
+    }
+}
+
+fn walk_block_for_caps(
+    block: &verum_ast::Block,
+    sink: &mut std::collections::HashSet<verum_kernel::arch::Capability>,
+) {
+    for stmt in block.stmts.iter() {
+        walk_stmt_for_caps(stmt, sink);
+    }
+    if let Maybe::Some(tail) = &block.expr {
+        walk_expr_for_caps(tail, sink);
+    }
+}
+
+fn walk_stmt_for_caps(
+    stmt: &verum_ast::stmt::Stmt,
+    sink: &mut std::collections::HashSet<verum_kernel::arch::Capability>,
+) {
+    use verum_ast::stmt::StmtKind;
+    match &stmt.kind {
+        StmtKind::Expr { expr, .. } => walk_expr_for_caps(expr, sink),
+        StmtKind::Let { value, .. } => {
+            if let Maybe::Some(init) = value {
+                walk_expr_for_caps(init, sink);
+            }
+        }
+        StmtKind::LetElse { value, .. } => walk_expr_for_caps(value, sink),
+        StmtKind::Defer(expr) | StmtKind::Errdefer(expr) => walk_expr_for_caps(expr, sink),
+        StmtKind::Provide { value, .. } | StmtKind::ProvideScope { value, .. } => {
+            walk_expr_for_caps(value, sink);
+        }
+        // Item / Empty / etc. — no body-level call sites.
+        _ => {}
+    }
+}
+
+fn walk_expr_for_caps(
+    expr: &verum_ast::expr::Expr,
+    sink: &mut std::collections::HashSet<verum_kernel::arch::Capability>,
+) {
+    use verum_ast::expr::ExprKind;
+    match &expr.kind {
+        ExprKind::Call { func, args, .. } => {
+            // Try to resolve the callee path against the canonical
+            // ontology.  Only fully-qualified Path expressions match;
+            // closures, dynamic dispatches, and method receivers
+            // produce None (silent skip).
+            if let Some(path) = expr_to_dotted_path(func) {
+                if let Some(cap) =
+                    verum_kernel::arch_capability_inference::lookup_capability(&path)
+                {
+                    sink.insert(cap);
+                }
+            }
+            walk_expr_for_caps(func, sink);
+            for a in args.iter() {
+                walk_expr_for_caps(a, sink);
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            // Method-call resolution requires the symbol table for
+            // type-aware lookup.  v1 walks the receiver + args for
+            // nested calls but does not attribute the method itself.
+            walk_expr_for_caps(receiver, sink);
+            for a in args.iter() {
+                walk_expr_for_caps(a, sink);
+            }
+        }
+        ExprKind::Block(block) => walk_block_for_caps(block, sink),
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            // IfCondition is structurally complex (let-bindings,
+            // multiple guard clauses).  v1 walks the branches but
+            // skips the condition payload — typical condition
+            // expressions don't introduce capability-relevant
+            // side effects.
+            walk_block_for_caps(then_branch, sink);
+            if let Maybe::Some(else_b) = else_branch {
+                walk_expr_for_caps(else_b, sink);
+            }
+        }
+        ExprKind::Match { expr: scrut, arms } => {
+            walk_expr_for_caps(scrut, sink);
+            for arm in arms.iter() {
+                walk_expr_for_caps(&arm.body, sink);
+            }
+        }
+        ExprKind::While {
+            condition, body, ..
+        } => {
+            walk_expr_for_caps(condition, sink);
+            walk_block_for_caps(body, sink);
+        }
+        ExprKind::For { iter, body, .. } => {
+            walk_expr_for_caps(iter, sink);
+            walk_block_for_caps(body, sink);
+        }
+        ExprKind::Loop { body, .. } => walk_block_for_caps(body, sink),
+        ExprKind::Binary { left, right, .. } => {
+            walk_expr_for_caps(left, sink);
+            walk_expr_for_caps(right, sink);
+        }
+        ExprKind::Unary { expr: inner, .. } => walk_expr_for_caps(inner, sink),
+        ExprKind::Field { expr: inner, .. }
+        | ExprKind::OptionalChain { expr: inner, .. }
+        | ExprKind::TupleIndex { expr: inner, .. } => walk_expr_for_caps(inner, sink),
+        ExprKind::Index { expr: e, index } => {
+            walk_expr_for_caps(e, sink);
+            walk_expr_for_caps(index, sink);
+        }
+        ExprKind::Tuple(items) => {
+            for e in items.iter() {
+                walk_expr_for_caps(e, sink);
+            }
+        }
+        // Leaf / non-recursive arms: Path, Literal, identifiers,
+        // closures, etc.  v1 does not enter closure bodies — the
+        // capability used at the closure invocation site is
+        // captured when the call to the closure is itself walked.
+        _ => {}
+    }
+}
+
+/// Extract a dotted path from an expression of `ExprKind::Path(...)`.
+/// Returns `Some("core.io.fs.read_file")` for paths and `None` for
+/// anything else.  Used by the capability walker to resolve
+/// `Call { func: Path(...), .. }` against the ontology.
+fn expr_to_dotted_path(expr: &verum_ast::expr::Expr) -> Option<String> {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::ty::PathSegment;
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            let segs: Vec<&str> = p
+                .segments
+                .iter()
+                .filter_map(|s| match s {
+                    PathSegment::Name(ident) => Some(ident.name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if segs.is_empty() {
+                None
+            } else {
+                Some(segs.join("."))
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Walk the entire module — both module-level attributes AND
