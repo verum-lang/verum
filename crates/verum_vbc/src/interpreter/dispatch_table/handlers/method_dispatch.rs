@@ -394,6 +394,91 @@ pub(in super::super) fn handle_call_method(
         receiver
     };
 
+    // Text mutation intercepts (push, push_str, push_char) — these
+    // mutate &mut self in the user's stdlib body via raw-pointer
+    // memcpy/memset, an FFI-style intrinsic that the interpreter
+    // doesn't execute.  Without this Rust-native intercept,
+    // `let mut s = ""; s.push_str("hi")` fails with "method
+    // 'push_str' not found on receiver of runtime kind Text<small>".
+    //
+    // The fix: extract the current Text bytes, append the arg, allocate
+    // a new heap Text with the concatenated content, and write back to
+    // the receiver's source register (following the CBGR mutable
+    // reference if present).  Small-string in-place mutation isn't
+    // possible (NaN-boxed values aren't heap-allocated), so we always
+    // promote to a heap Text on first mutation.
+    if (bare_method_name == "push_str"
+        || bare_method_name == "push"
+        || bare_method_name == "push_char")
+        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+    {
+        let mut current_text = extract_string(&dispatch_receiver, state);
+        let caller_base = state.reg_base();
+        let arg_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+        // Deref CBGR ref for arg if present (covers `out.push_str(&body)`).
+        let arg_val = if is_cbgr_ref(&arg_val_raw) {
+            let (abs_index, _) = decode_cbgr_ref(arg_val_raw.as_i64());
+            state.registers.get_absolute(abs_index)
+        } else {
+            arg_val_raw
+        };
+        match bare_method_name.as_str() {
+            "push_str" => {
+                let s = extract_string(&arg_val, state);
+                current_text.push_str(&s);
+            }
+            "push" | "push_char" => {
+                // Char is stored as Int (Unicode codepoint).  Accept
+                // both Int and Text-like args (a single-character
+                // Text from a call site like `s.push("a")`).
+                if arg_val.is_int() {
+                    if let Some(ch) = char::from_u32(arg_val.as_i64() as u32) {
+                        current_text.push(ch);
+                    }
+                } else if arg_val.is_small_string() || is_heap_string(&arg_val) {
+                    let s = extract_string(&arg_val, state);
+                    current_text.push_str(&s);
+                }
+            }
+            _ => unreachable!(),
+        }
+        let new_value = alloc_string_value(state, &current_text)?;
+        // Write back to receiver_reg, following CBGR ref to the
+        // caller's frame slot if present.
+        if is_cbgr_ref(&receiver) {
+            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            state.registers.set_absolute(abs_index, new_value);
+        } else {
+            state.registers.set(caller_base, receiver_reg, new_value);
+        }
+        state.set_reg(dst, Value::unit());
+        return Ok(DispatchResult::Continue);
+    }
+
+    // Path/PathBuf inherent-method intercept.  Stdlib bodies for
+    // `core.io.path.{Path, PathBuf}` aren't loaded into the user
+    // module — `emit_missing_stub_descriptors` only registers `RetV`
+    // placeholders so dispatch doesn't fail with "method not found",
+    // but the placeholder returns Unit and downstream record-field
+    // accesses crash with "field write out of bounds".  This Rust
+    // intercept re-implements `as_path`, `to_path_buf`, `join`,
+    // `join_str`, `as_str`, `to_str`, `parent` against the heap
+    // layout (`Path { inner: Text }` / `PathBuf { path: Path }`).
+    {
+        let caller_base = state.reg_base();
+        if let Some(result) = super::path_ops_runtime::try_intercept_path_method(
+            state,
+            &bare_method_name,
+            dispatch_receiver,
+            args.start.0,
+            args.count,
+            caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     // Try built-in primitive method dispatch first.
     // Pass the full qualified method_name so dispatch_primitive_method can
     // inspect the type prefix (e.g., "Stats.add") and skip builtin dispatch

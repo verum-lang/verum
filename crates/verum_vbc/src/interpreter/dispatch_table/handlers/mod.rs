@@ -60,6 +60,15 @@ pub(super) mod env_runtime;
 // libSystem `read(2)` on stdin via `std::io::stdin()`.
 pub(super) mod stdio_runtime;
 
+// High-level Rust intercepts for Path/PathBuf inherent methods
+// (as_path, to_path_buf, join, join_str, parent, as_str, to_str).
+// Closes the gap left by stub-only registration: when codegen emits
+// CallM for a stdlib method whose body is in the precompiled archive
+// but not the user module, the synthesised RetV stub returns Unit
+// and downstream record-field accesses crash.  These intercepts
+// re-implement the body in Rust against the heap layout.
+pub(super) mod path_ops_runtime;
+
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via
