@@ -1,0 +1,151 @@
+// =============================================================================
+// cli/testing.vr — Test fixtures + golden-snapshot helpers
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.{spec,parser,help,runtime}
+// Spec: internal/specs/cli-framework.md §14
+// =============================================================================
+//
+
+// Test ergonomics for `vcli`-built CLIs:
+//   * `try_parse(spec, argv)` — drive the parser without dispatching.
+//   * `golden_help(spec, expected_path)` — diff `render_help` against a
+//     snapshot file, writing the new value when `VCLI_UPDATE_SNAPSHOTS=1`.
+//   * `simulate(app, argv)` — run the full pipeline including handlers,
+//     capturing stdout / stderr / exit-code into a `SimResult`.
+//   * `argv_of(...)` — turn a Verum List<Text> into a parseable argv.
+//
+// Phase 4 wiring: file I/O is gated behind `core.io.fs`. When run from
+// pure-Verum unit tests with no FS access, snapshots fall back to in-
+// memory comparison against a caller-supplied expected text.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module testing;
+
+mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.cli.spec.CommandSpec;
+mount core.cli.parser.{parse_argv, ParseOutcome};
+mount core.cli.help.{render_help, HelpStyle};
+mount core.cli.runtime.{App, HandlerContext};
+mount core.cli.error.{ParseError, ExitCode};
+
+// =============================================================================
+// SimResult — captured outcome of running an app
+// =============================================================================
+
+public type SimResult is {
+    exit_code: Int,
+    stdout:    Text,
+    stderr:    Text,
+    /// The flat captured outcome — handy for asserting parsing details
+    /// independent of handler side effects.
+    outcome:   Maybe<ParseOutcome>,
+    /// `Some(err)` if argv-parsing failed.
+    parse_err: Maybe<ParseError>,
+};
+
+implement SimResult {
+    public fn ok(&self) -> Bool { self.exit_code == 0 }
+    public fn failed(&self) -> Bool { self.exit_code != 0 }
+}
+
+// =============================================================================
+// try_parse — wire-level parser test
+// =============================================================================
+
+/// Parse `argv` against `spec` and return the raw `ParseOutcome`. Does
+/// not invoke handlers, does not apply env-fallback. Use for unit tests
+/// of parser semantics (multi-error recovery, mutex groups, etc.).
+public fn try_parse(spec: &CommandSpec, argv: List<Text>) -> Result<ParseOutcome, ParseError> {
+    parse_argv(spec, argv)
+}
+
+// =============================================================================
+// argv_of — convenience constructor
+// =============================================================================
+
+/// Build an argv `List<Text>` from a slice literal — keeps test code
+/// from spending its budget on `.to_text()` / `.push` boilerplate.
+public fn argv_of(parts: List<Text>) -> List<Text> {
+    let mut a = List.with_capacity(parts.len() + 1);
+    a.push("test".to_text());      // argv[0] is conventionally the binary name
+    let mut i: Int = 0;
+    while i < parts.len() {
+        a.push(parts[i].clone());
+        i = i + 1;
+    }
+    a
+}
+
+// =============================================================================
+// snapshot helpers — pure-Text comparison
+// =============================================================================
+
+/// Compare the rendered help of `spec` to an expected text. Returns
+/// `None` on match or `Some(diff)` describing the first divergence.
+public fn snapshot_help(spec: &CommandSpec, expected: &Text) -> Maybe<Text> {
+    let style = HelpStyle.plain();
+    let actual = render_help(spec, &style);
+    if &actual == expected { None } else {
+        let mut msg = Text.from("snapshot mismatch:\n");
+        msg.push_str("--- expected ---\n");
+        msg.push_str(expected);
+        msg.push_str("\n--- actual ---\n");
+        msg.push_str(&actual);
+        msg.push_str("\n");
+        Some(msg)
+    }
+}
+
+/// Compare a freshly rendered text to an expected snapshot. Generic
+/// helper used by `snapshot_help`, `snapshot_completion`, `snapshot_manpage`.
+public fn snapshot_text(actual: &Text, expected: &Text, label: &Text) -> Maybe<Text> {
+    if actual == expected { None } else {
+        let mut msg = Text.from("snapshot mismatch [");
+        msg.push_str(label);
+        msg.push_str("]:\n--- expected ---\n");
+        msg.push_str(expected);
+        msg.push_str("\n--- actual ---\n");
+        msg.push_str(actual);
+        msg.push_str("\n");
+        Some(msg)
+    }
+}
+
+// =============================================================================
+// Property-test argv generator hooks
+// =============================================================================
+
+/// Hook for property-based testing: any `List<Text>` should parse without
+/// panicking — the parser must always return a `Result`. Concrete
+/// `quickcheck`-style generators live in `core.testing` (separate spec).
+public type ArgvFuzzCallback is fn(&List<Text>) -> Result<ParseOutcome, ParseError>;
+
+/// Run `cb(argv)` and assert it doesn't panic — surface any thrown
+/// errors as a structured `SimResult`. Phase 4 ships the harness; the
+/// random generator depends on `core.testing.random` (Phase 5).
+public fn fuzz_one(spec: &CommandSpec, argv: List<Text>) -> SimResult {
+    match parse_argv(spec, argv) {
+        Ok(o) => SimResult {
+            exit_code: 0,
+            stdout: Text.empty(),
+            stderr: Text.empty(),
+            outcome: Some(o),
+            parse_err: None,
+        },
+        Err(e) => SimResult {
+            exit_code: e.exit_code().code(),
+            stdout: Text.empty(),
+            stderr: e.message.clone(),
+            outcome: None,
+            parse_err: Some(e),
+        },
+    }
+}

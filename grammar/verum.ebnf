@@ -247,7 +247,7 @@ format_tag_time    = 'd' | 'dur' | 'tz' | 'date' | 'time' | 'datetime' ;
 format_tag_net     = 'ip' | 'cidr' | 'mac' | 'host' ;
 format_tag_version = 'ver' | 'semver' | 'b64' | 'hex' | 'pct' ;
 format_tag_struct  = 'mat' | 'vec' | 'interval' | 'ratio' | 'tensor' ;
-format_tag_code    = 'sh' | 'css' | 'lua' | 'asm' | 'contract' ;
+format_tag_code    = 'sh' | 'cli' | 'css' | 'lua' | 'asm' | 'contract' ;
 format_tag_science = 'chem' | 'music' | 'geo' ;
 
 (* All recognized format tags *)

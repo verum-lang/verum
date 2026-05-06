@@ -1,0 +1,137 @@
+// =============================================================================
+// cli/permissions.vr — Capability-required commands
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.spec, security.permission
+// Spec: internal/specs/cli-framework.md §17.1
+// =============================================================================
+//
+
+// `vcli` lets a command declare which `core.security.permission` it needs;
+// the runtime verifies the calling process has those caps before allowing
+// dispatch. In sandboxed environments (e.g. running under
+// `core.security.permission.SandboxLayer`), commands without their required
+// caps are hidden from `--help` and rejected with `EX_NOPERM` if invoked
+// directly.
+//
+// Phase 0/3 ships the wiring; the actual capability lookup integrates
+// with whatever sandbox the host application installs at startup.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module permissions;
+
+mount core.{Maybe, Result, List, Text, Bool};
+mount core.cli.spec.CommandSpec;
+mount core.cli.error.{ParseError, ExitCode, ParseErrorKind};
+
+// =============================================================================
+// Permission abstraction (insulated from core.security to keep cli small)
+// =============================================================================
+
+/// Coarse-grained permission tag. `cli` expresses requirements via
+/// these symbolic names; the runtime resolver maps them onto whatever
+/// `core.security.permission` model the application installs.
+public type Permission is
+    | NoPerm
+    | FilesystemRead
+    | FilesystemWrite
+    | NetworkOutbound
+    | NetworkInbound
+    | ProcessSpawn
+    | EnvRead
+    | EnvWrite
+    | RawSyscall(Text);
+
+implement Permission {
+    public fn name(&self) -> Text {
+        match self {
+            Permission.NoPerm => "none".to_text(),
+            Permission.FilesystemRead => "fs:read".to_text(),
+            Permission.FilesystemWrite => "fs:write".to_text(),
+            Permission.NetworkOutbound => "net:out".to_text(),
+            Permission.NetworkInbound => "net:in".to_text(),
+            Permission.ProcessSpawn => "proc:spawn".to_text(),
+            Permission.EnvRead => "env:read".to_text(),
+            Permission.EnvWrite => "env:write".to_text(),
+            Permission.RawSyscall(name) => Text.from(f"syscall:{name}"),
+        }
+    }
+}
+
+// =============================================================================
+// PermissionPolicy — what the host has granted
+// =============================================================================
+
+public type PermissionPolicy is {
+    granted: List<Permission>,
+};
+
+implement PermissionPolicy {
+    /// Build a policy granting unrestricted access — typical default
+    /// for non-sandboxed CLIs.
+    public fn unrestricted() -> PermissionPolicy {
+        let mut g = List.new();
+        g.push(Permission.FilesystemRead);
+        g.push(Permission.FilesystemWrite);
+        g.push(Permission.NetworkOutbound);
+        g.push(Permission.NetworkInbound);
+        g.push(Permission.ProcessSpawn);
+        g.push(Permission.EnvRead);
+        g.push(Permission.EnvWrite);
+        PermissionPolicy { granted: g }
+    }
+
+    /// Empty policy — nothing granted.
+    public fn empty() -> PermissionPolicy {
+        PermissionPolicy { granted: List.new() }
+    }
+
+    /// True iff `perm` is in the granted set.
+    public fn allows(&self, perm: &Permission) -> Bool {
+        let mut i: Int = 0;
+        while i < self.granted.len() {
+            if &self.granted[i].name() == &perm.name() { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    public fn grant(mut self, p: Permission) -> PermissionPolicy {
+        self.granted.push(p);
+        self
+    }
+}
+
+// =============================================================================
+// Verification — does this policy admit running `cmd`?
+// =============================================================================
+
+/// Check that `policy` covers every permission `cmd` declares as required.
+/// Returns the first missing permission or `Ok` if all are granted.
+public fn check_command(
+    cmd: &CommandSpec,
+    required: &List<Permission>,
+    policy: &PermissionPolicy,
+) -> Result<Unit, ParseError> {
+    let mut i: Int = 0;
+    while i < required.len() {
+        if !policy.allows(&required[i]) {
+            return Err(ParseError.bare(
+                ParseErrorKind.NotATty, // closest match in current taxonomy
+                Text.from(
+                    f"command '{cmd.name}' requires permission '{required[i].name()}' \
+                      which is not granted by the current sandbox"
+                ),
+            ));
+        }
+        i = i + 1;
+    }
+    Ok(())
+}

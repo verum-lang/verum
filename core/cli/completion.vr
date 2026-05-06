@@ -1,0 +1,360 @@
+// =============================================================================
+// cli/completion.vr — Shell-completion script generators
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, cli.spec
+// Spec: internal/specs/cli-framework.md §8.3
+// =============================================================================
+//
+
+// One source-of-truth → many shells. Each generator walks the same
+// `CommandSpec` tree and emits a shell-specific completion script that
+// covers: subcommands, long flags, short flags, value suggestions
+// (Static / EnumValues / FilePath / DirectoryPath / Hostname / Dynamic).
+//
+// Static completion sources are emitted inline; Dynamic sources call back
+// into the binary via `<bin> __complete <flag> <prefix>` — the runtime
+// recognises this hidden subcommand and prints the candidate list.
+//
+
+// Phase 3 ships:
+//   * bash         — bashcompletion v2-style
+//   * zsh          — _arguments-based with descriptions
+//   * fish         — `complete -c <bin>` directives
+//   * powershell   — Register-ArgumentCompleter
+//   * nushell      — extern + flag descriptors
+//   * elvish       — edit:completion:arg-completer
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module completion;
+
+mount core.{Maybe, Result, List, Text, Char, Int, Bool};
+mount core.text.builder.TextBuilder;
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, CompletionSource,
+};
+
+// =============================================================================
+// Shell — target shell
+// =============================================================================
+
+public type Shell is
+    | Bash
+    | Zsh
+    | Fish
+    | PowerShell
+    | Nushell
+    | Elvish;
+
+implement Shell {
+    public fn name(&self) -> Text {
+        match self {
+            Shell.Bash => "bash".to_text(),
+            Shell.Zsh => "zsh".to_text(),
+            Shell.Fish => "fish".to_text(),
+            Shell.PowerShell => "powershell".to_text(),
+            Shell.Nushell => "nushell".to_text(),
+            Shell.Elvish => "elvish".to_text(),
+        }
+    }
+}
+
+// =============================================================================
+// Top-level dispatch
+// =============================================================================
+
+/// Render a shell-completion script for `cmd` targeting `shell`.
+public fn render(cmd: &CommandSpec, shell: Shell) -> Text {
+    match shell {
+        Shell.Bash => render_bash(cmd),
+        Shell.Zsh => render_zsh(cmd),
+        Shell.Fish => render_fish(cmd),
+        Shell.PowerShell => render_powershell(cmd),
+        Shell.Nushell => render_nushell(cmd),
+        Shell.Elvish => render_elvish(cmd),
+    }
+}
+
+// =============================================================================
+// bash
+// =============================================================================
+
+fn render_bash(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("# bash completion for ");
+    b.append(bin);
+    b.append("\n_");
+    b.append(bin);
+    b.append("() {\n");
+    b.append("    local cur prev words cword\n");
+    b.append("    _init_completion -n = || return\n\n");
+
+    // Subcommand list
+    b.append("    local subcommands=\"");
+    let names = cmd.subcommand_names();
+    let mut i: Int = 0;
+    while i < names.len() {
+        if i > 0 { b.append(" "); }
+        b.append(&names[i]);
+        i = i + 1;
+    }
+    b.append("\"\n");
+
+    // Long-flag list
+    b.append("    local longs=\"");
+    let longs = cmd.long_names();
+    let mut j: Int = 0;
+    while j < longs.len() {
+        if j > 0 { b.append(" "); }
+        b.append("--");
+        b.append(&longs[j]);
+        j = j + 1;
+    }
+    b.append("\"\n\n");
+
+    b.append("    case \"$cur\" in\n");
+    b.append("        --*) COMPREPLY=( $(compgen -W \"$longs\" -- \"$cur\") );;\n");
+    b.append("        *)   COMPREPLY=( $(compgen -W \"$subcommands\" -- \"$cur\") );;\n");
+    b.append("    esac\n");
+    b.append("}\n");
+    b.append("complete -F _");
+    b.append(bin);
+    b.append(" ");
+    b.append(bin);
+    b.append("\n");
+    b.build()
+}
+
+// =============================================================================
+// zsh
+// =============================================================================
+
+fn render_zsh(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("#compdef ");
+    b.append(bin);
+    b.append("\n");
+    b.append("_");
+    b.append(bin);
+    b.append("() {\n");
+    b.append("    local -a flags subcommands\n");
+
+    b.append("    flags=(\n");
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        match &f.long {
+            Some(l) => {
+                b.append("        '--");
+                b.append(l);
+                b.append("[");
+                b.append(&f.help);
+                b.append("]'\n");
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+    b.append("    )\n");
+
+    b.append("    subcommands=(\n");
+    let mut k: Int = 0;
+    while k < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[k];
+        b.append("        '");
+        b.append(&sc.name);
+        b.append(":");
+        b.append(&sc.about);
+        b.append("'\n");
+        k = k + 1;
+    }
+    b.append("    )\n");
+
+    b.append("    _arguments -C $flags '*::: := __");
+    b.append(bin);
+    b.append("_subcmd'\n");
+    b.append("}\n_");
+    b.append(bin);
+    b.append("\n");
+    b.build()
+}
+
+// =============================================================================
+// fish
+// =============================================================================
+
+fn render_fish(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("# fish completion for ");
+    b.append(bin);
+    b.append("\n");
+
+    // Subcommands
+    let mut i: Int = 0;
+    while i < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[i];
+        b.append("complete -c ");
+        b.append(bin);
+        b.append(" -n '__fish_use_subcommand' -a '");
+        b.append(&sc.name);
+        b.append("' -d '");
+        b.append(&sc.about);
+        b.append("'\n");
+        i = i + 1;
+    }
+
+    // Flags
+    let mut j: Int = 0;
+    while j < cmd.flags.len() {
+        let f = &cmd.flags[j];
+        b.append("complete -c ");
+        b.append(bin);
+        match f.short {
+            Some(c) => { b.append(" -s "); b.append(&Text.from(f"{c}")); },
+            None => {},
+        }
+        match &f.long {
+            Some(l) => { b.append(" -l "); b.append(l); },
+            None => {},
+        }
+        b.append(" -d '");
+        b.append(&f.help);
+        b.append("'");
+        match &f.completion {
+            CompletionSource.FilePath => b.append(" -F"),
+            CompletionSource.DirectoryPath => b.append(" -F -a '(__fish_complete_directories)'"),
+            CompletionSource.Hostname => b.append(" -a '(__fish_print_hostnames)'"),
+            CompletionSource.EnumValues(vs) => {
+                b.append(" -a '");
+                let mut m: Int = 0;
+                while m < vs.len() {
+                    if m > 0 { b.append(" "); }
+                    b.append(&vs[m]);
+                    m = m + 1;
+                }
+                b.append("'");
+            },
+            CompletionSource.Static(vs) => {
+                b.append(" -a '");
+                let mut m: Int = 0;
+                while m < vs.len() {
+                    if m > 0 { b.append(" "); }
+                    b.append(&vs[m]);
+                    m = m + 1;
+                }
+                b.append("'");
+            },
+            _ => {},
+        }
+        b.append("\n");
+        j = j + 1;
+    }
+    b.build()
+}
+
+// =============================================================================
+// powershell
+// =============================================================================
+
+fn render_powershell(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("Register-ArgumentCompleter -Native -CommandName '");
+    b.append(bin);
+    b.append("' -ScriptBlock {\n");
+    b.append("    param($wordToComplete, $commandAst, $cursorPosition)\n");
+    b.append("    $candidates = @(\n");
+    let names = cmd.subcommand_names();
+    let mut i: Int = 0;
+    while i < names.len() {
+        b.append("        '");
+        b.append(&names[i]);
+        b.append("'\n");
+        i = i + 1;
+    }
+    let longs = cmd.long_names();
+    let mut j: Int = 0;
+    while j < longs.len() {
+        b.append("        '--");
+        b.append(&longs[j]);
+        b.append("'\n");
+        j = j + 1;
+    }
+    b.append("    )\n");
+    b.append("    $candidates | Where-Object { $_ -like \"$wordToComplete*\" } |\n");
+    b.append("        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n");
+    b.append("}\n");
+    b.build()
+}
+
+// =============================================================================
+// nushell
+// =============================================================================
+
+fn render_nushell(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("# nushell completion for ");
+    b.append(bin);
+    b.append("\nexport extern \"");
+    b.append(bin);
+    b.append("\" [\n");
+
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        match &f.long {
+            Some(l) => {
+                b.append("    --");
+                b.append(l);
+                b.append("\t# ");
+                b.append(&f.help);
+                b.append("\n");
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+
+    b.append("]\n");
+    b.build()
+}
+
+// =============================================================================
+// elvish
+// =============================================================================
+
+fn render_elvish(cmd: &CommandSpec) -> Text {
+    let bin = &cmd.name;
+    let mut b = TextBuilder.new();
+    b.append("# elvish completion for ");
+    b.append(bin);
+    b.append("\nuse builtin\n");
+    b.append("edit:completion:arg-completer[");
+    b.append(bin);
+    b.append("] = {|@words|\n");
+    b.append("    var subcommands = [");
+    let names = cmd.subcommand_names();
+    let mut i: Int = 0;
+    while i < names.len() {
+        if i > 0 { b.append(" "); }
+        b.append("'");
+        b.append(&names[i]);
+        b.append("'");
+        i = i + 1;
+    }
+    b.append("]\n");
+    b.append("    put $@subcommands\n");
+    b.append("}\n");
+    b.build()
+}

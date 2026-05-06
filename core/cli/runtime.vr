@@ -1,0 +1,351 @@
+// =============================================================================
+// cli/runtime.vr — App<E> dispatcher: argv → handler invocation
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, base.env, io.stdio, cli.{spec,parser,help,error,types}
+// Spec: internal/specs/cli-framework.md §11–§16
+// =============================================================================
+//
+
+// `App` is the entry point for a vcli-built command-line application.
+// It owns a `CommandSpec` and a `HandlerRegistry` mapping handler-names
+// to closures, and wires together: argv parsing → help / version short-
+// circuit → mutex / refinement validation → handler dispatch → exit code.
+//
+
+// The runtime intentionally returns `Result<ExitCode, ParseError>` from
+// `try_run` so the caller can choose between `process::exit` and library-
+// style usage. `run_or_exit` is the convenience wrapper that prints help
+// or error to stderr and calls `env::exit` with the appropriate code.
+//
+
+// Phase 0 ships:
+//   * synchronous handler dispatch (`HandlerRegistry`)
+//   * help / version short-circuit
+//   * exit-code mapping
+//   * env-fallback for flags (already-given values not overwritten)
+//
+// Phase 1 will add the @command derive macro that constructs `App` +
+// handler registry from a type. Phase 3 will add config-file resolution.
+// Phase 6 will add interactive-fallback prompts.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module runtime;
+
+mount core.{Maybe, Result, List, Map, Text, Int, Bool, Heap, Unit};
+mount core.base.env;
+mount core.io.stdio;
+mount core.text.builder.TextBuilder;
+mount core.cli.spec.{CommandSpec, FlagSpec, HandlerRef};
+mount core.cli.parser.{parse_argv, ParseOutcome, CapturedArg, CapturedFlag};
+mount core.cli.help.{render_help, HelpStyle};
+mount core.cli.error.{ParseError, ParseErrorKind, ExitCode};
+
+// =============================================================================
+// HandlerContext — what handlers receive
+// =============================================================================
+
+/// Runtime context passed to every handler. Carries the parse outcome
+/// (already validated and env-resolved) plus a back-reference to the
+/// matched command so handlers can render scoped help on demand.
+public type HandlerContext is {
+    /// The leaf command that matched.
+    command: CommandSpec,
+    /// Full path of subcommand names (root-first).
+    command_path: List<Text>,
+    /// Flag values, looked up by long-name.
+    flags: Map<Text, CapturedFlag>,
+    /// Positional args.
+    args: List<CapturedArg>,
+    /// Anything after `--`.
+    trailing: List<Text>,
+};
+
+implement HandlerContext {
+    /// Lookup a flag by long-name. Returns `None` if absent.
+    public fn flag(&self, long: &Text) -> Maybe<&CapturedFlag> {
+        self.flags.get(long)
+    }
+
+    /// Convenience: was this switch flag set?
+    public fn switch_set(&self, long: &Text) -> Bool {
+        match self.flags.get(long) {
+            Some(f) => f.occurrences > 0,
+            None => false,
+        }
+    }
+
+    /// Lookup a flag's first value. None if flag absent or has no values.
+    public fn flag_value(&self, long: &Text) -> Maybe<Text> {
+        match self.flags.get(long) {
+            Some(f) => if f.values.len() > 0 { Some(f.values[0].clone()) } else { None },
+            None => None,
+        }
+    }
+
+    /// Lookup a positional argument's first value.
+    public fn arg_value(&self, name: &Text) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.args.len() {
+            if &self.args[i].name == name {
+                if self.args[i].values.len() > 0 {
+                    return Some(self.args[i].values[0].clone());
+                }
+                return None;
+            }
+            i = i + 1;
+        }
+        None
+    }
+}
+
+// =============================================================================
+// Handler signature
+// =============================================================================
+
+/// Synchronous handler signature. Returns an `ExitCode` directly so
+/// the runtime can emit it as the process exit status. Handler errors
+/// are surfaced as non-zero `ExitCode` values; richer error reporting
+/// goes through `eprintln` from inside the handler.
+public type Handler is fn(&HandlerContext) -> ExitCode;
+
+// =============================================================================
+// HandlerRegistry — name → fn pointer
+// =============================================================================
+
+public type HandlerRegistry is {
+    handlers: Map<Text, Handler>,
+};
+
+implement HandlerRegistry {
+    public fn new() -> HandlerRegistry {
+        HandlerRegistry { handlers: Map.new() }
+    }
+
+    public fn register(mut self, name: Text, h: Handler) -> HandlerRegistry {
+        self.handlers.insert(name, h);
+        self
+    }
+
+    public fn lookup(&self, name: &Text) -> Maybe<Handler> {
+        self.handlers.get_optional(name.clone())
+    }
+}
+
+// =============================================================================
+// App<()> — runtime container
+// =============================================================================
+
+public type App is {
+    spec: CommandSpec,
+    registry: HandlerRegistry,
+    style: HelpStyle,
+};
+
+implement App {
+    /// Build an `App` from a fully-described `CommandSpec`. The handler
+    /// registry starts empty — populate via `.register("name", fn)`.
+    public fn from_spec(spec: CommandSpec) -> App {
+        App {
+            spec: spec,
+            registry: HandlerRegistry.new(),
+            style: HelpStyle.default(),
+        }
+    }
+
+    /// Register a named handler. The name must match a `HandlerRef::NamedHandler`
+    /// somewhere in the spec.
+    public fn register(mut self, name: Text, h: Handler) -> App {
+        self.registry = self.registry.register(name, h);
+        self
+    }
+
+    /// Override the help style.
+    public fn with_help_style(mut self, s: HelpStyle) -> App {
+        self.style = s;
+        self
+    }
+
+    /// Parse argv and dispatch. Returns the chosen exit code. Does not
+    /// itself call `env::exit`; callers can decide whether to exit or
+    /// continue (useful in REPL hosts).
+    public fn try_run(&self, argv: List<Text>) -> Result<ExitCode, ParseError> {
+        let outcome = parse_argv(&self.spec, argv)?;
+
+        // --help short-circuit on root.
+        if outcome.help_requested {
+            let target = self.find_at_path(&outcome.command_path);
+            let txt = render_help(target, &self.style);
+            stdio.println(&txt);
+            return Ok(ExitCode.ok());
+        }
+
+        // --version short-circuit.
+        if outcome.version_requested {
+            let target = self.find_at_path(&outcome.command_path);
+            let v = match &target.version {
+                Some(v) => v.clone(),
+                None => "unknown".to_text(),
+            };
+            stdio.println(&Text.from(f"{target.name} {v}"));
+            return Ok(ExitCode.ok());
+        }
+
+        // Apply env-fallback for any flag declared with `env` and not
+        // captured during parse.
+        let outcome = apply_env_fallbacks(&self.spec, &outcome);
+
+        // Resolve handler.
+        let target = self.find_at_path(&outcome.command_path);
+        match &target.handler {
+            HandlerRef.NoHandler => {
+                if target.subcommands.len() > 0 {
+                    let txt = render_help(target, &self.style);
+                    stdio.println(&txt);
+                    return Ok(ExitCode.usage());
+                }
+                Ok(ExitCode.ok())
+            },
+            HandlerRef.NamedHandler(name) => {
+                match self.registry.lookup(name) {
+                    Some(h) => {
+                        let ctx = HandlerContext {
+                            command: target.clone(),
+                            command_path: outcome.command_path.clone(),
+                            flags: outcome.flags.clone(),
+                            args: outcome.args.clone(),
+                            trailing: outcome.trailing.clone(),
+                        };
+                        Ok(h(&ctx))
+                    },
+                    None => Err(ParseError.bare(
+                        ParseErrorKind.InternalError,
+                        Text.from(f"no handler registered: '{name}'"),
+                    )),
+                }
+            },
+        }
+    }
+
+    /// Run the app and exit the process. Help → exit 0. Errors → render
+    /// to stderr and exit with the mapped code.
+    public fn run_or_exit(&self) -> ! {
+        let argv = env.args();
+        match self.try_run(argv) {
+            Ok(code) => env.exit(code.code()),
+            Err(e) => {
+                let line = render_error(&e);
+                stdio.eprintln(&line);
+                env.exit(e.exit_code().code());
+            },
+        }
+    }
+
+    /// Locate the spec node at the given command-path (root-first).
+    fn find_at_path(&self, path: &List<Text>) -> &CommandSpec {
+        let mut cur: &CommandSpec = &self.spec;
+        let mut i: Int = 1;     // skip root name
+        while i < path.len() {
+            match cur.find_subcommand(&path[i]) {
+                Some(sc) => { cur = sc; },
+                None => break,
+            }
+            i = i + 1;
+        }
+        cur
+    }
+}
+
+// =============================================================================
+// env-fallback application
+// =============================================================================
+
+/// For each flag with `env_fallback = Some(...)` that wasn't captured,
+/// pull the value from the process environment and synthesise a
+/// `CapturedFlag` entry.
+fn apply_env_fallbacks(spec: &CommandSpec, outcome: &ParseOutcome) -> ParseOutcome {
+    let mut updated = outcome.clone();
+    apply_env_for_command(spec, &mut updated);
+
+    // Walk the command path and apply env-fallbacks for each level.
+    let mut cur: &CommandSpec = spec;
+    let mut i: Int = 1;
+    while i < outcome.command_path.len() {
+        match cur.find_subcommand(&outcome.command_path[i]) {
+            Some(sc) => {
+                apply_env_for_command(sc, &mut updated);
+                cur = sc;
+            },
+            None => break,
+        }
+        i = i + 1;
+    }
+    updated
+}
+
+fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        // Only flags with both an env-fallback AND a long-name participate.
+        match (&f.env_fallback, &f.long) {
+            (Some(env_name), Some(long)) => {
+                let key = long.clone();
+                if !outcome.flags.contains_key(&key) {
+                    match env.var_opt(env_name) {
+                        Some(v) => {
+                            let mut values = List.new();
+                            values.push(v);
+                            outcome.flags.insert(key.clone(), CapturedFlag {
+                                name: key,
+                                values: values,
+                                occurrences: 1,
+                            });
+                        },
+                        None => {},
+                    }
+                }
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Error rendering
+// =============================================================================
+
+/// Render a `ParseError` as a multi-line styled block for stderr.
+fn render_error(e: &ParseError) -> Text {
+    let mut b = TextBuilder.new();
+    b.append("\x1b[31;1merror\x1b[0m: ");
+    b.append(&e.message);
+    b.append("\n");
+    let mut i: Int = 0;
+    while i < e.diagnostics.len() {
+        b.append("       ");
+        b.append(&e.diagnostics[i].to_text());
+        b.append("\n");
+        i = i + 1;
+    }
+    b.build()
+}
+
+// =============================================================================
+// Convenience top-level dispatch
+// =============================================================================
+
+/// Convenience: build an `App`, register one handler, run it.
+/// Useful for tiny scripts where the whole CLI is one command.
+public fn dispatch(spec: CommandSpec, h: Handler) -> ! {
+    let app = App.from_spec(spec).register("root".to_text(), h);
+    app.run_or_exit()
+}

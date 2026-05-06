@@ -1,0 +1,183 @@
+// =============================================================================
+// cli/derive.vr — Semantic mapping for @command / @arg / @flag derives
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.spec, cli.builder
+// Spec: internal/specs/cli-framework.md §4
+// Status: Phase 1 — semantic-only, scaffolding for the meta1 macro pass
+// =============================================================================
+//
+
+// This module documents how the (Phase 1) `@command`, `@arg`, `@flag`,
+// `@subcommand`, `@value`, `@group` derive attributes desugar into
+// `CommandSpec` / `ArgSpec` / `FlagSpec` constructions. The desugaring
+// itself happens in `verum_compiler::derives::cli`, but the helper
+// constructors here let the meta1 stage emit *minimum* `mount` paths
+// rather than reach across crate boundaries.
+//
+// Until the macro pass lands, hand-written code uses `cli::builder` to
+// produce identical specs. The two paths converge on the same `CommandSpec`
+// shape — every test against a hand-built spec is also a test against
+// the future macro pass.
+//
+
+// =============================================================================
+// Desugaring contract
+// =============================================================================
+//
+// @command(name = "tool", version = "1.0", about = "...")
+// type Cli is { ... }
+//
+//   ↓ desugars to
+//
+// fn __cli_spec_for_Cli() -> CommandSpec {
+//     let mut s = CommandSpec.new("tool", "...");
+//     s.version = Some("1.0");
+//     s = field_to_arg_or_flag(s, "field_name", FieldType, attrs);
+//     ...
+//     s.handler = HandlerRef.NamedHandler("Cli::__main");
+//     s
+// }
+//
+// @arg(help = "...") field: T   — desugars to ArgSpec via FromArg::arg_kind()
+// @flag(short = 'v', long = "verbose")
+//   field: Bool                 — desugars to FlagSpec.switch
+//   field: Maybe<T>             — FlagSpec.value with arity Optional
+//   field: T                    — FlagSpec.value with arity Exactly(1)
+//   field: List<T>              — FlagSpec.value with arity Unlimited + repeated
+//   field: Int + counter        — FlagSpec.counter
+//
+// @subcommand                   — variants of a sum-type field become
+//                                 nested CommandSpec subcommands; each
+//                                 record-payload variant becomes the
+//                                 subcommand's own arg-set.
+//
+// @value("name", aliases = [...])  — variant-level override for ValueEnum
+// @group(name = "g", kind = Exclusive, members = [...])
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module derive;
+
+mount core.{Maybe, Result, List, Text, Char, Bool};
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Arity, RefinementHandle,
+    InteractivePolicy, CompletionSource, HandlerRef,
+};
+mount core.cli.builder.{AppBuilder, ArgBuilder, FlagBuilder};
+mount core.cli.types.{ArgKind};
+
+// =============================================================================
+// FieldKindHint — meta1 hands the macro this enum to encode "what shape
+// the field type took" without needing the full type system at the
+// emission site.
+// =============================================================================
+
+/// What shape did the field type collapse into during meta1 lowering?
+public type FieldKindHint is
+    | FieldSwitch                    // Bool → arity Exactly(0)
+    | FieldOptional                  // Maybe<T>
+    | FieldRequired                  // bare T
+    | FieldVariadic                  // List<T> repeating
+    | FieldCounter                   // Int + @flag(count = true)
+    | FieldEnum(List<Text>);         // ValueEnum-derived
+
+// =============================================================================
+// Helpers used by the macro emitter
+// =============================================================================
+
+/// Build a flag from raw attribute-args. The macro emitter calls this
+/// for every `@flag` field after kind-hint resolution.
+public fn flag_from_meta(
+    long: Maybe<Text>,
+    short: Maybe<Char>,
+    help: Text,
+    kind: FieldKindHint,
+    refinement_expr: Maybe<Text>,
+    env_name: Maybe<Text>,
+    config_path: Maybe<Text>,
+    persistent: Bool,
+    negatable: Bool,
+) -> FlagSpec {
+    let long_name = match long {
+        Some(l) => l,
+        None => "flag".to_text(),
+    };
+
+    let mut b = match kind {
+        FieldKindHint.FieldSwitch => FlagBuilder.switch(long_name, help),
+        _ => FlagBuilder.value(long_name, help),
+    };
+
+    match short {
+        Some(c) => { b = b.short(c); },
+        None => {},
+    }
+    match kind {
+        FieldKindHint.FieldVariadic => { b = b.repeated().arity(Arity.Unlimited); },
+        FieldKindHint.FieldCounter => { b = b.counter(); },
+        FieldKindHint.FieldOptional => { b = b.arity(Arity.optional()); },
+        FieldKindHint.FieldEnum(variants) => { b = b.completion(CompletionSource.EnumValues(variants)); },
+        _ => {},
+    }
+    match refinement_expr {
+        Some(expr) => { b = b.refinement(expr); },
+        None => {},
+    }
+    match env_name {
+        Some(e) => { b = b.env(e); },
+        None => {},
+    }
+    match config_path {
+        Some(p) => { b = b.config(p); },
+        None => {},
+    }
+    if persistent { b = b.persistent(); }
+    if negatable { b = b.negatable(); }
+
+    b.build()
+}
+
+/// Build a positional argument from raw attribute-args.
+public fn arg_from_meta(
+    name: Text,
+    help: Text,
+    kind: FieldKindHint,
+    refinement_expr: Maybe<Text>,
+    env_name: Maybe<Text>,
+    config_path: Maybe<Text>,
+) -> ArgSpec {
+    let mut b = ArgBuilder.new(name, help);
+
+    match kind {
+        FieldKindHint.FieldOptional => { b = b.optional(); },
+        FieldKindHint.FieldVariadic => { b = b.variadic(); },
+        FieldKindHint.FieldEnum(variants) => { b = b.completion(CompletionSource.EnumValues(variants)); },
+        _ => {},
+    }
+    match refinement_expr {
+        Some(expr) => { b = b.refinement(expr); },
+        None => {},
+    }
+    match env_name {
+        Some(e) => { b = b.env(e); },
+        None => {},
+    }
+    match config_path {
+        Some(p) => { b = b.config(p); },
+        None => {},
+    }
+    b.build()
+}
+
+/// Build a `HandlerRef::NamedHandler` from a fully-qualified Verum path.
+/// The macro emitter mangles `Cli::main` → `"Cli__main"` and registers
+/// it in the runtime registry; this helper just wraps the string.
+public fn handler_ref(name: Text) -> HandlerRef {
+    HandlerRef.NamedHandler(name)
+}

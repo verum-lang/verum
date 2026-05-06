@@ -1,0 +1,230 @@
+// =============================================================================
+// cli/types.vr — Typed-argument protocols (FromArg, ValueEnum, ArgKind)
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, io.path
+// Spec: internal/specs/cli-framework.md §3.2
+// =============================================================================
+//
+
+// `FromArg` is the central protocol: any type that knows how to materialise
+// itself from a single argv token implements it. The runtime calls
+// `FromArg::from_arg(text)` once per slot. Built-in implementations cover
+// every primitive plus `Path`, `Maybe<T: FromArg>`, and `List<T: FromArgList>`.
+//
+
+// `ValueEnum` is the enum-style narrowing: a fixed alphabet of allowed
+// strings. Mostly used by sum-typed configuration choices like
+// `Format = Json | Yaml | Toml`. The completion machinery reads the
+// `variants()` list to emit shell completion automatically.
+//
+
+// `ArgKind` is a hint enum used by help-renderer and completion-emitters
+// to pick a sensible placeholder name and default completion source —
+// `ArgKind::Path` ⇒ placeholder `<PATH>` and shell `_files` completion.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module types;
+
+mount core.{Maybe, Result, List, Text, Char, Int, Float, Bool, Byte, Heap};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.cli.error.{ParseError, ParseErrorKind};
+
+// =============================================================================
+// ArgKind — completion / placeholder hint
+// =============================================================================
+
+/// Kind of value an argument carries — drives default placeholder and
+/// shell-completion source.
+public type ArgKind is
+    | Generic                   // `<VALUE>`, no completion
+    | TextKind                  // `<TEXT>`
+    | IntKind                   // `<N>`
+    | FloatKind                 // `<X>`
+    | BoolKind                  // `<BOOL>`
+    | PathKind                  // `<PATH>` + file completion
+    | DirectoryKind             // `<DIR>` + directory completion
+    | FileKind                  // `<FILE>` + file completion
+    | HostnameKind              // `<HOST>` + hostname completion
+    | UrlKind                   // `<URL>`
+    | EmailKind                 // `<EMAIL>`
+    | PortKind                  // `<PORT>`
+    | DurationKind              // `<DURATION>` (e.g. 10s, 5m)
+    | DateTimeKind              // `<DATETIME>`
+    | EnumKind(List<Text>);     // `<{a|b|c}>` + static completion
+
+implement ArgKind {
+    /// Default placeholder shown in usage line.
+    public fn placeholder(&self) -> Text {
+        match self {
+            ArgKind.Generic => "VALUE".to_text(),
+            ArgKind.TextKind => "TEXT".to_text(),
+            ArgKind.IntKind => "N".to_text(),
+            ArgKind.FloatKind => "X".to_text(),
+            ArgKind.BoolKind => "BOOL".to_text(),
+            ArgKind.PathKind => "PATH".to_text(),
+            ArgKind.DirectoryKind => "DIR".to_text(),
+            ArgKind.FileKind => "FILE".to_text(),
+            ArgKind.HostnameKind => "HOST".to_text(),
+            ArgKind.UrlKind => "URL".to_text(),
+            ArgKind.EmailKind => "EMAIL".to_text(),
+            ArgKind.PortKind => "PORT".to_text(),
+            ArgKind.DurationKind => "DURATION".to_text(),
+            ArgKind.DateTimeKind => "DATETIME".to_text(),
+            ArgKind.EnumKind(_) => "VALUE".to_text(),
+        }
+    }
+
+    /// Stable text tag used in `ArgSpec.kind_hint` / `FlagSpec.kind_hint`.
+    public fn tag(&self) -> Text {
+        match self {
+            ArgKind.Generic => "Generic".to_text(),
+            ArgKind.TextKind => "Text".to_text(),
+            ArgKind.IntKind => "Int".to_text(),
+            ArgKind.FloatKind => "Float".to_text(),
+            ArgKind.BoolKind => "Bool".to_text(),
+            ArgKind.PathKind => "Path".to_text(),
+            ArgKind.DirectoryKind => "Directory".to_text(),
+            ArgKind.FileKind => "File".to_text(),
+            ArgKind.HostnameKind => "Hostname".to_text(),
+            ArgKind.UrlKind => "Url".to_text(),
+            ArgKind.EmailKind => "Email".to_text(),
+            ArgKind.PortKind => "Port".to_text(),
+            ArgKind.DurationKind => "Duration".to_text(),
+            ArgKind.DateTimeKind => "DateTime".to_text(),
+            ArgKind.EnumKind(_) => "Enum".to_text(),
+        }
+    }
+}
+
+// =============================================================================
+// FromArg — parse a single argv token into Self
+// =============================================================================
+
+/// A type whose values can be materialised from a single argv token.
+///
+/// Implementors must be pure and deterministic: parsing the same string
+/// twice must yield identical results. Implementations should NOT throw
+/// or panic — surface failure via `Err(ParseError)`.
+public type FromArg is protocol {
+    /// Materialise `Self` from a string token. The token has been
+    /// pre-stripped of any surrounding `--flag=` separator.
+    fn from_arg(s: &Text) -> Result<Self, ParseError>;
+
+    /// Hint used by help / completion. Default is `Generic`.
+    fn arg_kind() -> ArgKind { ArgKind.Generic }
+}
+
+// =============================================================================
+// ValueEnum — fixed alphabet of allowed values
+// =============================================================================
+
+/// An enum-shaped type with a fixed set of allowed string values.
+public type ValueEnum is protocol {
+    /// All variants in declaration order. Used by completion and help.
+    fn variants() -> List<Text>;
+
+    /// Materialise from the canonical variant name (case-sensitive by default).
+    fn from_variant(s: &Text) -> Result<Self, ParseError>;
+
+    /// Render `self` back to its canonical variant name.
+    fn to_variant(&self) -> Text;
+}
+
+// =============================================================================
+// Built-in FromArg implementations
+// =============================================================================
+
+implement FromArg for Text {
+    fn from_arg(s: &Text) -> Result<Text, ParseError> {
+        Ok(s.clone())
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.TextKind }
+}
+
+implement FromArg for Int {
+    fn from_arg(s: &Text) -> Result<Int, ParseError> {
+        match s.parse_int() {
+            Ok(n) => Ok(n),
+            Err(_) => Err(ParseError.invalid_value(s.clone(), "integer".to_text())),
+        }
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.IntKind }
+}
+
+implement FromArg for Float {
+    fn from_arg(s: &Text) -> Result<Float, ParseError> {
+        match s.parse_float() {
+            Ok(x) => Ok(x),
+            Err(_) => Err(ParseError.invalid_value(s.clone(), "float".to_text())),
+        }
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.FloatKind }
+}
+
+implement FromArg for Bool {
+    fn from_arg(s: &Text) -> Result<Bool, ParseError> {
+        match s.to_lowercase().as_str() {
+            "true" | "1" | "yes" | "y" | "on" => Ok(true),
+            "false" | "0" | "no" | "n" | "off" => Ok(false),
+            _ => Err(ParseError.invalid_value(
+                s.clone(),
+                "boolean (true/false/yes/no/1/0/on/off)".to_text(),
+            )),
+        }
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.BoolKind }
+}
+
+implement FromArg for Char {
+    fn from_arg(s: &Text) -> Result<Char, ParseError> {
+        if s.char_count() == 1 {
+            match s.chars().next() {
+                Some(c) => Ok(c),
+                None => Err(ParseError.invalid_value(
+                    s.clone(),
+                    "single character".to_text(),
+                )),
+            }
+        } else {
+            Err(ParseError.invalid_value(s.clone(), "single character".to_text()))
+        }
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.TextKind }
+}
+
+// Maybe<T> — optional flag value: presence implies Some.
+implement<T: FromArg> FromArg for Maybe<T> {
+    fn from_arg(s: &Text) -> Result<Maybe<T>, ParseError> {
+        match T.from_arg(s) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn arg_kind() -> ArgKind { T.arg_kind() }
+}
+
+// =============================================================================
+// Bytes / List<Byte> for raw input
+// =============================================================================
+
+implement FromArg for List<Byte> {
+    fn from_arg(s: &Text) -> Result<List<Byte>, ParseError> {
+        Ok(s.as_bytes().to_list())
+    }
+
+    fn arg_kind() -> ArgKind { ArgKind.Generic }
+}

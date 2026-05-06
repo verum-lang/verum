@@ -1,0 +1,303 @@
+// =============================================================================
+// cli/manpage.vr — Groff/troff manpage emitter
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, cli.spec
+// Spec: internal/specs/cli-framework.md §8.2
+// =============================================================================
+//
+
+// Emits a `.TH ... .SH ...` groff document compatible with `man(1)`.
+// Output sections: NAME, SYNOPSIS, DESCRIPTION, OPTIONS, COMMANDS,
+// EXAMPLES, ENVIRONMENT, EXIT STATUS, AUTHOR, SEE ALSO. Subcommands are
+// rendered with their own subsections (`.SS`) so a single page can
+// document a multi-level CLI (kubectl-style).
+//
+// Spec field correspondences:
+//   CommandSpec.name        → .TH NAME 1
+//   CommandSpec.about       → .SH NAME
+//   CommandSpec.long_about  → .SH DESCRIPTION
+//   ArgSpec / FlagSpec      → .SH OPTIONS (.TP for each)
+//   subcommands             → .SH COMMANDS (.SS per subcommand)
+//   examples                → .SH EXAMPLES
+//   flags[].env_fallback    → .SH ENVIRONMENT
+//   ParseErrorKind exit-codes → .SH EXIT STATUS
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module manpage;
+
+mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.text.builder.TextBuilder;
+mount core.cli.spec.{CommandSpec, ArgSpec, FlagSpec, Example};
+
+// =============================================================================
+// Manpage section number
+// =============================================================================
+
+public type Section is
+    | UserCommands              // 1
+    | SystemCalls               // 2
+    | LibraryCalls              // 3
+    | SpecialFiles              // 4
+    | FileFormats               // 5
+    | Games                     // 6
+    | Misc                      // 7
+    | SystemAdmin;              // 8
+
+implement Section {
+    public fn number(&self) -> Int {
+        match self {
+            Section.UserCommands => 1,
+            Section.SystemCalls => 2,
+            Section.LibraryCalls => 3,
+            Section.SpecialFiles => 4,
+            Section.FileFormats => 5,
+            Section.Games => 6,
+            Section.Misc => 7,
+            Section.SystemAdmin => 8,
+        }
+    }
+}
+
+// =============================================================================
+// Top-level emit
+// =============================================================================
+
+/// Render `cmd` as a groff manpage in section `section`. The result is
+/// suitable for direct write to `<bin>.<n>` in a man-path directory.
+public fn render(cmd: &CommandSpec, section: Section) -> Text {
+    let mut b = TextBuilder.new();
+
+    // .TH header
+    b.append(".TH ");
+    b.append(&cmd.name.to_uppercase());
+    b.append(" ");
+    b.append(&Text.from(f"{section.number()}"));
+    match &cmd.version {
+        Some(v) => { b.append(" \""); b.append(v); b.append("\""); },
+        None => { b.append(" \"\""); },
+    }
+    b.append(" \"User Commands\"\n");
+
+    write_name(&mut b, cmd);
+    write_synopsis(&mut b, cmd);
+    write_description(&mut b, cmd);
+    if cmd.flags.len() > 0 || cmd.args.len() > 0 {
+        write_options(&mut b, cmd);
+    }
+    if cmd.subcommands.len() > 0 {
+        write_commands(&mut b, cmd);
+    }
+    if cmd.examples.len() > 0 {
+        write_examples(&mut b, cmd);
+    }
+    if has_env_fallbacks(cmd) {
+        write_environment(&mut b, cmd);
+    }
+    write_exit_status(&mut b);
+    write_author(&mut b, cmd);
+    b.build()
+}
+
+// =============================================================================
+// Sections
+// =============================================================================
+
+fn write_name(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH NAME\n");
+    b.append(&cmd.name);
+    b.append(" \\- ");
+    b.append(&cmd.about);
+    b.append("\n");
+}
+
+fn write_synopsis(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH SYNOPSIS\n");
+    b.append(".B ");
+    b.append(&cmd.name);
+    b.append("\n");
+    if cmd.flags.len() > 0 {
+        b.append("[\\fIOPTIONS\\fR] ");
+    }
+    let mut i: Int = 0;
+    while i < cmd.args.len() {
+        let a = &cmd.args[i];
+        b.append("\\fI");
+        match &a.placeholder {
+            Some(p) => b.append(p),
+            None => b.append(&a.name.to_uppercase()),
+        }
+        b.append("\\fR ");
+        i = i + 1;
+    }
+    if cmd.subcommands.len() > 0 {
+        b.append("\\fICOMMAND\\fR");
+    }
+    b.append("\n");
+}
+
+fn write_description(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH DESCRIPTION\n");
+    match &cmd.long_about {
+        Some(la) => { b.append(la); b.append("\n"); },
+        None => { b.append(&cmd.about); b.append("\n"); },
+    }
+}
+
+fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH OPTIONS\n");
+
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if f.hidden { i = i + 1; continue; }
+        b.append(".TP\n");
+        match f.short {
+            Some(c) => {
+                b.append("\\fB-");
+                b.append(&Text.from(f"{c}"));
+                b.append("\\fR, ");
+            },
+            None => {},
+        }
+        match &f.long {
+            Some(l) => {
+                b.append("\\fB--");
+                b.append(l);
+                b.append("\\fR");
+            },
+            None => {},
+        }
+        if !f.arity.is_switch() {
+            b.append(" \\fI");
+            match &f.placeholder {
+                Some(p) => b.append(p),
+                None => match &f.long {
+                    Some(l) => b.append(&l.to_uppercase()),
+                    None => b.append("VALUE"),
+                },
+            }
+            b.append("\\fR");
+        }
+        b.append("\n");
+        b.append(&f.help);
+        b.append("\n");
+        match &f.refinement {
+            Some(r) => {
+                b.append(".RS\n");
+                b.append("Constraint: ");
+                b.append(&r.expression);
+                b.append(".\n.RE\n");
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+
+    let mut j: Int = 0;
+    while j < cmd.args.len() {
+        let a = &cmd.args[j];
+        b.append(".TP\n\\fI");
+        match &a.placeholder {
+            Some(p) => b.append(p),
+            None => b.append(&a.name.to_uppercase()),
+        }
+        b.append("\\fR\n");
+        b.append(&a.help);
+        b.append("\n");
+        j = j + 1;
+    }
+}
+
+fn write_commands(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH COMMANDS\n");
+    let mut i: Int = 0;
+    while i < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[i];
+        if sc.hidden { i = i + 1; continue; }
+        b.append(".SS ");
+        b.append(&sc.name);
+        b.append("\n");
+        b.append(&sc.about);
+        b.append("\n");
+        i = i + 1;
+    }
+}
+
+fn write_examples(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH EXAMPLES\n");
+    let mut i: Int = 0;
+    while i < cmd.examples.len() {
+        let ex = &cmd.examples[i];
+        b.append(".PP\n");
+        b.append(&ex.description);
+        b.append("\n.RS\n.EX\n");
+        b.append(&ex.command);
+        b.append("\n.EE\n.RE\n");
+        i = i + 1;
+    }
+}
+
+fn has_env_fallbacks(cmd: &CommandSpec) -> Bool {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        if cmd.flags[i].env_fallback.is_some() { return true; }
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < cmd.args.len() {
+        if cmd.args[j].env_fallback.is_some() { return true; }
+        j = j + 1;
+    }
+    false
+}
+
+fn write_environment(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.append(".SH ENVIRONMENT\n");
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        match &cmd.flags[i].env_fallback {
+            Some(env) => {
+                b.append(".TP\n\\fB");
+                b.append(env);
+                b.append("\\fR\n");
+                b.append("Fallback for \\fB--");
+                match &cmd.flags[i].long {
+                    Some(l) => b.append(l),
+                    None => b.append("(this flag)"),
+                }
+                b.append("\\fR.\n");
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+}
+
+fn write_exit_status(b: &mut TextBuilder) {
+    b.append(".SH EXIT STATUS\n");
+    b.append(".TP\n0\nSuccess.\n");
+    b.append(".TP\n1\nGeneric error.\n");
+    b.append(".TP\n2\nUsage error (invalid argv).\n");
+    b.append(".TP\n65\nInvalid input data.\n");
+    b.append(".TP\n77\nPermission denied.\n");
+    b.append(".TP\n78\nConfiguration error.\n");
+}
+
+fn write_author(b: &mut TextBuilder, cmd: &CommandSpec) {
+    match &cmd.author {
+        Some(a) => {
+            b.append(".SH AUTHOR\n");
+            b.append(a);
+            b.append("\n");
+        },
+        None => {},
+    }
+}

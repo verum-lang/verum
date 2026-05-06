@@ -1,0 +1,620 @@
+// =============================================================================
+// cli/spec.vr — Command, argument, flag specification model
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text
+// Spec: internal/specs/cli-framework.md §3.1
+// =============================================================================
+//
+
+// `CommandSpec` is the single source of truth from which the framework
+// generates: argv parser, help renderer, bash/zsh/fish/powershell/nushell/
+// elvish completion scripts, manpage, JSON schema, REPL grammar, snapshot
+// fixtures and OpenAPI-style command export. All artefacts read this same
+// in-memory tree; the rendering never mutates the spec.
+//
+
+// The spec is value-typed, not protocol-typed: `CommandSpec` is a record
+// you can build, inspect, serialise (Phase 4: bincode), and pass around
+// freely. Handlers are referenced indirectly via `HandlerRef` — keeps the
+// spec serialisable and allows the same spec to be parsed by tooling
+// (IDE plugins) without loading the actual user code.
+//
+
+// # Spec lifecycle
+//
+
+//   1. Constructed (declarative `@command` derive — Phase 1, or builder)
+//   2. Resolved      — refinements wired, defaults bound
+//   3. Verified      — Z3-checked grammar coherence (Phase 7)
+//   4. Indexed       — flag/short-name maps, prefix tries built once
+//   5. Executable    — `App.run(argv)`
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module spec;
+
+mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool, Heap};
+mount core.base.protocols.{Debug, Display, Clone, Eq, Default};
+
+// =============================================================================
+// Arity — how many values an arg / flag consumes
+// =============================================================================
+
+/// Arity of an argument or flag — how many argv tokens it consumes.
+/// Zero arity means the presence of the flag itself is the value (Bool switch).
+public type Arity is
+    | Exactly(Int)              // ровно N значений
+    | AtMost(Int)               // 0..=N
+    | AtLeast(Int)              // N..
+    | Range(Int, Int)           // M..=N (inclusive)
+    | Unlimited;                // 0..
+
+implement Arity {
+    /// Default arity for a single-value field.
+    @inline
+    public fn one() -> Arity { Arity.Exactly(1) }
+
+    /// Default arity for a Maybe<T> field.
+    @inline
+    public fn optional() -> Arity { Arity.AtMost(1) }
+
+    /// True if this arity matches exactly zero — a switch flag.
+    public fn is_switch(&self) -> Bool {
+        match self {
+            Arity.Exactly(0) => true,
+            _ => false,
+        }
+    }
+
+    /// Maximum number of values this arity accepts (None = unbounded).
+    public fn upper_bound(&self) -> Maybe<Int> {
+        match self {
+            Arity.Exactly(n) => Some(*n),
+            Arity.AtMost(n) => Some(*n),
+            Arity.AtLeast(_) => None,
+            Arity.Range(_, hi) => Some(*hi),
+            Arity.Unlimited => None,
+        }
+    }
+
+    /// Minimum number of values required by this arity.
+    public fn lower_bound(&self) -> Int {
+        match self {
+            Arity.Exactly(n) => *n,
+            Arity.AtMost(_) => 0,
+            Arity.AtLeast(n) => *n,
+            Arity.Range(lo, _) => *lo,
+            Arity.Unlimited => 0,
+        }
+    }
+
+    /// True if at least one value is required.
+    @inline
+    public fn is_required(&self) -> Bool { self.lower_bound() > 0 }
+}
+
+// =============================================================================
+// Group — mutex / required / coreq sets of flags
+// =============================================================================
+
+/// Argument group — a named bag of flags with a relational constraint.
+/// The constraint is checked after parsing and surfaced as a `ParseError`
+/// rather than a panic.
+public type Group is {
+    /// Group identifier — used in error messages and `requires`/`conflicts_with`.
+    name: Text,
+    /// Flag long-names that participate in this group.
+    members: List<Text>,
+    /// Group kind (mutex / required / etc).
+    kind: GroupKind,
+    /// Optional help line; rendered above the group in `--help`.
+    help: Maybe<Text>,
+};
+
+/// Kind of relational constraint a `Group` enforces.
+public type GroupKind is
+    | Exclusive                 // не более одного из членов одновременно
+    | Required                  // ровно один обязателен
+    | RequiredAll               // все обязательны вместе
+    | OptionalAll;              // если хоть один задан — все обязательны
+
+implement Group {
+    /// Build an exclusive (mutex) group.
+    public fn exclusive(name: Text, members: List<Text>) -> Group {
+        Group { name: name, members: members, kind: GroupKind.Exclusive, help: None }
+    }
+
+    /// Build a "exactly one of" required group.
+    public fn one_required(name: Text, members: List<Text>) -> Group {
+        Group { name: name, members: members, kind: GroupKind.Required, help: None }
+    }
+
+    /// Attach explanatory help to this group.
+    public fn with_help(mut self, help: Text) -> Group {
+        self.help = Some(help);
+        self
+    }
+}
+
+// =============================================================================
+// Completion source — what shell-completion suggests for this slot
+// =============================================================================
+
+/// Where the completion machinery should look for candidate values.
+public type CompletionSource is
+    | NoCompletion
+    | Static(List<Text>)        // фиксированный список
+    | FilePath
+    | DirectoryPath
+    | Hostname
+    | ProcessName
+    | EnumValues(List<Text>)
+    | Dynamic(Text);            // имя callback функции для шеллов
+
+implement Default for CompletionSource {
+    fn default() -> CompletionSource { CompletionSource.NoCompletion }
+}
+
+// =============================================================================
+// Interactive fallback policy
+// =============================================================================
+
+/// Interactive fallback when a required arg/flag is missing.
+public type InteractivePolicy is
+    | Never
+    | OnTty
+    | Always;
+
+implement Default for InteractivePolicy {
+    fn default() -> InteractivePolicy { InteractivePolicy.OnTty }
+}
+
+// =============================================================================
+// Cosmetic / settings
+// =============================================================================
+
+/// Color emission policy.
+public type ColorChoice is
+    | AutoColor                 // detect via core.term — color if stdout.is_tty()
+    | AlwaysColor
+    | NeverColor;
+
+/// Error output format.
+public type ErrorFormat is
+    | HumanError                // styled, multiline, with hints
+    | JsonError                 // machine-readable JSON
+    | RawError;                 // single-line, no formatting
+
+/// Subcommand topic separator (cf. oclif `app topic:command` vs git `app topic command`).
+public type TopicSeparator is
+    | SpaceSep
+    | ColonSep
+    | SlashSep;
+
+/// Top-level invocation style — affects help layout and discovery hints.
+public type InvocationStyle is
+    | GitStyle                  // git-style: nested subcommands
+    | DockerStyle               // docker-style: action-object
+    | OclifStyle                // oclif-style: topic:action
+    | KubectlStyle;             // kubectl-style: verb-resource
+
+/// Per-command settings.
+public type CommandSettings is {
+    args_override_self:        Bool,    // последний `--x` побеждает (default true)
+    propagate_version:         Bool,    // подкоманды наследуют --version
+    args_negate_required:      Bool,    // `--no-foo` снимает required-ость `--foo`
+    disable_help_flag:         Bool,
+    disable_help_subcommand:   Bool,
+    disable_version_flag:      Bool,
+    arg_required_else_help:    Bool,    // пустой запуск показывает help
+    subcommand_required:       Bool,    // обязательно выбрать подкоманду
+    allow_external_subcommands: Bool,   // git-style: `tool foo` → exec `tool-foo`
+    allow_negative_numbers:    Bool,    // `-1` парсится как число, не как флаг
+    next_line_help:            Bool,    // help в новой строке (узкий терминал)
+    color:                     ColorChoice,
+    error_format:              ErrorFormat,
+    topic_separator:           TopicSeparator,
+    invocation_style:          InvocationStyle,
+};
+
+implement Default for CommandSettings {
+    fn default() -> CommandSettings {
+        CommandSettings {
+            args_override_self: true,
+            propagate_version: true,
+            args_negate_required: false,
+            disable_help_flag: false,
+            disable_help_subcommand: false,
+            disable_version_flag: false,
+            arg_required_else_help: false,
+            subcommand_required: false,
+            allow_external_subcommands: false,
+            allow_negative_numbers: false,
+            next_line_help: false,
+            color: ColorChoice.AutoColor,
+            error_format: ErrorFormat.HumanError,
+            topic_separator: TopicSeparator.SpaceSep,
+            invocation_style: InvocationStyle.GitStyle,
+        }
+    }
+}
+
+// =============================================================================
+// Examples / deprecation metadata
+// =============================================================================
+
+/// A help-line example: pair of `command line` and `description`.
+public type Example is {
+    command:     Text,
+    description: Text,
+};
+
+implement Example {
+    public fn new(command: Text, description: Text) -> Example {
+        Example { command: command, description: description }
+    }
+}
+
+/// Deprecation note for commands or flags being phased out.
+public type DeprecationNote is {
+    since:       Text,          // версия, в которой появилось предупреждение
+    removed_in:  Maybe<Text>,   // версия, в которой будет удалено
+    replacement: Maybe<Text>,   // что использовать вместо
+    note:        Maybe<Text>,
+};
+
+// =============================================================================
+// Refinement reference
+// =============================================================================
+
+/// Opaque handle to a refinement predicate attached to an arg/flag.
+/// Phase 0 stores only the human-readable expression; Phase 2 wires
+/// runtime predicates through this handle to validate parsed values.
+public type RefinementHandle is {
+    /// Human-readable predicate (e.g. "1 <= port && port <= 65535").
+    /// Surfaced in error messages and help placeholders.
+    expression: Text,
+    /// Optional lower / upper bound hints (auto-extracted when possible).
+    lower: Maybe<Text>,
+    upper: Maybe<Text>,
+};
+
+// =============================================================================
+// Handler reference
+// =============================================================================
+
+/// Handler reference — opaque pointer to a function the runtime invokes
+/// after successful parsing. Phase 0 ships a tag-only reference; the
+/// runtime resolves it via a registered closure. Phase 1 derive macros
+/// fill this in automatically.
+public type HandlerRef is
+    | NoHandler
+    | NamedHandler(Text);       // имя в HandlerRegistry
+
+implement Default for HandlerRef {
+    fn default() -> HandlerRef { HandlerRef.NoHandler }
+}
+
+// =============================================================================
+// ArgSpec — a single positional argument
+// =============================================================================
+
+/// A positional argument descriptor.
+public type ArgSpec is {
+    name:           Text,           // имя поля (для help / диагностики)
+    arity:          Arity,
+    placeholder:    Maybe<Text>,    // имя в usage (default: name UPPER)
+    help:           Text,
+    long_help:      Maybe<Text>,
+    default_text:   Maybe<Text>,    // текстовое представление дефолта (для help)
+    env_fallback:   Maybe<Text>,
+    config_path:    Maybe<Text>,
+    refinement:     Maybe<RefinementHandle>,
+    completion:     CompletionSource,
+    interactive:    InteractivePolicy,
+    hidden:         Bool,
+    /// Тип-маркер от FromArg::arg_kind() для default-completion / placeholder.
+    kind_hint:      Text,           // "Path" | "Hostname" | "Generic" | ...
+};
+
+implement ArgSpec {
+    /// Build a required positional argument with `arity = Exactly(1)`.
+    public fn required(name: Text, help: Text) -> ArgSpec {
+        ArgSpec {
+            name: name,
+            arity: Arity.one(),
+            placeholder: None,
+            help: help,
+            long_help: None,
+            default_text: None,
+            env_fallback: None,
+            config_path: None,
+            refinement: None,
+            completion: CompletionSource.NoCompletion,
+            interactive: InteractivePolicy.OnTty,
+            hidden: false,
+            kind_hint: "Generic",
+        }
+    }
+
+    /// Build an optional positional argument (arity AtMost(1)).
+    public fn optional(name: Text, help: Text) -> ArgSpec {
+        let mut a = ArgSpec.required(name, help);
+        a.arity = Arity.optional();
+        a
+    }
+
+    /// Build a variadic positional argument (consumes the rest of argv).
+    public fn variadic(name: Text, help: Text) -> ArgSpec {
+        let mut a = ArgSpec.required(name, help);
+        a.arity = Arity.Unlimited;
+        a
+    }
+}
+
+// =============================================================================
+// FlagSpec — a named option (`--long` / `-s`)
+// =============================================================================
+
+/// A named flag descriptor.
+public type FlagSpec is {
+    long:            Maybe<Text>,
+    short:           Maybe<Char>,
+    arity:           Arity,
+    placeholder:     Maybe<Text>,
+    help:            Text,
+    long_help:       Maybe<Text>,
+    default_text:    Maybe<Text>,
+    env_fallback:    Maybe<Text>,
+    config_path:     Maybe<Text>,
+    refinement:      Maybe<RefinementHandle>,
+    completion:      CompletionSource,
+    interactive:     InteractivePolicy,
+    persistent:      Bool,         // наследуется в подкомандах
+    repeated:        Bool,         // повторение → List<T>
+    counter:         Bool,         // -vvv → Int
+    negatable:       Bool,         // --foo / --no-foo
+    hidden:          Bool,
+    requires:        List<Text>,
+    conflicts_with:  List<Text>,
+    kind_hint:       Text,
+};
+
+implement FlagSpec {
+    /// Build a switch flag (no value, default false).
+    public fn switch(long: Text, help: Text) -> FlagSpec {
+        FlagSpec {
+            long: Some(long),
+            short: None,
+            arity: Arity.Exactly(0),
+            placeholder: None,
+            help: help,
+            long_help: None,
+            default_text: Some("false"),
+            env_fallback: None,
+            config_path: None,
+            refinement: None,
+            completion: CompletionSource.NoCompletion,
+            interactive: InteractivePolicy.Never,
+            persistent: false,
+            repeated: false,
+            counter: false,
+            negatable: false,
+            hidden: false,
+            requires: List.new(),
+            conflicts_with: List.new(),
+            kind_hint: "Bool",
+        }
+    }
+
+    /// Build a value-bearing flag (arity Exactly(1)).
+    public fn value(long: Text, help: Text) -> FlagSpec {
+        let mut f = FlagSpec.switch(long, help);
+        f.arity = Arity.one();
+        f.kind_hint = "Generic";
+        f.default_text = None;
+        f
+    }
+
+    /// Attach a short letter.
+    public fn short(mut self, ch: Char) -> FlagSpec {
+        self.short = Some(ch);
+        self
+    }
+
+    /// Mark the flag persistent (visible to all child subcommands).
+    public fn persistent(mut self) -> FlagSpec {
+        self.persistent = true;
+        self
+    }
+
+    /// Mark as a counter (`-vvv` → 3).
+    public fn counter(mut self) -> FlagSpec {
+        self.counter = true;
+        self.repeated = true;
+        self.arity = Arity.Exactly(0);
+        self.kind_hint = "Int";
+        self
+    }
+
+    /// Mark as repeatable (each occurrence appends).
+    public fn repeated(mut self) -> FlagSpec {
+        self.repeated = true;
+        self
+    }
+
+    /// Mark as negatable (`--foo` / `--no-foo`).
+    public fn negatable(mut self) -> FlagSpec {
+        self.negatable = true;
+        self
+    }
+
+    /// Bind to an env-variable fallback.
+    public fn env(mut self, name: Text) -> FlagSpec {
+        self.env_fallback = Some(name);
+        self
+    }
+}
+
+// =============================================================================
+// CommandSpec — a single command (root or subcommand)
+// =============================================================================
+
+/// Root or subcommand descriptor.
+public type CommandSpec is {
+    name:        Text,
+    version:     Maybe<Text>,
+    about:       Text,
+    long_about:  Maybe<Text>,
+    author:      Maybe<Text>,
+    args:        List<ArgSpec>,
+    flags:       List<FlagSpec>,
+    subcommands: List<CommandSpec>,
+    groups:      List<Group>,
+    examples:    List<Example>,
+    aliases:     List<Text>,
+    hidden:      Bool,
+    deprecated:  Maybe<DeprecationNote>,
+    after_help:  Maybe<Text>,
+    settings:    CommandSettings,
+    handler:     HandlerRef,
+};
+
+implement CommandSpec {
+    /// Build an empty command spec with the given name and one-line about.
+    public fn new(name: Text, about: Text) -> CommandSpec {
+        CommandSpec {
+            name: name,
+            version: None,
+            about: about,
+            long_about: None,
+            author: None,
+            args: List.new(),
+            flags: List.new(),
+            subcommands: List.new(),
+            groups: List.new(),
+            examples: List.new(),
+            aliases: List.new(),
+            hidden: false,
+            deprecated: None,
+            after_help: None,
+            settings: Default.default(),
+            handler: HandlerRef.NoHandler,
+        }
+    }
+
+    /// Set the version string.
+    public fn with_version(mut self, version: Text) -> CommandSpec {
+        self.version = Some(version);
+        self
+    }
+
+    /// Append a positional argument.
+    public fn add_arg(mut self, a: ArgSpec) -> CommandSpec {
+        self.args.push(a);
+        self
+    }
+
+    /// Append a flag.
+    public fn add_flag(mut self, f: FlagSpec) -> CommandSpec {
+        self.flags.push(f);
+        self
+    }
+
+    /// Append a subcommand.
+    public fn add_subcommand(mut self, s: CommandSpec) -> CommandSpec {
+        self.subcommands.push(s);
+        self
+    }
+
+    /// Append a group.
+    public fn add_group(mut self, g: Group) -> CommandSpec {
+        self.groups.push(g);
+        self
+    }
+
+    /// Append a usage example.
+    public fn add_example(mut self, ex: Example) -> CommandSpec {
+        self.examples.push(ex);
+        self
+    }
+
+    /// Find a subcommand by name (or alias).
+    public fn find_subcommand(&self, name: &Text) -> Maybe<&CommandSpec> {
+        let mut i: Int = 0;
+        while i < self.subcommands.len() {
+            let sc = &self.subcommands[i];
+            if &sc.name == name { return Some(sc); }
+            let mut j: Int = 0;
+            while j < sc.aliases.len() {
+                if &sc.aliases[j] == name { return Some(sc); }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Find a flag by long-name.
+    public fn find_flag_long(&self, long: &Text) -> Maybe<&FlagSpec> {
+        let mut i: Int = 0;
+        while i < self.flags.len() {
+            match &self.flags[i].long {
+                Some(name) => if name == long { return Some(&self.flags[i]); },
+                None => {},
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Find a flag by short-letter.
+    public fn find_flag_short(&self, ch: Char) -> Maybe<&FlagSpec> {
+        let mut i: Int = 0;
+        while i < self.flags.len() {
+            match self.flags[i].short {
+                Some(c) => if c == ch { return Some(&self.flags[i]); },
+                None => {},
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Collect every long-name in this command (for did-you-mean).
+    public fn long_names(&self) -> List<Text> {
+        let mut r = List.new();
+        let mut i: Int = 0;
+        while i < self.flags.len() {
+            match &self.flags[i].long {
+                Some(name) => r.push(name.clone()),
+                None => {},
+            }
+            i = i + 1;
+        }
+        r
+    }
+
+    /// Collect every subcommand name + alias (for did-you-mean).
+    public fn subcommand_names(&self) -> List<Text> {
+        let mut r = List.new();
+        let mut i: Int = 0;
+        while i < self.subcommands.len() {
+            r.push(self.subcommands[i].name.clone());
+            let mut j: Int = 0;
+            while j < self.subcommands[i].aliases.len() {
+                r.push(self.subcommands[i].aliases[j].clone());
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        r
+    }
+}
