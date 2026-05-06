@@ -2742,9 +2742,16 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(operands);
         }
         Instruction::TensorExtended { sub_op, operands } => {
-            // TensorExtended uses structured per-sub_op decoding —
-            // its decoder reads operands positionally per
-            // TensorSubOpcode, so there's no length-prefix to add.
+            // TensorExtended carrier — emitted by
+            // `emit_intrinsic_tensor_extended` for the 114
+            // `TensorExtendedOpcode`-strategy intrinsics.  Operand
+            // bytes pack `[dst:1-2b][arg0:1-2b]…` per the codegen-side
+            // helper.  The wire format is shared with the structured
+            // `Instruction::TensorXxx` encoder arms above (Pool,
+            // Argmin, Solve, BatchNorm, SVD, …), which write their
+            // own per-sub-op operand layouts.  See the registry-
+            // driven decoder dispatch at `Opcode::TensorExtended`
+            // for the unified read path.
             output.push(Opcode::TensorExtended.to_byte());
             output.push(*sub_op);
             output.extend_from_slice(operands);
@@ -4042,15 +4049,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // sweep so sequential decoding doesn't fall into the
             // structured arms below — those structured arms encode
             // dead `Instruction::Tensor*` IR variants that codegen
-            // never emits.  Letting them match first caused
-            // mis-decoding (e.g. BatchNorm/SVD reading register-
-            // encoded bytes as f32 fields) and broke linker round
-            // trip on real bytecode.
+            // never emits (verified across
+            // `crates/verum_vbc/src/codegen/`).  Letting them match
+            // first caused mis-decoding (e.g. BatchNorm/SVD reading
+            // register-encoded bytes as f32 fields) and broke linker
+            // round trip on real bytecode.
             //
             // When a new sub-op is added to the registry with
             // `TensorExtendedOpcode` strategy, add (sub_op,
-            // param_count + 1) here.  See registry.rs for the source
-            // of truth on each intrinsic's arity.
+            // param_count + 1) to `registry_driven_tensor_arity`.
+            // See registry.rs for the source of truth on each
+            // intrinsic's arity.
             if let Some(arity) =
                 registry_driven_tensor_arity(sub_opcode_byte)
             {
