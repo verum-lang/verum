@@ -185,6 +185,19 @@ pub struct PhaseInputs {
     /// CapabilityEscalation in production: any inferred capability
     /// not declared in `Shape.requires` raises the violation.
     pub inferred_used_capabilities: Vec<crate::arch::Capability>,
+    /// Transitive lifecycle regressions (AP-024) — chains of
+    /// composes_with peers reaching a strictly-lower-rank
+    /// lifecycle through 2+ hops.  Populated by the compiler
+    /// using `arch_transitive::resolve_transitive_lifecycle_regressions`
+    /// over the session's arch_shape_registry.  AP-009 covers
+    /// the depth-1 case; AP-024 catches the deeper variants.
+    pub transitive_lifecycle_regressions: Vec<(String, String, crate::arch::Lifecycle)>,
+    /// Transitive foundation downgrades (AP-019) — chains of
+    /// composes_with peers reaching a foundation strictly weaker
+    /// than the cog's own through 2+ hops.  AP-005 covers the
+    /// depth-1 case; AP-019 catches the deeper variants.
+    pub foundation_downgrades:
+        Vec<(String, crate::arch::Foundation, crate::arch::Foundation)>,
 }
 
 /// Run the phase for a single module with caller-supplied inputs.
@@ -235,6 +248,10 @@ pub fn run_arch_phase_one_with(
     // walker hasn't been invoked.  Either way the silent path of
     // AP-001 reports no violation, so no false-positive risk.
     ctx.inferred_used_capabilities = inputs.inferred_used_capabilities.clone();
+    // Transitive checks — AP-019 / AP-024 production wiring via
+    // session arch_shape_registry + arch_transitive DFS resolver.
+    ctx.transitive_lifecycle_regressions = inputs.transitive_lifecycle_regressions.clone();
+    ctx.foundation_downgrades = inputs.foundation_downgrades.clone();
 
     let violations = check_all_anti_patterns(&shape_for_checks, &ctx);
 

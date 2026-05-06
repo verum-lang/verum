@@ -1750,7 +1750,159 @@ fn pin_compiler_phase_walks_body_for_capability_inference() {
 }
 
 // =============================================================================
-// 27. Internal/ references must NOT appear in any architecture .vr file
+// 27. R-AB-CD — transitive peer-graph walker (AP-019 / AP-024)
+// =============================================================================
+
+#[test]
+fn pin_transitive_walker_present() {
+    // R-A: kernel-side DFS infrastructure for multi-hop checks.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_transitive.rs"),
+    )
+    .expect("read arch_transitive.rs");
+    for needle in &[
+        "pub fn for_each_transitive_peer",
+        "pub fn resolve_transitive_lifecycle_regressions",
+        "pub fn resolve_transitive_foundation_downgrades",
+        "pub const MAX_TRANSITIVE_DEPTH",
+        "pub struct PeerVisit",
+    ] {
+        assert!(
+            src.contains(needle),
+            "arch_transitive.rs missing surface: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_phase_inputs_transitive_fields_present() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_phase.rs"),
+    )
+    .expect("read arch_phase.rs");
+    for needle in &[
+        "pub transitive_lifecycle_regressions:",
+        "pub foundation_downgrades:",
+        "ctx.transitive_lifecycle_regressions = inputs.transitive_lifecycle_regressions.clone()",
+        "ctx.foundation_downgrades = inputs.foundation_downgrades.clone()",
+    ] {
+        assert!(
+            src.contains(needle),
+            "arch_phase.rs missing transitive wiring: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_session_transitive_resolvers_present() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let session_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("session.rs"),
+    )
+    .expect("read session.rs");
+    for needle in &[
+        "pub fn resolve_transitive_lifecycle_regressions",
+        "pub fn resolve_foundation_downgrades",
+    ] {
+        assert!(
+            session_src.contains(needle),
+            "session.rs missing transitive resolver: {}",
+            needle,
+        );
+    }
+    let phase_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("pipeline")
+            .join("ats_v_phase.rs"),
+    )
+    .expect("read ats_v_phase.rs");
+    for needle in &[
+        ".resolve_transitive_lifecycle_regressions(",
+        ".resolve_foundation_downgrades(",
+        "transitive_lifecycle_regressions,",
+        "foundation_downgrades,",
+    ] {
+        assert!(
+            phase_src.contains(needle),
+            "ats_v_phase.rs missing transitive wiring: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_transitive_resolver_correctness() {
+    // Direct correctness check using the resolver against a small
+    // crafted registry.  This duplicates the kernel-internal unit
+    // tests but locks the public API surface.
+    use std::collections::BTreeMap;
+    use verum_kernel::arch::*;
+    use verum_kernel::arch_transitive::resolve_transitive_lifecycle_regressions;
+
+    let mut registry: BTreeMap<String, Shape> = BTreeMap::new();
+    let theorem_shape = |composes_with: Vec<String>| Shape {
+        exposes: vec![],
+        requires: vec![],
+        preserves: vec![],
+        consumes: vec![],
+        at_tier: Tier::Aot,
+        foundation: Foundation::ZfcTwoInacc,
+        stratum: MsfsStratum::LFnd,
+        cve_closure: CveClosure {
+            constructive: None,
+            verifiable_strategy: None,
+            executable: None,
+        },
+        lifecycle: Lifecycle::Theorem {
+            since: "v0.1".into(),
+        },
+        composes_with,
+        strict: false,
+    };
+    let mut hypothesis_shape = theorem_shape(vec![]);
+    hypothesis_shape.lifecycle = Lifecycle::Hypothesis {
+        confidence: ConfidenceLevel::Low,
+    };
+
+    registry.insert("start".into(), theorem_shape(vec!["A".into()]));
+    registry.insert("A".into(), theorem_shape(vec!["B".into()]));
+    registry.insert("B".into(), hypothesis_shape);
+
+    let theorem_rank = Lifecycle::Theorem {
+        since: "v".into(),
+    }
+    .rank();
+    let regressions =
+        resolve_transitive_lifecycle_regressions("start", theorem_rank, &registry);
+    assert_eq!(
+        regressions.len(),
+        1,
+        "expected exactly 1 transitive regression chain"
+    );
+    let (intermediate, terminal, _) = &regressions[0];
+    assert_eq!(intermediate, "A");
+    assert_eq!(terminal, "B");
+}
+
+// =============================================================================
+// 28. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]
