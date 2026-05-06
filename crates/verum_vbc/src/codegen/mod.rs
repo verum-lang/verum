@@ -8322,13 +8322,94 @@ impl VbcCodegen {
                     }
                 }
 
-                // Encode method signatures as variants (VBC convention for protocol methods)
+                // Encode method signatures as variants (VBC convention for protocol methods).
+                //
+                // #131 Layer E — protocol-level + method-local generic
+                // param scoping.  Pre-fix `ast_type_to_type_ref` had
+                // no scope: an unknown `TypeKind::Path([Self])` /
+                // `[Item]` / `[U]` (protocol-level Self/Item or
+                // method-local `map<U, B>` params) fell through to
+                // `TypeRef::Concrete(TypeId::PTR=14)`.  At
+                // archive_metadata-time the PTR fallback resolved to
+                // the wrong-arity concrete name `"Heap"` /  `"List"`
+                // via the module-local type-id-to-name table —
+                // protocol-method signatures got rendered as
+                // `MappedIter<Heap, Heap>` instead of
+                // `MappedIter<Self, F>` and the typechecker actively
+                // mismatched user-side `Heap<T,V>` shapes.
+                //
+                // Fix: build a combined `generic_param_map`
+                // (protocol-level params at IDs 0..N from
+                // `type_decl.generics`, then method-local params at
+                // IDs N..N+M from `decl.generics`), and route every
+                // type-ref conversion through `resolve_field_type_ref`
+                // — which emits `TypeRef::Generic(id)` for path-name
+                // matches.  archive_metadata's
+                // `type_ref_to_text_with_params` only seeds its
+                // `param_id_to_name` from protocol-level params
+                // (IDs 0..N), so method-local IDs (N+) fall through
+                // to `__generic_N` placeholders, which the
+                // typechecker's `parse_descriptor_type_string`
+                // converts to fresh TypeVars (the unifier-permissive
+                // shape we want).
+                //
+                // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+                // every binding comes from the protocol decl AST's
+                // own generics list, no hardcoded param names.
+                let mut proto_param_map: std::collections::HashMap<String, u16> = type_decl
+                    .generics
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, g)| match &g.kind {
+                        verum_ast::ty::GenericParamKind::Type { name, .. } => {
+                            Some((name.name.to_string(), i as u16))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                // #131 Layer E — `Self` is the implicit
+                // implementor type in protocol method signatures
+                // (`fn lt(self, other: Self) -> Bool` in PartialOrd,
+                // `MappedIter<Self, F>` return-type in Iterator.map).
+                // Protocols never declare `Self` in `type_decl.generics`,
+                // so without this binding `ast_type_to_type_ref` falls
+                // through to `TypeRef::Concrete(TypeId::PTR=14)` —
+                // which collides with codegen's `Heap → TypeId::PTR`
+                // alias mapping at line 1102.  archive_metadata's
+                // `type_id_to_name` then renders id=14 as `"Heap"`,
+                // breaking every protocol method that mentions Self
+                // (PartialOrd `lt`/`le`/etc, Iterator return types,
+                // …).  Bind Self to an out-of-range synthetic ID so
+                // it round-trips as `__generic_N` → fresh TypeVar.
+                let self_synthetic_id = type_decl.generics.len() as u16 + 0x4000;
+                proto_param_map
+                    .entry("Self".to_string())
+                    .or_insert(self_synthetic_id);
                 for protocol_item in &protocol_body.items {
                     if let verum_ast::decl::ProtocolItemKind::Function { decl, .. } =
                         &protocol_item.kind
                     {
                         let method_name = decl.name.name.to_string();
                         let method_name_id = StringId(self.ctx.intern_string_raw(&method_name));
+
+                        // Build the combined scope: protocol-level
+                        // params first (IDs 0..N), then method-local
+                        // params (IDs N..N+M).  Method-locals start
+                        // from the protocol-param count so the
+                        // archive_metadata renderer's
+                        // protocol-only `param_id_to_name` doesn't
+                        // resolve them — they round-trip as
+                        // `__generic_N` → fresh TypeVar.
+                        let mut combined_map = proto_param_map.clone();
+                        let proto_count = combined_map.len() as u16;
+                        for (i, g) in decl.generics.iter().enumerate() {
+                            if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
+                                let key = name.name.to_string();
+                                combined_map
+                                    .entry(key)
+                                    .or_insert(proto_count + i as u16);
+                            }
+                        }
 
                         // Build function TypeRef for the method
                         let param_refs: Vec<crate::types::TypeRef> = decl
@@ -8338,7 +8419,7 @@ impl VbcCodegen {
                                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } =
                                     &p.kind
                                 {
-                                    Some(self.ast_type_to_type_ref(ty))
+                                    Some(self.resolve_field_type_ref(ty, &combined_map))
                                 } else {
                                     None // Skip self params
                                 }
@@ -8346,7 +8427,9 @@ impl VbcCodegen {
                             .collect();
 
                         let ret_ref = match &decl.return_type {
-                            verum_common::Maybe::Some(ty) => self.ast_type_to_type_ref(ty),
+                            verum_common::Maybe::Some(ty) => {
+                                self.resolve_field_type_ref(ty, &combined_map)
+                            }
                             verum_common::Maybe::None => {
                                 TypeRef::Concrete(crate::types::TypeId::UNIT)
                             }
@@ -9230,17 +9313,151 @@ impl VbcCodegen {
         {
             return self.resolve_field_type_ref(inner, generic_param_map);
         }
-        // Check if the type is a simple path that matches a generic param
+        // #131 Layer E — nested function types must preserve the
+        // map through recursion.  The standard `ast_type_to_type_ref`
+        // recurses with itself for `TypeKind::Function`, which loses
+        // the protocol's / method's param scope.  For protocol
+        // method signatures like `fn map<U, B>(self, f: fn(Self.Item)
+        // -> B) -> ...`, the param `f`'s type is itself a function
+        // type containing an associated-type projection
+        // (`Self.Item`) and a method-local param (`B`).  Without
+        // this branch, both fell through to `TypeRef::Concrete(PTR)`
+        // → wrong-arity-name fallback at archive_metadata-render
+        // time.
+        if let TypeKind::Function {
+            params,
+            return_type,
+            contexts,
+            ..
+        } = &ty.kind
+        {
+            let param_refs: Vec<TypeRef> = params
+                .iter()
+                .map(|p| self.resolve_field_type_ref(p, generic_param_map))
+                .collect();
+            let ret_ref = self.resolve_field_type_ref(return_type, generic_param_map);
+            let ctx_refs: smallvec::SmallVec<[crate::types::ContextRef; 2]> = contexts
+                .requirements
+                .iter()
+                .filter_map(|req| {
+                    let ctx_name = format!("{}", req.path);
+                    self.context_name_to_id
+                        .get(&ctx_name)
+                        .copied()
+                        .map(crate::types::ContextRef)
+                })
+                .collect();
+            return TypeRef::Function {
+                params: param_refs,
+                return_type: Box::new(ret_ref),
+                contexts: ctx_refs,
+            };
+        }
+        // #131 Layer E — associated-type projection.  In Verum the
+        // parser produces `TypeKind::Qualified { self_ty, trait_ref,
+        // assoc_name }` for both `Self.Item` and `<T as Trait>::Foo`
+        // (parser at `verum_fast_parser/src/ty.rs:1928`).  The older
+        // `TypeKind::AssociatedType` variant exists in the AST but
+        // isn't produced by the source parser.  Both shapes are
+        // rendered as a synthetic generic-param ID outside the
+        // protocol-level range, so archive_metadata's
+        // `param_id_to_name` (seeded only from protocol type_params)
+        // doesn't resolve it.  The hash-derived ID is stable per
+        // (base-name, assoc-name) pair within a method scope —
+        // multiple references to the same `Self.Item` in one method
+        // signature collapse to the same ID, preserving the
+        // "this-is-the-same-type" invariant the unifier needs.
+        // Range starts at 0xC000 = 49152 — well above any
+        // legitimate combined protocol+method-local param count
+        // (typically <16 in stdlib protocols).
+        let qualified_components: Option<(String, String)> = match &ty.kind {
+            TypeKind::AssociatedType { base, assoc } => {
+                // Older shape — keep handling for forward-compat in
+                // case future codepaths emit it.
+                let mut base_name = String::new();
+                if let TypeKind::Path(path) = &base.kind {
+                    for seg in path.segments.iter() {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            if !base_name.is_empty() {
+                                base_name.push('.');
+                            }
+                            base_name.push_str(ident.name.as_str());
+                        }
+                    }
+                }
+                Some((base_name, assoc.name.as_str().to_string()))
+            }
+            TypeKind::Qualified {
+                self_ty, assoc_name, ..
+            } => {
+                // Walk the (possibly nested) self_ty chain to recover
+                // a stable base-key.  For `Self.Iter.Item`, parser
+                // builds `Qualified { self_ty: Qualified { self_ty:
+                // Self, assoc: Iter }, assoc: Item }`.  Joining each
+                // level's assoc-name into the key keeps distinct
+                // chained projections distinct in the hash.
+                let mut base_name = String::new();
+                let mut current: &verum_ast::ty::Type = self_ty;
+                loop {
+                    match &current.kind {
+                        TypeKind::Path(path) => {
+                            for seg in path.segments.iter() {
+                                if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                                    if !base_name.is_empty() {
+                                        base_name.push('.');
+                                    }
+                                    base_name.push_str(ident.name.as_str());
+                                }
+                            }
+                            break;
+                        }
+                        TypeKind::Qualified {
+                            self_ty: inner_self,
+                            assoc_name: inner_assoc,
+                            ..
+                        } => {
+                            // Walk inwards, accumulating from the
+                            // outside in — we'll reverse at the end
+                            // for stable left-to-right naming.
+                            base_name = format!("{}.{}", inner_assoc.name.as_str(), base_name);
+                            current = inner_self;
+                        }
+                        _ => break,
+                    }
+                }
+                Some((base_name, assoc_name.name.as_str().to_string()))
+            }
+            _ => None,
+        };
+        if let Some((base_str, assoc_str)) = qualified_components {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            base_str.hash(&mut h);
+            assoc_str.hash(&mut h);
+            let synthetic_id = 0xC000u16 + ((h.finish() as u16) & 0x3FFF);
+            return TypeRef::Generic(crate::types::TypeParamId(synthetic_id));
+        }
+        // Check if the type is a simple path that matches a generic param.
+        //
+        // #131 Layer E — `Self` is parsed as `PathSegment::SelfValue`,
+        // NOT `PathSegment::Name("Self")` (parser at
+        // `verum_fast_parser/src/ty.rs:1915`).  The naive
+        // `if let PathSegment::Name(ident) = seg` filter misses
+        // `Self`, returns "" (empty), and the empty string isn't in
+        // any param map → falls through to `ast_type_to_type_ref`
+        // which emits `TypeRef::Concrete(PTR)`.  Recognise both
+        // segment shapes (Name + SelfValue) so the protocol's
+        // synthetic Self mapping registered above (id `0x4000+N`)
+        // actually fires.
         if let TypeKind::Path(path) = &ty.kind {
             let type_name = path
                 .segments
                 .iter()
-                .find_map(|seg| {
-                    if let PathSegment::Name(ident) = seg {
-                        Some(ident.name.to_string())
-                    } else {
-                        None
-                    }
+                .find_map(|seg| match seg {
+                    PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    PathSegment::SelfValue => Some("Self".to_string()),
+                    _ => None,
                 })
                 .unwrap_or_default();
             if let Some(&param_idx) = generic_param_map.get(&type_name) {
@@ -10915,17 +11132,36 @@ impl VbcCodegen {
             if info.id.0 >= SENTINEL_THRESHOLD {
                 continue;
             }
-            // Prefer simple names over qualified ones for the stub
-            // (interpreter intercepts dispatch by simple name).
-            // The first name registered for a given id wins —
-            // typical pattern is "name" first, then "module.name"
-            // alias, both pointing at the same FunctionInfo.
-            id_to_name.entry(info.id.0).or_insert_with(|| name.clone());
+            // PREFER QUALIFIED NAMES so the stub's simple-name
+            // extraction (`rsplit('.').next()`) recovers the
+            // canonical bare function name rather than a
+            // user-supplied alias.  Without this, mounting
+            // `core.shell.script.{args as script_args}` could leave
+            // the stub registered under `script_args` — interpreter
+            // intercepts (`try_intercept_env_runtime` etc.) match
+            // on the canonical `args` and miss the alias.  Picking
+            // the longest dotted name ensures we always have the
+            // canonical bare name available as the trailing segment.
+            id_to_name
+                .entry(info.id.0)
+                .and_modify(|existing| {
+                    let existing_dots = existing.matches('.').count();
+                    let new_dots = name.matches('.').count();
+                    if new_dots > existing_dots {
+                        *existing = name.clone();
+                    }
+                })
+                .or_insert_with(|| name.clone());
         }
         // 4. For each referenced id missing from `emitted`, create
         // a stub.  Skip ids beyond SENTINEL_THRESHOLD (handled by
         // the FFI / variant-ctor / newtype-ctor dispatch paths).
         const SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        // Track which (name, arity) stubs we synthesise so the CallM
+        // pass below doesn't add duplicates for the same qualified
+        // function id.
+        let mut stub_synthesised: std::collections::HashSet<u32> =
+            std::collections::HashSet::new();
         for id in referenced {
             if id >= SENTINEL_THRESHOLD {
                 continue;
@@ -10937,20 +11173,24 @@ impl VbcCodegen {
                 Some(n) => n.clone(),
                 None => continue, // ID not in ctx.functions — drop
             };
-            // Strip qualified prefix to get the simple name for
-            // the descriptor.  intercepts (and the typecheck-side
-            // `register_inherent_methods_from_metadata`) work off
-            // the simple name.
-            let simple_name = name
-                .rsplit('.')
-                .next()
-                .unwrap_or(name.as_str())
-                .to_string();
             let info = match self.ctx.functions.get(&name) {
                 Some(i) => i.clone(),
                 None => continue,
             };
-            let name_id = StringId(self.ctx.intern_string_raw(&simple_name));
+            // Use the QUALIFIED name as descriptor.name when ctx
+            // tracks one — `find_function_by_name`/`_by_unique_bare_suffix`
+            // both honour `.suffix` matching against fully-qualified
+            // registrations, while name-based intercepts
+            // (`try_intercept_*` etc.) consistently strip via
+            // `rsplit('.').next()` so they work on either form.
+            // Carrying the qualified form lets bare-name CallM
+            // dispatch (`receiver.as_path()` codegen-emitted as
+            // `CallM { method_id: "as_path" }`) hit the suffix-match
+            // path and resolve to the unique `<TypeName>.as_path`
+            // stub instead of bottoming out as
+            // "method 'as_path' not found".
+            let name_id = StringId(self.ctx.intern_string_raw(&name));
+            stub_synthesised.insert(id);
             let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
             descriptor.id = crate::module::FunctionId(id);
             descriptor.register_count = 1;
@@ -11008,17 +11248,103 @@ impl VbcCodegen {
             );
             self.functions.push(vbc_func);
         }
-        // Note: CallM's `method_id` is a STRING id, not a
-        // FunctionId.  We don't emit stubs for it because (a) the
-        // runtime does name-based dispatch via
-        // `find_function_by_name` which finds qualified registrations
-        // already pushed during compilation, and (b) emitting RetV
-        // stubs for arbitrary stdlib methods would silently return
-        // junk for any method that has a real implementation rather
-        // than a name-based intercept.  Real stdlib bodies must come
-        // through the linker-merge path (which currently fails with
-        // a `truncated bytecode` issue tracked separately).
-        let _ = method_names;
+        // CallM stubs.  `method_id` is a STRING id, not a FunctionId,
+        // so the FunctionId-driven loop above never sees these.  Without
+        // a stub, name-based dispatch via `find_function_by_unique_bare_suffix`
+        // misses `<TypeName>.<method>` (the qualified registration only
+        // exists in `ctx.functions`, not in this module's compiled list).
+        //
+        // For each unique CallM method name, find ctx.functions entries
+        // whose qualified name ends with `.<method>` (e.g. `PathBuf.as_path`)
+        // and synthesise a `RetV` stub for each unemitted one.  Rust-side
+        // intercepts (`try_intercept_file_runtime`, `try_intercept_shell_runtime`,
+        // text mutation intercepts above this layer) fire BEFORE the body
+        // runs, so the empty `RetV` body is never executed for any method
+        // that has an intercept.  Methods without an intercept will surface
+        // as a more debuggable "function returned Unit, expected T"
+        // downstream rather than the opaque "method not found".
+        for method_id in method_names {
+            let method_name = match self
+                .ctx
+                .strings
+                .get(StringId(method_id).0 as usize)
+                .cloned()
+            {
+                Some(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+            // Skip if the method name itself contains a dot — it's
+            // already a qualified call and the FunctionId-driven path
+            // (above) handles it via `find_function_by_name`.
+            if method_name.contains('.') {
+                continue;
+            }
+            let suffix = format!(".{}", method_name);
+            // Walk ctx.functions and collect candidates: any qualified
+            // name ending with `.<method>` (skipping sentinel ids).
+            let candidates: Vec<(String, FunctionInfo)> = self
+                .ctx
+                .functions
+                .iter()
+                .filter(|(name, info)| {
+                    info.id.0 < SENTINEL_THRESHOLD
+                        && (name.ends_with(&suffix) || name.as_str() == method_name)
+                })
+                .map(|(n, i)| (n.clone(), i.clone()))
+                .collect();
+            for (qualified_name, info) in candidates {
+                if emitted.contains(&info.id.0) {
+                    continue;
+                }
+                if !stub_synthesised.insert(info.id.0) {
+                    continue;
+                }
+                let name_id = StringId(self.ctx.intern_string_raw(&qualified_name));
+                let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+                descriptor.id = info.id;
+                descriptor.register_count = 1;
+                descriptor.locals_count = info.param_count as u16;
+                for (i, pname) in info.param_names.iter().enumerate() {
+                    let pname_to_use = if pname.is_empty() {
+                        format!("_arg{}", i)
+                    } else {
+                        pname.clone()
+                    };
+                    let pname_id = StringId(self.ctx.intern_string_raw(&pname_to_use));
+                    descriptor.params.push(crate::module::ParamDescriptor {
+                        name: pname_id,
+                        type_ref: TypeRef::Concrete(TypeId::UNIT),
+                        is_mut: false,
+                        default: None,
+                    });
+                }
+                while descriptor.params.len() < info.param_count {
+                    let i = descriptor.params.len();
+                    let pname_id =
+                        StringId(self.ctx.intern_string_raw(&format!("_arg{}", i)));
+                    descriptor.params.push(crate::module::ParamDescriptor {
+                        name: pname_id,
+                        type_ref: TypeRef::Concrete(TypeId::UNIT),
+                        is_mut: false,
+                        default: None,
+                    });
+                }
+                if info.is_async {
+                    descriptor.properties |= crate::types::PropertySet::ASYNC;
+                }
+                descriptor.is_generator = info.is_generator;
+                if let Some(parent_name) = info.parent_type_name.as_deref() {
+                    if let Some(&parent_tid) = self.type_name_to_id.get(parent_name) {
+                        descriptor.parent_type = Some(parent_tid);
+                    }
+                }
+                let vbc_func = crate::module::VbcFunction::new(
+                    descriptor,
+                    vec![Instruction::RetV],
+                );
+                self.functions.push(vbc_func);
+            }
+        }
     }
 
     /// Builds the final VBC module.
