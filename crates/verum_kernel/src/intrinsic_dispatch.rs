@@ -994,39 +994,49 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }),
 
         // ----- Red-team closure axioms (AT-1..AT-5) -----
+        //
+        // Two-layer discharge architecture: this dispatcher is the
+        // **registry-attestation surface** — it answers "is this
+        // intrinsic admissible as a kernel discharge?" by returning
+        // `holds: true` (yes, the intrinsic exists, the kernel
+        // honours the bridge).  The **actual per-Shape check**
+        // happens through the phase orchestrator
+        // `arch_phase::run_arch_phase_one_with` → `check_all_anti_patterns`
+        // → the matching `check_*` function (e.g. `check_capability_ontology_v`).
+        //
+        // This separation is intentional: IntrinsicValue is a flat
+        // typed enum (Bool / Int / Text / Decision / Unit), not a
+        // carrier for the structured `arch::Shape` value the check
+        // functions consume.  Callers never invoke the dispatcher
+        // with a Shape; they invoke it with the intrinsic name to
+        // assert the bridge exists.
         "kernel_arch_capability_ontology_check" => Some(IntrinsicValue::Decision {
             holds: true,
             reason: "ATS-V capability-ontology completeness check — closes attack-vector \
-                     AT-1: every Capability.Custom { tag, schema } usage must have its \
-                     `tag` registered in core.architecture.capability_ontology before \
-                     the cog passes the ATS-V phase. Prevents inline `transfers_privilege: \
-                     true` injection of fake high-privilege capabilities."
+                     AT-1.  Registry-attestation surface: actual per-Shape check runs \
+                     through arch_phase::run_arch_phase_one_with (see \
+                     check_capability_ontology_v in arch_anti_pattern.rs)."
                 .into(),
         }),
         "kernel_arch_yoneda_canonical_roster_complete" => Some(IntrinsicValue::Decision {
             holds: true,
             reason: "ATS-V Yoneda canonical-roster completeness — closes attack-vector \
-                     AT-3: a Yoneda equivalence verdict is binding only when the \
-                     `agreements` list spans the full canonical 5-roster (EndUser, \
-                     PeerCog, Stakeholder, Auditor, Adversary). Single-observer \
-                     verdicts cannot fabricate equivalence."
+                     AT-3.  Registry-attestation surface; actual per-Shape check is \
+                     check_yoneda_canonical_roster_complete_v in arch_anti_pattern.rs."
                 .into(),
         }),
         "kernel_arch_theorem_cve_required" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V theorem-CVE coupling — closes attack-vector AT-2: a cog \
-                     declaring Lifecycle.Theorem(...) must carry full CVE-closure \
-                     (Constructive + Verifiable + Executable) regardless of the strict \
-                     flag. Theorem-status semantically implies CVE+ closure."
+            reason: "ATS-V theorem-CVE coupling — closes attack-vector AT-2.  \
+                     Registry-attestation surface; actual per-Shape check is \
+                     check_theorem_cve_required_v in arch_anti_pattern.rs."
                 .into(),
         }),
         "kernel_arch_consumes_format_check" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "ATS-V consumes-format validation — closes attack-vector AT-5: \
-                     `consumes` field entries must match `<resource>/<positive_int> <unit>` \
-                     where unit ∈ {bytes, ops, ms, ns}. Format violations surface as \
-                     AP-025 DeclarationDrift before downstream gas-accounting consumes \
-                     the value."
+            reason: "ATS-V consumes-format validation — closes attack-vector AT-5.  \
+                     Registry-attestation surface; actual per-Shape check is \
+                     check_consumes_format_v in arch_anti_pattern.rs."
                 .into(),
         }),
 
