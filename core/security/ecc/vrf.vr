@@ -1,0 +1,309 @@
+// =============================================================================
+// security/ecc/vrf.vr — Verifiable Random Function — RFC 9381 ECVRF-EDWARDS25519
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core, core.security.ecc.ed25519, core.security.hash.sha512
+// Reference:
+//  - RFC 9381 — Verifiable Random Functions (VRFs), Goldberg / Reyzin /
+//    Papadopoulos / Vcelak. Errata-clean revision of the IRTF
+//    draft-irtf-cfrg-vrf-15.
+//    https://www.rfc-editor.org/rfc/rfc9381.html
+//  - Ciphersuite ECVRF-EDWARDS25519-SHA512-TAI (RFC 9381 §5.5).
+// =============================================================================
+//
+
+// A VRF is a "verifiable" pseudo-random function: the secret-key holder
+// can produce a unique output for any input and a *proof* that the
+// output is correct; anyone with the public key can check the proof.
+// The output is unforgeable — no one without the secret key can
+// produce a valid (input, output, proof) triple — and pseudo-random
+// even relative to the public key (collision-resistance + UC).
+//
+
+// # Where VRFs are used
+//
+
+// * **Fair leader election** — block proposer selected by VRF over a
+//   round seed; leadership is verifiable but unpredictable in advance.
+// * **Sortition** in stake-weighted committees (Algorand, drand).
+// * **Anti-enumeration in DNS** — NSEC5 uses VRF to hide the existence
+//   set of zone records.
+// * **Lottery / VRF-NFT distribution** — provably fair on-chain
+//   randomness.
+//
+
+// # The ciphersuite
+//
+
+// `ECVRF-EDWARDS25519-SHA512-TAI` — Edwards25519 group + SHA-512 hash
+// + the *try-and-increment* hash-to-curve method. RFC 9381 §5.5
+// pins the parameter set; this module implements that suite verbatim
+// and offers it as the only ciphersuite at v0.1. (RFC 9381 §5.4
+// also specifies an Elligator2-based suite; that variant is a
+// follow-up — its hash-to-curve has slightly tighter side-channel
+// guarantees.)
+//
+
+// # Wire sizes
+//
+
+// | Object | Size |
+// |--------------|------|
+// | Secret key | 32 B (Ed25519 seed) |
+// | Public key | 32 B |
+// | Proof π | 80 B (Γ‖c‖s — 32+16+32) |
+// | Output β | 64 B (SHA-512 of canonical Γ encoding) |
+//
+
+// # Determinism
+//
+
+// Like Ed25519 signing, ECVRF prove is **fully deterministic** — same
+// (sk, alpha) → same (proof, beta). No fresh randomness at prove time.
+// The deterministic nonce is derived from sk and alpha via SHA-512
+// (RFC 9381 §5.4.2.2).
+//
+
+// # Architecture — intrinsic-backed
+//
+
+// Hot operations (scalar mul, point hash-to-curve, point addition,
+// integer-mod-q reduction) route through `@intrinsic("verum.vrf.*")`:
+//
+
+//  * `verum.vrf.prove` — produce (β, π) from (sk, alpha)
+//  * `verum.vrf.verify` — check π against (pk, alpha, β)
+//  * `verum.vrf.proof_to_hash` — recompute β from a valid proof
+//
+
+// The runtime binds these to a fiat-crypto-derived implementation
+// (same lineage that backs `core.security.ecc.ed25519`).
+//
+
+// # Constant-time
+//
+
+// Scalar multiplication and point operations are constant-time on
+// every platform; secret-data-dependent branches are absent. The
+// Edwards-form addition formula is complete (no exceptional cases).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.security.ecc.vrf;
+mount core.*;
+mount core.security.ecc.ed25519.{Ed25519Seed, Ed25519PublicKey, fill_random};
+
+// =============================================================================
+// Sizes (RFC 9381 §5.5)
+// =============================================================================
+
+public const VRF_SECRET_KEY_SIZE: Int = 32;
+public const VRF_PUBLIC_KEY_SIZE: Int = 32;
+public const VRF_PROOF_SIZE:      Int = 80;
+public const VRF_OUTPUT_SIZE:     Int = 64;
+
+// Ciphersuite tag — first byte of every hash domain separator
+// (RFC 9381 §5.4.1). Locked to ECVRF-EDWARDS25519-SHA512-TAI.
+const SUITE_STRING: Byte = 0x03;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// 32-byte VRF secret key. Bit-for-bit reuse of the Ed25519 seed
+/// representation — a single account key can be used for both
+/// signature and VRF (RFC 9381 §3 explicitly endorses this dual use
+/// once the protocol's domain-separation tags differ, which they do
+/// here: VRF uses suite tag 0x03 in every hash, Ed25519 does not).
+public type VrfSecretKey is [Byte; 32];
+
+/// 32-byte VRF public key — the compressed Edwards25519 point that is
+/// also the Ed25519 public key derived from this secret. Reusable.
+public type VrfPublicKey is [Byte; 32];
+
+/// 80-byte proof — `Γ ‖ c ‖ s` where Γ is the 32-byte compressed
+/// curve point, c is the 16-byte challenge, s is the 32-byte response
+/// scalar (RFC 9381 §5.3).
+public type VrfProof is [Byte; 80];
+
+/// 64-byte deterministic VRF output. Pseudo-random output of
+/// `proof_to_hash(π)` (RFC 9381 §5.2).
+public type VrfOutput is [Byte; 64];
+
+/// Convenience pair returned from `prove`.
+public type VrfProveResult is {
+    proof:  VrfProof,
+    output: VrfOutput,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type VrfError is
+    /// Proof is syntactically ill-formed (wrong length, Γ does not
+    /// decode to a point on the curve, scalar s ≥ L) or fails the
+    /// signature equation. Identical to Ed25519's strict-mode reject.
+    | InvalidProof(Text)
+    /// Public key is not a valid Edwards25519 point or is small-order.
+    | InvalidPublicKey
+    /// Backend intrinsic absent.
+    | BackendNotReady;
+
+implement Display for VrfError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidProof(why) => f.write_str(f"VRF: invalid proof ({why})".as_str()),
+            InvalidPublicKey  => f.write_str("VRF: invalid public key"),
+            BackendNotReady   => f.write_str("VRF: backend intrinsic not ready"),
+        }
+    }
+}
+
+implement Debug for VrfError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidProof(why) => f.write_str(f"InvalidProof({why})".as_str()),
+            InvalidPublicKey  => f.write_str("InvalidPublicKey"),
+            BackendNotReady   => f.write_str("BackendNotReady"),
+        }
+    }
+}
+
+// =============================================================================
+// Ecvrf namespace
+// =============================================================================
+
+public type Ecvrf is ();
+
+implement Ecvrf {
+    // ─── Key generation ──────────────────────────────────────────────────
+
+    /// Fresh 32-byte secret key (CSPRNG). Use `public_key` to derive
+    /// the matching VRF/Ed25519 public key.
+    public fn generate_secret_key() -> VrfSecretKey {
+        let mut sk: [Byte; 32] = [0; 32];
+        fill_random(&mut sk);
+        sk
+    }
+
+    /// Derive the VRF public key from a secret key. Identical procedure
+    /// to Ed25519 public-key derivation (RFC 9381 §5.5 routes both
+    /// through SHA-512(sk)[0..32] clamped, then scalar-mul by base
+    /// point). The byte layout matches `Ed25519PublicKey`, so a single
+    /// 32-byte string serves both protocols.
+    public fn public_key(sk: &VrfSecretKey) -> VrfPublicKey {
+        let bytes = @intrinsic("verum.vrf.public_key", sk);
+        let mut pk: [Byte; 32] = [0; 32];
+        let mut i: Int = 0;
+        while i < 32 { pk[i] = bytes[i]; i = i + 1; }
+        pk
+    }
+
+    // ─── Prove / verify ──────────────────────────────────────────────────
+
+    /// Produce `(proof, output)` for input `alpha` under secret key `sk`.
+    /// Deterministic: same input → same output / proof bit-for-bit.
+    ///
+    ///
+    /// `alpha` may be any byte string; canonical practice is a stable
+    /// encoding that includes a domain-separation tag chosen by the
+    /// caller, prefixed before the message material:
+    ///
+    /// ```verum
+    /// let alpha = [b"synarc-l1/proposer-election/v1/", &epoch_seed, &slot_no].concat();
+    /// let r = Ecvrf.prove(&sk, &alpha);
+    /// ```
+    public fn prove(sk: &VrfSecretKey, alpha: &[Byte]) -> VrfProveResult {
+        let raw = @intrinsic("verum.vrf.prove", sk, alpha);
+        // Backend returns 80B proof || 64B output.
+        let mut proof:  [Byte; 80] = [0; 80];
+        let mut output: [Byte; 64] = [0; 64];
+        let mut i: Int = 0;
+        while i < 80 { proof[i] = raw[i]; i = i + 1; }
+        let mut j: Int = 0;
+        while j < 64 { output[j] = raw[80 + j]; j = j + 1; }
+        VrfProveResult { proof, output }
+    }
+
+    /// Verify `proof` and recover the output `β` for `alpha` under `pk`.
+    /// On success the recovered β is bitwise-equal to the prover's
+    /// output. The strict-mode checks of RFC 9381 §5.3 are applied:
+    ///
+    /// * Public key non-small-order check.
+    /// * Γ point on curve.
+    /// * s in canonical range [0, L).
+    /// * Challenge equation balances.
+    ///
+    /// Failure surfaces as `VrfError.InvalidProof` (or `InvalidPublicKey`
+    /// when the issue is upstream of the proof).
+    public fn verify(
+        pk:    &VrfPublicKey,
+        alpha: &[Byte],
+        proof: &VrfProof,
+    ) -> Result<VrfOutput, VrfError> {
+        match @intrinsic("verum.vrf.verify", pk, alpha, proof) {
+            VrfVerifyResult.Accepted(out) => {
+                let mut o: [Byte; 64] = [0; 64];
+                let mut i: Int = 0;
+                while i < 64 { o[i] = out[i]; i = i + 1; }
+                Ok(o)
+            }
+            VrfVerifyResult.RejectMalformed(why) => Err(InvalidProof(why)),
+            VrfVerifyResult.RejectKey            => Err(InvalidPublicKey),
+            VrfVerifyResult.BackendError        => Err(BackendNotReady),
+        }
+    }
+
+    /// Recompute output β from a valid proof without re-running the
+    /// full verification. Useful when a caller has already verified the
+    /// proof and wants to retrieve β cheaply, or when only β is needed
+    /// downstream (RFC 9381 §5.2 `proof_to_hash`).
+    ///
+    /// Returns Err(InvalidProof) on a malformed proof; this function
+    /// does **not** check the proof's validity against (pk, alpha) —
+    /// only structural well-formedness. Use `verify` to authenticate.
+    public fn proof_to_hash(proof: &VrfProof) -> Result<VrfOutput, VrfError> {
+        match @intrinsic("verum.vrf.proof_to_hash", proof) {
+            ProofToHashResult.Ok(bytes) => {
+                let mut o: [Byte; 64] = [0; 64];
+                let mut i: Int = 0;
+                while i < 64 { o[i] = bytes[i]; i = i + 1; }
+                Ok(o)
+            }
+            ProofToHashResult.Malformed(why) => Err(InvalidProof(why)),
+        }
+    }
+
+    /// Convenience: numeric draw in `[0, modulus)` from VRF output.
+    /// Uses rejection sampling on the 64-byte stream to avoid bias —
+    /// any output `≥ floor(2^512 / modulus) * modulus` is rejected and
+    /// the next 64-byte sample (re-hash of the previous) is consumed.
+    /// For `modulus ≤ 2^60` rejection probability is negligible (< 2^-450).
+    public fn output_to_int_below(output: &VrfOutput, modulus: UInt64) -> UInt64 {
+        if modulus == 0_u64 { return 0_u64; }
+        @intrinsic("verum.vrf.output_to_int_below", output, modulus)
+    }
+}
+
+// =============================================================================
+// Internal — backend response types
+// =============================================================================
+
+/// Backend response for `verify`. Matched by intrinsic glue layer to
+/// avoid pre-decoding the variant in Rust before crossing the FFI seam.
+type VrfVerifyResult is
+    | Accepted([Byte; 64])
+    | RejectMalformed(Text)
+    | RejectKey
+    | BackendError;
+
+type ProofToHashResult is
+    | Ok([Byte; 64])
+    | Malformed(Text);
