@@ -8169,30 +8169,45 @@ impl VbcCodegen {
                     tid
                 };
 
-                // Capture generic parameters from the AST.  Same
-                // rationale as the Sum/Variant arm — without
-                // type_params, archive_metadata loses positional
-                // substitution info at use sites.
-                let mut record_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
-                    smallvec::SmallVec::new();
-                for (idx, gp) in type_decl.generics.iter().enumerate() {
-                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
-                        let gname_id = StringId(self.ctx.intern_string_raw(gname.name.as_str()));
-                        record_type_params.push(crate::types::TypeParamDescriptor {
-                            name: gname_id,
-                            id: crate::types::TypeParamId(idx as u16),
-                            bounds: smallvec::SmallVec::new(),
-                            default: None,
-                            variance: crate::types::Variance::Invariant,
-                        });
-                    }
-                }
+                // Generic parameters are populated below by the
+                // bounds-and-defaults pass (search for "Also populate
+                // type_params" later in this arm).  That second pass
+                // fills in the same name+id PLUS the protocol bounds
+                // (`<T: Eq + Hash>`) and default-type bindings (`<T = Int>`)
+                // which this short pass cannot — so we emit nothing
+                // here and let the richer pass populate the field
+                // exactly once.
+                //
+                // Pre-fix this arm built `record_type_params` from
+                // generics (id + name only), assigned it to
+                // `type_params:` at descriptor construction, AND THEN
+                // the bounds-and-defaults pass below also pushed
+                // every generic — duplicating every entry.
+                // archive_metadata's `convert_generic_params` walked
+                // the duplicated list verbatim → `metadata.types["List"]`
+                // ended up with `generic_params=[T, T]` (length 2,
+                // same name twice).  Downstream consumers compared
+                // `generic_params.len()` against user-side type-arg
+                // count and rejected `List<Int>` (1 arg) with
+                // "non-record type: List<_, _>" at every use site.
+                // Identical pattern affected `Map`
+                // (`generic_params=[K,V,K,V]`), `Set`, every record
+                // type with generics — the entire cross-collection
+                // user-side dispatch surface.
+                //
+                // Symptomatic test: `vcs/specs/L1-core/generics/associated_types.vr:387`
+                // `let pairs: List<(Int, Int)> = collect_all(zipped);`
+                // failed with `Cannot access field 'new' on
+                // non-record type: List<_, _>`.
+                //
+                // Sum arm (~line 8012) populates type_params in a
+                // single richer pass and was unaffected; the
+                // duplication was Record-arm and Protocol-arm only.
                 // Create a TypeDescriptor for this type (drop_fn will be set later if Drop is implemented)
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
                     kind: crate::types::TypeKind::Record,
-                    type_params: record_type_params,
                     ..Default::default()
                 };
 
