@@ -13055,18 +13055,57 @@ impl TypeChecker {
                         let _ = self.unifier.unify(left_deref, right_deref, span);
                     }
                     _ => {
+                        // Normalize both sides through the projection
+                        // resolver before unify.  Required for
+                        // associated-type projections like
+                        // `Maybe<I.Item>` where `I` got bound to a
+                        // concrete type during call-site
+                        // instantiation: the projection
+                        // `::Item<MyIter>` (concrete-base shape) must
+                        // reduce to the impl's bound type (e.g.
+                        // `Int`) BEFORE the unifier compares it
+                        // against the other side, otherwise the
+                        // unifier sees two structurally-different
+                        // Generic types and emits "Type mismatch:
+                        // expected 'Int', found 'Item<MyIter>'".
+                        //
+                        // The concrete-base case isn't handled by the
+                        // unifier's "deferred projection" path
+                        // (unify.rs:~2702) — that path only fires
+                        // when the projection's base STILL has
+                        // unresolved type vars. After call-site
+                        // substitution, the base IS concrete, so
+                        // this layer must drive the resolution.
+                        //
+                        // `normalize_type` is idempotent on
+                        // already-normalized types so this is safe
+                        // for non-projection inputs (cheap path-
+                        // walk + early return).
+                        //
+                        // Stdlib-agnostic — resolution flows through
+                        // `try_resolve_associated_type_projection` →
+                        // `protocol_checker::try_find_associated_type`
+                        // which iterates registered impls; no
+                        // hardcoded type/protocol names.
+                        let left_normalized = self.normalize_type(left_deref);
+                        let right_normalized = self.normalize_type(right_deref);
                         // For other types: allow numeric coercion via Numeric protocol,
                         // otherwise require strict same-type match via unification
-                        if self.unifier.unify(left_deref, right_deref, span).is_err() {
+                        if self
+                            .unifier
+                            .unify(&left_normalized, &right_normalized, span)
+                            .is_err()
+                        {
                             let pc = self.protocol_checker.read();
-                            if pc.implements_protocol(left_deref, "Numeric")
-                                && pc.implements_protocol(right_deref, "Numeric")
+                            if pc.implements_protocol(&left_normalized, "Numeric")
+                                && pc.implements_protocol(&right_normalized, "Numeric")
                             {
                                 // Both implement Numeric — allow cross-type comparison for literals
                             } else {
                                 drop(pc);
                                 // Re-run unify to produce the error
-                                self.unifier.unify(left_deref, right_deref, span)?;
+                                self.unifier
+                                    .unify(&left_normalized, &right_normalized, span)?;
                             }
                         }
                     }
