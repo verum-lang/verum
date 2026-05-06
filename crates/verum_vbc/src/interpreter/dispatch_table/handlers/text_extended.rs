@@ -31,6 +31,9 @@ pub(in super::super) fn handle_text_extended(
     use crate::instruction::TextSubOpcode;
 
     let sub_op_byte = read_u8(state)?;
+    // Skip operand-length varint (see encode_instruction's
+    // `Instruction::TextExtended` arm).
+    let _operand_len = read_varint(state)?;
     let sub_op = TextSubOpcode::from_byte(sub_op_byte);
     let dst = read_reg(state)?;
 

@@ -35,6 +35,9 @@ pub(in super::super) fn handle_math_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
+    // Skip operand-length varint (see encode_instruction's
+    // `Instruction::MathExtended` arm).
+    let _operand_len = read_varint(state)?;
     let sub_op = MathSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {

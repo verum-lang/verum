@@ -702,6 +702,13 @@ pub(in super::super) fn handle_cbgr_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
+    // Skip operand-length varint that the encoder writes after
+    // sub_op (see encode_instruction's `Instruction::CbgrExtended`
+    // arm).  Without this, the operand-length bytes get
+    // misinterpreted as register indices.  The length is only
+    // consumed by sequential decoders (linker, disassembler);
+    // dispatch reads operands per-sub_op below.
+    let _operand_len = read_varint(state)?;
     let sub_op = CbgrSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
