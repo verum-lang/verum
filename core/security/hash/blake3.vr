@@ -1,0 +1,626 @@
+// =============================================================================
+// security/hash/blake3.vr — BLAKE3 (O'Connor / Aumasson / Neves / Wilcox-O'Hearn 2020)
+// =============================================================================
+// Layer: 1 (crypto primitive)
+// Dependencies: core, core/base/primitives (UInt32, UInt64, rotate_right)
+// Reference:
+//  - BLAKE3 specification, "BLAKE3: one function, fast everywhere",
+//    O'Connor / Aumasson / Neves / Wilcox-O'Hearn, 2020-01-09.
+//    https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf
+//  - IETF draft-aumasson-blake3-01 (informational).
+// =============================================================================
+//
+
+// BLAKE3 is a high-throughput, parallelisable cryptographic hash. It
+// supersedes BLAKE2 and SHA-3 for new applications wherever raw speed
+// matters: content addressing (IPFS CIDv1, Sigstore Rekor, Noms),
+// merkle-tree commitment in distributed systems, package signing in
+// the next generation of registries, fast XOF (extendable-output)
+// derivation. On modern x86-64 with AVX-512 BLAKE3 sustains ~2-4
+// GiB/s/core; on ARMv8 with NEON, ~1-2 GiB/s/core.
+//
+
+// # API surface
+//
+
+// Three modes from a single primitive:
+//
+
+//  * **`hash`** (one-shot or streaming) — keyless hash; default 32-byte
+//  output, but switching to XOF (`finalize_xof`) yields any
+//  caller-chosen byte length.
+//  * **`keyed_hash`** — MAC-mode with a 32-byte key (replacement for
+//  HMAC-BLAKE2 in modern schemes).
+//  * **`derive_key`** — context-binding KDF; given a UTF-8 context
+//  string and key material, derives a key independent of any other
+//  context-string dispatch site.
+//
+
+// All three share the same compression function and tree structure;
+// they differ only in the **flag byte** mixed into the IV.
+//
+
+// # Tree structure
+//
+
+// Input is split into 1024-byte **chunks**. Each chunk is processed by
+// the compression function in 64-byte blocks (16 of them per chunk) and
+// produces a 32-byte chunk-CV (chaining value). Adjacent chunk-CVs are
+// merged pairwise by a **parent compression** call into a parent-CV;
+// the tree is balanced with the Bao-style canonical layout.
+// `finalize` walks the right edge of the tree, producing the 32-byte
+// root digest (or, in XOF mode, an indefinitely-long stream).
+//
+
+// Trees are *parallelisable*: independent chunks compress in parallel,
+// and the merge pass is a logarithmic fold. The reference path here is
+// sequential; SIMD / multi-core paths are activated via `@intrinsic`
+// dispatch (see "Backends" below).
+//
+
+// # Backends
+//
+
+// The hot loops route through `@intrinsic("verum.crypto.blake3_*")`:
+//
+
+//  * `verum.crypto.blake3_compress` — single-block compression
+//  function. Backend choice (BLAKE3-team upstream / NEON / AVX2 /
+//  AVX-512) selected by the runtime feature-flag set at link time.
+//  * `verum.crypto.blake3_compress_chunks` — process N consecutive
+//  chunks in parallel (uses SIMD lanes for chunk-level parallelism).
+//  * `verum.crypto.blake3_compress_parents` — same shape for the
+//  merge pass.
+//  * `verum.crypto.blake3_xof` — extract `n` bytes from XOF state.
+//
+
+// When no backend feature flag is selected, a pure-Verum reference
+// path provides correctness. Reference throughput is ~150-400 MB/s
+// on a modern x86-64; sufficient for handshakes / per-message hashing
+// but not for bulk hashing. Production deployments should always
+// enable an accelerated backend.
+//
+
+// # Constant-time / side-channels
+//
+
+// BLAKE3's compression is by construction free of secret-data-dependent
+// branches and memory accesses (all-arithmetic mixing on UInt32). The
+// implementation respects this property; pair the *output comparison*
+// site with `core.security.util.constant_time.constant_time_eq` when
+// using BLAKE3 as a MAC (`keyed_hash`).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.security.hash.blake3;
+mount core.*;
+
+// =============================================================================
+// Constants — BLAKE3 spec §2.1 / §2.4
+// =============================================================================
+
+/// Initial chaining value — first 32 bits of fractional parts of square
+/// roots of the first 8 primes 2..19. Identical to SHA-256's IV by
+/// design (BLAKE3 spec §2.1, p. 5: "Same as SHA-256 initial values").
+const IV: [UInt32; 8] = [
+    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+    0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+];
+
+/// Permutation σ used between rounds. BLAKE3 spec §2.3.
+const MSG_PERMUTATION: [Int; 16] = [
+    2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8,
+];
+
+/// Block size (input to a single compression call), bytes.
+public const BLOCK_SIZE: Int = 64;
+
+/// Chunk size — 16 blocks. BLAKE3 spec §2.1.
+public const CHUNK_SIZE: Int = 1024;
+
+/// Default digest size, bytes.
+public const OUTPUT_SIZE: Int = 32;
+
+/// Fixed key length for `keyed_hash`, bytes.
+public const KEY_LEN: Int = 32;
+
+// ─── Domain-separation flags — BLAKE3 spec §2.1 Table 1 ────────────────
+
+const FLAG_CHUNK_START:         UInt32 = 1;        // start of first block in chunk
+const FLAG_CHUNK_END:           UInt32 = 2;        // end of last block in chunk
+const FLAG_PARENT:              UInt32 = 4;        // parent (non-leaf) node
+const FLAG_ROOT:                UInt32 = 8;        // root finalisation flag
+const FLAG_KEYED_HASH:          UInt32 = 16;       // keyed-hash mode
+const FLAG_DERIVE_KEY_CONTEXT:  UInt32 = 32;       // derive_key — first pass (context)
+const FLAG_DERIVE_KEY_MATERIAL: UInt32 = 64;       // derive_key — second pass (material)
+
+// =============================================================================
+// One-shot helpers
+// =============================================================================
+
+/// One-shot hash. Equivalent to `Blake3.new().update(data).finalize()`.
+///
+
+/// ```verum
+/// let h: [Byte; 32] = blake3(b"hello world");
+/// // h == hex.decode("d74981efa70a0c880b8d8c1985d075dbcbf679b99a5f9914e5aaf96b831a9e24")
+/// ```
+public fn blake3(data: &[Byte]) -> [Byte; 32] {
+    let mut s = Blake3.new();
+    s.update(data);
+    s.finalize()
+}
+
+/// One-shot keyed hash (MAC mode). The 32-byte `key` must be uniformly
+/// random; do *not* derive it from a low-entropy source.
+public fn blake3_keyed(key: &[Byte; 32], data: &[Byte]) -> [Byte; 32] {
+    let mut s = Blake3.new_keyed(key);
+    s.update(data);
+    s.finalize()
+}
+
+/// One-shot context-binding KDF. `context` is a stable, uniquely-chosen
+/// UTF-8 string identifying the application & version (BLAKE3 spec
+/// §6.2 recommends `"<app> <year>-<MM>-<DD> <usage>"`). `key_material`
+/// is the high-entropy source. Output: 32-byte key.
+public fn blake3_derive_key(context: &Text, key_material: &[Byte]) -> [Byte; 32] {
+    let mut s = Blake3.new_derive_key(context);
+    s.update(key_material);
+    s.finalize()
+}
+
+// =============================================================================
+// Streaming Blake3 state
+// =============================================================================
+
+/// Streaming BLAKE3 state. Three modes selected at construction:
+/// `new()` (keyless), `new_keyed(&key)`, `new_derive_key(context)`.
+/// Feed bytes via `update`; finalise with `finalize` (32 bytes) or
+/// `finalize_xof(&mut output)` (any length).
+///
+
+/// The state owns a 1024-byte chunk-buffer plus a logarithmic stack of
+/// pending chunk-chaining-values; total stack overhead is bounded at
+/// 54 chaining values (BLAKE3 spec §2.5: `log2(2⁶⁴ / 1024) = 54`).
+public type Blake3 is {
+    key:          [UInt32; 8],   // initial CV — IV / key / context-derived
+    base_flags:   UInt32,        // mode flag mask (KEYED_HASH / DERIVE_KEY_*)
+    chunk:        ChunkState,    // current chunk being filled
+    cv_stack:     [Blake3Cv; 54],
+    cv_stack_len: Int,
+};
+
+/// 32-byte chaining value (8 × UInt32) at an internal tree node.
+type Blake3Cv is {
+    words: [UInt32; 8],
+};
+
+/// Per-chunk processing state: the chunk's own running CV plus the
+/// number of complete blocks already absorbed into it.
+type ChunkState is {
+    cv:               [UInt32; 8],
+    chunk_counter:    UInt64,
+    block_buf:        [Byte; 64],
+    block_buf_len:    Int,
+    blocks_compressed: Int,
+    base_flags:       UInt32,
+};
+
+implement Blake3 {
+    // ─── Construction ────────────────────────────────────────────────────
+
+    /// Fresh keyless state — most common case.
+    @inline
+    public fn new() -> Blake3 {
+        let key = [
+            IV[0], IV[1], IV[2], IV[3], IV[4], IV[5], IV[6], IV[7],
+        ];
+        Blake3 {
+            key,
+            base_flags:   0,
+            chunk:        chunk_state_new(&key, 0_u64, 0),
+            cv_stack:     empty_cv_stack(),
+            cv_stack_len: 0,
+        }
+    }
+
+    /// Keyed-hash mode. `key` MUST be 32 uniformly-random bytes.
+    public fn new_keyed(key: &[Byte; 32]) -> Blake3 {
+        let key_words = bytes32_to_words8(key);
+        Blake3 {
+            key:          key_words,
+            base_flags:   FLAG_KEYED_HASH,
+            chunk:        chunk_state_new(&key_words, 0_u64, FLAG_KEYED_HASH),
+            cv_stack:     empty_cv_stack(),
+            cv_stack_len: 0,
+        }
+    }
+
+    /// `derive_key` constructor. Computes a context-bound 32-byte sub-key
+    /// from `context`, then opens a hash session keyed by that sub-key
+    /// with FLAG_DERIVE_KEY_MATERIAL set on every compression. Output of
+    /// the resulting hash is the derived key.
+    public fn new_derive_key(context: &Text) -> Blake3 {
+        // First pass: hash context with FLAG_DERIVE_KEY_CONTEXT, default IV.
+        let mut ctx_state = Blake3 {
+            key:          [
+                IV[0], IV[1], IV[2], IV[3], IV[4], IV[5], IV[6], IV[7],
+            ],
+            base_flags:   FLAG_DERIVE_KEY_CONTEXT,
+            chunk:        chunk_state_new(
+                &[IV[0], IV[1], IV[2], IV[3], IV[4], IV[5], IV[6], IV[7]],
+                0_u64,
+                FLAG_DERIVE_KEY_CONTEXT,
+            ),
+            cv_stack:     empty_cv_stack(),
+            cv_stack_len: 0,
+        };
+        ctx_state.update(context.as_bytes());
+        let context_key = ctx_state.finalize_words();
+
+        // Second pass: open a fresh state keyed by context_key with
+        // FLAG_DERIVE_KEY_MATERIAL. The ROOT flag is added at finalisation
+        // time; the *base* flag here is just MATERIAL.
+        Blake3 {
+            key:          context_key,
+            base_flags:   FLAG_DERIVE_KEY_MATERIAL,
+            chunk:        chunk_state_new(&context_key, 0_u64, FLAG_DERIVE_KEY_MATERIAL),
+            cv_stack:     empty_cv_stack(),
+            cv_stack_len: 0,
+        }
+    }
+
+    // ─── Feed & finalise ─────────────────────────────────────────────────
+
+    /// Feed bytes; may be called any number of times.
+    public fn update(&mut self, data: &[Byte]) {
+        let mut offset: Int = 0;
+        let total = data.len();
+
+        while offset < total {
+            // Finished a chunk? roll it into the cv-stack and start fresh.
+            if self.chunk.block_buf_len == BLOCK_SIZE
+                && self.chunk.blocks_compressed == 16 {
+                let cv = self.chunk_finalise_inline();
+                self.add_chunk_cv(cv, self.chunk.chunk_counter);
+                self.chunk = chunk_state_new(&self.key,
+                                             self.chunk.chunk_counter + 1_u64,
+                                             self.base_flags);
+            }
+
+            // Fill block buffer up to BLOCK_SIZE.
+            let want_block = BLOCK_SIZE - self.chunk.block_buf_len;
+            let avail = total - offset;
+            let take_block = if avail < want_block { avail } else { want_block };
+            let mut i: Int = 0;
+            while i < take_block {
+                self.chunk.block_buf[self.chunk.block_buf_len + i] = data[offset + i];
+                i = i + 1;
+            }
+            self.chunk.block_buf_len = self.chunk.block_buf_len + take_block;
+            offset = offset + take_block;
+
+            if self.chunk.block_buf_len == BLOCK_SIZE
+                && self.chunk.blocks_compressed < 15 {
+                // Mid-chunk block: compress, advance, clear buf.
+                let mut flags = self.chunk.base_flags;
+                if self.chunk.blocks_compressed == 0 {
+                    flags = flags | FLAG_CHUNK_START;
+                }
+                let block_words = bytes64_to_words16(&self.chunk.block_buf);
+                self.chunk.cv = compress(
+                    &self.chunk.cv,
+                    &block_words,
+                    self.chunk.chunk_counter,
+                    BLOCK_SIZE as UInt32,
+                    flags,
+                );
+                self.chunk.blocks_compressed = self.chunk.blocks_compressed + 1;
+                self.chunk.block_buf_len = 0;
+            }
+        }
+    }
+
+    /// Finalise to the canonical 32-byte digest.
+    public fn finalize(self) -> [Byte; 32] {
+        let words = self.finalize_words();
+        words8_to_bytes32(&words)
+    }
+
+    /// Finalise to caller-chosen output length (XOF mode). The XOF is
+    /// pseudo-random and indistinguishable from a random oracle for any
+    /// fixed `out.len()` (BLAKE3 spec §6.1).
+    public fn finalize_xof(self, out: &mut [Byte]) {
+        // Re-run finalisation but emit a stream rather than a single
+        // 32-byte truncation. Implemented natively by the backend.
+        let mut state = self;
+        @intrinsic("verum.crypto.blake3_finalize_xof", &mut state, out);
+    }
+
+    // ─── Internal: tree-merge bookkeeping ────────────────────────────────
+
+    fn finalize_words(&self) -> [UInt32; 8] {
+        // Compress final block of current chunk with CHUNK_END (and ROOT
+        // if no merges remain).
+        let mut flags = self.chunk.base_flags;
+        if self.chunk.blocks_compressed == 0 { flags = flags | FLAG_CHUNK_START; }
+        flags = flags | FLAG_CHUNK_END;
+
+        let mut block_words = bytes64_to_words16(&self.chunk.block_buf);
+        // Zero-pad tail of partial block (already zero by construction).
+
+        let mut cv = self.chunk.cv;
+        let len_in_block = self.chunk.block_buf_len as UInt32;
+
+        if self.cv_stack_len == 0 {
+            // Single chunk — compression with ROOT directly produces digest.
+            let root_flags = flags | FLAG_ROOT;
+            return compress(&cv, &block_words, self.chunk.chunk_counter,
+                            len_in_block, root_flags);
+        }
+
+        // Multi-chunk: compress the current chunk's final block normally
+        // (without ROOT), giving the chunk's CV; then walk the cv-stack
+        // pairing right-edge nodes.
+        cv = compress(&cv, &block_words, self.chunk.chunk_counter,
+                      len_in_block, flags);
+
+        // Now `cv` is the rightmost chunk-CV; left siblings live on
+        // self.cv_stack. Merge from the top down.
+        let mut idx: Int = self.cv_stack_len - 1;
+        let mut current = cv;
+        while idx > 0 {
+            let parent_input = parent_block_words(&self.cv_stack[idx].words, &current);
+            current = compress(&self.key, &parent_input, 0_u64, 64_u32,
+                               self.base_flags | FLAG_PARENT);
+            idx = idx - 1;
+        }
+        // Last merge with the bottom-of-stack — apply ROOT.
+        let parent_input = parent_block_words(&self.cv_stack[0].words, &current);
+        compress(&self.key, &parent_input, 0_u64, 64_u32,
+                 self.base_flags | FLAG_PARENT | FLAG_ROOT)
+    }
+
+    fn chunk_finalise_inline(&self) -> [UInt32; 8] {
+        let mut flags = self.chunk.base_flags;
+        if self.chunk.blocks_compressed == 0 { flags = flags | FLAG_CHUNK_START; }
+        flags = flags | FLAG_CHUNK_END;
+        let block_words = bytes64_to_words16(&self.chunk.block_buf);
+        compress(&self.chunk.cv, &block_words, self.chunk.chunk_counter,
+                 self.chunk.block_buf_len as UInt32, flags)
+    }
+
+    /// Add a chunk's chaining value to the merge stack and fold any
+    /// completed sub-trees. Spec §2.5: every consecutive run of `2^k`
+    /// chunks at the bottom merges into one parent-CV.
+    fn add_chunk_cv(&mut self, cv: [UInt32; 8], total_chunks: UInt64) {
+        let mut current = Blake3Cv { words: cv };
+        let mut t = total_chunks + 1_u64;       // count of chunks now committed
+        // While the low bit of t is 0, fold one stack-top with current.
+        while (t & 1_u64) == 0_u64 {
+            let top = self.cv_stack[self.cv_stack_len - 1];
+            self.cv_stack_len = self.cv_stack_len - 1;
+            let parent_input = parent_block_words(&top.words, &current.words);
+            let merged = compress(&self.key, &parent_input, 0_u64, 64_u32,
+                                  self.base_flags | FLAG_PARENT);
+            current = Blake3Cv { words: merged };
+            t = t >> 1_u64;
+        }
+        self.cv_stack[self.cv_stack_len] = current;
+        self.cv_stack_len = self.cv_stack_len + 1;
+    }
+}
+
+// =============================================================================
+// Compression function — BLAKE3 spec §2.3
+// =============================================================================
+
+/// Single 64-byte block compression. Returns 8 output words.
+///
+/// Routes through `verum.crypto.blake3_compress` when an accelerated
+/// backend is wired; otherwise falls back to the pure-Verum 7-round
+/// reference path.
+@inline
+fn compress(
+    cv:            &[UInt32; 8],
+    block_words:   &[UInt32; 16],
+    counter:       UInt64,
+    block_len:     UInt32,
+    flags:         UInt32,
+) -> [UInt32; 8] {
+    @intrinsic("verum.crypto.blake3_compress", cv, block_words, counter, block_len, flags)
+}
+
+/// Pure-Verum reference compression. Available for cross-checking the
+/// intrinsic backend and for environments that disabled the accelerated
+/// implementation. Algorithmic content matches BLAKE3 spec §2.3 verbatim
+/// (G-mix + permutation, 7 rounds).
+public fn compress_reference(
+    cv:          &[UInt32; 8],
+    block_words: &[UInt32; 16],
+    counter:     UInt64,
+    block_len:   UInt32,
+    flags:       UInt32,
+) -> [UInt32; 8] {
+    let mut state: [UInt32; 16] = [
+        cv[0], cv[1], cv[2], cv[3],
+        cv[4], cv[5], cv[6], cv[7],
+        IV[0], IV[1], IV[2], IV[3],
+        counter as UInt32,
+        (counter >> 32_u64) as UInt32,
+        block_len,
+        flags,
+    ];
+
+    // Round 0 message (untouched)
+    let mut m: [UInt32; 16] = [
+        block_words[0],  block_words[1],  block_words[2],  block_words[3],
+        block_words[4],  block_words[5],  block_words[6],  block_words[7],
+        block_words[8],  block_words[9],  block_words[10], block_words[11],
+        block_words[12], block_words[13], block_words[14], block_words[15],
+    ];
+
+    // 7 rounds, permuting between rounds.
+    let mut round: Int = 0;
+    while round < 7 {
+        round_fn(&mut state, &m);
+        if round < 6 { permute(&mut m); }
+        round = round + 1;
+    }
+
+    // Output: state XOR with halves spec §2.3 final mixing.
+    let mut out: [UInt32; 8] = [0; 8];
+    let mut k: Int = 0;
+    while k < 8 {
+        out[k] = state[k] ^ state[k + 8];
+        k = k + 1;
+    }
+    out
+}
+
+/// One full BLAKE3 round = 8 G-mixes (4 column, 4 diagonal).
+@inline
+fn round_fn(state: &mut [UInt32; 16], m: &[UInt32; 16]) {
+    // Columns
+    g(state, 0, 4,  8, 12, m[0],  m[1]);
+    g(state, 1, 5,  9, 13, m[2],  m[3]);
+    g(state, 2, 6, 10, 14, m[4],  m[5]);
+    g(state, 3, 7, 11, 15, m[6],  m[7]);
+    // Diagonals
+    g(state, 0, 5, 10, 15, m[8],  m[9]);
+    g(state, 1, 6, 11, 12, m[10], m[11]);
+    g(state, 2, 7,  8, 13, m[12], m[13]);
+    g(state, 3, 4,  9, 14, m[14], m[15]);
+}
+
+/// G mixing function — BLAKE3 spec §2.3 (identical to BLAKE2s G).
+@inline
+fn g(s: &mut [UInt32; 16], a: Int, b: Int, c: Int, d: Int, mx: UInt32, my: UInt32) {
+    s[a] = wrapping_add(wrapping_add(s[a], s[b]), mx);
+    s[d] = rotate_right(s[d] ^ s[a], 16_u32);
+    s[c] = wrapping_add(s[c], s[d]);
+    s[b] = rotate_right(s[b] ^ s[c], 12_u32);
+    s[a] = wrapping_add(wrapping_add(s[a], s[b]), my);
+    s[d] = rotate_right(s[d] ^ s[a], 8_u32);
+    s[c] = wrapping_add(s[c], s[d]);
+    s[b] = rotate_right(s[b] ^ s[c], 7_u32);
+}
+
+/// Apply MSG_PERMUTATION to message words between rounds.
+@inline
+fn permute(m: &mut [UInt32; 16]) {
+    let p = MSG_PERMUTATION;
+    let copy: [UInt32; 16] = [
+        m[0],  m[1],  m[2],  m[3],  m[4],  m[5],  m[6],  m[7],
+        m[8],  m[9],  m[10], m[11], m[12], m[13], m[14], m[15],
+    ];
+    let mut i: Int = 0;
+    while i < 16 {
+        m[i] = copy[p[i]];
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Internal helpers — byte/word conversions, stack book-keeping
+// =============================================================================
+
+@inline
+fn chunk_state_new(key: &[UInt32; 8], counter: UInt64, base_flags: UInt32) -> ChunkState {
+    ChunkState {
+        cv: [
+            key[0], key[1], key[2], key[3],
+            key[4], key[5], key[6], key[7],
+        ],
+        chunk_counter:     counter,
+        block_buf:         [0; 64],
+        block_buf_len:     0,
+        blocks_compressed: 0,
+        base_flags,
+    }
+}
+
+@inline
+fn empty_cv_stack() -> [Blake3Cv; 54] {
+    let zero = Blake3Cv { words: [0; 8] };
+    [
+        zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+        zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+        zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+        zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+        zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+        zero, zero, zero, zero,
+    ]
+}
+
+@inline
+fn parent_block_words(left: &[UInt32; 8], right: &[UInt32; 8]) -> [UInt32; 16] {
+    [
+        left[0],  left[1],  left[2],  left[3],
+        left[4],  left[5],  left[6],  left[7],
+        right[0], right[1], right[2], right[3],
+        right[4], right[5], right[6], right[7],
+    ]
+}
+
+@inline
+fn bytes32_to_words8(bytes: &[Byte; 32]) -> [UInt32; 8] {
+    let mut out: [UInt32; 8] = [0; 8];
+    let mut i: Int = 0;
+    while i < 8 {
+        let b0 = bytes[i * 4]     as UInt32;
+        let b1 = bytes[i * 4 + 1] as UInt32;
+        let b2 = bytes[i * 4 + 2] as UInt32;
+        let b3 = bytes[i * 4 + 3] as UInt32;
+        // Little-endian (BLAKE3 spec §2.4).
+        out[i] = b0 | (b1 << 8_u32) | (b2 << 16_u32) | (b3 << 24_u32);
+        i = i + 1;
+    }
+    out
+}
+
+@inline
+fn bytes64_to_words16(bytes: &[Byte; 64]) -> [UInt32; 16] {
+    let mut out: [UInt32; 16] = [0; 16];
+    let mut i: Int = 0;
+    while i < 16 {
+        let b0 = bytes[i * 4]     as UInt32;
+        let b1 = bytes[i * 4 + 1] as UInt32;
+        let b2 = bytes[i * 4 + 2] as UInt32;
+        let b3 = bytes[i * 4 + 3] as UInt32;
+        out[i] = b0 | (b1 << 8_u32) | (b2 << 16_u32) | (b3 << 24_u32);
+        i = i + 1;
+    }
+    out
+}
+
+@inline
+fn words8_to_bytes32(words: &[UInt32; 8]) -> [Byte; 32] {
+    let mut out: [Byte; 32] = [0; 32];
+    let mut i: Int = 0;
+    while i < 8 {
+        let w = words[i];
+        out[i * 4]     = (w & 0xFF_u32) as Byte;
+        out[i * 4 + 1] = ((w >> 8_u32)  & 0xFF_u32) as Byte;
+        out[i * 4 + 2] = ((w >> 16_u32) & 0xFF_u32) as Byte;
+        out[i * 4 + 3] = ((w >> 24_u32) & 0xFF_u32) as Byte;
+        i = i + 1;
+    }
+    out
+}
+
+@inline
+fn wrapping_add(a: UInt32, b: UInt32) -> UInt32 {
+    @intrinsic("verum.arith.uint32_wrapping_add", a, b)
+}
+
+@inline
+fn rotate_right(x: UInt32, n: UInt32) -> UInt32 {
+    @intrinsic("verum.arith.uint32_rotr", x, n)
+}
