@@ -3097,7 +3097,7 @@ fn registry_driven_tensor_arity(sub_op: u8) -> Option<usize> {
         // Reductions.
         T::ReduceFromArgs => 3,
         T::Argmax => 3,
-        T::Topk => 4,
+        T::Topk => 3,
         T::Trace => 2,
         T::TensorNorm => 2,
         // Linear algebra.
