@@ -24,6 +24,12 @@
 //  Verifiable Random Function. Reuses the
 //  Edwards25519 keypair so a single account key
 //  serves both Ed25519 sign and ECVRF prove.
+//  * `bls12_381.vr` — pairing-friendly BLS12-381 curve with
+//  G1/G2/GT operations, optimal-Ate pairing,
+//  IETF-spec'd signatures, multi-sig + thr-sig
+//  aggregation. Backbone of every modern protocol
+//  needing short signatures + threshold composition
+//  (Eth2 PoS, Drand, Filecoin, Zcash Sapling, Halo2).
 //
 
 // Higher-level signature combinators (multi-sig, threshold,
@@ -42,3 +48,4 @@ public module ed25519;
 public module p256;
 public module x25519;
 public module vrf;
+public module bls12_381;
