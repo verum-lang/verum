@@ -1,0 +1,800 @@
+// =============================================================================
+// security/ecc/bls12_381.vr — BLS12-381 pairing-friendly curve + signatures
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core, core.security.hash.{sha256, blake3}
+// References:
+//  - draft-irtf-cfrg-bls-signature-05 (IETF, BLS Signatures)
+//  - draft-irtf-cfrg-pairing-friendly-curves-11 (IETF, BLS12-381 pinning)
+//  - Sean Bowe, "BLS12-381: New zk-SNARK Elliptic Curve Construction" (2017)
+//  - hash-to-curve: RFC 9380 §8.8.1 (BLS12381G1_XMD:SHA-256_SSWU_RO_)
+//  - hash-to-curve: RFC 9380 §8.8.2 (BLS12381G2_XMD:SHA-256_SSWU_RO_)
+// =============================================================================
+//
+
+// BLS12-381 is the pairing-friendly elliptic curve adopted by every
+// modern protocol that needs short signatures + threshold aggregation:
+//
+
+//  * Ethereum 2.0 / Eth-PoS (BLS validator signatures)
+//  * Filecoin (verifier proofs, deal signatures)
+//  * Zcash Sapling (Groth16 + Halo2 over BLS12-381)
+//  * Algorand (compact certificates)
+//  * Drand (threshold randomness beacon)
+//  * Chia (BLS aggregation in PoSpace+PoT)
+//
+
+// # Curve summary
+//
+
+//  * Prime field 𝔽_p with p ≈ 2^381 (381-bit modulus, ~128-bit
+//    classical security).
+//  * G1: prime-order subgroup of E(𝔽_p) of order r ≈ 2^255.
+//    Compressed point: 48 B.
+//  * G2: prime-order subgroup of E'(𝔽_p^2) of same order r.
+//    Compressed point: 96 B.
+//  * GT: r-th roots of unity in 𝔽_p^12. Pairing target.
+//    Compressed: 576 B (12 × 48 B).
+//  * Pairing e: G1 × G2 → GT (optimal Ate pairing, Miller loop
+//    over 64 bits).
+//
+
+// # Signature variants (draft-irtf-cfrg-bls-signature §3)
+//
+
+// The IETF draft fixes two ciphersuite layouts:
+//
+
+//  * **BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_** — short
+//    signatures (G1 = 48 B), longer public keys (G2 = 96 B).
+//  * **BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_** — longer
+//    signatures (G2 = 96 B), shorter public keys (G1 = 48 B).
+//
+
+// The G2-signature variant is canonical for *threshold-aggregation*
+// validator BFT (Eth2, Drand). The G1-signature variant is canonical
+// for *individual-signature* heavy paths (Filecoin StorageMarket).
+//
+
+// This module surfaces both via `BlsCipherSuite`. Default at v0.1:
+// G2-signature (BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_) — matches
+// IETF "minimal-pubkey-size" draft default and Eth2 production.
+//
+
+// # Aggregation
+//
+
+// Two distinct primitives often confused:
+//
+
+//  * **Plain aggregation** — Σ σ_i over distinct (pk_i, m_i). Each
+//    signer signs *their own* message; the aggregate signature
+//    verifies all of (pk_i, m_i) at once. **Susceptible to
+//    rogue-key attacks** without proof-of-possession.
+//  * **Multi-sig** (= "aggregation with same message") — Σ σ_i where
+//    every signer signed the *same* m. Used for Eth2 attestations,
+//    Drand round signatures. **Requires PoP** to be safe (or the
+//    BLS Anti-Rogue-Key trick from Boneh–Drijvers–Neven 2018).
+//
+
+// The module exposes both with explicit naming; the safer
+// `verify_with_pop` form is the recommended default.
+//
+
+// # Threshold signing
+//
+
+// `t-of-n` Shamir-style threshold over G2 (BDN18 §3): the secret-key
+// shares are scalars in 𝔽_r distributed via Shamir; each share
+// produces a partial signature; combining ≥ t partial sigs reconstructs
+// the BLS signature under the group public key. Operationally:
+// validator-set BFT vote aggregation, Drand round assembly.
+//
+
+// # Architecture — intrinsic-backed
+//
+
+// Hot loops route through `@intrinsic("verum.crypto.bls12_381_*")`:
+//
+
+//  * `verum.crypto.bls12_381_g1_*`   — G1 group ops
+//  * `verum.crypto.bls12_381_g2_*`   — G2 group ops
+//  * `verum.crypto.bls12_381_pairing` — optimal Ate pairing
+//  * `verum.crypto.bls12_381_sign`   — sk-side signing
+//  * `verum.crypto.bls12_381_verify` — pairing equation check
+//  * `verum.crypto.bls12_381_aggregate_sigs` — sigma-add
+//  * `verum.crypto.bls12_381_aggregate_pks`  — pubkey-add
+//  * `verum.crypto.bls12_381_threshold_combine` — Lagrange-combine
+//
+
+// Backend is supplied by `blst` (Supranational, audited) — same
+// implementation lineage that powers Eth2 consensus clients.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.security.ecc.bls12_381;
+mount core.*;
+mount core.security.ecc.ed25519.{fill_random};
+
+// =============================================================================
+// Sizes (draft-irtf-cfrg-bls-signature §3 + draft-pairing-friendly-curves §4.2.1)
+// =============================================================================
+
+/// Prime field 𝔽_p modulus byte length (381 bits, padded to 48 B).
+public const FP_SIZE: Int = 48;
+
+/// G1 compressed point — 48 B (1 sign-bit packed into the high bit).
+public const G1_COMPRESSED_SIZE: Int = 48;
+
+/// G1 uncompressed point — 96 B (X || Y).
+public const G1_UNCOMPRESSED_SIZE: Int = 96;
+
+/// G2 compressed point — 96 B.
+public const G2_COMPRESSED_SIZE: Int = 96;
+
+/// G2 uncompressed point — 192 B.
+public const G2_UNCOMPRESSED_SIZE: Int = 192;
+
+/// GT element — 576 B (12 × FP_SIZE).
+public const GT_SIZE: Int = 576;
+
+/// Scalar field 𝔽_r (curve subgroup order). 32 B little-endian
+/// canonical encoding; values ≥ r are rejected.
+public const SCALAR_SIZE: Int = 32;
+
+/// Default secret key — 32 random bytes that key-derive into 𝔽_r
+/// per draft §2.3 (HKDF-SHA-256-SHA-256-Expand).
+public const SECRET_KEY_SIZE: Int = 32;
+
+// =============================================================================
+// Ciphersuite — variant (which group hosts the signature)
+// =============================================================================
+
+/// BLS signature ciphersuite — chooses which group hosts signatures
+/// vs public keys. Wire-incompatible across variants; both pin
+/// SHA-256 as the hash + SSWU as the hash-to-curve method per RFC 9380.
+public type BlsCipherSuite is
+    /// G1 hosts public keys (48 B), G2 hosts signatures (96 B).
+    /// **Recommended for threshold + multi-sig** — every modern
+    /// validator-set BFT chain uses this variant. IETF "minimal-pubkey-
+    /// size" default.
+    | MinPk
+    /// G2 hosts public keys (96 B), G1 hosts signatures (48 B).
+    /// Used where individual signatures dominate (Filecoin
+    /// StorageMarket, BLS-anchored content addressing).
+    | MinSig;
+
+implement BlsCipherSuite {
+    /// Domain-separation tag from RFC 9380 §8.8 — pinned by IETF
+    /// draft-irtf-cfrg-bls-signature §4.2.3 ("ciphersuite ID").
+    public fn dst(&self) -> Text {
+        match self {
+            MinPk => "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_".into(),
+            MinSig => "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_".into(),
+        }
+    }
+
+    public fn signature_size(&self) -> Int {
+        match self {
+            MinPk => G2_COMPRESSED_SIZE,
+            MinSig => G1_COMPRESSED_SIZE,
+        }
+    }
+
+    public fn public_key_size(&self) -> Int {
+        match self {
+            MinPk => G1_COMPRESSED_SIZE,
+            MinSig => G2_COMPRESSED_SIZE,
+        }
+    }
+}
+
+// =============================================================================
+// Group elements — opaque carriers backed by intrinsic state
+// =============================================================================
+
+/// G1 point. Compressed-form bytes for wire; the runtime memoises
+/// the uncompressed Jacobian form in a side handle for hot ops.
+public type G1Point is {
+    bytes: [Byte; 48],
+};
+
+/// G2 point.
+public type G2Point is {
+    bytes: [Byte; 96],
+};
+
+/// GT (target group) element. Constructed by `pairing` only; never
+/// transmitted on wire — equality of GT elements is the only operation
+/// callers need (the BLS verify equation reduces to one GT equality).
+public type GTElement is {
+    bytes: [Byte; 576],
+};
+
+/// 32-byte canonical scalar 𝔽_r little-endian. Out-of-range scalars
+/// are rejected at decode time.
+public type Scalar is {
+    bytes: [Byte; 32],
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type BlsError is
+    /// Wire bytes do not decode to a curve point (sub-group check
+    /// failed, infinity flag inconsistent, off-curve).
+    | InvalidPoint(Text)
+    /// Scalar is out of [0, r) range.
+    | InvalidScalar
+    /// Public key was small-order or rejected by sub-group membership.
+    | InvalidPublicKey
+    /// Signature wire-form malformed (length, infinity, off-curve).
+    | InvalidSignature(Text)
+    /// Pairing equation rejected — signature does not authenticate.
+    | VerificationFailed
+    /// Number of (pk_i, m_i) inputs to aggregate-verify mismatch.
+    | AggregateMismatch(Text)
+    /// Threshold reconstruction failed: too few shares, duplicate
+    /// indices, or shares from inconsistent committees.
+    | ThresholdRebuildFailed(Text)
+    /// Backend intrinsic absent.
+    | BackendNotReady;
+
+implement Display for BlsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidPoint(why)         => f.write_str(f"BLS12-381: invalid point ({why})".as_str()),
+            InvalidScalar             => f.write_str("BLS12-381: scalar out of [0, r)"),
+            InvalidPublicKey          => f.write_str("BLS12-381: invalid public key"),
+            InvalidSignature(why)     => f.write_str(f"BLS12-381: invalid signature ({why})".as_str()),
+            VerificationFailed        => f.write_str("BLS12-381: signature verification failed"),
+            AggregateMismatch(why)    => f.write_str(f"BLS12-381: aggregate mismatch ({why})".as_str()),
+            ThresholdRebuildFailed(why) => f.write_str(f"BLS12-381: threshold rebuild ({why})".as_str()),
+            BackendNotReady           => f.write_str("BLS12-381: backend intrinsic not ready"),
+        }
+    }
+}
+
+implement Debug for BlsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidPoint(why)            => f.write_str(f"InvalidPoint({why})".as_str()),
+            InvalidScalar                => f.write_str("InvalidScalar"),
+            InvalidPublicKey             => f.write_str("InvalidPublicKey"),
+            InvalidSignature(why)        => f.write_str(f"InvalidSignature({why})".as_str()),
+            VerificationFailed           => f.write_str("VerificationFailed"),
+            AggregateMismatch(why)       => f.write_str(f"AggregateMismatch({why})".as_str()),
+            ThresholdRebuildFailed(why)  => f.write_str(f"ThresholdRebuildFailed({why})".as_str()),
+            BackendNotReady              => f.write_str("BackendNotReady"),
+        }
+    }
+}
+
+// =============================================================================
+// Group operations — G1
+// =============================================================================
+
+implement G1Point {
+    /// Identity (point at infinity).
+    public fn identity() -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_identity");
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    /// Generator G1 (canonical, draft-pairing-friendly-curves §4.2.1).
+    public fn generator() -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_generator");
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    public fn from_compressed(bytes: &[Byte; 48]) -> Result<G1Point, BlsError> {
+        match @intrinsic("verum.crypto.bls12_381_g1_decompress", bytes) {
+            G1DecodeResult.Ok(b) => {
+                let mut out: [Byte; 48] = [0; 48];
+                let mut i: Int = 0; while i < 48 { out[i] = b[i]; i = i + 1; }
+                Ok(G1Point { bytes: out })
+            }
+            G1DecodeResult.Err(why) => Err(InvalidPoint(why)),
+        }
+    }
+
+    public fn to_compressed(&self) -> [Byte; 48] {
+        let mut out: [Byte; 48] = [0; 48];
+        let mut i: Int = 0;
+        while i < 48 { out[i] = self.bytes[i]; i = i + 1; }
+        out
+    }
+
+    /// Group law: P + Q.
+    public fn add(&self, other: &G1Point) -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_add", self, other);
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    /// Scalar multiplication: k · P.
+    public fn mul(&self, k: &Scalar) -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_mul", self, k);
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    /// `−P` — additive inverse.
+    public fn neg(&self) -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_neg", self);
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    /// Hash-to-curve under the named domain-separation tag (RFC 9380
+    /// §8.8.1 — BLS12381G1_XMD:SHA-256_SSWU_RO_).
+    public fn hash_to_curve(msg: &[Byte], dst: &Text) -> G1Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g1_hash_to_curve", msg, dst);
+        let mut b: [Byte; 48] = [0; 48];
+        let mut i: Int = 0; while i < 48 { b[i] = bytes[i]; i = i + 1; }
+        G1Point { bytes: b }
+    }
+
+    /// Sub-group membership check — `r · P == identity`. Required
+    /// before any pairing operation; pairings on non-subgroup points
+    /// are not bilinear.
+    public fn is_in_subgroup(&self) -> Bool {
+        @intrinsic("verum.crypto.bls12_381_g1_subgroup_check", self)
+    }
+
+    /// `Eq` — constant-time bytewise compare on canonical compressed form.
+    public fn eq(&self, other: &G1Point) -> Bool {
+        @intrinsic("verum.crypto.bls12_381_g1_eq", self, other)
+    }
+}
+
+// =============================================================================
+// Group operations — G2
+// =============================================================================
+
+implement G2Point {
+    public fn identity() -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_identity");
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    public fn generator() -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_generator");
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    public fn from_compressed(bytes: &[Byte; 96]) -> Result<G2Point, BlsError> {
+        match @intrinsic("verum.crypto.bls12_381_g2_decompress", bytes) {
+            G2DecodeResult.Ok(b) => {
+                let mut out: [Byte; 96] = [0; 96];
+                let mut i: Int = 0; while i < 96 { out[i] = b[i]; i = i + 1; }
+                Ok(G2Point { bytes: out })
+            }
+            G2DecodeResult.Err(why) => Err(InvalidPoint(why)),
+        }
+    }
+
+    public fn to_compressed(&self) -> [Byte; 96] {
+        let mut out: [Byte; 96] = [0; 96];
+        let mut i: Int = 0;
+        while i < 96 { out[i] = self.bytes[i]; i = i + 1; }
+        out
+    }
+
+    public fn add(&self, other: &G2Point) -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_add", self, other);
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    public fn mul(&self, k: &Scalar) -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_mul", self, k);
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    public fn neg(&self) -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_neg", self);
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    /// RFC 9380 §8.8.2 — BLS12381G2_XMD:SHA-256_SSWU_RO_.
+    public fn hash_to_curve(msg: &[Byte], dst: &Text) -> G2Point {
+        let bytes = @intrinsic("verum.crypto.bls12_381_g2_hash_to_curve", msg, dst);
+        let mut b: [Byte; 96] = [0; 96];
+        let mut i: Int = 0; while i < 96 { b[i] = bytes[i]; i = i + 1; }
+        G2Point { bytes: b }
+    }
+
+    public fn is_in_subgroup(&self) -> Bool {
+        @intrinsic("verum.crypto.bls12_381_g2_subgroup_check", self)
+    }
+
+    public fn eq(&self, other: &G2Point) -> Bool {
+        @intrinsic("verum.crypto.bls12_381_g2_eq", self, other)
+    }
+}
+
+// =============================================================================
+// Pairing
+// =============================================================================
+
+/// Optimal-Ate pairing e: G1 × G2 → GT. Bilinear:
+/// e(a·P, b·Q) = e(P, Q)^(a·b). Non-degenerate: e(G1_gen, G2_gen) ≠ 1.
+public fn pairing(p: &G1Point, q: &G2Point) -> GTElement {
+    let bytes = @intrinsic("verum.crypto.bls12_381_pairing", p, q);
+    let mut b: [Byte; 576] = [0; 576];
+    let mut i: Int = 0; while i < 576 { b[i] = bytes[i]; i = i + 1; }
+    GTElement { bytes: b }
+}
+
+/// Multi-pairing — Π e(P_i, Q_i). Computed in one Miller loop +
+/// final exponentiation, ~2× faster than N independent pairings.
+/// Used in batch-verification and the BLS aggregate-verify path.
+public fn multi_pairing(pairs: &List<(G1Point, G2Point)>) -> GTElement {
+    let bytes = @intrinsic("verum.crypto.bls12_381_multi_pairing", pairs);
+    let mut b: [Byte; 576] = [0; 576];
+    let mut i: Int = 0; while i < 576 { b[i] = bytes[i]; i = i + 1; }
+    GTElement { bytes: b }
+}
+
+implement GTElement {
+    /// Constant-time bytewise compare. The verify equation reduces to
+    /// `e(σ, G2) == e(H(m), pk)`; this method performs that final test.
+    public fn eq(&self, other: &GTElement) -> Bool {
+        @intrinsic("verum.crypto.bls12_381_gt_eq", self, other)
+    }
+
+    /// Multiplicative identity — e(P, Q) when P or Q is identity.
+    public fn one() -> GTElement {
+        let bytes = @intrinsic("verum.crypto.bls12_381_gt_one");
+        let mut b: [Byte; 576] = [0; 576];
+        let mut i: Int = 0; while i < 576 { b[i] = bytes[i]; i = i + 1; }
+        GTElement { bytes: b }
+    }
+}
+
+// =============================================================================
+// Scalar (𝔽_r)
+// =============================================================================
+
+implement Scalar {
+    public fn from_bytes_le(bytes: &[Byte; 32]) -> Result<Scalar, BlsError> {
+        match @intrinsic("verum.crypto.bls12_381_scalar_decode", bytes) {
+            ScalarDecodeResult.Ok(b) => {
+                let mut out: [Byte; 32] = [0; 32];
+                let mut i: Int = 0; while i < 32 { out[i] = b[i]; i = i + 1; }
+                Ok(Scalar { bytes: out })
+            }
+            ScalarDecodeResult.OutOfRange => Err(InvalidScalar),
+        }
+    }
+
+    public fn to_bytes_le(&self) -> [Byte; 32] {
+        let mut out: [Byte; 32] = [0; 32];
+        let mut i: Int = 0; while i < 32 { out[i] = self.bytes[i]; i = i + 1; }
+        out
+    }
+
+    /// Sample a uniform scalar from the runtime CSPRNG (rejection
+    /// sampling on a 64-byte output → mod r → if biased, retry).
+    public fn random() -> Scalar {
+        let bytes = @intrinsic("verum.crypto.bls12_381_scalar_random");
+        let mut b: [Byte; 32] = [0; 32];
+        let mut i: Int = 0; while i < 32 { b[i] = bytes[i]; i = i + 1; }
+        Scalar { bytes: b }
+    }
+}
+
+// =============================================================================
+// Signature primitives — IETF draft-irtf-cfrg-bls-signature
+// =============================================================================
+
+/// Secret key — 32 random bytes that key-derive into 𝔽_r per
+/// draft §2.3 (HKDF-SHA-256(IKM, salt, info) → big-int → mod r).
+public type BlsSecretKey is {
+    bytes: [Byte; 32],
+};
+
+/// Public key — point in G1 or G2 depending on ciphersuite.
+public type BlsPublicKey is {
+    suite: BlsCipherSuite,
+    /// Compressed encoding — exactly `suite.public_key_size()` bytes.
+    /// Stored as List<Byte> rather than fixed array since the size
+    /// varies (48 / 96) by suite.
+    bytes: List<Byte>,
+};
+
+/// Signature — point in G2 or G1 depending on ciphersuite.
+public type BlsSignature is {
+    suite: BlsCipherSuite,
+    bytes: List<Byte>,
+};
+
+/// Proof-of-possession — a signature *under the same ciphersuite as
+/// the keypair* over the public key bytes themselves. PoP defends
+/// the multi-sig path against rogue-key attacks. PoP must be checked
+/// before accepting `pk` into any aggregator.
+public type BlsProofOfPossession is {
+    suite: BlsCipherSuite,
+    bytes: List<Byte>,
+};
+
+implement BlsSecretKey {
+    /// Sample a fresh secret key — calls into the runtime CSPRNG.
+    pub fn generate() -> BlsSecretKey {
+        let mut sk: [Byte; 32] = [0; 32];
+        fill_random(&mut sk);
+        BlsSecretKey { bytes: sk }
+    }
+
+    /// Derive secret key from input keying material per IETF draft §2.3
+    /// (HKDF-SHA-256). `ikm` MUST be at least 32 bytes of high-entropy
+    /// material. `key_info` is an optional context-binding label.
+    public fn key_gen(ikm: &[Byte], key_info: &[Byte]) -> Result<BlsSecretKey, BlsError> {
+        if ikm.len() < 32 {
+            return Err(InvalidScalar);
+        }
+        let bytes = @intrinsic("verum.crypto.bls12_381_key_gen", ikm, key_info);
+        let mut sk: [Byte; 32] = [0; 32];
+        let mut i: Int = 0; while i < 32 { sk[i] = bytes[i]; i = i + 1; }
+        Ok(BlsSecretKey { bytes: sk })
+    }
+
+    /// Derive the matching public key. Direction depends on suite: for
+    /// `MinPk` the pk lives in G1 (sk · G1_gen); for `MinSig` it lives
+    /// in G2 (sk · G2_gen).
+    public fn public_key(&self, suite: BlsCipherSuite) -> BlsPublicKey {
+        let bytes = @intrinsic("verum.crypto.bls12_381_sk_to_pk", self, suite);
+        BlsPublicKey { suite, bytes }
+    }
+
+    /// IETF draft §2.6 — Sign(SK, message) → signature.
+    /// Deterministic: same (sk, message, suite) → same signature.
+    public fn sign(&self, suite: BlsCipherSuite, message: &[Byte]) -> BlsSignature {
+        let bytes = @intrinsic("verum.crypto.bls12_381_sign", self, suite, message);
+        BlsSignature { suite, bytes }
+    }
+
+    /// IETF draft §3.3 — PopProve(SK). Required before adding the
+    /// matching public key to a multi-sig aggregator.
+    public fn prove_possession(&self, suite: BlsCipherSuite) -> BlsProofOfPossession {
+        let bytes = @intrinsic("verum.crypto.bls12_381_pop_prove", self, suite);
+        BlsProofOfPossession { suite, bytes }
+    }
+}
+
+implement BlsPublicKey {
+    /// IETF draft §2.5 — KeyValidate(PK). Subgroup check + non-identity.
+    public fn validate(&self) -> Result<(), BlsError> {
+        match @intrinsic("verum.crypto.bls12_381_pk_validate", self) {
+            true  => Ok(()),
+            false => Err(InvalidPublicKey),
+        }
+    }
+
+    /// PoP-check companion to BlsSecretKey.prove_possession.
+    /// IETF draft §3.3.3 — PopVerify(PK, proof) → bool.
+    public fn verify_possession(&self, proof: &BlsProofOfPossession) -> Result<(), BlsError> {
+        if proof.suite != self.suite {
+            return Err(AggregateMismatch("PoP suite mismatch".into()));
+        }
+        match @intrinsic("verum.crypto.bls12_381_pop_verify", self, proof) {
+            true  => Ok(()),
+            false => Err(VerificationFailed),
+        }
+    }
+}
+
+implement BlsSignature {
+    /// IETF draft §2.7 — Verify(PK, message, signature).
+    pub fn verify(
+        &self,
+        public_key: &BlsPublicKey,
+        message: &[Byte],
+    ) -> Result<(), BlsError> {
+        if self.suite != public_key.suite {
+            return Err(AggregateMismatch("signature/pk suite mismatch".into()));
+        }
+        match @intrinsic("verum.crypto.bls12_381_verify", public_key, message, self) {
+            true  => Ok(()),
+            false => Err(VerificationFailed),
+        }
+    }
+}
+
+// =============================================================================
+// Aggregation
+// =============================================================================
+
+/// Aggregate `signatures` (which must all share one ciphersuite) into
+/// a single 48 / 96-byte aggregate signature. Used when each signer
+/// signed *their own* message (`AggregateVerify` flow). For the
+/// multi-sig flow (everyone signs the *same* message) use
+/// `aggregate_signatures` first then `fast_aggregate_verify`.
+public fn aggregate_signatures(
+    signatures: &List<BlsSignature>,
+) -> Result<BlsSignature, BlsError> {
+    if signatures.is_empty() {
+        return Err(AggregateMismatch("empty signature list".into()));
+    }
+    let suite = signatures[0].suite;
+    for s in signatures.iter() {
+        if s.suite != suite {
+            return Err(AggregateMismatch("mixed-suite signatures".into()));
+        }
+    }
+    let bytes = @intrinsic("verum.crypto.bls12_381_aggregate_sigs", signatures);
+    Ok(BlsSignature { suite, bytes })
+}
+
+/// Aggregate `public_keys` — multi-sig flow. Each pk MUST have a verified
+/// proof-of-possession on file before aggregation; without PoP the multi-
+/// sig is rogue-key-vulnerable.
+public fn aggregate_public_keys(
+    public_keys: &List<BlsPublicKey>,
+) -> Result<BlsPublicKey, BlsError> {
+    if public_keys.is_empty() {
+        return Err(AggregateMismatch("empty public-key list".into()));
+    }
+    let suite = public_keys[0].suite;
+    for pk in public_keys.iter() {
+        if pk.suite != suite {
+            return Err(AggregateMismatch("mixed-suite public keys".into()));
+        }
+    }
+    let bytes = @intrinsic("verum.crypto.bls12_381_aggregate_pks", public_keys);
+    Ok(BlsPublicKey { suite, bytes })
+}
+
+/// IETF draft §3.1.1 — AggregateVerify(PKs, msgs, sig). Each (pk_i, msg_i)
+/// pair authenticates *its own* signer-message link; the aggregate
+/// signature certifies all of them.
+public fn aggregate_verify(
+    public_keys: &List<BlsPublicKey>,
+    messages:    &List<List<Byte>>,
+    signature:   &BlsSignature,
+) -> Result<(), BlsError> {
+    if public_keys.len() != messages.len() {
+        return Err(AggregateMismatch("|pks| ≠ |msgs|".into()));
+    }
+    if public_keys.is_empty() {
+        return Err(AggregateMismatch("empty pk list".into()));
+    }
+    let suite = signature.suite;
+    for pk in public_keys.iter() {
+        if pk.suite != suite {
+            return Err(AggregateMismatch("mixed-suite public keys".into()));
+        }
+    }
+    match @intrinsic(
+        "verum.crypto.bls12_381_aggregate_verify",
+        public_keys, messages, signature,
+    ) {
+        true  => Ok(()),
+        false => Err(VerificationFailed),
+    }
+}
+
+/// IETF draft §3.3.4 — FastAggregateVerify(PKs, m, sig). Multi-sig
+/// flow: every pk co-signed the *same* m. Faster than aggregate_verify
+/// (one pairing instead of N+1) and the canonical path for validator
+/// BFT vote aggregation.
+public fn fast_aggregate_verify(
+    public_keys: &List<BlsPublicKey>,
+    message:     &[Byte],
+    signature:   &BlsSignature,
+) -> Result<(), BlsError> {
+    if public_keys.is_empty() {
+        return Err(AggregateMismatch("empty pk list".into()));
+    }
+    let suite = signature.suite;
+    for pk in public_keys.iter() {
+        if pk.suite != suite {
+            return Err(AggregateMismatch("mixed-suite public keys".into()));
+        }
+    }
+    match @intrinsic(
+        "verum.crypto.bls12_381_fast_aggregate_verify",
+        public_keys, message, signature,
+    ) {
+        true  => Ok(()),
+        false => Err(VerificationFailed),
+    }
+}
+
+// =============================================================================
+// Threshold (t-of-n Shamir)
+// =============================================================================
+
+/// Distinct identity for a threshold-share holder. Indices MUST be
+/// non-zero and unique within a committee (Lagrange interpolation
+/// requires distinct evaluation points).
+public type ThresholdId is { value: UInt32 };
+
+/// Partial signature from one share-holder.
+public type ThresholdShare is {
+    suite:  BlsCipherSuite,
+    id:     ThresholdId,
+    bytes:  List<Byte>,
+};
+
+implement ThresholdShare {
+    /// Sign with one share — same protocol as full BLS sign, just with
+    /// the share scalar instead of the full secret. Verify with the
+    /// share's *partial public key* to detect malformed shares early.
+    public fn sign(
+        secret_share: &Scalar,
+        suite:        BlsCipherSuite,
+        id:           ThresholdId,
+        message:      &[Byte],
+    ) -> ThresholdShare {
+        let bytes = @intrinsic(
+            "verum.crypto.bls12_381_threshold_sign",
+            secret_share, suite, id, message,
+        );
+        ThresholdShare { suite, id, bytes }
+    }
+}
+
+/// Combine ≥ `threshold` shares (signed over the *same* message) into
+/// a full BLS signature under the group public key. Lagrange
+/// interpolation in 𝔽_r over the share IDs. Returns `Err` if fewer than
+/// `threshold` shares are provided, IDs collide, or shares are mixed-suite.
+public fn threshold_combine(
+    shares:    &List<ThresholdShare>,
+    threshold: Int,
+) -> Result<BlsSignature, BlsError> {
+    if shares.len() < threshold {
+        return Err(ThresholdRebuildFailed(f"only {shares.len()} of ≥{threshold} shares"));
+    }
+    let suite = shares[0].suite;
+    for s in shares.iter() {
+        if s.suite != suite {
+            return Err(ThresholdRebuildFailed("mixed-suite shares".into()));
+        }
+    }
+    let bytes = @intrinsic(
+        "verum.crypto.bls12_381_threshold_combine",
+        shares, threshold,
+    );
+    Ok(BlsSignature { suite, bytes })
+}
+
+// =============================================================================
+// Backend response variants
+// =============================================================================
+
+type G1DecodeResult is
+    | Ok([Byte; 48])
+    | Err(Text);
+
+type G2DecodeResult is
+    | Ok([Byte; 96])
+    | Err(Text);
+
+type ScalarDecodeResult is
+    | Ok([Byte; 32])
+    | OutOfRange;
