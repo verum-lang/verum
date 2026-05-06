@@ -17,6 +17,11 @@
 //  * coverage — per-suite coverage taxonomy and quota tracker
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.testing;
 
 public module dst;

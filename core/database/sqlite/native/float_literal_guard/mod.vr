@@ -6,6 +6,11 @@
 // Spec §14.1.2 — floating-point literals.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.float_literal_guard;
 
 public module guard;

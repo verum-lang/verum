@@ -15,6 +15,11 @@
 //  SQLITE_READONLY_DIRECTORY (8 | 6<<8)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.readonly_db_detect;
 
 public module reason;

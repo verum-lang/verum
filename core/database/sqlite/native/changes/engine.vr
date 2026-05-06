@@ -15,6 +15,11 @@
 // The 32-bit variants truncate via the standard cast (`as Int`).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.changes.engine;
 
 mount core.*;

@@ -1,5 +1,10 @@
 // VACUUM truncation plan + outcome.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vacuum_truncate_api.plan;
 
 mount base.{Bool, Int64};

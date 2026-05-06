@@ -23,6 +23,11 @@
 //  * `engine` — _os_init / _os_end call counters + idempotence
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.os_init_api;
 
 public module phase;

@@ -9,6 +9,11 @@
 // semantics. clear_bindings always returns SQLITE_OK.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.finalize.outcome;
 
 mount core.*;

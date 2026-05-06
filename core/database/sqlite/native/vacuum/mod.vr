@@ -31,6 +31,11 @@
 //  * `incremental` — incremental_vacuum(N) trim
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vacuum;
 
 public module mode;

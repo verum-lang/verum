@@ -1,5 +1,10 @@
 // Dependency description — which cursors the expression references.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.query_invariant_hoist.dependency;
 
 mount base.{Bool, Int64};

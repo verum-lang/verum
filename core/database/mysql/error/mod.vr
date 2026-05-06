@@ -4,6 +4,11 @@
 // Spec: internal/specs/database.md §5.6, dev.mysql.com/doc/refman/8.0/en/server-error-reference.html
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.mysql.error;
 
 mount core.*;

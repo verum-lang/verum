@@ -6,6 +6,11 @@
 // layer their own codes over the APPLICATION_ERROR scope.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.quic.error;
 
 mount core.*;

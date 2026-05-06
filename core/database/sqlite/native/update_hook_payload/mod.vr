@@ -6,6 +6,11 @@
 // Spec §15.8 — update_hook.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.update_hook_payload;
 
 public module event;

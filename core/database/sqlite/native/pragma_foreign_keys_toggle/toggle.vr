@@ -1,5 +1,10 @@
 // PRAGMA foreign_keys toggle + apply-timing gate.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.pragma_foreign_keys_toggle.toggle;
 
 mount base.{Bool, Text};

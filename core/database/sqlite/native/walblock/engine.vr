@@ -9,6 +9,11 @@
 // primitive ops; the L1 pager + L0 VFS execute them.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.walblock.engine;
 
 mount core.*;

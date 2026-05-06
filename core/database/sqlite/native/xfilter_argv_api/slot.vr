@@ -1,5 +1,10 @@
 // One constraint value slot in xFilter argv.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.xfilter_argv_api.slot;
 
 mount base.{Bool, Text};

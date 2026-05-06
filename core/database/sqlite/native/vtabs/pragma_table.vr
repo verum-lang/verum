@@ -17,6 +17,11 @@
 // emits (per SQLite docs).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vtabs.pragma_table;
 
 mount core.*;

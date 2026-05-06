@@ -58,6 +58,11 @@
 // audit-gate visibility.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_self_soundness.predicative_reflection;
 
 mount core.prelude.{Bool};

@@ -46,6 +46,11 @@
 //  reviewer's confirmation of the exact mathlib4 / Coq stdlib path.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.lemmas.beta;
 
 mount core.prelude.{Heap};

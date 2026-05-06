@@ -15,6 +15,11 @@
 // The set covers every byte-length boundary (1, 2, 3, 4, 5, 6, 7, 8, 9).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.test_vectors.varint;
 
 mount core.*;

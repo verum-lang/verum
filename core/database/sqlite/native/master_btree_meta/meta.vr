@@ -1,5 +1,10 @@
 // B-tree "meta[]" slot array in the database file header.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.master_btree_meta.meta;
 
 mount base.{Bool, Text, Int64, Maybe};

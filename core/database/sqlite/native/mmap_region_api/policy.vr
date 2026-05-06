@@ -1,5 +1,10 @@
 // mmap-policy — mmap_size + SQLITE_MAX_MMAP_SIZE.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.mmap_region_api.policy;
 
 mount base.{Bool, Int64};

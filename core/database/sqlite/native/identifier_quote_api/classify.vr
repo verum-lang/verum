@@ -1,5 +1,10 @@
 // Classify a raw identifier token (including its quotes, if present).
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.identifier_quote_api.classify;
 
 mount core.database.sqlite.native.identifier_quote_api.style.{

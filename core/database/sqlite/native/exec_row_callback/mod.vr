@@ -10,6 +10,11 @@
 //  callback returns 0 to continue, non-zero to abort with SQLITE_ABORT.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.exec_row_callback;
 
 public module row;

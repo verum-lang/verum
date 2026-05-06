@@ -6,6 +6,11 @@
 //  * all operands NULL -> result is "" (empty Text)
 //  * otherwise NULLs in operands skipped, remaining joined by sep
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.concat_ws_fn.fn_;
 
 mount base.{Bool, Text};

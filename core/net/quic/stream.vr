@@ -5,6 +5,11 @@
 // independent flow control windows for both directions.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.quic.stream;
 
 mount core.*;

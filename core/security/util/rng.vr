@@ -47,6 +47,11 @@
 // and <300ns on Darwin. Hot-path callers should batch draws when
 // possible (one 256-byte draw is cheaper than eight 32-byte draws).
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.security.util.rng;
 mount core.*;
 

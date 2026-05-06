@@ -1,5 +1,10 @@
 // Rowid allocation policy.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.rowid_api.policy;
 
 mount core.database.sqlite.native.rowid_api.kind.{

@@ -4,6 +4,11 @@
 // Spec: SQLite C API — sqlite3_file_control(db, zDbName, op, pArg).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.file_control.opcode;
 
 mount core.*;

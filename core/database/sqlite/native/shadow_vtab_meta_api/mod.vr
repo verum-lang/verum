@@ -5,6 +5,11 @@
 // Spec §16.3 / §16.5 — fts5 + rtree + sessions backing tables.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.shadow_vtab_meta_api;
 
 public module fts5_family;

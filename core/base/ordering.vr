@@ -7,6 +7,11 @@
 
 // Import protocols used by impl blocks
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.base.ordering;
 mount core.result.{Result, Ok, Err};
 mount core.protocols.{Eq, Clone, Copy, Default, Debug, Display, Formatter, FormatError};

@@ -1,5 +1,10 @@
 // Lookaside config — slot size + count per SQLITE_DBCONFIG_LOOKASIDE.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.lookaside_allocator_api.config;
 
 mount base.{Bool, Int64};

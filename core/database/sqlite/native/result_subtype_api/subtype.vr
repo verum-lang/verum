@@ -1,5 +1,10 @@
 // sqlite3_result_subtype / _value_subtype — 1-byte subtype carrier.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.result_subtype_api.subtype;
 
 mount base.{Bool, Text};

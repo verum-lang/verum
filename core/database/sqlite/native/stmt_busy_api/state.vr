@@ -1,5 +1,10 @@
 // sqlite3_stmt_busy — busy-state probe.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stmt_busy_api.state;
 
 mount base.{Bool, Text};

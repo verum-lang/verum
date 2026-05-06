@@ -1,5 +1,10 @@
 // PRAGMA locking_mode handler.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.locking_mode_pragma.gate;
 
 mount base.{Bool, Text};

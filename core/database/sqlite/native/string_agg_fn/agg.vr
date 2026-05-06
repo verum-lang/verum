@@ -6,6 +6,11 @@
 //  * separator from the first non-NULL row "wins" — engine remembers it
 //  * result is NULL only when no rows were aggregated
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.string_agg_fn.agg;
 
 mount base.{Bool, Text, Maybe};

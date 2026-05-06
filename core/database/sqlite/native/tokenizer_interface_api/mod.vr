@@ -5,6 +5,11 @@
 // Spec §16.2.3 — FTS5 tokenizer.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.tokenizer_interface_api;
 
 public module method;

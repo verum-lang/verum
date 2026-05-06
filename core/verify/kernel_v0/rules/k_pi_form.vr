@@ -57,6 +57,11 @@
 // T-Beta, T-Eta) downstream depends on the same substitution lemma.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.rules.k_pi_form;
 
 mount core.prelude.{Heap, Maybe};

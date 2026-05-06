@@ -20,6 +20,11 @@
 // algorithm; loom uses crc32 separately for the WAL header CRC.)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.test_vectors.wal_checksum;
 
 mount core.*;

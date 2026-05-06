@@ -1,5 +1,10 @@
 // Snapshot handle — opaque token passed around sqlite3_snapshot_get/open/free.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.snapshot_isolation_api.handle;
 
 mount base.{Bool, Int64};

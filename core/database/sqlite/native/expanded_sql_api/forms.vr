@@ -1,5 +1,10 @@
 // sqlite3_sql / _expanded_sql / _normalized_sql — three views.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.expanded_sql_api.forms;
 
 mount base.{Bool, Text};

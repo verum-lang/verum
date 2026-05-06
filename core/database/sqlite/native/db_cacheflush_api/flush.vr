@@ -1,5 +1,10 @@
 // sqlite3_db_cacheflush — fsync all dirty pages without committing.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.db_cacheflush_api.flush;
 
 mount base.{Bool, Int64, Text};

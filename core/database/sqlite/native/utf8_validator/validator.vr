@@ -1,5 +1,10 @@
 // UTF-8 classification helpers.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.utf8_validator.validator;
 
 mount base.{Bool};

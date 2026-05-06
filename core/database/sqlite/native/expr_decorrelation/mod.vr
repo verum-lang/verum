@@ -12,6 +12,11 @@
 //  * inner LIMIT matches at most 1 row when used in scalar position
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.expr_decorrelation;
 
 public module position;

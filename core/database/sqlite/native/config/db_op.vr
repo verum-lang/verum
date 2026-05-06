@@ -8,6 +8,11 @@
 // sqlite3_initialize but always before any sqlite3_step on the db.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.config.db_op;
 
 mount core.*;

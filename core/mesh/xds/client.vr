@@ -12,6 +12,11 @@
 //  Preferred (Envoy 1.15+ / Istio 1.8+).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mesh.xds.client;
 
 mount core.*;

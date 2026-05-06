@@ -18,6 +18,11 @@
 //  * `engine` — per-stmt slot w/ validation
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bind_blob_v2;
 
 public module spec;

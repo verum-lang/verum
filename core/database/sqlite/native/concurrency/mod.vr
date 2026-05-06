@@ -15,6 +15,11 @@
 //  * deadlock — wait-for graph + cycle detector for DST tests
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.concurrency;
 
 public module thread_safety;

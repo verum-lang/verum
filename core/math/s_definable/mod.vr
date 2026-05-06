@@ -21,6 +21,11 @@
 // 10.4) cites Lemma 3.4 transitively.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.s_definable;
 
 // Public module declarations — namespace-tree visibility for the

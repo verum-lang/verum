@@ -1,5 +1,10 @@
 // Shape of a row-value expression — arity + label hint.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.row_value_api.shape;
 
 mount base.{Bool, Text};

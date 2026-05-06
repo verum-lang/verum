@@ -8,6 +8,11 @@
 // opaque Int64 handle to stand in. 0 is the NULL sentinel.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.free_api.ptr;
 
 mount core.*;

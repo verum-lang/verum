@@ -8,6 +8,11 @@
 // Columns: addr | opcode | p1 | p2 | p3 | p4 | p5 | comment
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.explain_opcode_dump;
 
 public module row;

@@ -15,6 +15,11 @@
 //  * `engine` — schema registry + SQLITE_LIMIT_ATTACHED cap
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.attach_detach_api;
 
 public module directive;

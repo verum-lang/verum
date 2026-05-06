@@ -49,6 +49,11 @@
 // Spec: docs/architecture/mimalloc-allocator-plan.md
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mem.heap;
 mount super.segment.{
     MemSegment, SegmentError, SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,

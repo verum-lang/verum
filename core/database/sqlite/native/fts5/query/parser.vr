@@ -9,6 +9,11 @@
 // `NEAR(t1, t2, n)` (proximity).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.fts5.query.parser;
 
 mount core.*;

@@ -9,6 +9,11 @@
 //  randomblob(N) → BLOB of N random bytes (N >= 1; SQLite caps at SQLITE_MAX_LENGTH)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.random_vtab_api;
 
 public module fn_;

@@ -6,6 +6,11 @@
 // Spec §17.9 — rowid and primary keys.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.rowid_api;
 
 public module kind;

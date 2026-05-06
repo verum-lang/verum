@@ -2,6 +2,11 @@
 // net/http3/error.vr — HTTP/3 error codes (RFC 9114 §8.1)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.http3.error;
 
 mount core.*;

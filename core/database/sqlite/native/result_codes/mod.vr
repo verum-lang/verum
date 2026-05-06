@@ -25,6 +25,11 @@
 //  * `function` — SQLITE_DETERMINISTIC / DIRECTONLY / INNOCUOUS (func flags)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.result_codes;
 
 public module checkpoint;

@@ -1,5 +1,10 @@
 // sqlite3_errstr(rc) lookup table — primary result codes only.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.error_str_api.table;
 
 mount base.{Bool, Text};

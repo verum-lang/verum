@@ -24,6 +24,11 @@
 //  * `is_reversible` — True ⇒ every step has a down_sql
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.migrations.plan;
 
 mount core.*;

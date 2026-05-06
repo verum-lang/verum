@@ -9,6 +9,11 @@
 // may be intercepted when applied to columns of a particular vtab.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vtab_overload_function_api;
 
 public module request;

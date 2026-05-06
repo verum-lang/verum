@@ -12,6 +12,11 @@
 //  %z — plain string that sqlite3_free'd after use
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.printf_api.conv;
 
 mount core.*;

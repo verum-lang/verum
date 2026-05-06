@@ -16,6 +16,11 @@
 // final query bbox; the caller then runs `VtabRTree.search(&bbox)`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vtabs.rtree.query;
 
 mount core.*;

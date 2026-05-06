@@ -16,6 +16,11 @@
 //  u32 left_child_page + varint payload_size + payload_prefix + [overflow_page (4B)]
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.btree_cell_parse_api;
 
 public module cell_kind;

@@ -1,5 +1,10 @@
 // IS DISTINCT FROM / IS NOT DISTINCT FROM — null-safe comparison.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.null_safe_compare_op_api.ops;
 
 mount base.{Bool, Int64, Text};

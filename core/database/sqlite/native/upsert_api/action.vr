@@ -1,5 +1,10 @@
 // UPSERT action taxonomy — DO NOTHING vs DO UPDATE SET ...
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.upsert_api.action;
 
 mount base.{Bool, Text};

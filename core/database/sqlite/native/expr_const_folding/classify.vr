@@ -1,5 +1,10 @@
 // Classifier helpers for common expression shapes.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.expr_const_folding.classify;
 
 mount core.database.sqlite.native.expr_const_folding.level.{

@@ -11,6 +11,11 @@
 // frames past `min(reader_marks)` until the reader releases its lock.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.wal_index.reader;
 
 mount core.*;

@@ -23,6 +23,11 @@
 //  typed error rather than a silent pause.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.mysql.auth.caching_sha2;
 
 mount core.*;

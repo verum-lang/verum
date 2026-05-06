@@ -2,6 +2,11 @@
 // net/http3/server.vr — High-level HTTP/3 server (RFC 9114)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.http3.server;
 
 mount core.*;

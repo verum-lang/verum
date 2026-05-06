@@ -6,6 +6,11 @@
 // skip-nulls returns "". Spec §15.5 (built-in scalar functions).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.concat_ws_fn;
 
 public module fn_;

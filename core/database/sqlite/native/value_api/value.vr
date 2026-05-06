@@ -7,6 +7,11 @@
 // A sqlite3_value is a tagged union plus a handful of flags.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.value_api.value;
 
 mount core.*;

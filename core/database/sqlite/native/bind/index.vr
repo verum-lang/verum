@@ -18,6 +18,11 @@
 // per-statement collection that lets the binder resolve `name → 1-based idx`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bind.index;
 
 mount core.*;

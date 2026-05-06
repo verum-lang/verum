@@ -1,5 +1,10 @@
 // Per-source-table planner hint.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_hint_api.hint;
 
 mount base.{Bool, Text};

@@ -6,6 +6,11 @@
 // SQL-standard syntax. Result is always 0/1, never NULL. Spec §15.5.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.null_safe_compare_op_api;
 
 public module ops;

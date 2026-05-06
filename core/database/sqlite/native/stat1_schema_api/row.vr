@@ -1,5 +1,10 @@
 // sqlite_stat1 row + stat-text parser.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stat1_schema_api.row;
 
 mount base.{Bool, Int64, Text};

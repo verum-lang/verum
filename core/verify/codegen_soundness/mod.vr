@@ -38,6 +38,11 @@
 //   6. `machine_code_emission` — LLVM backend boundary (TCB exit).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.codegen_soundness.mod;
 
 mount super.vbc_lowering.{kernel_vbc_lowering_preserves_semantics};

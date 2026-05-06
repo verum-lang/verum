@@ -9,6 +9,11 @@
 //  X LIKE Y ESCAPE E → E must be a single UTF-8 byte (not multibyte)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.like_escape_clause_api;
 
 public module clause;

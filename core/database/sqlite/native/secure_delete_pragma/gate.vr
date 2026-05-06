@@ -1,5 +1,10 @@
 // PRAGMA secure_delete — zero-fill freed storage.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.secure_delete_pragma.gate;
 
 mount base.{Bool, Text};

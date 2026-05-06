@@ -9,6 +9,11 @@
 // 1 iff the flag is present (with or without a "SQLITE_" prefix).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.version_api.compile_option;
 
 mount core.*;

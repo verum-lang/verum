@@ -1,5 +1,10 @@
 // LIKE ESCAPE clause validation + escape-byte helpers.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.like_escape_clause_api.clause;
 
 mount base.{Bool, Int64};

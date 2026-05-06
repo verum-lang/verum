@@ -18,6 +18,11 @@
 // captures the dominant first-three slot shape per opcode.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.opcode_catalog.operand_shape;
 
 mount core.*;

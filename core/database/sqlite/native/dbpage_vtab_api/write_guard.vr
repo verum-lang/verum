@@ -10,6 +10,11 @@
 //  * no active read txn on the target schema.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.dbpage_vtab_api.write_guard;
 
 mount core.*;

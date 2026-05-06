@@ -8,6 +8,11 @@
 // index that's not a function of the table itself.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_variants.descriptor;
 
 mount core.*;

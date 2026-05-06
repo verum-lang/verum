@@ -1,5 +1,10 @@
 // SorterConfig — per-sort knobs the VDBE uses.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.sorter_config_api.config;
 
 mount base.{Bool, Int64};

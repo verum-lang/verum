@@ -20,6 +20,11 @@
 //  * `codec` — encode_u16 / decode_u16 per byte order
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.utf16_codec;
 
 public module byte_order;

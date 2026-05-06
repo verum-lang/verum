@@ -1,5 +1,10 @@
 // Hoist-plan outcome: where to place the compute-once.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.query_invariant_hoist.plan;
 
 mount core.database.sqlite.native.query_invariant_hoist.dependency.{

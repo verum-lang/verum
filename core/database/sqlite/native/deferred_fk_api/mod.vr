@@ -9,6 +9,11 @@
 // This catalogue tracks the violation-set per-transaction.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.deferred_fk_api;
 
 public module constraint_mode;

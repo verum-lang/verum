@@ -6,6 +6,11 @@
 // non-recursive variant (top-level only). Spec §15.5 (json1).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.json_tree_vtab_api;
 
 public module walker;

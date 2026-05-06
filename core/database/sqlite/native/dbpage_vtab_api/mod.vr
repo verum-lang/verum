@@ -21,6 +21,11 @@
 //  * `write_guard` — whether the connection permits writes
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.dbpage_vtab_api;
 
 public module row;

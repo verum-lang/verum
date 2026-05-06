@@ -8,6 +8,11 @@
 // CREATE INDEX ... ON t(col1 ASC, col2 DESC NULLS FIRST);
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_key_sort_api;
 
 public module nulls_policy;

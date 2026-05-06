@@ -1,6 +1,11 @@
 // PRAGMA journal_mode modes (surface-level; full transition matrix in
 // `journal_mode_transition` from wave 19).
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.journal_mode_pragma_api.mode_;
 
 mount base.{Bool, Text};

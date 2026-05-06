@@ -20,6 +20,11 @@
 //  ≥13 odd text, byte_length = (st - 13) / 2
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.serial_type_api;
 
 public module kind;

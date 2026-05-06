@@ -10,6 +10,11 @@
 // overflow page has a 4-byte next-page header followed by payload bytes.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.overflow_page_api;
 
 public module layout;

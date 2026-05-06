@@ -35,7 +35,11 @@
 
 // Only compile this module for aarch64
 @cfg(target_arch = "aarch64")
-
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.intrinsics.lowlevel.aarch64;
 
 // =============================================================================

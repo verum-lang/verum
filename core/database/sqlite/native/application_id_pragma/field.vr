@@ -1,5 +1,10 @@
 // PRAGMA application_id — 32-bit header field at offset 68.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.application_id_pragma.field;
 
 mount base.{Bool, Text};
