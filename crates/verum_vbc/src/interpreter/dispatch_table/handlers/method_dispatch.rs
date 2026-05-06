@@ -1507,6 +1507,66 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // Receiver-TypeId qualified lookup safety net. When codegen
+    // emits a CallM with a BARE method name (codegen couldn't
+    // statically infer the receiver's type, e.g. for a let binding
+    // whose type wasn't recorded in `variable_type_names`), the
+    // user-compiled body lives under `<TypeName>.<method>` in the
+    // module's function table — bare-name `find_function_by_name`
+    // misses it.  Read the receiver's TypeId from the heap header
+    // and retry the lookup with the qualified name.
+    //
+    // Without this retry, `cwd.as_path()` where `cwd: PathBuf`
+    // surfaces as `method 'as_path' not found on receiver of
+    // runtime kind Object` because the function exists as
+    // `PathBuf.as_path` in the module — same class as the static-
+    // method gap above where `Path.new` couldn't be loaded into
+    // ctx.functions.
+    // Receiver-aware bare-name lookup safety net.  When codegen
+    // emitted CallM with a BARE method name (no `.` qualifier —
+    // happens whenever `infer_expr_type_name` couldn't statically
+    // determine the receiver's type at compile time, e.g. for a
+    // `let cwd = match …` whose pattern-bind didn't propagate the
+    // PathBuf type into `variable_type_names`), the user-compiled
+    // body lives under `<TypeName>.<bare>` in the function table —
+    // exact-match on `as_path` misses it.  Try two strategies:
+    //   1. TypeId-aware: walk `module.types` for the receiver's
+    //      runtime TypeId, recover the type name, look up
+    //      `<type_name>.<bare>` exactly.  Works ONLY when the
+    //      stdlib type's TypeDescriptor is in the user module
+    //      (currently only happens for user-defined types).
+    //   2. Unique bare-suffix: scan all function names for one
+    //      ending with `.<bare>` — unambiguous if exactly one
+    //      match.  Works for stdlib types whose
+    //      TypeDescriptors aren't in the user module but whose
+    //      methods are.
+    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() && !method_name.contains('.') {
+        let ptr = dispatch_receiver.as_ptr::<u8>();
+        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let recv_type_id = header.type_id;
+        // Strategy 1: TypeId-aware exact qualified lookup.
+        let mut found: Option<crate::module::FunctionId> = state
+            .module
+            .find_method_by_receiver_type(recv_type_id, &bare_method_name);
+        // Strategy 2: unique bare-suffix match.
+        if found.is_none() {
+            found = state
+                .module
+                .find_function_by_unique_bare_suffix(&bare_method_name);
+        }
+        if let Some(func_id) = found {
+            let caller_base = state.reg_base();
+            let mut call_args: Vec<Value> = Vec::with_capacity(args.count as usize + 1);
+            call_args.push(dispatch_receiver);
+            for i in 0..args.count {
+                call_args.push(state.registers.get(caller_base, Reg(args.start.0 + i as u16)));
+            }
+            let result = call_function_sync(state, func_id, &call_args)?;
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     // Method not found anywhere — emit a diagnostic that pins down the
     // *runtime* shape of the receiver and, when the receiver carries
     // an object-tag, lists the methods that DO exist on it. The

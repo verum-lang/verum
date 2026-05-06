@@ -1250,6 +1250,40 @@ impl VbcCodegen {
             self.protocol_registry
                 .entry(name.clone())
                 .or_insert_with(|| info.clone());
+
+            // #130 — also allocate a TypeId + stub TypeDescriptor for
+            // each imported protocol.  Without this, when a later
+            // module declares `implement Iterator for IntoList<T>`,
+            // the impl-push at `compile_item Impl` (line ~5162)
+            // checks `self.type_name_to_id.get("Iterator")` — which
+            // returns None because Iterator was registered only in
+            // the source module's compilation unit.  The push is
+            // skipped silently; archive_metadata then sees an empty
+            // `IntoList.protocols` and the typechecker downstream
+            // can't resolve `xs.into_iter().map(f)` because no
+            // Iterator-impl-for-IntoList exists in the
+            // metadata.implementations table.
+            //
+            // Stub kind=Protocol with empty variants is correct: the
+            // codegen impl-push reads `td.variants` to populate the
+            // impl's methods array (line ~5169), but downstream
+            // typecheck (which is the consumer for stdlib metadata)
+            // resolves impl methods via the protocol's own method
+            // declarations table — see infer.rs:2417 — so empty
+            // methods at the impl level is fine; the protocol body
+            // remains the canonical source.
+            if !self.type_name_to_id.contains_key(name) {
+                let type_id = self.alloc_user_type_id();
+                self.type_name_to_id.insert(name.clone(), type_id);
+                let name_sid = StringId(self.ctx.intern_string_raw(name));
+                let stub = crate::types::TypeDescriptor {
+                    id: type_id,
+                    name: name_sid,
+                    kind: crate::types::TypeKind::Protocol,
+                    ..Default::default()
+                };
+                self.types.push(stub);
+            }
         }
     }
 
@@ -10838,6 +10872,11 @@ impl VbcCodegen {
         use std::collections::{HashMap, HashSet};
         // 1. Collect referenced FunctionIds from emitted bytecode.
         let mut referenced: HashSet<u32> = HashSet::new();
+        // Method names referenced via CallM.method_id — those are
+        // STRING IDs (interned method names like "as_path" or
+        // "Text.push_str"), not function IDs.  Resolve them to
+        // ctx.functions entries by string match below.
+        let mut method_names: HashSet<u32> = HashSet::new();
         for vbc_func in self.functions.iter() {
             for instr in &vbc_func.instructions {
                 match instr {
@@ -10850,7 +10889,7 @@ impl VbcCodegen {
                         referenced.insert(*func_id);
                     }
                     Instruction::CallM { method_id, .. } => {
-                        referenced.insert(*method_id);
+                        method_names.insert(*method_id);
                     }
                     _ => {}
                 }
@@ -10969,6 +11008,17 @@ impl VbcCodegen {
             );
             self.functions.push(vbc_func);
         }
+        // Note: CallM's `method_id` is a STRING id, not a
+        // FunctionId.  We don't emit stubs for it because (a) the
+        // runtime does name-based dispatch via
+        // `find_function_by_name` which finds qualified registrations
+        // already pushed during compilation, and (b) emitting RetV
+        // stubs for arbitrary stdlib methods would silently return
+        // junk for any method that has a real implementation rather
+        // than a name-based intercept.  Real stdlib bodies must come
+        // through the linker-merge path (which currently fails with
+        // a `truncated bytecode` issue tracked separately).
+        let _ = method_names;
     }
 
     /// Builds the final VBC module.
