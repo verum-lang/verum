@@ -1587,21 +1587,32 @@ impl TypeChecker {
             None => return,
         };
 
-        // Capture any existing protocol's associated_types and
-        // associated_consts so the hardcoded
-        // `register_standard_protocols` defaults (which seed only
-        // `Item` for Iterator, `Output` for math ops, etc.) survive
-        // when we replace the methods table with the VBCA-derived
-        // signatures.  Without this preservation, overwriting the
-        // hardcoded Iterator wipes its `Item` associated type and
-        // user code that names `MyIter::Item` fails to resolve.
+        // Conservative MERGE policy with `register_standard_protocols`
+        // hardcoded baseline (in `crates/verum_types/src/protocol.rs:1973+`):
         //
-        // Idempotent skip: if we already registered a protocol whose
-        // methods cover the metadata-required surface (count >=
-        // required_methods + default_methods), there's nothing to
-        // do.  This avoids re-running the parse on every
-        // `ensure_stdlib_type_loaded` call for an already-loaded
-        // protocol.
+        //  * If the existing protocol has ≥2 methods, it's a
+        //    well-formed hardcoded entry (Eq/Ord/Show/PartialOrd/etc
+        //    all seed multiple methods with hand-curated TypeVar
+        //    shapes that round-trip correctly through the unifier).
+        //    OVERWRITING those with VBCA-derived signatures breaks
+        //    operator-protocol unification (Layer E gap: TypeRef::Generic
+        //    method-local param ids render as concrete TypeIds via
+        //    fallback to PTR / well-known-type-name — so e.g. PartialOrd's
+        //    `lt(T, T) -> Bool` gets stomped by `lt(Heap<_,_>, Heap<_,_>)
+        //    -> Bool`).  Skip in this case — keep the hardcoded entry.
+        //  * If the existing protocol has 0 or 1 methods, it's a
+        //    stub (e.g. Iterator hardcoded with only `next`).  Layer D
+        //    populates the missing 73 default-method signatures.
+        //    SUPPLEMENT in this case — preserve the hardcoded
+        //    protocol's `associated_types` + `associated_consts`
+        //    (the stub seeds `Iterator::Item`, etc.) but replace the
+        //    methods table with the VBCA-derived 74 entries.
+        //
+        // This split is the cleanest co-existence with the legacy
+        // hardcoded path until `register_standard_protocols` is
+        // removed in favour of pure metadata-driven registration
+        // (separate refactor; CLAUDE.md "no stdlib knowledge in
+        // compiler" rule).
         let (existing_assoc_types, existing_assoc_consts, existing_method_count) = {
             let pc = self.protocol_checker.read();
             match pc.get_protocol(name) {
@@ -1613,25 +1624,64 @@ impl TypeChecker {
                 Maybe::None => (verum_common::Map::new(), verum_common::Map::new(), 0),
             }
         };
-        let needed = protocol_desc.required_methods.len() + protocol_desc.default_methods.len();
-        if existing_method_count >= needed && needed > 0 {
+        // Skip when the hardcoded baseline is well-formed (≥2 methods).
+        if existing_method_count >= 2 {
             return;
         }
 
-        // Parse param/return type strings via
-        // `parse_descriptor_type_string` — the same parser used by
-        // `register_inherent_methods_from_metadata`.  Pre-fix this
-        // helper used `Self::text_to_path(&p.ty)` which treats the
-        // entire string as a single identifier — that yields
-        // `Type::Named { path: "List<T>", args: [] }`, an
-        // ill-formed type that never unifies with the structural
-        // `Type::Generic { name: "List", args: [T] }` produced at
-        // user-code call sites.  The descriptor parser handles
-        // primitives, bare names, generic instantiations
-        // (`Maybe<T>`), references (`&T`), and function types
-        // correctly so the protocol method's parameter / return
-        // shape round-trips through the typechecker's unifier.
-        let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
+        // Convert each metadata-derived parameter / return type
+        // string back into a structured `Type`.  The
+        // descriptor-string parser handles primitives, bare names,
+        // generic instantiations (`Maybe<T>`), references (`&T`),
+        // function types, and the `__opaque_type_N` /
+        // `__generic_N` placeholders (mapped to fresh TypeVars) —
+        // the same parser used by
+        // `register_inherent_methods_from_metadata`.  Without
+        // structural parsing, `text_to_path("List<T>")` yields a
+        // single-identifier `Type::Named { path: "List<T>", args: [] }`
+        // which never unifies with the structural `Type::Generic
+        // { name: "List", args: [T] }` produced at call sites.
+        //
+        // Cap regression risk: if any param-type string looks like
+        // a concrete TypeRef::Concrete(...) reference that the
+        // protocol-method-variant codegen path resolved to a
+        // wrong-arity built-in (`"Heap"`/`"List"` rendered for what
+        // should be a `Self.Item`-projection generic param — Layer E
+        // gap), wrap the parsed Type into a fresh `TypeVar`.  This
+        // routes the broken rendering through unifier-friendly
+        // shape (anything-unifies-with-it) instead of an active
+        // arity mismatch with user code.  Conservative for the
+        // typecheck path: fresh TypeVars unify with anything, so
+        // method-resolution is permissive but never produces a
+        // false-positive type error.
+        let to_type = |s: &Text| -> Type {
+            let parsed = parse_descriptor_type_string(s.as_str());
+            // Generic-name shapes that the codegen produces only
+            // when it lost the source-level generic param identity
+            // (i.e. `Self.Item` / `Self` rendered as a wrong-arity
+            // concrete type like bare `Heap` or `List`).  These
+            // never appear as well-formed user-side concrete
+            // shapes: `Heap` always carries 1 arg, `List` always
+            // carries 1 arg, etc.  When we see them with 0 args at
+            // a method-signature site, route them through a fresh
+            // TypeVar — pessimistic but unifier-safe.
+            match &parsed {
+                Type::Named { path, args } if args.is_empty() => {
+                    if let Some(id) = path.as_ident() {
+                        let n = id.as_str();
+                        if matches!(
+                            n,
+                            "Heap" | "Shared" | "List" | "Map" | "Set"
+                                | "Maybe" | "Result" | "Range" | "Iterator"
+                        ) {
+                            return Type::Var(crate::ty::TypeVar::fresh());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            parsed
+        };
         let mut methods = verum_common::Map::new();
         for m in protocol_desc.required_methods.iter() {
             let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
