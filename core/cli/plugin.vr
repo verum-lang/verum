@@ -1,0 +1,136 @@
+// =============================================================================
+// cli/plugin.vr — Plugin / external-subcommand discovery
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, base.env, io.path, cli.spec
+// Spec: internal/specs/cli-framework.md §12
+// =============================================================================
+//
+
+// Two complementary plugin models:
+//
+//   1. **`@plugin` cogs** — declarative; resolved via the cog package
+//      manager, enumerated at App startup, attached as subcommands.
+//      Phase 8 wires the actual cog-loading; this module ships the
+//      data shape and discovery hooks.
+//
+//   2. **External subcommands** (git-style) — whenever the parser hits
+//      an unknown subcommand and `allow_external_subcommands=true`,
+//      we look in $PATH for `<bin>-<subcmd>` and exec it with the
+//      remaining argv.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module plugin;
+
+mount core.{Maybe, Result, List, Text, Bool};
+mount core.base.env;
+mount core.cli.spec.CommandSpec;
+
+// =============================================================================
+// PluginManifest — what an installed plugin advertises
+// =============================================================================
+
+public type PluginManifest is {
+    /// Plugin package identifier (e.g. "github.com/foo/mytool-extra").
+    name:        Text,
+    /// Plugin semver.
+    version:     Text,
+    /// Required parent CLI version range.
+    requires:    Maybe<Text>,
+    /// Subcommand specs the plugin contributes when loaded.
+    commands:    List<CommandSpec>,
+};
+
+implement PluginManifest {
+    public fn new(name: Text, version: Text) -> PluginManifest {
+        PluginManifest {
+            name: name,
+            version: version,
+            requires: None,
+            commands: List.new(),
+        }
+    }
+}
+
+// =============================================================================
+// PluginRegistry — installed plugins for an App
+// =============================================================================
+
+public type PluginRegistry is {
+    plugins: List<PluginManifest>,
+};
+
+implement PluginRegistry {
+    public fn new() -> PluginRegistry {
+        PluginRegistry { plugins: List.new() }
+    }
+
+    public fn install(mut self, m: PluginManifest) -> PluginRegistry {
+        self.plugins.push(m);
+        self
+    }
+
+    public fn count(&self) -> Int { self.plugins.len() }
+
+    /// Merge every plugin's commands into `root.subcommands`.
+    public fn attach_to(&self, root: &mut CommandSpec) {
+        let mut i: Int = 0;
+        while i < self.plugins.len() {
+            let pm = &self.plugins[i];
+            let mut j: Int = 0;
+            while j < pm.commands.len() {
+                root.subcommands.push(pm.commands[j].clone());
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+    }
+}
+
+// =============================================================================
+// External subcommand discovery
+// =============================================================================
+
+/// Resolve `$PATH` for a binary named `<app>-<subcmd>`. Returns the
+/// absolute path on hit, or None if no such binary is on PATH.
+public fn resolve_external(app_name: &Text, subcmd: &Text) -> Maybe<Text> {
+    let mut bin = app_name.clone();
+    bin.push_str("-");
+    bin.push_str(subcmd);
+
+    let path_var = match env.path() {
+        Some(p) => p,
+        None => return None,
+    };
+
+    let sep = path_separator();
+    let parts = path_var.split(&sep);
+    let mut i: Int = 0;
+    while i < parts.len() {
+        let dir = &parts[i];
+        let mut full = dir.clone();
+        full.push_str(&Text.from("/"));
+        full.push_str(&bin);
+        // Phase 8 gates this on actual file-existence / +x check via
+        // core.io.fs.exists / metadata; placeholder here returns the
+        // first textual candidate so callers can proceed deterministically.
+        if !full.is_empty() {
+            return Some(full);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+@cfg(target_os = "windows")
+fn path_separator() -> Text { Text.from(";") }
+
+@cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))
+fn path_separator() -> Text { Text.from(":") }

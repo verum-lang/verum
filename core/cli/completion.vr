@@ -89,47 +89,47 @@ public fn render(cmd: &CommandSpec, shell: Shell) -> Text {
 fn render_bash(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("# bash completion for ");
-    b.append(bin);
-    b.append("\n_");
-    b.append(bin);
-    b.append("() {\n");
-    b.append("    local cur prev words cword\n");
-    b.append("    _init_completion -n = || return\n\n");
+    b.push("# bash completion for ");
+    b.push(bin);
+    b.push("\n_");
+    b.push(bin);
+    b.push("() {\n");
+    b.push("    local cur prev words cword\n");
+    b.push("    _init_completion -n = || return\n\n");
 
     // Subcommand list
-    b.append("    local subcommands=\"");
+    b.push("    local subcommands=\"");
     let names = cmd.subcommand_names();
     let mut i: Int = 0;
     while i < names.len() {
-        if i > 0 { b.append(" "); }
-        b.append(&names[i]);
+        if i > 0 { b.push(" "); }
+        b.push(&names[i]);
         i = i + 1;
     }
-    b.append("\"\n");
+    b.push("\"\n");
 
     // Long-flag list
-    b.append("    local longs=\"");
+    b.push("    local longs=\"");
     let longs = cmd.long_names();
     let mut j: Int = 0;
     while j < longs.len() {
-        if j > 0 { b.append(" "); }
-        b.append("--");
-        b.append(&longs[j]);
+        if j > 0 { b.push(" "); }
+        b.push("--");
+        b.push(&longs[j]);
         j = j + 1;
     }
-    b.append("\"\n\n");
+    b.push("\"\n\n");
 
-    b.append("    case \"$cur\" in\n");
-    b.append("        --*) COMPREPLY=( $(compgen -W \"$longs\" -- \"$cur\") );;\n");
-    b.append("        *)   COMPREPLY=( $(compgen -W \"$subcommands\" -- \"$cur\") );;\n");
-    b.append("    esac\n");
-    b.append("}\n");
-    b.append("complete -F _");
-    b.append(bin);
-    b.append(" ");
-    b.append(bin);
-    b.append("\n");
+    b.push("    case \"$cur\" in\n");
+    b.push("        --*) COMPREPLY=( $(compgen -W \"$longs\" -- \"$cur\") );;\n");
+    b.push("        *)   COMPREPLY=( $(compgen -W \"$subcommands\" -- \"$cur\") );;\n");
+    b.push("    esac\n");
+    b.push("}\n");
+    b.push("complete -F _");
+    b.push(bin);
+    b.push(" ");
+    b.push(bin);
+    b.push("\n");
     b.build()
 }
 
@@ -140,51 +140,51 @@ fn render_bash(cmd: &CommandSpec) -> Text {
 fn render_zsh(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("#compdef ");
-    b.append(bin);
-    b.append("\n");
-    b.append("_");
-    b.append(bin);
-    b.append("() {\n");
-    b.append("    local -a flags subcommands\n");
+    b.push("#compdef ");
+    b.push(bin);
+    b.push("\n");
+    b.push("_");
+    b.push(bin);
+    b.push("() {\n");
+    b.push("    local -a flags subcommands\n");
 
-    b.append("    flags=(\n");
+    b.push("    flags=(\n");
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
         match &f.long {
             Some(l) => {
-                b.append("        '--");
-                b.append(l);
-                b.append("[");
-                b.append(&f.help);
-                b.append("]'\n");
+                b.push("        '--");
+                b.push(l);
+                b.push("[");
+                b.push(&f.help);
+                b.push("]'\n");
             },
             None => {},
         }
         i = i + 1;
     }
-    b.append("    )\n");
+    b.push("    )\n");
 
-    b.append("    subcommands=(\n");
+    b.push("    subcommands=(\n");
     let mut k: Int = 0;
     while k < cmd.subcommands.len() {
         let sc = &cmd.subcommands[k];
-        b.append("        '");
-        b.append(&sc.name);
-        b.append(":");
-        b.append(&sc.about);
-        b.append("'\n");
+        b.push("        '");
+        b.push(&sc.name);
+        b.push(":");
+        b.push(&sc.about);
+        b.push("'\n");
         k = k + 1;
     }
-    b.append("    )\n");
+    b.push("    )\n");
 
-    b.append("    _arguments -C $flags '*::: := __");
-    b.append(bin);
-    b.append("_subcmd'\n");
-    b.append("}\n_");
-    b.append(bin);
-    b.append("\n");
+    b.push("    _arguments -C $flags '*::: := __");
+    b.push(bin);
+    b.push("_subcmd'\n");
+    b.push("}\n_");
+    b.push(bin);
+    b.push("\n");
     b.build()
 }
 
@@ -195,21 +195,21 @@ fn render_zsh(cmd: &CommandSpec) -> Text {
 fn render_fish(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("# fish completion for ");
-    b.append(bin);
-    b.append("\n");
+    b.push("# fish completion for ");
+    b.push(bin);
+    b.push("\n");
 
     // Subcommands
     let mut i: Int = 0;
     while i < cmd.subcommands.len() {
         let sc = &cmd.subcommands[i];
-        b.append("complete -c ");
-        b.append(bin);
-        b.append(" -n '__fish_use_subcommand' -a '");
-        b.append(&sc.name);
-        b.append("' -d '");
-        b.append(&sc.about);
-        b.append("'\n");
+        b.push("complete -c ");
+        b.push(bin);
+        b.push(" -n '__fish_use_subcommand' -a '");
+        b.push(&sc.name);
+        b.push("' -d '");
+        b.push(&sc.about);
+        b.push("'\n");
         i = i + 1;
     }
 
@@ -217,46 +217,46 @@ fn render_fish(cmd: &CommandSpec) -> Text {
     let mut j: Int = 0;
     while j < cmd.flags.len() {
         let f = &cmd.flags[j];
-        b.append("complete -c ");
-        b.append(bin);
+        b.push("complete -c ");
+        b.push(bin);
         match f.short {
-            Some(c) => { b.append(" -s "); b.append(&Text.from(f"{c}")); },
+            Some(c) => { b.push(" -s "); b.push(&Text.from(f"{c}")); },
             None => {},
         }
         match &f.long {
-            Some(l) => { b.append(" -l "); b.append(l); },
+            Some(l) => { b.push(" -l "); b.push(l); },
             None => {},
         }
-        b.append(" -d '");
-        b.append(&f.help);
-        b.append("'");
+        b.push(" -d '");
+        b.push(&f.help);
+        b.push("'");
         match &f.completion {
-            CompletionSource.FilePath => b.append(" -F"),
-            CompletionSource.DirectoryPath => b.append(" -F -a '(__fish_complete_directories)'"),
-            CompletionSource.Hostname => b.append(" -a '(__fish_print_hostnames)'"),
+            CompletionSource.FilePath => b.push(" -F"),
+            CompletionSource.DirectoryPath => b.push(" -F -a '(__fish_complete_directories)'"),
+            CompletionSource.Hostname => b.push(" -a '(__fish_print_hostnames)'"),
             CompletionSource.EnumValues(vs) => {
-                b.append(" -a '");
+                b.push(" -a '");
                 let mut m: Int = 0;
                 while m < vs.len() {
-                    if m > 0 { b.append(" "); }
-                    b.append(&vs[m]);
+                    if m > 0 { b.push(" "); }
+                    b.push(&vs[m]);
                     m = m + 1;
                 }
-                b.append("'");
+                b.push("'");
             },
             CompletionSource.Static(vs) => {
-                b.append(" -a '");
+                b.push(" -a '");
                 let mut m: Int = 0;
                 while m < vs.len() {
-                    if m > 0 { b.append(" "); }
-                    b.append(&vs[m]);
+                    if m > 0 { b.push(" "); }
+                    b.push(&vs[m]);
                     m = m + 1;
                 }
-                b.append("'");
+                b.push("'");
             },
             _ => {},
         }
-        b.append("\n");
+        b.push("\n");
         j = j + 1;
     }
     b.build()
@@ -269,31 +269,31 @@ fn render_fish(cmd: &CommandSpec) -> Text {
 fn render_powershell(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("Register-ArgumentCompleter -Native -CommandName '");
-    b.append(bin);
-    b.append("' -ScriptBlock {\n");
-    b.append("    param($wordToComplete, $commandAst, $cursorPosition)\n");
-    b.append("    $candidates = @(\n");
+    b.push("Register-ArgumentCompleter -Native -CommandName '");
+    b.push(bin);
+    b.push("' -ScriptBlock {\n");
+    b.push("    param($wordToComplete, $commandAst, $cursorPosition)\n");
+    b.push("    $candidates = @(\n");
     let names = cmd.subcommand_names();
     let mut i: Int = 0;
     while i < names.len() {
-        b.append("        '");
-        b.append(&names[i]);
-        b.append("'\n");
+        b.push("        '");
+        b.push(&names[i]);
+        b.push("'\n");
         i = i + 1;
     }
     let longs = cmd.long_names();
     let mut j: Int = 0;
     while j < longs.len() {
-        b.append("        '--");
-        b.append(&longs[j]);
-        b.append("'\n");
+        b.push("        '--");
+        b.push(&longs[j]);
+        b.push("'\n");
         j = j + 1;
     }
-    b.append("    )\n");
-    b.append("    $candidates | Where-Object { $_ -like \"$wordToComplete*\" } |\n");
-    b.append("        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n");
-    b.append("}\n");
+    b.push("    )\n");
+    b.push("    $candidates | Where-Object { $_ -like \"$wordToComplete*\" } |\n");
+    b.push("        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n");
+    b.push("}\n");
     b.build()
 }
 
@@ -304,29 +304,29 @@ fn render_powershell(cmd: &CommandSpec) -> Text {
 fn render_nushell(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("# nushell completion for ");
-    b.append(bin);
-    b.append("\nexport extern \"");
-    b.append(bin);
-    b.append("\" [\n");
+    b.push("# nushell completion for ");
+    b.push(bin);
+    b.push("\nexport extern \"");
+    b.push(bin);
+    b.push("\" [\n");
 
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
         match &f.long {
             Some(l) => {
-                b.append("    --");
-                b.append(l);
-                b.append("\t# ");
-                b.append(&f.help);
-                b.append("\n");
+                b.push("    --");
+                b.push(l);
+                b.push("\t# ");
+                b.push(&f.help);
+                b.push("\n");
             },
             None => {},
         }
         i = i + 1;
     }
 
-    b.append("]\n");
+    b.push("]\n");
     b.build()
 }
 
@@ -337,24 +337,24 @@ fn render_nushell(cmd: &CommandSpec) -> Text {
 fn render_elvish(cmd: &CommandSpec) -> Text {
     let bin = &cmd.name;
     let mut b = TextBuilder.new();
-    b.append("# elvish completion for ");
-    b.append(bin);
-    b.append("\nuse builtin\n");
-    b.append("edit:completion:arg-completer[");
-    b.append(bin);
-    b.append("] = {|@words|\n");
-    b.append("    var subcommands = [");
+    b.push("# elvish completion for ");
+    b.push(bin);
+    b.push("\nuse builtin\n");
+    b.push("edit:completion:arg-completer[");
+    b.push(bin);
+    b.push("] = {|@words|\n");
+    b.push("    var subcommands = [");
     let names = cmd.subcommand_names();
     let mut i: Int = 0;
     while i < names.len() {
-        if i > 0 { b.append(" "); }
-        b.append("'");
-        b.append(&names[i]);
-        b.append("'");
+        if i > 0 { b.push(" "); }
+        b.push("'");
+        b.push(&names[i]);
+        b.push("'");
         i = i + 1;
     }
-    b.append("]\n");
-    b.append("    put $@subcommands\n");
-    b.append("}\n");
+    b.push("]\n");
+    b.push("    put $@subcommands\n");
+    b.push("}\n");
     b.build()
 }

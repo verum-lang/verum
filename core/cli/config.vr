@@ -97,20 +97,20 @@ implement ResolvedConfig {
     /// Render `--debug-config`-style breakdown for stderr.
     public fn debug_render(&self) -> Text {
         let mut b = core.text.builder.TextBuilder.new();
-        b.append("Config resolved:\n");
+        b.push("Config resolved:\n");
         let keys = self.values.keys();
         let mut i: Int = 0;
         while i < keys.len() {
             let k = &keys[i];
             match self.values.get(k) {
                 Some(rv) => {
-                    b.append("  ");
-                    b.append(k);
-                    b.append(" = ");
-                    b.append(&rv.value);
-                    b.append("  (");
-                    b.append(&rv.source.to_text());
-                    b.append(")\n");
+                    b.push("  ");
+                    b.push(k);
+                    b.push(" = ");
+                    b.push(&rv.value);
+                    b.push("  (");
+                    b.push(&rv.source.to_text());
+                    b.push(")\n");
                 },
                 None => {},
             }

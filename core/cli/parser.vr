@@ -682,3 +682,209 @@ fn count_present(members: &List<Text>, flags: &Map<Text, CapturedFlag>) -> Int {
     }
     n
 }
+
+// =============================================================================
+// Parser<A> protocol — composable combinator surface (spec §3.3)
+// =============================================================================
+//
+// The `Parser<A>` protocol describes a stateful parser that consumes
+// part of a `ParseState` and returns either a parsed `A` or a
+// `ParseError`. Concrete combinators (`arg`, `flag`, `many`, etc.)
+// build small parsers that the runtime composes into the parse tree.
+//
+// Phase 0 ships only the protocol + the `ArgParser` / `FlagParser`
+// adapters that wrap a single `ArgSpec` / `FlagSpec`. The `parse_argv`
+// driver above is the production path; combinator-driven parsers are
+// for tooling that needs to reason about partial parses (linters,
+// REPL completion, structured-input adapters).
+//
+
+/// A description of what a parser consumes — used by the help renderer
+/// when the parser is built combinator-style instead of derived from a
+/// spec tree.
+public type ParserDescription is {
+    /// Human-readable label (e.g. "<PORT>", "--verbose").
+    label:    Text,
+    /// One-line help string.
+    help:     Text,
+    /// Category hint for completion / placeholder rendering.
+    kind:     Text,
+};
+
+/// A parser of `A` values. Implementations consume part of `state.argv`
+/// starting at `state.cursor` and return either a parsed value or an
+/// error explaining why the consumption failed.
+public type Parser<A> is protocol {
+    fn parse(&self, state: &mut ParseState) -> Result<A, ParseError>;
+    fn describe(&self) -> ParserDescription;
+}
+
+// -----------------------------------------------------------------------------
+// ArgParser — wraps a single ArgSpec for combinator-mode use
+// -----------------------------------------------------------------------------
+
+public type ArgParser is {
+    spec: ArgSpec,
+};
+
+implement Parser<Text> for ArgParser {
+    fn parse(&self, state: &mut ParseState) -> Result<Text, ParseError> {
+        match state.advance() {
+            Some(tok) => Ok(tok),
+            None => Err(ParseError.missing_required(self.spec.name.clone())),
+        }
+    }
+
+    fn describe(&self) -> ParserDescription {
+        ParserDescription {
+            label: self.spec.name.clone(),
+            help: self.spec.help.clone(),
+            kind: self.spec.kind_hint.clone(),
+        }
+    }
+}
+
+/// Build an `ArgParser` from an `ArgSpec`.
+public fn arg(spec: ArgSpec) -> ArgParser {
+    ArgParser { spec: spec }
+}
+
+// -----------------------------------------------------------------------------
+// FlagParser — wraps a FlagSpec
+// -----------------------------------------------------------------------------
+
+public type FlagParser is {
+    spec: FlagSpec,
+};
+
+implement Parser<Maybe<Text>> for FlagParser {
+    fn parse(&self, state: &mut ParseState) -> Result<Maybe<Text>, ParseError> {
+        let key = match &self.spec.long {
+            Some(l) => l.clone(),
+            None => return Ok(None),
+        };
+        // Look ahead: is the current token --<key>= or --<key>?
+        let mut prefix = Text.from("--");
+        prefix.push_str(&key);
+        match state.peek() {
+            Some(t) => {
+                if t == &prefix {
+                    state.advance();
+                    return match state.advance() {
+                        Some(v) => Ok(Some(v)),
+                        None => Err(ParseError.missing_value(key)),
+                    };
+                }
+                Ok(None)
+            },
+            None => Ok(None),
+        }
+    }
+
+    fn describe(&self) -> ParserDescription {
+        let label = match &self.spec.long {
+            Some(l) => { let mut s = Text.from("--"); s.push_str(l); s },
+            None => Text.from("--?"),
+        };
+        ParserDescription {
+            label: label,
+            help: self.spec.help.clone(),
+            kind: self.spec.kind_hint.clone(),
+        }
+    }
+}
+
+/// Build a `FlagParser` from a `FlagSpec`.
+public fn flag(spec: FlagSpec) -> FlagParser {
+    FlagParser { spec: spec }
+}
+
+// -----------------------------------------------------------------------------
+// Combinators — Phase 0 ships the structural form; the runtime path
+// in `parse_argv` is the optimised implementation. These exist for
+// tooling that wants to compose parsers programmatically.
+// -----------------------------------------------------------------------------
+
+/// Make a parser optional: if it fails non-fatally (no input consumed)
+/// produce `None` instead of `Err`.
+public type OptionalParser<A, P: Parser<A>> is {
+    inner: P,
+};
+
+implement<A, P: Parser<A>> Parser<Maybe<A>> for OptionalParser<A, P> {
+    fn parse(&self, state: &mut ParseState) -> Result<Maybe<A>, ParseError> {
+        let saved_cursor = state.cursor;
+        match self.inner.parse(state) {
+            Ok(v) => Ok(Some(v)),
+            Err(_) => {
+                state.cursor = saved_cursor;
+                Ok(None)
+            },
+        }
+    }
+
+    fn describe(&self) -> ParserDescription {
+        let mut d = self.inner.describe();
+        let mut lab = Text.from("[");
+        lab.push_str(&d.label);
+        lab.push_str("]");
+        d.label = lab;
+        d
+    }
+}
+
+public fn optional<A, P: Parser<A>>(inner: P) -> OptionalParser<A, P> {
+    OptionalParser { inner: inner }
+}
+
+/// Run `inner` zero or more times, collecting into a List.
+public type ManyParser<A, P: Parser<A>> is {
+    inner: P,
+};
+
+implement<A, P: Parser<A>> Parser<List<A>> for ManyParser<A, P> {
+    fn parse(&self, state: &mut ParseState) -> Result<List<A>, ParseError> {
+        let mut out: List<A> = List.new();
+        loop {
+            let saved = state.cursor;
+            match self.inner.parse(state) {
+                Ok(v) => out.push(v),
+                Err(_) => {
+                    state.cursor = saved;
+                    return Ok(out);
+                },
+            }
+        }
+    }
+
+    fn describe(&self) -> ParserDescription {
+        let mut d = self.inner.describe();
+        d.label.push_str("...");
+        d
+    }
+}
+
+public fn many<A, P: Parser<A>>(inner: P) -> ManyParser<A, P> {
+    ManyParser { inner: inner }
+}
+
+// =============================================================================
+// ParserTransformer — rank-2 polymorphic transformer (spec §3.4)
+// =============================================================================
+//
+// Phase 0 ships the transformer SHAPE — concrete implementations
+// (`with_logging`, `with_telemetry`, `with_permission`) land alongside
+// the relevant subsystems. This decouples the parser-protocol surface
+// from logging/telemetry/security so they can evolve independently.
+//
+
+public type ParserTransformer is {
+    name: Text,
+    apply_label: Text,
+};
+
+implement ParserTransformer {
+    public fn new(name: Text) -> ParserTransformer {
+        ParserTransformer { name: name, apply_label: Text.from("apply") }
+    }
+}

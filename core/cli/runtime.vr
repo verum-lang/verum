@@ -326,14 +326,14 @@ fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
 /// Render a `ParseError` as a multi-line styled block for stderr.
 fn render_error(e: &ParseError) -> Text {
     let mut b = TextBuilder.new();
-    b.append("\x1b[31;1merror\x1b[0m: ");
-    b.append(&e.message);
-    b.append("\n");
+    b.push("\x1b[31;1merror\x1b[0m: ");
+    b.push(&e.message);
+    b.push("\n");
     let mut i: Int = 0;
     while i < e.diagnostics.len() {
-        b.append("       ");
-        b.append(&e.diagnostics[i].to_text());
-        b.append("\n");
+        b.push("       ");
+        b.push(&e.diagnostics[i].to_text());
+        b.push("\n");
         i = i + 1;
     }
     b.build()

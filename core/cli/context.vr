@@ -1,0 +1,232 @@
+// =============================================================================
+// cli/context.vr — DI contexts for cli runtime + persistent flags
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, base.env, cli.spec, cli.parser
+// Spec: internal/specs/cli-framework.md §7
+// =============================================================================
+//
+
+// Bridge between vcli runtime and `core.context` so handlers can be
+// declared with `using [Logger, FileSystem, Clock, ...]` and tested
+// with `provide [...]`. The runtime (`runtime.vr`) constructs a
+// `CliContext` once at App startup and wires defaults.
+//
+// `GlobalFlags` is the persistent-flag context layer: every flag in
+// `CommandSpec.flags` whose `persistent = true` is materialised as a
+// `Map<Text, CapturedFlag>` keyed by long-name and made visible to
+// every nested handler in the command tree.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module context;
+
+mount core.{Maybe, Result, List, Map, Text, Bool};
+mount core.cli.spec.{CommandSpec, FlagSpec};
+mount core.cli.parser.{ParseOutcome, CapturedFlag};
+
+// =============================================================================
+// CliContext — installed once per App.run()
+// =============================================================================
+
+/// Top-level context the runtime publishes to every handler. Carries
+/// app-wide configuration that handler-side `Context.get()` can pull.
+public type CliContext is {
+    /// Application name (as declared by the root `@command(name = "...")`).
+    app_name: Text,
+    /// Application version, if declared.
+    app_version: Maybe<Text>,
+    /// Whether stdout is connected to a TTY at App startup.
+    stdout_is_tty: Bool,
+    /// Whether stderr is connected to a TTY at App startup.
+    stderr_is_tty: Bool,
+    /// Whether stdin is connected to a TTY at App startup.
+    stdin_is_tty: Bool,
+    /// Color choice resolved at startup (auto detection folded in).
+    color_enabled: Bool,
+};
+
+implement CliContext {
+    public fn new(app_name: Text) -> CliContext {
+        CliContext {
+            app_name: app_name,
+            app_version: None,
+            stdout_is_tty: false,
+            stderr_is_tty: false,
+            stdin_is_tty: false,
+            color_enabled: false,
+        }
+    }
+
+    public fn with_version(mut self, v: Text) -> CliContext {
+        self.app_version = Some(v);
+        self
+    }
+
+    public fn with_tty(mut self, stdout: Bool, stderr: Bool, stdin: Bool) -> CliContext {
+        self.stdout_is_tty = stdout;
+        self.stderr_is_tty = stderr;
+        self.stdin_is_tty = stdin;
+        self
+    }
+
+    public fn with_color(mut self, color: Bool) -> CliContext {
+        self.color_enabled = color;
+        self
+    }
+}
+
+// =============================================================================
+// GlobalFlags — persistent-flag layer
+// =============================================================================
+
+/// Persistent-flag layer published to nested handlers. The runtime
+/// builds this from `ParseOutcome.flags` filtered to flags whose
+/// `FlagSpec.persistent = true` along the matched command path.
+public type GlobalFlags is {
+    flags: Map<Text, CapturedFlag>,
+};
+
+implement GlobalFlags {
+    public fn empty() -> GlobalFlags {
+        GlobalFlags { flags: Map.new() }
+    }
+
+    /// Build a `GlobalFlags` snapshot from a parse outcome filtered to
+    /// the persistent flags of `cmd` and every command in `path`.
+    public fn from_outcome(
+        cmd: &CommandSpec,
+        path: &List<Text>,
+        outcome: &ParseOutcome,
+    ) -> GlobalFlags {
+        let mut g = GlobalFlags.empty();
+        absorb_persistent(cmd, outcome, &mut g);
+
+        let mut cur: &CommandSpec = cmd;
+        let mut i: Int = 1;
+        while i < path.len() {
+            match cur.find_subcommand(&path[i]) {
+                Some(sc) => {
+                    absorb_persistent(sc, outcome, &mut g);
+                    cur = sc;
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+        g
+    }
+
+    /// True iff a switch named `long` was set anywhere along the path.
+    public fn switch_set(&self, long: &Text) -> Bool {
+        match self.flags.get_optional(long.clone()) {
+            Some(c) => c.occurrences > 0,
+            None => false,
+        }
+    }
+
+    /// First value for `long`, or None if absent.
+    public fn value(&self, long: &Text) -> Maybe<Text> {
+        match self.flags.get_optional(long.clone()) {
+            Some(c) => if c.values.len() > 0 { Some(c.values[0].clone()) } else { None },
+            None => None,
+        }
+    }
+}
+
+fn absorb_persistent(
+    cmd: &CommandSpec,
+    outcome: &ParseOutcome,
+    g: &mut GlobalFlags,
+) {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if f.persistent {
+            match &f.long {
+                Some(l) => match outcome.flags.get_optional(l.clone()) {
+                    Some(c) => { g.flags.insert(l.clone(), c); },
+                    None => {},
+                },
+                None => {},
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// LifecycleHooks — bridge between runtime and @before_run / @after_run
+// =============================================================================
+
+/// Lifecycle hook type. Every hook receives the `HandlerContext`-like
+/// payload via the same `CliContext` and may return `Continue`/`Skip`/
+/// `Abort(ExitCode)` per spec §12.3.
+public type HookOutcome is
+    | HookContinue
+    | HookSkip
+    | HookAbort(Int);              // exit code
+
+public type Hook is fn(&CliContext) -> HookOutcome;
+
+/// Lifecycle-hook registry attached to an App.
+public type LifecycleHooks is {
+    before_args_parse: List<Hook>,
+    after_args_parse:  List<Hook>,
+    before_run:        List<Hook>,
+    after_run:         List<Hook>,
+    on_error:          List<Hook>,
+};
+
+implement LifecycleHooks {
+    public fn new() -> LifecycleHooks {
+        LifecycleHooks {
+            before_args_parse: List.new(),
+            after_args_parse: List.new(),
+            before_run: List.new(),
+            after_run: List.new(),
+            on_error: List.new(),
+        }
+    }
+
+    public fn add_before_args_parse(mut self, h: Hook) -> LifecycleHooks {
+        self.before_args_parse.push(h);
+        self
+    }
+
+    public fn add_before_run(mut self, h: Hook) -> LifecycleHooks {
+        self.before_run.push(h);
+        self
+    }
+
+    public fn add_after_run(mut self, h: Hook) -> LifecycleHooks {
+        self.after_run.push(h);
+        self
+    }
+
+    public fn add_on_error(mut self, h: Hook) -> LifecycleHooks {
+        self.on_error.push(h);
+        self
+    }
+
+    /// Run a hook list in order. Returns the first non-Continue outcome
+    /// or `Continue` if all passed.
+    public fn run_chain(hooks: &List<Hook>, ctx: &CliContext) -> HookOutcome {
+        let mut i: Int = 0;
+        while i < hooks.len() {
+            let h = hooks[i];
+            match h(ctx) {
+                HookOutcome.HookContinue => {},
+                other => return other,
+            }
+            i = i + 1;
+        }
+        HookOutcome.HookContinue
+    }
+}

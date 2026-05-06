@@ -66,6 +66,12 @@ public module config;
 public module testing;
 public module verify;
 public module permissions;
+public module context;
+public module frontmatter;
+public module repl;
+public module plugin;
+public module json_schema;
+public module tainted;
 public module example;
 public module prelude;
 

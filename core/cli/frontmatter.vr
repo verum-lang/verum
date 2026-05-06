@@ -1,0 +1,280 @@
+// =============================================================================
+// cli/frontmatter.vr — PEP-723-style inline metadata for shebang scripts
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text
+// Spec: internal/specs/cli-framework.md §13
+// =============================================================================
+//
+
+// Verum-flavoured PEP-723: inline metadata at the top of a `.vr` script
+// declares the script's name, version, dependency list, and required
+// Verum runtime version. The cog-resolver bridge reads this block and
+// lazy-loads required cogs before dispatch.
+//
+// Format — inside a script after the shebang line:
+//
+//   //! ---
+//   //! name = "release-script"
+//   //! version = "0.1.0"
+//   //! requires-verum = ">=2.0"
+//   //! requires-cogs = ["core.cli@^1", "github.com/foo/bar@^2"]
+//   //! ---
+//
+// The block is delimited by `//! ---` markers. Inside, every `//! key =
+// value` line uses TOML-style scalar syntax. Arrays of strings use the
+// `[ "a", "b" ]` form. The parser is **not** a full TOML parser — only
+// the subset that fits in this metadata block is supported.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module frontmatter;
+
+mount core.{Maybe, Result, List, Map, Text, Int, Bool};
+
+// =============================================================================
+// Frontmatter — parsed value
+// =============================================================================
+
+/// A parsed frontmatter block.
+public type Frontmatter is {
+    /// `name = "..."`
+    name:           Maybe<Text>,
+    /// `version = "..."`
+    version:        Maybe<Text>,
+    /// `description = "..."`
+    description:    Maybe<Text>,
+    /// `requires-verum = "..."` — semver range string
+    requires_verum: Maybe<Text>,
+    /// `requires-cogs = [...]` — list of "name@semver-range"
+    requires_cogs:  List<Text>,
+    /// Free-form key/value pairs (`tags`, `license`, ...).
+    extras:         Map<Text, Text>,
+};
+
+implement Frontmatter {
+    public fn empty() -> Frontmatter {
+        Frontmatter {
+            name: None,
+            version: None,
+            description: None,
+            requires_verum: None,
+            requires_cogs: List.new(),
+            extras: Map.new(),
+        }
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type FrontmatterError is
+    | NoFrontmatter
+    | MissingClosing
+    | InvalidLine(Int, Text)
+    | DuplicateKey(Text);
+
+implement FrontmatterError {
+    public fn to_text(&self) -> Text {
+        match self {
+            FrontmatterError.NoFrontmatter =>
+                "no `//! ---` opening marker found".to_text(),
+            FrontmatterError.MissingClosing =>
+                "frontmatter block opens but never closes".to_text(),
+            FrontmatterError.InvalidLine(n, s) =>
+                Text.from(f"line {n}: invalid frontmatter syntax: {s}"),
+            FrontmatterError.DuplicateKey(k) =>
+                Text.from(f"duplicate key '{k}' in frontmatter"),
+        }
+    }
+}
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+/// Parse a `.vr` script source and extract the frontmatter block, if
+/// present. Returns `Err(NoFrontmatter)` if no opening marker exists.
+public fn parse(source: &Text) -> Result<Frontmatter, FrontmatterError> {
+    let lines = split_lines(source);
+    let mut state = State.Searching;
+    let mut fm = Frontmatter.empty();
+    let mut line_no: Int = 0;
+
+    let open_marker = Text.from("//! ---");
+
+    while line_no < lines.len() {
+        let raw = &lines[line_no];
+        let line = raw.trim();
+
+        match state {
+            State.Searching => {
+                // Skip shebang and blanks.
+                if line.starts_with(&Text.from("#!")) || line.is_empty() {
+                    line_no = line_no + 1;
+                    continue;
+                }
+                if line == &open_marker {
+                    state = State.Inside;
+                    line_no = line_no + 1;
+                    continue;
+                }
+                // First non-blank, non-shebang, non-marker line — no frontmatter.
+                return Err(FrontmatterError.NoFrontmatter);
+            },
+            State.Inside => {
+                if line == &open_marker {
+                    return Ok(fm);
+                }
+                let prefix = Text.from("//!");
+                if !line.starts_with(&prefix) {
+                    return Err(FrontmatterError.InvalidLine(line_no, line.clone()));
+                }
+                let body = line.slice(3, line.len()).trim();
+                if body.is_empty() {
+                    line_no = line_no + 1;
+                    continue;
+                }
+                apply_kv_line(&body, &mut fm)?;
+                line_no = line_no + 1;
+            },
+        }
+    }
+
+    match state {
+        State.Inside => Err(FrontmatterError.MissingClosing),
+        State.Searching => Err(FrontmatterError.NoFrontmatter),
+    }
+}
+
+type State is
+    | Searching
+    | Inside;
+
+/// Split `s` on `\n`, dropping the trailing newline. Verum's
+/// `Text.lines()` returns an iterator; for the frontmatter parser we
+/// need indexable List<Text>.
+fn split_lines(s: &Text) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut start: Int = 0;
+    let mut i: Int = 0;
+    while i < s.len() {
+        match s.byte_at(i) {
+            Some(b) => {
+                if b == 0x0A {
+                    out.push(s.slice(start, i));
+                    start = i + 1;
+                }
+            },
+            None => break,
+        }
+        i = i + 1;
+    }
+    if start < s.len() {
+        out.push(s.slice(start, s.len()));
+    }
+    out
+}
+
+// =============================================================================
+// Key/value lines
+// =============================================================================
+
+fn apply_kv_line(body: &Text, fm: &mut Frontmatter) -> Result<Unit, FrontmatterError> {
+    let eq = Text.from("=");
+    let eq_idx = match body.find(&eq) {
+        Some(n) => n,
+        None => return Err(FrontmatterError.InvalidLine(0, body.clone())),
+    };
+    let key = body.slice(0, eq_idx).trim();
+    let value_raw = body.slice(eq_idx + 1, body.len()).trim();
+
+    // Resolve known keys.
+    if &key == &Text.from("name") {
+        match &fm.name { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
+        fm.name = Some(unquote(&value_raw));
+        return Ok(());
+    }
+    if &key == &Text.from("version") {
+        match &fm.version { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
+        fm.version = Some(unquote(&value_raw));
+        return Ok(());
+    }
+    if &key == &Text.from("description") {
+        match &fm.description { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
+        fm.description = Some(unquote(&value_raw));
+        return Ok(());
+    }
+    if &key == &Text.from("requires-verum") {
+        match &fm.requires_verum { Some(_) => return Err(FrontmatterError.DuplicateKey(key.clone())), None => {} }
+        fm.requires_verum = Some(unquote(&value_raw));
+        return Ok(());
+    }
+    if &key == &Text.from("requires-cogs") {
+        if fm.requires_cogs.len() > 0 {
+            return Err(FrontmatterError.DuplicateKey(key.clone()));
+        }
+        fm.requires_cogs = parse_string_array(&value_raw)?;
+        return Ok(());
+    }
+    // Unknown key → keep in extras.
+    fm.extras.insert(key, unquote(&value_raw));
+    Ok(())
+}
+
+/// Strip surrounding `"..."` from a string literal. No escape handling
+/// — the format intentionally rejects embedded quotes.
+fn unquote(s: &Text) -> Text {
+    if s.len() < 2 { return s.clone(); }
+    let q = Text.from("\"");
+    if s.starts_with(&q) && s.ends_with(&q) {
+        return s.slice(1, s.len() - 1);
+    }
+    s.clone()
+}
+
+/// Parse `[ "a", "b", "c" ]` into a `List<Text>`.
+fn parse_string_array(s: &Text) -> Result<List<Text>, FrontmatterError> {
+    let trimmed = s.trim();
+    let lb = Text.from("[");
+    let rb = Text.from("]");
+    if !trimmed.starts_with(&lb) || !trimmed.ends_with(&rb) {
+        return Err(FrontmatterError.InvalidLine(0, s.clone()));
+    }
+    let inner = trimmed.slice(1, trimmed.len() - 1);
+    let mut out = List.new();
+    if inner.trim().is_empty() {
+        return Ok(out);
+    }
+
+    // Split on commas at top level (no nested arrays here).
+    let mut start: Int = 0;
+    let mut i: Int = 0;
+    let mut in_quotes: Bool = false;
+    while i < inner.len() {
+        match inner.byte_at(i) {
+            Some(b) => {
+                if b == b'"' { in_quotes = !in_quotes; }
+                else if b == b',' && !in_quotes {
+                    let part = inner.slice(start, i).trim();
+                    out.push(unquote(&part));
+                    start = i + 1;
+                }
+            },
+            None => break,
+        }
+        i = i + 1;
+    }
+    let last = inner.slice(start, inner.len()).trim();
+    if !last.is_empty() {
+        out.push(unquote(&last));
+    }
+    Ok(out)
+}
