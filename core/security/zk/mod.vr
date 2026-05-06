@@ -1,0 +1,45 @@
+// =============================================================================
+// security/zk/mod.vr — Zero-knowledge proof systems
+// =============================================================================
+// Layer: 3 (cryptography)
+// =============================================================================
+//
+
+// Two zero-knowledge proof systems, complementary in their guarantees:
+//
+//   * **Halo2 + KZG10** — Plonk-style proofs over BLS12-381. Tiny
+//     proofs (~1-2 KB), fast verifier, recursion-friendly via the Halo
+//     accumulator design. **Pre-quantum** (security rests on AGM +
+//     DLog over BLS12-381). Best for short-life proofs and rollup
+//     aggregators.
+//   * **STARK + FRI** — Reed-Solomon IOP with FRI low-degree test.
+//     Larger proofs (~50-200 KB), comparable verifier speed, recursion
+//     at logarithmic cost. **Post-quantum secure** under collision-
+//     resistance of the underlying hash (BLAKE3). Best for long-lived
+//     attestations and PQ-roadmap deployments.
+//
+// Both systems share the *circuit-DSL* design pattern: the user
+// constructs an immutable description of the relation to prove
+// (`Circuit` for Halo2, `Air` for STARK), then invokes the prover
+// with witness inputs. Verifier-side artifacts (`VerifyingKey` /
+// `AirVk`) are content-addressed.
+//
+// The two share generic helpers as far as practical (range-proofs,
+// set-membership, hash-preimage). Where the underlying constraint
+// language differs (custom gates vs. transition polynomials) the
+// helpers diverge.
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "BLS12-381 + BLAKE3 stdlib lands (done)",
+        "ZK prover backends bound at runtime layer",
+    ]),
+)
+module core.security.zk;
+
+public module halo2;
+public module stark;

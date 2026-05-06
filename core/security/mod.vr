@@ -76,8 +76,14 @@ public module spiffe;
 // + the shared SecretStore protocol.
 public module secrets;
 
-// Post-quantum cryptography — FIPS 203 ML-KEM + FIPS 204 ML-DSA.
+// Post-quantum cryptography — FIPS 203 ML-KEM + FIPS 204 ML-DSA + FIPS 205 SLH-DSA.
 public module pq;
+
+/// Zero-knowledge proof systems — Halo2+KZG10 (pre-quantum, short proofs)
+/// and STARK+FRI (post-quantum, transparent setup). Both expose circuit-
+/// DSL builders + prove/verify; backends route through `verum.crypto.*`
+/// intrinsics so SIMD/GPU acceleration is opt-in via runtime feature flags.
+public module zk;
 
 // X.509 certificate subsystem (RFC 5280) — DER parser + chain validation +
 // trust store. Ships as a subtree; see x509/mod.vr for internals.

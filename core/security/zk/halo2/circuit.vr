@@ -1,0 +1,441 @@
+// =============================================================================
+// security/zk/halo2/circuit.vr — Halo2 circuit DSL
+// =============================================================================
+// =============================================================================
+//
+
+// The "circuit" of a zero-knowledge proof system is *not* a Boolean
+// or arithmetic circuit in the classic sense. In Halo2 (and Plonk
+// generally), a circuit is a **layout**:
+//
+//   * a fixed grid of N rows × M columns;
+//   * each column carries either a *witness* (advice — secret to
+//     the prover), a *fixed* (public, baked-in constants), an
+//     *instance* (public input from the verifier), or a
+//     *selector* (one-bit gate-activation indicator);
+//   * a finite set of *gates* — low-degree polynomial constraints
+//     that must hold across rows where the corresponding selector
+//     is on;
+//   * a finite set of *lookups* — Plonkish constraints that some
+//     tuple of cells be a row of an enumerated table;
+//   * a *permutation* describing wire equality classes (the
+//     "copy constraints" that make this a proof system rather
+//     than just N independent rows).
+//
+// The user describes the layout once (`Circuit.configure`); the
+// prover *fills in* witness values according to that layout
+// (`Circuit.synthesize`).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "Halo2 stdlib parent module conditions hold",
+    ]),
+)
+module core.security.zk.halo2.circuit;
+mount core.*;
+
+// =============================================================================
+// Column types
+// =============================================================================
+
+public type ColumnType is
+    /// Witness — secret to prover.
+    | Advice
+    /// Public — verifier-side input (e.g., commitment hash, message).
+    | Instance
+    /// Constant baked into circuit — same on every prover run.
+    | Fixed
+    /// One-bit gate activator. By convention, exactly one selector
+    /// per logical gate.
+    | Selector;
+
+/// A single column in the circuit's grid layout.
+public type Column is {
+    index: Int,             // 0-based, unique within `ColumnType`
+    kind:  ColumnType,
+    /// Caller-defined annotation — surfaces in proof-failure traces.
+    name:  Text,
+};
+
+implement Column {
+    public fn new(index: Int, kind: ColumnType, name: Text) -> Column {
+        Column { index, kind, name }
+    }
+}
+
+/// A toggleable activator for a gate. By convention, at exactly one
+/// row of any given selector's column the value is 1; everywhere else
+/// 0. Halo2's "compressed selector" optimisation merges multiple
+/// selectors at the proving step (see Halo2 §3.4); irrelevant at the
+/// circuit-DSL surface.
+public type Selector is {
+    column: Column,
+};
+
+// =============================================================================
+// Region and Cell
+// =============================================================================
+
+/// A "region" is a contiguous block of rows scoped to a single sub-
+/// computation. Regions are the ergonomic unit at which the user
+/// places witnesses and turns on selectors. The layouter merges
+/// regions into the global row layout, possibly relocating them.
+public type Region is {
+    name:        Text,
+    /// Row index where the region starts (assigned by the layouter
+    /// at synthesis time; -1 before).
+    start_row:   Int,
+    /// Number of rows the region occupies.
+    height:      Int,
+    /// Selectors that must be enabled within this region.
+    selectors:   List<Selector>,
+};
+
+/// A cell is a (column, relative-row) coordinate within a region.
+/// Equality of cells (across regions) declares a copy-constraint.
+public type Cell is {
+    column:    Column,
+    row_offset: Int,       // 0 = first row of the region
+};
+
+// =============================================================================
+// Constraints
+// =============================================================================
+
+/// A polynomial expression over the circuit's columns. All gates and
+/// lookups are built on top of `Constraint`. The expression is purely
+/// syntactic — no field arithmetic happens at construction; the prover
+/// evaluates it during proof generation.
+///
+/// Supported constructors mirror the grammar of Halo2 §3.3 expressions:
+///
+///   x : column reference at offset r relative to the gate row
+///   c : Fp constant
+///   x + y, x − y, x · y, scalar · x : field operations (degree
+///     accumulates additively for ·, additively for + / −)
+///   x^k : exponentiation by small constant
+///
+/// Halo2 imposes a maximum gate degree (3 by default in Halo2's
+/// reference impl); the prover detects degree overflow at config time.
+public type Constraint is
+    | Constant(Bytes32)              // 32-byte little-endian Fp constant
+    | ColumnRef { column: Column, rotation: Int }
+    | Add(Box<Constraint>, Box<Constraint>)
+    | Sub(Box<Constraint>, Box<Constraint>)
+    | Mul(Box<Constraint>, Box<Constraint>)
+    | Scale(Bytes32, Box<Constraint>)
+    | Pow(Box<Constraint>, Int);
+
+/// Pre-canonical 32-byte LE field element. Validation against the
+/// scalar-field modulus happens at prover binding time, not here.
+type Bytes32 is [Byte; 32];
+
+implement Constraint {
+    public fn constant(c: Bytes32) -> Constraint { Constant(c) }
+    public fn column(col: Column) -> Constraint {
+        ColumnRef { column: col, rotation: 0 }
+    }
+    public fn column_at(col: Column, rotation: Int) -> Constraint {
+        ColumnRef { column: col, rotation }
+    }
+
+    public fn add(self, rhs: Constraint) -> Constraint {
+        Add(Box.new(self), Box.new(rhs))
+    }
+    public fn sub(self, rhs: Constraint) -> Constraint {
+        Sub(Box.new(self), Box.new(rhs))
+    }
+    public fn mul(self, rhs: Constraint) -> Constraint {
+        Mul(Box.new(self), Box.new(rhs))
+    }
+    public fn scale(self, c: Bytes32) -> Constraint {
+        Scale(c, Box.new(self))
+    }
+    public fn pow(self, k: Int) -> Constraint {
+        Pow(Box.new(self), k)
+    }
+}
+
+// =============================================================================
+// Gates and lookups
+// =============================================================================
+
+/// A "gate" is a list of polynomial constraints that must all evaluate
+/// to zero on every row where the gate's selector is on. The Halo2
+/// proving system encodes them as a single packed multi-poly via the
+/// "selectors compression" pass.
+public type Gate is {
+    name:        Text,
+    selector:    Selector,
+    constraints: List<Constraint>,
+};
+
+implement Gate {
+    public fn new(name: Text, selector: Selector, constraints: List<Constraint>) -> Gate {
+        Gate { name, selector, constraints }
+    }
+}
+
+/// A lookup constraint: every (input_1(row), …, input_k(row)) tuple
+/// at a row where `selector` is on must be a row of `table`. The
+/// table is a fixed-column tuple. Halo2 §3.5.
+public type Lookup is {
+    name:        Text,
+    selector:    Selector,
+    inputs:      List<Constraint>,
+    table:       List<Column>,        // columns of ColumnType.Fixed
+};
+
+implement Lookup {
+    public fn new(name: Text, selector: Selector,
+                  inputs: List<Constraint>, table: List<Column>) -> Lookup {
+        Lookup { name, selector, inputs, table }
+    }
+}
+
+/// Permutation argument: declares a set of cell-equivalence-classes
+/// the verifier must check. Each `class` is a list of cells that
+/// the prover commits to all carrying the same field value. The
+/// Plonkish permutation polynomial encodes them.
+public type Permutation is {
+    classes: List<List<Cell>>,
+};
+
+// =============================================================================
+// Circuit
+// =============================================================================
+
+/// The compile-time circuit description. A user's circuit is a value
+/// of this type, plus a `synthesize` closure that fills in the witness.
+public type Circuit is {
+    /// Layout: ordered list of allocated columns.
+    columns:     List<Column>,
+    selectors:   List<Selector>,
+    gates:       List<Gate>,
+    lookups:     List<Lookup>,
+    permutation: Permutation,
+    /// Required circuit dimension `k`: row count = 2^k. Powers-of-two
+    /// requirement comes from the FFT-based polynomial commitment;
+    /// the SRS must be sized at least `2^k` group elements.
+    k:           Int,
+};
+
+/// Builder context exposed to `Circuit.configure`. Allocates columns
+/// and gates; the user records the layout once.
+public type ConfigureContext is {
+    next_advice:   Int,
+    next_instance: Int,
+    next_fixed:    Int,
+    next_selector: Int,
+    accumulated_gates:   List<Gate>,
+    accumulated_lookups: List<Lookup>,
+};
+
+implement ConfigureContext {
+    public fn new() -> ConfigureContext {
+        ConfigureContext {
+            next_advice: 0,
+            next_instance: 0,
+            next_fixed: 0,
+            next_selector: 0,
+            accumulated_gates: [],
+            accumulated_lookups: [],
+        }
+    }
+
+    public fn alloc_advice(&mut self, name: Text) -> Column {
+        let c = Column.new(self.next_advice, ColumnType.Advice, name);
+        self.next_advice = self.next_advice + 1;
+        c
+    }
+
+    public fn alloc_instance(&mut self, name: Text) -> Column {
+        let c = Column.new(self.next_instance, ColumnType.Instance, name);
+        self.next_instance = self.next_instance + 1;
+        c
+    }
+
+    public fn alloc_fixed(&mut self, name: Text) -> Column {
+        let c = Column.new(self.next_fixed, ColumnType.Fixed, name);
+        self.next_fixed = self.next_fixed + 1;
+        c
+    }
+
+    public fn alloc_selector(&mut self, name: Text) -> Selector {
+        let c = Column.new(self.next_selector, ColumnType.Selector, name);
+        self.next_selector = self.next_selector + 1;
+        Selector { column: c }
+    }
+
+    public fn add_gate(&mut self, gate: Gate) {
+        self.accumulated_gates.push(gate);
+    }
+
+    public fn add_lookup(&mut self, lookup: Lookup) {
+        self.accumulated_lookups.push(lookup);
+    }
+}
+
+/// Builder context for `Circuit.synthesize`. The prover hands one of
+/// these to the user; the user fills cells with witness bytes.
+public type SynthesizeContext is {
+    /// Internal handle — opaque to the user, threaded through assigner
+    /// methods.
+    handle: Int,
+};
+
+implement SynthesizeContext {
+    /// Assign a witness value to a cell.
+    public fn assign(&mut self, cell: Cell, value: &[Byte; 32]) -> Result<(), CircuitError> {
+        match @intrinsic(
+            "verum.crypto.halo2_synth_assign",
+            self.handle, cell, value,
+        ) {
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.assign".into())),
+        }
+    }
+
+    /// Declare a copy-constraint between two cells. Both cells must
+    /// hold the same field element in any valid witness.
+    public fn copy(&mut self, a: Cell, b: Cell) -> Result<(), CircuitError> {
+        match @intrinsic(
+            "verum.crypto.halo2_synth_copy",
+            self.handle, a, b,
+        ) {
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.copy".into())),
+        }
+    }
+
+    /// Activate a selector in this row.
+    public fn enable(&mut self, selector: &Selector, row: Int) -> Result<(), CircuitError> {
+        match @intrinsic(
+            "verum.crypto.halo2_synth_enable",
+            self.handle, selector, row,
+        ) {
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.enable".into())),
+        }
+    }
+}
+
+// =============================================================================
+// Generic constraint helpers — patterns reused across most circuits
+// =============================================================================
+
+/// A range proof: `0 ≤ x < 2^bits`. Implemented as a Plonkish lookup
+/// against the canonical 0..2^bits power-of-two table. Common bit-widths
+/// (8, 16, 32) are pre-baked into the SRS layer; other widths fall back
+/// to bitwise-decomposition gates.
+public fn range_constraint(
+    cfg:        &mut ConfigureContext,
+    name:       Text,
+    selector:   Selector,
+    advice:     Column,
+    bits:       Int,
+) -> Result<(), CircuitError> {
+    if bits <= 0 || bits > 64 {
+        return Err(CircuitError.InvalidGateShape(f"range_constraint: bits={bits}"));
+    }
+    let table = match @intrinsic(
+        "verum.crypto.halo2_canonical_range_table",
+        bits,
+    ) {
+        TableResult.Ok(cols) => cols,
+        TableResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
+    };
+    cfg.add_lookup(Lookup.new(
+        name,
+        selector,
+        [Constraint.column(advice)],
+        table,
+    ));
+    Ok(())
+}
+
+/// Set-membership proof — `x ∈ {a_0, …, a_{k-1}}`. Implemented as a
+/// Plonkish lookup against a single-column fixed table loaded with
+/// the elements at SRS-load time.
+public fn set_membership_constraint(
+    cfg:        &mut ConfigureContext,
+    name:       Text,
+    selector:   Selector,
+    advice:     Column,
+    table:      Column,    // ColumnType.Fixed pre-loaded with the set
+) -> Result<(), CircuitError> {
+    if table.kind != ColumnType.Fixed {
+        return Err(CircuitError.InvalidGateShape(
+            "set_membership: table must be ColumnType.Fixed".into()));
+    }
+    cfg.add_lookup(Lookup.new(
+        name,
+        selector,
+        [Constraint.column(advice)],
+        [table],
+    ));
+    Ok(())
+}
+
+/// Hash-preimage gate: forces `out == H(in_0, …, in_k)` where H is one
+/// of the canonical Plonk-friendly hashes (Poseidon, Rescue, MiMC). The
+/// concrete hash is selected at Halo2-runtime via the SRS — the
+/// circuit's role is to *declare* that the preimage relation must hold.
+public fn hash_preimage_constraint(
+    cfg:        &mut ConfigureContext,
+    name:       Text,
+    selector:   Selector,
+    inputs:     List<Column>,
+    output:     Column,
+    hash_name:  Text,         // canonical: "poseidon-bls12381-128-32"
+) -> Result<(), CircuitError> {
+    let gate = match @intrinsic(
+        "verum.crypto.halo2_canonical_hash_gate",
+        name.clone(), selector, inputs, output, hash_name,
+    ) {
+        HashGateResult.Ok(g) => g,
+        HashGateResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
+    };
+    cfg.add_gate(gate);
+    Ok(())
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CircuitError is
+    | InvalidGateShape(Text)
+    | DegreeOverflow { gate: Text, degree: Int, max_allowed: Int }
+    | UnknownColumn(Text)
+    | AssignmentFailed(Text)
+    | DimensionTooSmall { required: Int, provided: Int };
+
+implement Display for CircuitError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidGateShape(why)        => f.write_str(f"halo2.circuit: invalid gate shape ({why})".as_str()),
+            DegreeOverflow { gate, degree, max_allowed } =>
+                f.write_str(f"halo2.circuit: gate {gate:?} degree {degree} > max {max_allowed}".as_str()),
+            UnknownColumn(c)             => f.write_str(f"halo2.circuit: unknown column {c:?}".as_str()),
+            AssignmentFailed(why)        => f.write_str(f"halo2.circuit: assignment failed ({why})".as_str()),
+            DimensionTooSmall { required, provided } =>
+                f.write_str(f"halo2.circuit: 2^{required} required but SRS provides 2^{provided}".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// Internal — backend response variants
+// =============================================================================
+
+type TableResult is
+    | Ok(List<Column>)
+    | Err(Text);
+
+type HashGateResult is
+    | Ok(Gate)
+    | Err(Text);

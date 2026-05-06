@@ -1,0 +1,75 @@
+// =============================================================================
+// security/zk/stark/mod.vr — STARK (FRI-based) zero-knowledge system
+// =============================================================================
+// Layer: 3 (cryptography)
+// Dependencies: core, core.security.hash.blake3
+// References:
+//  - Ben-Sasson, Bentov, Horesh, Riabzev, "Scalable, transparent and
+//    post-quantum secure computational integrity" (2018).
+//    https://eprint.iacr.org/2018/046
+//  - Ben-Sasson, Bentov, Horesh, Riabzev, "Fast Reed-Solomon
+//    Interactive Oracle Proofs of Proximity" (2018).
+//    https://eccc.weizmann.ac.il/report/2017/134/
+//  - StarkWare Cairo paper (2021). https://eprint.iacr.org/2021/1063
+// =============================================================================
+//
+
+// STARK (Scalable Transparent ARgument of Knowledge) is the post-
+// quantum zero-knowledge proof system. Three load-bearing properties:
+//
+//   * **Transparent setup.** No trusted ceremony — the only public
+//     parameter is the choice of finite field + hash function.
+//   * **Post-quantum secure.** Security reduces to collision-resistance
+//     of the hash function, not to discrete-log / pairing assumptions.
+//     STARKs survive cryptographically-relevant quantum computers.
+//   * **Recursion at logarithmic cost.** A STARK can verify another
+//     STARK in `O(polylog N)`; recursive aggregators (StarkEx, RISC0)
+//     compress epoch-scale state transitions into a single proof.
+//
+// Trade-off vs Halo2: STARK proofs are larger (~50-200 KB vs
+// ~1-2 KB for Halo2), but verifier time is comparable (a few ms)
+// and STARK proving is GPU-friendly out of the box.
+//
+
+// # Surface
+//
+//   * `air.vr`     — Algebraic Intermediate Representation. The user
+//     describes their state-transition system as: a row of N fields
+//     evolves into the next row by a fixed transition function plus
+//     boundary conditions. AIR encodes both as low-degree polynomials.
+//   * `prover.vr`  — `prove(air, witness) → Proof`.
+//   * `verifier.vr`— `verify(air_vk, proof, public_inputs) → Bool`.
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "BLAKE3 stdlib lands (done)",
+        "STARK soundness re-stated in Verum kernel via @framework(stark_2018, ...)",
+    ]),
+)
+module core.security.zk.stark;
+
+public module air;
+public module prover;
+public module verifier;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+public mount .air.{
+    Air, AirBuilder, TransitionConstraint, BoundaryConstraint,
+    TraceLayout, FieldChoice, ProofParams,
+    AirError,
+};
+
+public mount .prover.{
+    Proof, prove, ProverError,
+};
+
+public mount .verifier.{
+    AirVk, verify, verify_batch, VerifierError,
+};

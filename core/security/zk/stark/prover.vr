@@ -1,0 +1,135 @@
+// =============================================================================
+// security/zk/stark/prover.vr — STARK prover (FRI-based)
+// =============================================================================
+//
+
+// `prove(air, witness, params) → Proof`. The witness is the trace
+// (a length × width matrix of field elements). The prover:
+//
+//   1. Encodes trace columns as polynomials over the field.
+//   2. Low-degree-extends each via FFT to length × blowup_factor.
+//   3. Merkle-commits the extended trace (BLAKE3, RFC 6962-style).
+//   4. Builds the composition polynomial: random linear combination
+//      of (transition + boundary) constraint polynomials, divided
+//      by the appropriate vanishing polynomials.
+//   5. Merkle-commits the composition polynomial's evaluation on a
+//      coset.
+//   6. Runs FRI to prove that all committed polynomials are close to
+//      Reed-Solomon codewords (i.e., have low degree).
+//   7. Fiat-Shamir over the BLAKE3 transcript folds all interaction
+//      into a single non-interactive proof.
+//
+// Hot loops (FFT, Merkle, FRI fold, GoldilocksMul) route through
+// `@intrinsic("verum.crypto.stark_*")`. Backend is plonky3-style.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "STARK stdlib parent module conditions hold",
+    ]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu]),
+)
+module core.security.zk.stark.prover;
+mount core.*;
+mount core.security.zk.stark.air.{Air, ProofParams, AirError};
+
+// =============================================================================
+// Proof
+// =============================================================================
+
+/// STARK proof. Wire size scales with `O(log² N · query_count)` —
+/// typically 50-200 KB for production parameters. Fully self-contained;
+/// no SRS or extra setup data needed at verifier side beyond the AIR.
+public type Proof is {
+    bytes: List<Byte>,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type ProverError is
+    | TraceShapeMismatch { expected: (Int, Int), got: (Int, Int) }
+    | ConstraintFailedAtRow { name: Text, row: Int }
+    | PublicInputArityMismatch { expected: Int, got: Int }
+    | FriCommitmentFailed(Text)
+    | BackendError(Text);
+
+implement Display for ProverError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TraceShapeMismatch { expected, got } =>
+                f.write_str(f"stark.prover: trace shape expected={expected:?} got={got:?}".as_str()),
+            ConstraintFailedAtRow { name, row } =>
+                f.write_str(f"stark.prover: constraint {name:?} fails at row {row}".as_str()),
+            PublicInputArityMismatch { expected, got } =>
+                f.write_str(f"stark.prover: public-input arity expected={expected} got={got}".as_str()),
+            FriCommitmentFailed(why) =>
+                f.write_str(f"stark.prover: FRI commit ({why})".as_str()),
+            BackendError(why) =>
+                f.write_str(f"stark.prover: backend ({why})".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// Prove — produce a STARK proof from an AIR + witness trace
+// =============================================================================
+
+/// Prove that `trace` satisfies `air`'s constraints under `public_inputs`.
+///
+/// `trace` is a row-major flat byte buffer of size
+/// `air.trace.length × air.trace.width × field.element_size()`. The
+/// prover validates the buffer's shape against the AIR before
+/// proceeding.
+///
+/// Failure modes:
+///
+///   * Trace shape mismatch → `TraceShapeMismatch`.
+///   * Public-input vector wrong arity → `PublicInputArityMismatch`.
+///   * Some transition / boundary constraint *actually* fails on the
+///     supplied witness → `ConstraintFailedAtRow` (with the failing
+///     constraint name + row). This branch is the prover doing its job —
+///     a witness that fails the public claim shouldn't produce a proof.
+public fn prove(
+    air:           &Air,
+    trace:         &[Byte],
+    public_inputs: &[List<Byte>],
+    params:        &ProofParams,
+) -> Result<Proof, ProverError> {
+    if public_inputs.len() != air.public_input_arity {
+        return Err(PublicInputArityMismatch {
+            expected: air.public_input_arity,
+            got: public_inputs.len(),
+        });
+    }
+    let elem_size = air.field.element_size();
+    let expected_bytes = air.trace.length * air.trace.width * elem_size;
+    if trace.len() != expected_bytes {
+        return Err(TraceShapeMismatch {
+            expected: (air.trace.length, air.trace.width),
+            got:      (trace.len() / (air.trace.width * elem_size), air.trace.width),
+        });
+    }
+    match @intrinsic(
+        "verum.crypto.stark_prove",
+        air, trace, public_inputs, params,
+    ) {
+        ProveResult.Ok(p)                            => Ok(p),
+        ProveResult.ConstraintFailed(name, row)      => Err(ConstraintFailedAtRow { name, row }),
+        ProveResult.FriFailed(why)                   => Err(FriCommitmentFailed(why)),
+        ProveResult.BackendFailed(why)               => Err(BackendError(why)),
+    }
+}
+
+// =============================================================================
+// Internal — backend response variants
+// =============================================================================
+
+type ProveResult is
+    | Ok(Proof)
+    | ConstraintFailed(Text, Int)
+    | FriFailed(Text)
+    | BackendFailed(Text);

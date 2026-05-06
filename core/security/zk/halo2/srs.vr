@@ -1,0 +1,194 @@
+// =============================================================================
+// security/zk/halo2/srs.vr — Universal Structured Reference String
+// =============================================================================
+//
+
+// The Halo2 + KZG10 family is **universal-SRS-trusted-setup**: a single
+// public ceremony produces an SRS that any circuit up to its capacity
+// can use. There is no per-circuit ceremony.
+//
+
+// # Anatomy of the SRS
+//
+
+// Let `g, h` be generators of G1 and G2. Let `τ ∈ 𝔽_r` be a random
+// "toxic" scalar — known only to the ceremony participants and
+// then destroyed. The SRS is:
+//
+//   {[g · τ^i] : i = 0..(2^k − 1)}            // G1 powers
+//   {[h], [h · τ]}                            // G2 base + one power
+//
+// `k` is the ceremony's *capacity* — circuits up to 2^k rows can use
+// this SRS. Verum's prover binds the circuit's `k` to the SRS at
+// load time; over-capacity is accepted (just wastes space), under-
+// capacity raises `SrsError.CapacityExceeded`.
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "Halo2 stdlib parent module conditions hold",
+        "ceremony output committed via signed bytes-blob in chain genesis",
+    ]),
+)
+module core.security.zk.halo2.srs;
+mount core.*;
+
+// =============================================================================
+// Parameters
+// =============================================================================
+
+public type SrsParams is {
+    /// Capacity exponent. Number of polynomial commits per circuit
+    /// upper-bounded by `2^k`.
+    k:           Int,
+    /// Application label baked into the ceremony transcript. Two SRSs
+    /// produced from the same τ but different labels are *distinct*
+    /// public objects; cross-using them across applications is rejected.
+    label:       Text,
+    /// Ceremony participants' public keys (BLS12-381 pubkeys), in
+    /// chronological order. Used to verify the ceremony transcript's
+    /// hash chain.
+    participants: List<List<Byte>>,
+};
+
+implement SrsParams {
+    public fn new(k: Int, label: Text) -> SrsParams {
+        SrsParams { k, label, participants: [] }
+    }
+    public fn with_participant(mut self, pk: List<Byte>) -> SrsParams {
+        self.participants.push(pk);
+        self
+    }
+}
+
+// =============================================================================
+// UniversalSrs — output of the ceremony
+// =============================================================================
+
+/// Opaque handle to the universal SRS. The actual G1/G2 powers live
+/// in the runtime (typically `mmap`-loaded from an on-disk binary so
+/// the OS pages-on-demand from a few-GB file); the Verum surface
+/// exposes only verification-relevant metadata.
+public type UniversalSrs is {
+    params:        SrsParams,
+    /// 32-byte BLAKE3 digest over the canonical encoding of the
+    /// G1/G2 powers + the participant transcript. Use this as the
+    /// content-address of the SRS in any registry.
+    transcript_hash: [Byte; 32],
+    /// Opaque integer — runtime-side handle into the loaded SRS.
+    handle:        Int,
+};
+
+// =============================================================================
+// Setup — produces a fresh SRS via a one-shot ceremony
+// =============================================================================
+//
+// This is the *trusted* step: the ceremony's randomness must be
+// non-recoverable. Production deployments run a multi-party
+// computation (perpetual-powers-of-tau), each participant
+// contributing entropy and proving they did. The chain operator
+// commits the final transcript hash to genesis.
+// =============================================================================
+
+/// Run a single-machine ceremony — for development / testnet only.
+/// **Do not use in production**: a single-machine ceremony has no
+/// distributed-trust guarantee. Production runs `setup_with_entropy`
+/// across N participants and chain-anchors each contribution.
+public fn setup(params: SrsParams) -> Result<UniversalSrs, SrsError> {
+    let result = @intrinsic("verum.crypto.halo2_srs_setup", params);
+    match result {
+        SrsSetupResult.Ok(srs) => Ok(srs),
+        SrsSetupResult.Err(why) => Err(SrsError.SetupFailed(why)),
+    }
+}
+
+/// Multi-party setup — accepts a list of participant entropy blobs.
+/// Participants are processed in order; each one's contribution is
+/// hashed into the running transcript and the resulting transcript
+/// hash must match the participant's claimed contribution. Failure of
+/// any participant's verification aborts the entire ceremony.
+public fn setup_with_entropy(
+    params:       SrsParams,
+    contributions: List<List<Byte>>,   // each entry: that participant's signed entropy
+) -> Result<UniversalSrs, SrsError> {
+    if contributions.is_empty() {
+        return Err(SrsError.SetupFailed("zero participants".into()));
+    }
+    if contributions.len() != params.participants.len() {
+        return Err(SrsError.SetupFailed(f"|contributions| ≠ |participants|"));
+    }
+    let result = @intrinsic(
+        "verum.crypto.halo2_srs_setup_mpc",
+        params, contributions,
+    );
+    match result {
+        SrsSetupResult.Ok(srs)   => Ok(srs),
+        SrsSetupResult.Err(why)  => Err(SrsError.SetupFailed(why)),
+    }
+}
+
+implement UniversalSrs {
+    /// Verify that an SRS handle is internally consistent — every
+    /// power of τ relates to its predecessor by τ^i = τ · τ^(i-1) under
+    /// pairing on the side h_τ basis. This is what the chain runs at
+    /// genesis to authenticate the ceremony output.
+    public fn verify(&self) -> Result<(), SrsError> {
+        match @intrinsic("verum.crypto.halo2_srs_verify", self) {
+            true  => Ok(()),
+            false => Err(SrsError.IntegrityFailed),
+        }
+    }
+
+    /// Load an SRS from on-disk bytes. The digest is recomputed and
+    /// compared against the committed transcript hash; mismatch raises
+    /// `IntegrityFailed`.
+    public fn load(bytes: &[Byte], params: SrsParams) -> Result<UniversalSrs, SrsError> {
+        match @intrinsic("verum.crypto.halo2_srs_load", bytes, params) {
+            SrsLoadResult.Ok(srs)  => Ok(srs),
+            SrsLoadResult.Err(why) => Err(SrsError.LoadFailed(why)),
+        }
+    }
+
+    /// Serialise to wire bytes. The encoded format is the IETF
+    /// "Plonkish-SRS" CBOR with deterministic ordering.
+    public fn serialize(&self) -> List<Byte> {
+        @intrinsic("verum.crypto.halo2_srs_serialize", self)
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type SrsError is
+    | SetupFailed(Text)
+    | IntegrityFailed
+    | LoadFailed(Text)
+    | CapacityExceeded { circuit_k: Int, srs_k: Int };
+
+implement Display for SrsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SetupFailed(why)         => f.write_str(f"halo2.srs: setup failed ({why})".as_str()),
+            IntegrityFailed          => f.write_str("halo2.srs: integrity check failed (transcript hash mismatch)"),
+            LoadFailed(why)          => f.write_str(f"halo2.srs: load failed ({why})".as_str()),
+            CapacityExceeded { circuit_k, srs_k } =>
+                f.write_str(f"halo2.srs: circuit needs 2^{circuit_k} but SRS provides only 2^{srs_k}".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// Internal — backend response variants
+// =============================================================================
+
+type SrsSetupResult is
+    | Ok(UniversalSrs)
+    | Err(Text);
+
+type SrsLoadResult is
+    | Ok(UniversalSrs)
+    | Err(Text);

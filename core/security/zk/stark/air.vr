@@ -1,0 +1,272 @@
+// =============================================================================
+// security/zk/stark/air.vr — Algebraic Intermediate Representation (AIR)
+// =============================================================================
+//
+
+// In a STARK the prover's claim is "there exists a *trace* (a sequence
+// of N rows of K field elements each) such that:
+//
+//   1. every row except the last satisfies the *transition constraint*
+//      against its successor;
+//   2. some specific cells satisfy the *boundary constraints* (input,
+//      output, and any "stamp" cells the system pins).
+//
+// The AIR is the *language* in which both kinds of constraint are
+// expressed: low-degree multivariate polynomials over the trace
+// columns. The prover commits to the trace via Merkle-tree hashing
+// (FRI), then proves all constraints hold by combining them into a
+// single composition polynomial of bounded degree and proving
+// proximity to a low-degree codeword via FRI.
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "STARK stdlib parent module conditions hold",
+    ]),
+)
+module core.security.zk.stark.air;
+mount core.*;
+
+// =============================================================================
+// Field choice
+// =============================================================================
+
+/// STARK works over arbitrary finite fields, but two are canonical:
+///
+///   * **Goldilocks** — 𝔽_p with p = 2^64 − 2^32 + 1. Word-aligned for
+///     cheap arithmetic on 64-bit CPUs; canonical for Plonky2 and
+///     RISC Zero.
+///   * **Mersenne31** — 𝔽_p with p = 2^31 − 1. Byte-half-aligned for
+///     SIMD friendliness; canonical for the M31 family.
+///   * **BabyBear** — 𝔽_p with p = 2^31 − 2^27 + 1. NTT-friendly; widely
+///     used in Plonky3.
+///
+/// Custom fields live behind `Custom(modulus)` for niche cases.
+public type FieldChoice is
+    | Goldilocks
+    | Mersenne31
+    | BabyBear
+    | Custom { modulus: List<Byte> };       // big-endian prime modulus
+
+implement FieldChoice {
+    /// Field-element byte width (canonical encoding).
+    public fn element_size(&self) -> Int {
+        match self {
+            Goldilocks         => 8,
+            Mersenne31         => 4,
+            BabyBear           => 4,
+            Custom { modulus } => modulus.len(),
+        }
+    }
+}
+
+// =============================================================================
+// Trace layout
+// =============================================================================
+
+/// Layout of the execution trace.
+///
+///   * `length` is the row count = `2^k` (power of two, FRI requirement).
+///   * `width` is the number of field-element columns per row.
+///
+/// A typical zk-VM step trace runs `length = 2^20`, `width = 32`.
+public type TraceLayout is {
+    length: Int,            // 2^k
+    width:  Int,
+};
+
+implement TraceLayout {
+    public fn new(length: Int, width: Int) -> TraceLayout {
+        TraceLayout { length, width }
+    }
+
+    public fn k(&self) -> Int {
+        // log2(length) — assumes power-of-two; AirBuilder enforces.
+        let mut n = self.length;
+        let mut k = 0;
+        while n > 1 { n = n / 2; k = k + 1; }
+        k
+    }
+}
+
+// =============================================================================
+// Constraints
+// =============================================================================
+
+/// Polynomial expression over trace cells. Cells are addressed by
+/// `(column, row_offset)` — `row_offset = 0` is the "current" row,
+/// `row_offset = 1` is the "next" row (used by transition constraints
+/// to relate row_n to row_{n+1}).
+public type Expr is
+    | Constant(List<Byte>)              // canonical encoding of Fp constant
+    | Cell { column: Int, offset: Int }
+    | Add(Box<Expr>, Box<Expr>)
+    | Sub(Box<Expr>, Box<Expr>)
+    | Mul(Box<Expr>, Box<Expr>)
+    | Pow(Box<Expr>, Int);
+
+implement Expr {
+    public fn constant(c: List<Byte>) -> Expr { Constant(c) }
+    public fn cell(column: Int) -> Expr { Cell { column, offset: 0 } }
+    public fn next(column: Int)  -> Expr { Cell { column, offset: 1 } }
+    public fn add(self, rhs: Expr) -> Expr { Add(Box.new(self), Box.new(rhs)) }
+    public fn sub(self, rhs: Expr) -> Expr { Sub(Box.new(self), Box.new(rhs)) }
+    public fn mul(self, rhs: Expr) -> Expr { Mul(Box.new(self), Box.new(rhs)) }
+    public fn pow(self, k: Int) -> Expr { Pow(Box.new(self), k) }
+}
+
+/// Transition constraint — must hold across every adjacent pair of
+/// rows in the trace. `expr` evaluates to 0 on every (row_n, row_{n+1})
+/// pair iff the trace is valid.
+public type TransitionConstraint is {
+    name: Text,
+    expr: Expr,
+};
+
+/// Boundary constraint — pins the value of a specific cell to a
+/// specific public value. Used for inputs (row 0), outputs (last row),
+/// and intermediate "checkpoint" stamps.
+public type BoundaryConstraint is {
+    name:   Text,
+    column: Int,
+    row:    Int,           // absolute row in the trace
+    value:  List<Byte>,    // expected Fp value
+};
+
+// =============================================================================
+// AIR — full algebraic description
+// =============================================================================
+
+public type Air is {
+    field:        FieldChoice,
+    trace:        TraceLayout,
+    transitions:  List<TransitionConstraint>,
+    boundaries:   List<BoundaryConstraint>,
+    /// Public-input arity — number of Fp values the verifier supplies.
+    public_input_arity: Int,
+};
+
+/// Builder for `Air` — keeps `Air` itself immutable.
+public type AirBuilder is {
+    field:        FieldChoice,
+    trace:        TraceLayout,
+    transitions:  List<TransitionConstraint>,
+    boundaries:   List<BoundaryConstraint>,
+    public_input_arity: Int,
+};
+
+implement AirBuilder {
+    public fn new(field: FieldChoice, trace: TraceLayout) -> AirBuilder {
+        AirBuilder {
+            field, trace,
+            transitions: [], boundaries: [],
+            public_input_arity: 0,
+        }
+    }
+
+    public fn add_transition(&mut self, c: TransitionConstraint) {
+        self.transitions.push(c);
+    }
+
+    public fn add_boundary(&mut self, c: BoundaryConstraint) {
+        self.boundaries.push(c);
+    }
+
+    /// Declare the size of the public-inputs vector.
+    public fn with_public_input_arity(mut self, n: Int) -> AirBuilder {
+        self.public_input_arity = n;
+        self
+    }
+
+    /// Validate + freeze. Checks: trace.length is a power of two,
+    /// transition expressions only reference valid columns, boundary
+    /// rows are in range.
+    public fn build(self) -> Result<Air, AirError> {
+        if (self.trace.length & (self.trace.length - 1)) != 0 {
+            return Err(AirError.NonPowerOfTwoTrace(self.trace.length));
+        }
+        if self.trace.length < 2 {
+            return Err(AirError.TraceTooSmall(self.trace.length));
+        }
+        for b in self.boundaries.iter() {
+            if b.row < 0 || b.row >= self.trace.length {
+                return Err(AirError.BoundaryRowOutOfRange { row: b.row, length: self.trace.length });
+            }
+            if b.column < 0 || b.column >= self.trace.width {
+                return Err(AirError.BoundaryColumnOutOfRange { column: b.column, width: self.trace.width });
+            }
+        }
+        match @intrinsic("verum.crypto.stark_air_validate_exprs",
+                         &self.transitions, self.trace.width) {
+            true  => Ok(Air {
+                field: self.field,
+                trace: self.trace,
+                transitions: self.transitions,
+                boundaries:  self.boundaries,
+                public_input_arity: self.public_input_arity,
+            }),
+            false => Err(AirError.InvalidExprColumn),
+        }
+    }
+}
+
+// =============================================================================
+// Proof params — FRI rate, query count, blowup factor
+// =============================================================================
+
+/// Soundness-budget parameters for the proof. Higher values → more
+/// queries → larger proofs but stronger soundness. Defaults aim at
+/// ~100-bit conjectured soundness.
+public type ProofParams is {
+    /// Reed-Solomon rate denominator. Trace is extended to
+    /// `length × blowup_factor` for the low-degree extension.
+    /// Common values: 4 (128-bit), 8 (160-bit conservative).
+    blowup_factor: Int,
+    /// Number of FRI queries. Soundness ≈ blowup * queries (bits).
+    num_queries:   Int,
+    /// Stop FRI folding when polynomial degree drops below this.
+    /// Larger value → fewer FRI rounds → smaller proofs but slightly
+    /// weaker soundness.
+    grinding_factor: Int,
+}
+
+impl ProofParams {
+    /// 100-bit soundness, fast-prover preset. Suitable for testnet,
+    /// dev environments, low-stakes proofs.
+    public fn fast() -> ProofParams {
+        ProofParams { blowup_factor: 4, num_queries: 30, grinding_factor: 10 }
+    }
+
+    /// 128-bit soundness, production-grade. Slower prover, larger proofs.
+    public fn production() -> ProofParams {
+        ProofParams { blowup_factor: 8, num_queries: 64, grinding_factor: 20 }
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type AirError is
+    | NonPowerOfTwoTrace(Int)
+    | TraceTooSmall(Int)
+    | BoundaryRowOutOfRange { row: Int, length: Int }
+    | BoundaryColumnOutOfRange { column: Int, width: Int }
+    | InvalidExprColumn;
+
+implement Display for AirError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NonPowerOfTwoTrace(n)   => f.write_str(f"stark.air: trace length {n} is not a power of two".as_str()),
+            TraceTooSmall(n)        => f.write_str(f"stark.air: trace length {n} < 2".as_str()),
+            BoundaryRowOutOfRange { row, length } =>
+                f.write_str(f"stark.air: boundary row {row} ∉ [0, {length})".as_str()),
+            BoundaryColumnOutOfRange { column, width } =>
+                f.write_str(f"stark.air: boundary column {column} ∉ [0, {width})".as_str()),
+            InvalidExprColumn      => f.write_str("stark.air: transition references column ∉ [0, width)"),
+        }
+    }
+}

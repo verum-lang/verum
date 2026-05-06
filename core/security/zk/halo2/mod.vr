@@ -1,0 +1,117 @@
+// =============================================================================
+// security/zk/halo2/mod.vr — Halo2 + KZG10 zero-knowledge proof system
+// =============================================================================
+// Layer: 3 (cryptography)
+// Dependencies: core, core.security.{hash, ecc.bls12_381}
+// References:
+//  - Bowe, Grigg, Hopwood, "Halo: Recursive Proof Composition without a
+//    Trusted Setup" (2019). https://eprint.iacr.org/2019/1021
+//  - Halo2 specification: https://zcash.github.io/halo2/
+//  - KZG10: Kate, Zaverucha, Goldberg, "Constant-Size Commitments to
+//    Polynomials and Their Applications" (2010).
+//  - Plonk: Gabizon, Williamson, Ciobotaru, "PLONK: Permutations over
+//    Lagrange-bases for Oecumenical Noninteractive arguments of
+//    Knowledge" (2019). https://eprint.iacr.org/2019/953
+// =============================================================================
+//
+
+// Halo2 is a Plonk-style zero-knowledge proof system over the
+// BLS12-381 curve, with KZG10 as the polynomial commitment scheme.
+// Used by Zcash Sapling/Orchard, Penumbra, Filecoin EVM and many
+// recent rollup designs.
+//
+
+// # Why Halo2 (vs Groth16, vs Plonk-base, vs STARK)
+//
+
+//  * **No per-circuit trusted setup.** A single universal SRS (one
+//    ceremony, one product) serves any circuit up to the SRS's
+//    capacity. New circuits need *no* ceremony.
+//  * **Recursion-friendly.** Halo's accumulator design lets proofs
+//    verify other proofs in ~constant time. Useful for cross-shard
+//    rollup proofs, recursive zk-VM step traces, infinite-loop
+//    incrementally-verifiable computation.
+//  * **Custom gates.** Unlike Plonk-base (only addition + multiplication),
+//    Halo2 supports arbitrary low-degree gate polynomials — essential
+//    for efficient hash circuits (Poseidon, Rescue) and elliptic-curve
+//    arithmetic-circuit shaping.
+//  * **Lookup tables.** Plonkish lookups (Halo2 §3.5) compress
+//    arbitrary table-membership checks into `O(log N)` gates;
+//    canonical for range-proofs, byte decomposition, S-box layers.
+//
+
+// # Surface
+//
+
+// Three logical sub-modules — re-exported here as `halo2.*`:
+//
+
+//  * `circuit` — DSL types: Constraint / Region / Column / Selector /
+//    Gate / Lookup. The user constructs an immutable circuit
+//    description; the prover instantiates witness values into the
+//    column layout it specifies.
+//  * `prover`  — `prove(circuit, witness, srs) → Proof`.
+//  * `verifier`— `verify(circuit_vk, proof, public_inputs) → Bool`.
+//  * `srs`     — universal Structured Reference String generation +
+//    serialisation. The chain operator runs `setup(k)` once per
+//    deployment; the SRS is then content-addressed and reused.
+//
+
+// # Why this ships at `Lifecycle.Conditional`
+//
+// The compile-time-discharged claim "Halo2 verifier is sound under
+// AGM + DLog" depends on:
+//   1. BLS12-381 stdlib (now landed) — done.
+//   2. A universal SRS ceremony — operational concern, not stdlib.
+//   3. End-to-end Verum-mechanised soundness proof — out of scope
+//      for v0.1; we cite the Halo2 paper via @framework(halo2_2019, ...)
+//      as the upstream proof of soundness (`AdmittedWithIou` status
+//      in the codegen-attestation framework).
+//
+// Once items 2-3 land we promote to `Lifecycle.Theorem`.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "BLS12-381 stdlib lands (done)",
+        "universal-SRS ceremony output committed in chain genesis",
+        "Halo2 soundness re-stated in Verum kernel via @framework(halo2_2019, ...)",
+    ]),
+)
+module core.security.zk.halo2;
+
+public module circuit;
+public module prover;
+public module verifier;
+public module srs;
+
+// =============================================================================
+// Re-exports — the typical caller imports just `core.security.zk.halo2`
+// =============================================================================
+
+public mount .circuit.{
+    // Layout primitives
+    Column, ColumnType, Selector, Region, Cell,
+    // Constraints
+    Constraint, Gate, Lookup, Permutation,
+    // Circuit container
+    Circuit, ConfigureContext, SynthesizeContext,
+    // Helpers — generic constraint shapes
+    range_constraint, set_membership_constraint, hash_preimage_constraint,
+    // Errors
+    CircuitError,
+};
+
+public mount .prover.{
+    Proof, ProvingKey, prove, prove_with_aux, ProverError,
+};
+
+public mount .verifier.{
+    VerifyingKey, verify, verify_batch, VerifierError,
+};
+
+public mount .srs.{
+    UniversalSrs, SrsParams, setup, setup_with_entropy, SrsError,
+};
