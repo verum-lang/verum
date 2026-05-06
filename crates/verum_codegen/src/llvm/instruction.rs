@@ -22377,11 +22377,91 @@ fn lower_extended<'ctx>(
             Ok(())
         }
         Some(ExtendedSubOpcode::MakeVariantTyped) => {
-            // Stage A — typed variant constructor sub-opcode is
-            // emitted by the type-driven codegen path; the LLVM
-            // lowering stays on the existing untyped MakeVariant
-            // path until the typed runtime is wired (#251 follow-up).
-            ctx.emit_unimplemented_sub_op("Extended", sub_op);
+            // Carrier-shape MakeVariantTyped: emitted when the decoder
+            // falls back to `Instruction::Extended { sub_op = 0x01,
+            // operands }` rather than the structural
+            // `Instruction::MakeVariantTyped` form (which has its own
+            // top-level arm at line ~3465 above).  The carrier-shape
+            // path only fires when the encoder emits 0x1F prefix +
+            // 0x01 sub_op and the decoder routes to the carrier
+            // bucket — typically because the structural decoder lost
+            // typing information mid-pipeline.
+            //
+            // Operand layout (see encoder at bytecode.rs):
+            //   [reg:dst][varint:type_id][varint:tag][varint:field_count]
+            //
+            // Reads operands via the same varint-prefixed bytecode
+            // walker the structural path uses; the type_id is consumed
+            // and discarded (zero-cost contract — Phase 3a/3b/3c have
+            // already proved the layout) and we delegate to the same
+            // `runtime.lower_make_variant` path as untyped MakeVariant.
+            if operands.is_empty() {
+                ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                return Ok(());
+            }
+            // Decode reg-byte (handle two-byte high-bit encoding).
+            let mut idx = 0;
+            let dst_reg: u16 = if operands[idx] & 0x80 == 0 {
+                let r = operands[idx] as u16;
+                idx += 1;
+                r
+            } else {
+                if operands.len() < idx + 2 {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                }
+                let r = (((operands[idx] & 0x7F) as u16) << 8) | (operands[idx + 1] as u16);
+                idx += 2;
+                r
+            };
+            // Decode three varints (type_id, tag, field_count).
+            let mut decode_varint = |idx: &mut usize| -> Option<u64> {
+                let mut value: u64 = 0;
+                let mut shift: u32 = 0;
+                while *idx < operands.len() {
+                    let b = operands[*idx];
+                    *idx += 1;
+                    value |= ((b & 0x7F) as u64) << shift;
+                    if b & 0x80 == 0 {
+                        return Some(value);
+                    }
+                    shift += 7;
+                    if shift >= 64 {
+                        return None;
+                    }
+                }
+                None
+            };
+            let _type_id = match decode_varint(&mut idx) {
+                Some(v) => v as u32,
+                None => {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                }
+            };
+            let tag = match decode_varint(&mut idx) {
+                Some(v) => v as u32,
+                None => {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                }
+            };
+            let field_count = match decode_varint(&mut idx) {
+                Some(v) => v as u32,
+                None => {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                }
+            };
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let variant_ptr = runtime.lower_make_variant(
+                ctx.builder(),
+                ctx.get_module(),
+                tag,
+                field_count,
+            )?;
+            ctx.set_register(dst_reg, variant_ptr.into());
+            ctx.mark_variant_register(dst_reg);
             Ok(())
         }
         None => {
