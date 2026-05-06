@@ -472,6 +472,416 @@ public type CveClosure is {
 };
 
 // =============================================================================
+// CVE-architecture spec primitives — operationalisation of cve-architecture.md
+// =============================================================================
+//
+// The CVE-architecture spec (`internal/cve/docs/cve-architecture.md`)
+// declares a set of load-bearing concepts that ATS-V must operationalise:
+//
+//   * `ExecutabilitySense`   — §2.3.0: three senses of the E axis
+//                              (structural readiness vs current
+//                              execution vs post-factum chronicle);
+//                              CVE-E refers exclusively to structural
+//                              readiness.
+//   * `CognitiveSubstrate`   — §1.5: the cognitive mode under which
+//                              CVE operates (analytic-decompositional
+//                              by default; alternative substrates are
+//                              co-equal in their domains of validity).
+//   * `FormalAnchoring`      — §4.5: the formal tradition in which the
+//                              tri-axis closure is anchored. Curry-
+//                              Howard-Lawvere is the most-developed
+//                              anchoring; parallel anchorings exist
+//                              in automata theory, control theory,
+//                              distributed protocols, functional
+//                              systems, and institutional design.
+//   * `Purpose` + thresholds — §14.6: declared purpose terminates an
+//                              audit. K/V/E thresholds specify the
+//                              level sufficient for the role; the
+//                              audit closes when configuration meets
+//                              thresholds (no infinite polishing).
+//   * `ArchitecturalDefect`  — §20.4: format for registering
+//                              defects against the architecture
+//                              itself, distinct from the L0..L5 audit
+//                              chronicle. Resolves at L4 (revision)
+//                              or L2 (refinement of methodology).
+// =============================================================================
+
+// ----- ExecutabilitySense (§2.3.0) -----
+
+/// The three senses of executability that CVE-E disambiguates.
+/// CVE-E refers EXCLUSIVELY to `StructuralReadiness`. The other two
+/// are co-located concepts that audits frequently conflate:
+///
+///   * `StructuralReadiness`    — the artefact admits a working
+///                                representation deployable in a
+///                                suitable environment. THIS IS
+///                                THE CONTENT OF THE E AXIS.
+///   * `CurrentExecution`       — the artefact is, at this moment,
+///                                running in production. Stronger
+///                                than E; characterises L0 maturity
+///                                in spec §3.5 [T] state, but is
+///                                not what the E axis asks.
+///   * `PostFactumChronicle`    — accumulated history of past
+///                                execution. Material for
+///                                antifragility chronicle (§15);
+///                                NOT the content of the E axis.
+///
+/// A `[T]` Theorem cog requires `StructuralReadiness`. Citing past
+/// execution (`PostFactumChronicle`) as evidence of E is the
+/// `BoundlessAudit`/`ImplicitSubstrate` family of register collisions.
+public type ExecutabilitySense is
+    | StructuralReadiness
+    | CurrentExecution
+    | PostFactumChronicle;
+
+/// Stable diagnostic tag for `ExecutabilitySense`. Used in audit
+/// JSON, anti-pattern messages, dual-audience surfaces.
+public fn executability_sense_tag(s: ExecutabilitySense) -> Text {
+    match s {
+        StructuralReadiness  => "structural_readiness",
+        CurrentExecution     => "current_execution",
+        PostFactumChronicle  => "post_factum_chronicle",
+    }
+}
+
+/// True iff the sense is the canonical content of CVE-E. Soundness
+/// pin: exactly one of three senses (`StructuralReadiness`) anchors
+/// the E axis; the other two are co-located but not equivalent.
+public fn executability_sense_is_canonical_e(s: ExecutabilitySense) -> Bool {
+    match s {
+        StructuralReadiness  => true,
+        CurrentExecution     => false,
+        PostFactumChronicle  => false,
+    }
+}
+
+// ----- CognitiveSubstrate (§1.5) -----
+
+/// The cognitive mode under which a knowledge artefact is
+/// articulated. CVE itself operates under the
+/// `AnalyticDecompositional` substrate; alternative substrates are
+/// co-equal in their proper domains of validity, and the
+/// architecture's self-disclosure of its own substrate is part of
+/// operational hygiene per spec §1.5.
+///
+///   * `AnalyticDecompositional` — CVE's own substrate: the artefact
+///                                  is decomposed into the three K/V/E
+///                                  projections, each evaluated
+///                                  separately, the verdict assembled.
+///                                  Default for `@arch_module(...)`.
+///   * `HolisticRelational`      — the artefact is evaluated as a
+///                                  non-decomposable node in a network
+///                                  of relations (e.g. living tradition,
+///                                  network maturity).
+///   * `ActionCentric`           — the primary object IS the action,
+///                                  not the result; the artefact's
+///                                  identity is in performance
+///                                  (e.g. craft mastery, performance
+///                                  disciplines).
+///   * `TraditionTransmitting`   — the artefact's identity is in
+///                                  multi-generational reproduction
+///                                  through a transmission lineage.
+///
+/// CVE applies fully to the `AnalyticDecompositional` substrate;
+/// for the others CVE captures the *transmissible articulable
+/// contour* only, leaving non-articulable surface outside the
+/// CVE-zone (spec §13.4).
+public type CognitiveSubstrate is
+    | AnalyticDecompositional
+    | HolisticRelational
+    | ActionCentric
+    | TraditionTransmitting;
+
+/// Stable diagnostic tag for `CognitiveSubstrate`.
+public fn cognitive_substrate_tag(s: CognitiveSubstrate) -> Text {
+    match s {
+        AnalyticDecompositional  => "analytic_decompositional",
+        HolisticRelational       => "holistic_relational",
+        ActionCentric            => "action_centric",
+        TraditionTransmitting    => "tradition_transmitting",
+    }
+}
+
+/// Default substrate for ATS-V annotations: CVE's native mode.
+/// A cog whose declared substrate is anything else and which
+/// claims `[T]` Theorem in strict mode triggers AP-038
+/// `ImplicitSubstrate` unless the substrate-mismatch is
+/// explicitly bridged (spec §13.4).
+public fn cognitive_substrate_default() -> CognitiveSubstrate {
+    AnalyticDecompositional
+}
+
+// ----- FormalAnchoring (§4.5) -----
+
+/// The formal tradition anchoring the tri-axis closure of an
+/// architectural artefact. Curry-Howard-Lawvere is the eponym and
+/// most-developed anchoring; the other variants register parallel
+/// anchorings on different stages of formalisation, per spec §4.5.
+///
+///   * `CurryHowardLawvere`     — logic ↔ types ↔ categories;
+///                                 the canonical anchoring for
+///                                 mathematical and SE artefacts.
+///   * `AutomataTheory`         — grammars ↔ automata ↔ languages;
+///                                 the tri-register for formal
+///                                 languages and parsers.
+///   * `ControlTheory`          — state equations ↔ transfer
+///                                 functions ↔ realisations;
+///                                 the tri-register for dynamical
+///                                 systems.
+///   * `DistributedProtocols`   — specifications ↔ execution
+///                                 models ↔ observable traces;
+///                                 the tri-register for distributed
+///                                 systems.
+///   * `FunctionalSystems`      — afferent synthesis ↔ action
+///                                 program ↔ result acceptor;
+///                                 the tri-register for
+///                                 behavioural biology and
+///                                 cognitive physiology.
+///   * `InstitutionalDesign`    — normative structure ↔ decision
+///                                 procedure ↔ stabilised
+///                                 practices; the tri-register for
+///                                 social institutions.
+///   * `CustomAnchoring(name)`  — user-registered anchoring (open
+///                                 catalog, validated against the
+///                                 anchoring registry).
+///
+/// A cog whose `Foundation` is mathematical/SE-style but which
+/// makes claims in a non-CHL domain (e.g. an institutional protocol
+/// described as a `[T]` Theorem with no anchoring declaration)
+/// triggers AP-039 `AnchoringOverextension` in strict mode.
+public type FormalAnchoring is
+    | CurryHowardLawvere
+    | AutomataTheory
+    | ControlTheory
+    | DistributedProtocols
+    | FunctionalSystems
+    | InstitutionalDesign
+    | CustomAnchoring(Text);
+
+/// Stable diagnostic tag for `FormalAnchoring`.
+public fn formal_anchoring_tag(a: FormalAnchoring) -> Text {
+    match a {
+        CurryHowardLawvere    => "curry_howard_lawvere",
+        AutomataTheory        => "automata_theory",
+        ControlTheory         => "control_theory",
+        DistributedProtocols  => "distributed_protocols",
+        FunctionalSystems     => "functional_systems",
+        InstitutionalDesign   => "institutional_design",
+        CustomAnchoring(_)    => "custom_anchoring",
+    }
+}
+
+/// Default anchoring for Verum-native artefacts: the CHL eponym.
+/// Spec §4.5 identifies this as the most-developed anchoring; cogs
+/// whose body inhabits CHL need not declare it explicitly.
+public fn formal_anchoring_default() -> FormalAnchoring {
+    CurryHowardLawvere
+}
+
+// ----- Purpose + K/V/E thresholds (§14.6) -----
+
+/// Threshold on the K (Constructive) axis declared sufficient for
+/// the artefact's role. A K-witness at or above the threshold
+/// closes the K question of the audit; below, action A
+/// (replenishment) is required, action B (status downgrade) is
+/// permitted, action C (deletion) is the residual.
+///
+///   * `FullWitness`              — explicit, computable,
+///                                  first-class witness; no holes.
+///   * `TypedSchema`              — schema-with-typed-parameters
+///                                  is sufficient (e.g. a generic
+///                                  reference under a type-level
+///                                  constraint).
+///   * `ReferenceImplBounded`     — reference implementation
+///                                  bounded to a stated domain
+///                                  is sufficient.
+public type CveThresholdK is
+    | FullWitness
+    | TypedSchema
+    | ReferenceImplBounded;
+
+/// Threshold on the V (Verifiable) axis.
+///
+///   * `FullFormalProof`        — kernel-checked machine proof
+///                                in the chosen meta-theory.
+///   * `TypecheckPlusTests`     — typechecker + named test battery
+///                                with declared coverage.
+///   * `NamedCertification`     — passage of a named certification
+///                                (e.g. external audit, conformance
+///                                suite) is sufficient.
+public type CveThresholdV is
+    | FullFormalProof
+    | TypecheckPlusTests
+    | NamedCertification;
+
+/// Threshold on the E (Executable, in the `StructuralReadiness`
+/// sense per `ExecutabilitySense`) axis.
+///
+///   * `StructurallyReady`         — deployable in any environment
+///                                   of the declared class.
+///   * `DeployedInOneEnv`          — one specific environment is
+///                                   sufficient.
+///   * `FunctorialOnly`            — a functor in a category is
+///                                   sufficient (e.g. for purely
+///                                   mathematical artefacts).
+public type CveThresholdE is
+    | StructurallyReady
+    | DeployedInOneEnv
+    | FunctorialOnly;
+
+/// Stable diagnostic tags for the three threshold axes. Used in
+/// audit JSON when a `Purpose` is rendered.
+public fn cve_threshold_k_tag(t: CveThresholdK) -> Text {
+    match t {
+        FullWitness            => "full_witness",
+        TypedSchema            => "typed_schema",
+        ReferenceImplBounded   => "reference_impl_bounded",
+    }
+}
+
+public fn cve_threshold_v_tag(t: CveThresholdV) -> Text {
+    match t {
+        FullFormalProof      => "full_formal_proof",
+        TypecheckPlusTests   => "typecheck_plus_tests",
+        NamedCertification   => "named_certification",
+    }
+}
+
+public fn cve_threshold_e_tag(t: CveThresholdE) -> Text {
+    match t {
+        StructurallyReady   => "structurally_ready",
+        DeployedInOneEnv    => "deployed_in_one_env",
+        FunctorialOnly      => "functorial_only",
+    }
+}
+
+/// Declared purpose of an architectural artefact, per spec §14.6.
+/// The purpose terminates the audit: when configuration meets
+/// thresholds, the audit closes (no infinite polishing). Without
+/// a declared purpose AND a strict-mode audit invocation, AP-037
+/// `BoundlessAudit` fires.
+///
+///   * `role`        — short label of the role the artefact serves.
+///   * `k_min`       — minimum K threshold sufficient for the role.
+///   * `v_min`       — minimum V threshold sufficient for the role.
+///   * `e_min`       — minimum E threshold sufficient for the role.
+public type Purpose is {
+    role: Text,
+    k_min: CveThresholdK,
+    v_min: CveThresholdV,
+    e_min: CveThresholdE,
+};
+
+/// A safe default purpose for cogs that genuinely have no
+/// audit-bounding role declared. NOT recommended for `[T]` Theorem
+/// or `[C]` Conditional cogs in strict mode — those should declare
+/// purpose explicitly.
+public fn purpose_default() -> Purpose {
+    Purpose {
+        role: "unspecified",
+        k_min: CveThresholdK.FullWitness,
+        v_min: CveThresholdV.TypecheckPlusTests,
+        e_min: CveThresholdE.StructurallyReady,
+    }
+}
+
+// ----- ArchitecturalDefect (§20.4) -----
+
+/// Kind of architectural defect, per spec §20.4. Resolution path
+/// depends on kind: `FalseRejection` and `FalseAcceptance` cluster
+/// at L4 (architectural revision); `InterLayerLeak` may resolve
+/// at L4 OR L2 (methodological refinement) depending on the leak's
+/// origin.
+public type DefectKind is
+    | FalseRejection
+    | FalseAcceptance
+    | InterLayerLeak
+    | OtherDefect(Text);
+
+/// Resolution path for a registered architectural defect.
+/// `L4Revision` modifies the architectural law itself (rare);
+/// `L2Refinement` adjusts the methodology layer without touching
+/// the architectural law (typical).
+public type Resolution is
+    | L4Revision
+    | L2Refinement
+    | OtherResolution(Text);
+
+/// Stable diagnostic tags for `DefectKind` and `Resolution`.
+public fn defect_kind_tag(k: DefectKind) -> Text {
+    match k {
+        FalseRejection      => "false_rejection",
+        FalseAcceptance     => "false_acceptance",
+        InterLayerLeak      => "inter_layer_leak",
+        OtherDefect(_)      => "other_defect",
+    }
+}
+
+public fn resolution_tag(r: Resolution) -> Text {
+    match r {
+        L4Revision           => "l4_revision",
+        L2Refinement         => "l2_refinement",
+        OtherResolution(_)   => "other_resolution",
+    }
+}
+
+/// Architectural defect record, per spec §20.4. Every registered
+/// defect carries a complete provenance chain: the version of the
+/// architecture against which it was filed, the witness artefact,
+/// the application context, the observed and expected results, the
+/// proposed resolution. Self-application of CVE to the chronicle
+/// itself: K — record format is specified; V — every revision
+/// validates against the three §20.2 criteria; I — the resolution
+/// procedure is executable.
+public type ArchitecturalDefect is {
+    short_name: Text,
+    arch_version: Text,
+    submitted_on: Text,
+    submitter: Text,
+    kind: DefectKind,
+    witness_artefact: Text,
+    application_context: Text,
+    observed_result: Text,
+    expected_result: Text,
+    proposed_resolution: Resolution,
+};
+
+// ----- ShapeDeclarations — spec-load-bearing optional declarations -----
+
+/// Optional declarations packaged into a `Shape`. Carries the four
+/// CVE-architecture spec concepts that are not yet load-bearing in
+/// the canonical primitives but ARE load-bearing in the
+/// architectural law: declared purpose (terminates audit), declared
+/// cognitive substrate (CVE's mode of operation, defaults to
+/// `AnalyticDecompositional`), declared formal anchoring (CHL by
+/// default), declared executability sense (`StructuralReadiness`
+/// by default).
+///
+/// All four are `Maybe<...>` so `@arch_module(...)` need not declare
+/// them explicitly; absent declarations default per the helpers
+/// `cognitive_substrate_default`, `formal_anchoring_default`,
+/// canonical `ExecutabilitySense.StructuralReadiness`, and
+/// `purpose_default()`. In strict mode, absence triggers the
+/// CVE-AH band anti-patterns (AP-037..AP-039).
+public type ShapeDeclarations is {
+    purpose: Maybe<Purpose>,
+    substrate: Maybe<CognitiveSubstrate>,
+    anchoring: Maybe<FormalAnchoring>,
+    e_sense: Maybe<ExecutabilitySense>,
+};
+
+/// Empty declarations record — every field unspecified, the
+/// architectural type-checker fills defaults at audit time.
+public fn shape_declarations_empty() -> ShapeDeclarations {
+    ShapeDeclarations {
+        purpose: None,
+        substrate: None,
+        anchoring: None,
+        e_sense: None,
+    }
+}
+
+// =============================================================================
 // Shape — main carrier of @arch_module(...)
 // =============================================================================
 
@@ -482,7 +892,7 @@ public type CveClosure is {
 /// architectural type checking and produces the per-module
 /// violation roster.
 ///
-/// Field semantics (all 13 fields the parser recognises):
+/// Field semantics (12 canonical fields the parser recognises):
 ///   * `exposes`          — capabilities surfacing externally
 ///   * `requires`         — capabilities the cog needs from peers
 ///   * `preserves`        — boundary invariants honoured by the
@@ -498,6 +908,10 @@ public type CveClosure is {
 ///   * `lifecycle`        — maturation stage
 ///   * `composes_with`    — cogs/functions this one composes with
 ///   * `strict`           — strict-mode flag (errors vs warnings)
+///   * `declarations`     — optional CVE-architecture spec
+///                          declarations (purpose, substrate,
+///                          anchoring, e_sense). Per spec §1.5,
+///                          §2.3.0, §4.5, §14.6.
 public type Shape is {
     exposes: List<Capability>,
     requires: List<Capability>,
@@ -510,6 +924,7 @@ public type Shape is {
     lifecycle: Lifecycle,
     composes_with: List<Text>,
     strict: Bool,
+    declarations: Maybe<ShapeDeclarations>,
 };
 
 // =============================================================================
@@ -815,6 +1230,7 @@ public fn shape_default_for_unannotated() -> Shape {
         lifecycle: Lifecycle.Plan("unspecified"),
         composes_with: [],
         strict: false,
+        declarations: None,
     }
 }
 
@@ -858,4 +1274,52 @@ public fn tier_check_runs_nothing() -> Bool {
     !tier_compatible_with(Tier.Aot, Tier.Check) &&
     !tier_compatible_with(Tier.Check, Tier.Interp) &&
     !tier_compatible_with(Tier.Check, Tier.Gpu)
+}
+
+/// **Soundness pin** (spec §2.3.0): of the three executability
+/// senses, exactly one (`StructuralReadiness`) is the canonical
+/// content of the CVE-E axis. The other two are co-located but
+/// distinct; conflating them is a register collision (§2.3.0).
+public fn executability_sense_canonical_unique() -> Bool {
+    executability_sense_is_canonical_e(ExecutabilitySense.StructuralReadiness) &&
+    !executability_sense_is_canonical_e(ExecutabilitySense.CurrentExecution) &&
+    !executability_sense_is_canonical_e(ExecutabilitySense.PostFactumChronicle)
+}
+
+/// **Soundness pin** (spec §1.5): the default cognitive substrate
+/// for ATS-V annotations is `AnalyticDecompositional`. The other
+/// substrates are co-equal in their proper domains but require
+/// explicit declaration to be load-bearing.
+public fn cognitive_substrate_default_is_analytic() -> Bool {
+    match cognitive_substrate_default() {
+        AnalyticDecompositional  => true,
+        _                        => false,
+    }
+}
+
+/// **Soundness pin** (spec §4.5): the default formal anchoring is
+/// the eponymous Curry-Howard-Lawvere triad. Other anchorings are
+/// co-equal where they apply but require explicit declaration.
+public fn formal_anchoring_default_is_chl() -> Bool {
+    match formal_anchoring_default() {
+        CurryHowardLawvere  => true,
+        _                   => false,
+    }
+}
+
+/// **Soundness pin** (spec §14.6): a default purpose has all three
+/// thresholds set; this enables vacuous audit termination for cogs
+/// without an explicit purpose declaration. Strict-mode cogs SHOULD
+/// override this default to bound the audit per their actual role.
+public fn purpose_default_is_complete() -> Bool {
+    let p = purpose_default();
+    match p.k_min {
+        FullWitness | TypedSchema | ReferenceImplBounded  => true,
+    } &&
+    match p.v_min {
+        FullFormalProof | TypecheckPlusTests | NamedCertification  => true,
+    } &&
+    match p.e_min {
+        StructurallyReady | DeployedInOneEnv | FunctorialOnly  => true,
+    }
 }
