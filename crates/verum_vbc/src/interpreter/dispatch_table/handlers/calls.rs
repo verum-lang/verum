@@ -88,6 +88,19 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Path/PathBuf constructors and free helpers
+            // (`Path.new`, `PathBuf.from`, etc.).  Sibling to file_runtime —
+            // see `path_ops_runtime` doc comment for the rationale.
+            if let Some(result) = super::path_ops_runtime::try_intercept_path_constructor(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             if let Some(result) = super::env_runtime::try_intercept_env_runtime(
                 state,
                 &func_name,

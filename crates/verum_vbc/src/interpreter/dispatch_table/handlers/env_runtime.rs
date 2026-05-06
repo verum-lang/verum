@@ -241,8 +241,14 @@ fn intercept_current_dir(state: &mut InterpreterState) -> InterpreterResult<Opti
         Ok(p) => {
             let s = p.to_string_lossy().to_string();
             let text = alloc_string_value(state, &s)?;
-            // PathBuf has shape `{ inner: Text }` — single-field record.
-            let pathbuf = alloc_record_n_fields(state, "PathBuf", &[text])?;
+            // PathBuf has shape `{ path: Path { inner: Text } }` —
+            // a 1-field record wrapping a `Path` 1-field record.
+            // Pre-fix this allocated `{ inner: Text }` directly,
+            // collapsing the PathBuf and Path shapes into one;
+            // method dispatch on the result then mis-resolved
+            // against the wrong field layout (`as_path` etc.).
+            let inner_path = alloc_record_n_fields(state, "Path", &[text])?;
+            let pathbuf = alloc_record_n_fields(state, "PathBuf", &[inner_path])?;
             Ok(Some(wrap_in_variant(state, "Result", 0, &[pathbuf])?))
         }
         Err(_e) => {
