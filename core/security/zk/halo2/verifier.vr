@@ -1,0 +1,132 @@
+// =============================================================================
+// security/zk/halo2/verifier.vr — Halo2 verifier
+// =============================================================================
+//
+
+// `verify(vk, proof, public_inputs) → Bool`. The verifier is fast (a
+// few ms on commodity hardware) regardless of the prover's circuit
+// size — succinctness of Halo2 + KZG10. Returns `Ok(())` for valid;
+// any failure is a typed `VerifierError`.
+//
+// Batch verification (`verify_batch`) amortises pairing equation
+// checks across many proofs — e.g., when a single block contains N
+// proofs that all share a verifying key. Roughly ~1.5× faster than
+// N independent verifies for N ≥ 4.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "Halo2 stdlib parent module conditions hold",
+    ]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp]),
+)
+module core.security.zk.halo2.verifier;
+mount core.*;
+mount core.security.zk.halo2.prover.{Proof, VerifyingKey};
+mount core.security.zk.halo2.srs.{UniversalSrs};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type VerifierError is
+    /// Public-inputs vector is the wrong length for the verifying key's
+    /// circuit (every Instance column needs exactly one Fp value).
+    | PublicInputArity { expected: Int, got: Int }
+    /// Wire-format of the proof is invalid (truncated, wrong header,
+    /// elements off-curve).
+    | MalformedProof(Text)
+    /// Wire-format of a public input is not a canonical Fp encoding.
+    | MalformedPublicInput(Int)
+    /// The proof checks did not authenticate. Returned for *any*
+    /// well-formed-but-rejected proof; the verifier deliberately does
+    /// **not** distinguish "wrong commitment" from "bad opening" — that
+    /// distinction would leak prover-side information across boundaries
+    /// (RFC-style same-error discipline).
+    | VerificationFailed
+    /// SRS the proof was constructed against is not loaded by the
+    /// verifier (hash mismatch).
+    | SrsMismatch
+    | BackendError(Text);
+
+implement Display for VerifierError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PublicInputArity { expected, got } =>
+                f.write_str(f"halo2.verifier: public-input arity expected={expected} got={got}".as_str()),
+            MalformedProof(why)        => f.write_str(f"halo2.verifier: malformed proof ({why})".as_str()),
+            MalformedPublicInput(idx)  => f.write_str(f"halo2.verifier: public input #{idx} malformed".as_str()),
+            VerificationFailed         => f.write_str("halo2.verifier: verification failed"),
+            SrsMismatch                => f.write_str("halo2.verifier: SRS hash mismatch"),
+            BackendError(why)          => f.write_str(f"halo2.verifier: backend ({why})".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// Verify
+// =============================================================================
+
+/// Verify one proof. The verifier is *value-blind* — it does not
+/// expose the path of the failing check (analogous to Ed25519's
+/// strict-mode discipline). For diagnostics, run the prover side
+/// in `validate_witness` mode.
+public fn verify(
+    vk:           &VerifyingKey,
+    public_inputs: &List<List<Byte>>,
+    proof:        &Proof,
+    srs:          &UniversalSrs,
+) -> Result<(), VerifierError> {
+    match @intrinsic(
+        "verum.crypto.halo2_verify",
+        vk, public_inputs, proof, srs,
+    ) {
+        VerifyResult.Accepted              => Ok(()),
+        VerifyResult.Rejected              => Err(VerificationFailed),
+        VerifyResult.PublicInputArity(e, g) => Err(PublicInputArity { expected: e, got: g }),
+        VerifyResult.MalformedProof(why)   => Err(MalformedProof(why)),
+        VerifyResult.MalformedInput(idx)   => Err(MalformedPublicInput(idx)),
+        VerifyResult.SrsMismatch           => Err(SrsMismatch),
+        VerifyResult.Backend(why)          => Err(BackendError(why)),
+    }
+}
+
+/// Verify N proofs that all share `vk`. Pairing equations combine via
+/// a random-linear-combination check (Halo2 §4.4 multi-proof opening),
+/// reducing N+1 pairings to 2 pairings + N field ops.
+public fn verify_batch(
+    vk:                 &VerifyingKey,
+    proofs_with_inputs: &List<(Proof, List<List<Byte>>)>,
+    srs:                &UniversalSrs,
+) -> Result<(), VerifierError> {
+    if proofs_with_inputs.is_empty() {
+        return Ok(());
+    }
+    match @intrinsic(
+        "verum.crypto.halo2_verify_batch",
+        vk, proofs_with_inputs, srs,
+    ) {
+        VerifyResult.Accepted              => Ok(()),
+        VerifyResult.Rejected              => Err(VerificationFailed),
+        VerifyResult.PublicInputArity(e, g) => Err(PublicInputArity { expected: e, got: g }),
+        VerifyResult.MalformedProof(why)   => Err(MalformedProof(why)),
+        VerifyResult.MalformedInput(idx)   => Err(MalformedPublicInput(idx)),
+        VerifyResult.SrsMismatch           => Err(SrsMismatch),
+        VerifyResult.Backend(why)          => Err(BackendError(why)),
+    }
+}
+
+// =============================================================================
+// Internal — backend response variants
+// =============================================================================
+
+type VerifyResult is
+    | Accepted
+    | Rejected
+    | PublicInputArity(Int, Int)
+    | MalformedProof(Text)
+    | MalformedInput(Int)
+    | SrsMismatch
+    | Backend(Text);

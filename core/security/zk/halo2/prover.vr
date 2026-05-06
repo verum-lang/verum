@@ -1,0 +1,173 @@
+// =============================================================================
+// security/zk/halo2/prover.vr — Halo2 prover
+// =============================================================================
+//
+
+// `prove(circuit, witness, srs) → Proof`. The witness is the secret
+// data that satisfies the circuit's constraints; the prover commits
+// to it via KZG10 and produces a non-interactive proof (Fiat-Shamir
+// over a Merlin transcript).
+//
+
+// # Performance characteristics
+//
+//   * Prover runtime is ~`O(N · log N)` field ops + `O(N)` G1 mul,
+//     dominated by FFTs.
+//   * Memory peak is ~`(num_columns × 2^k × 32 B) + (FFT scratch)`.
+//     For a typical recursion-leaf circuit (k=14, ~5 columns),
+//     ~3-4 MB. A k=20 circuit pushes ~150 MB.
+//   * GPU-accelerated MSMs (multi-scalar mul) deliver 5-30× speed-up
+//     on supported hardware via `Tier.Gpu` dispatch (when the
+//     `tier_gpu` runtime feature is enabled).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Conditional([
+        "Halo2 stdlib parent module conditions hold",
+    ]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu]),
+)
+module core.security.zk.halo2.prover;
+mount core.*;
+mount core.security.zk.halo2.circuit.{Circuit, SynthesizeContext, CircuitError};
+mount core.security.zk.halo2.srs.{UniversalSrs, SrsError};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// The "PK" (proving key) precomputes circuit-specific data from the
+/// SRS and the circuit description. Persistable: produce once via
+/// `prove.precompute`, reuse across many proves.
+public type ProvingKey is {
+    /// Hash of the circuit description (BLAKE3 of canonical encoding).
+    /// Used to assert that a proving key + circuit pair belong together.
+    circuit_digest: [Byte; 32],
+    /// Reference to the SRS this PK was specialised against.
+    srs_handle:     Int,
+    /// Opaque runtime handle.
+    handle:         Int,
+};
+
+/// Verifier-side counterpart of `ProvingKey`. Distributed with the
+/// circuit; verifier uses VK + proof + public-inputs to decide.
+public type VerifyingKey is {
+    circuit_digest: [Byte; 32],
+    /// Bytewise-stable serialisation. Embed in chain genesis or in
+    /// the cog archive's metadata.
+    bytes:          List<Byte>,
+};
+
+/// An opaque proof. Wire size for a typical Halo2 + KZG circuit is
+/// a few hundred bytes (constants for the commitment + linearisation
+/// + opening proofs); independent of circuit size in the asymptotic
+/// regime, ~1-2 KB in practice.
+public type Proof is {
+    bytes: List<Byte>,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type ProverError is
+    | CircuitMismatch { expected: [Byte; 32], got: [Byte; 32] }
+    | InsufficientCapacity { circuit_k: Int, srs_k: Int }
+    | WitnessAssignmentFailed(Text)
+    | TranscriptError(Text)
+    | BackendError(Text);
+
+implement Display for ProverError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CircuitMismatch { .. } => f.write_str("halo2.prover: circuit digest mismatch"),
+            InsufficientCapacity { circuit_k, srs_k } =>
+                f.write_str(f"halo2.prover: circuit needs 2^{circuit_k} but SRS k={srs_k}".as_str()),
+            WitnessAssignmentFailed(why) => f.write_str(f"halo2.prover: witness assignment ({why})".as_str()),
+            TranscriptError(why)         => f.write_str(f"halo2.prover: transcript ({why})".as_str()),
+            BackendError(why)            => f.write_str(f"halo2.prover: backend ({why})".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// Precompute
+// =============================================================================
+
+/// Specialise a circuit against an SRS — produces (PK, VK). Persist
+/// both. The VK is what the chain commits to; the PK is local prover
+/// state.
+public fn precompute(
+    circuit: &Circuit,
+    srs:     &UniversalSrs,
+) -> Result<(ProvingKey, VerifyingKey), ProverError> {
+    if circuit.k > srs.params.k {
+        return Err(InsufficientCapacity { circuit_k: circuit.k, srs_k: srs.params.k });
+    }
+    match @intrinsic("verum.crypto.halo2_precompute", circuit, srs) {
+        PrecomputeResult.Ok(pk, vk) => Ok((pk, vk)),
+        PrecomputeResult.Err(why)   => Err(BackendError(why)),
+    }
+}
+
+// =============================================================================
+// Prove — synthesise witness + non-interactively prove
+// =============================================================================
+
+/// One-shot prove: caller supplies a "synthesise" closure that the
+/// prover invokes on a fresh `SynthesizeContext`. The closure fills
+/// in the witness; all assignments must match the circuit's gate
+/// constraints, otherwise `WitnessAssignmentFailed` surfaces.
+public fn prove<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
+    pk:           &ProvingKey,
+    public_inputs: &List<List<Byte>>,    // one Fp value per Instance column
+    synthesize:   F,
+) -> Result<Proof, ProverError> {
+    let result = @intrinsic(
+        "verum.crypto.halo2_prove",
+        pk, public_inputs, synthesize,
+    );
+    match result {
+        ProveResult.Ok(p)            => Ok(p),
+        ProveResult.WitnessFailed(why) => Err(WitnessAssignmentFailed(why)),
+        ProveResult.TranscriptFailed(why) => Err(TranscriptError(why)),
+        ProveResult.BackendFailed(why) => Err(BackendError(why)),
+    }
+}
+
+/// Prove with auxiliary "advice" hint — hot loops sometimes recompute
+/// witness from a smaller hint set. Default `prove` re-builds advice
+/// from instance + private inputs.
+public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
+    pk:           &ProvingKey,
+    public_inputs: &List<List<Byte>>,
+    aux:          &List<Byte>,        // backend-defined auxiliary blob
+    synthesize:   F,
+) -> Result<Proof, ProverError> {
+    let result = @intrinsic(
+        "verum.crypto.halo2_prove_with_aux",
+        pk, public_inputs, aux, synthesize,
+    );
+    match result {
+        ProveResult.Ok(p)            => Ok(p),
+        ProveResult.WitnessFailed(why) => Err(WitnessAssignmentFailed(why)),
+        ProveResult.TranscriptFailed(why) => Err(TranscriptError(why)),
+        ProveResult.BackendFailed(why) => Err(BackendError(why)),
+    }
+}
+
+// =============================================================================
+// Internal — backend response variants
+// =============================================================================
+
+type PrecomputeResult is
+    | Ok(ProvingKey, VerifyingKey)
+    | Err(Text);
+
+type ProveResult is
+    | Ok(Proof)
+    | WitnessFailed(Text)
+    | TranscriptFailed(Text)
+    | BackendFailed(Text);
