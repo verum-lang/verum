@@ -129,6 +129,13 @@ pub(in super::super) fn try_intercept_file_runtime(
         "exists" if arg_count == 1 => {
             intercept_exists(state, args_start_reg, arg_count, caller_base)
         }
+        // `path_exists` is core.shell.builtins's wrapper around
+        // `fs_metadata(p).is_ok()` — same semantics as fs.exists.
+        // Bypasses the metadata-allocation chain that crashes when
+        // the inner stub returns Unit.
+        "path_exists" if arg_count == 1 => {
+            intercept_exists(state, args_start_reg, arg_count, caller_base)
+        }
         "is_file" if arg_count == 1 => {
             intercept_metadata_pred(state, args_start_reg, caller_base, MetaPred::File)
         }
@@ -138,12 +145,34 @@ pub(in super::super) fn try_intercept_file_runtime(
         "is_symlink" if arg_count == 1 => {
             intercept_metadata_pred(state, args_start_reg, caller_base, MetaPred::Symlink)
         }
+        // `core.io.fs.metadata(&Path) -> IoResult<Metadata>`.
+        // Allocates a `Metadata { kind: FileType, len: Int, modified:
+        // Maybe<Int>, accessed: Maybe<Int>, mtime_ns: Int, atime_ns: Int }`
+        // record (6 Value slots).  Stdlib's `Metadata.is_file()` /
+        // `is_dir()` / `is_symlink()` reads `kind` (variant tag).
+        "metadata" if arg_count == 1 => {
+            intercept_metadata(state, args_start_reg, caller_base)
+        }
+        // `core.io.fs.file_size(&Path) -> IoResult<Int>` — convenience
+        // path-shaped wrapper around metadata().len().
+        "file_size" if arg_count == 1 => {
+            intercept_file_size(state, args_start_reg, caller_base)
+        }
         // Mutations — gated on FileSystem write permission.
         "create_dir" if arg_count == 1 => {
             intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::CreateDir)
         }
         "create_dir_all" if arg_count == 1 => {
             intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::CreateDirAll)
+        }
+        // `mkdir_p` and `mkdir` are core.shell.builtins's path-typed
+        // mkdir wrappers — semantics: mkdir_p creates all parents
+        // (idempotent), mkdir creates one level.
+        "mkdir_p" if arg_count == 1 => {
+            intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::CreateDirAll)
+        }
+        "mkdir" if arg_count == 1 => {
+            intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::CreateDir)
         }
         "remove_file" if arg_count == 1 => {
             intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::RemoveFile)
@@ -154,8 +183,25 @@ pub(in super::super) fn try_intercept_file_runtime(
         "remove_dir_all" if arg_count == 1 => {
             intercept_unit_op(state, args_start_reg, caller_base, FsUnitOp::RemoveDirAll)
         }
+        // `rm` and `rm_rf` are core.shell.builtins's wrappers.
+        // `rm` removes a file (or empty dir); `rm_rf` removes a path
+        // recursively (file or dir tree).
+        "rm" if arg_count == 1 => {
+            intercept_rm_smart(state, args_start_reg, caller_base, false)
+        }
+        "rm_rf" if arg_count == 1 => {
+            intercept_rm_smart(state, args_start_reg, caller_base, true)
+        }
         "rename" if arg_count == 2 => intercept_rename(state, args_start_reg, caller_base),
+        "mv" if arg_count == 2 => intercept_rename(state, args_start_reg, caller_base),
         "copy" if arg_count == 2 => intercept_copy(state, args_start_reg, caller_base),
+        "cp" if arg_count == 2 => intercept_copy(state, args_start_reg, caller_base),
+        // `which(name: &Text) -> Maybe<Path>` — searches PATH.
+        "which" if arg_count == 1 => intercept_which(state, args_start_reg, caller_base),
+        // `command_exists(name: &Text) -> Bool` — `which.is_some()`.
+        "command_exists" if arg_count == 1 => {
+            intercept_command_exists(state, args_start_reg, caller_base)
+        }
         _ => Ok(None),
     }
 }
@@ -354,6 +400,202 @@ fn intercept_copy(
         )?)),
         Err(e) => Ok(Some(build_io_err(state, &e)?)),
     }
+}
+
+/// `core.io.fs.metadata(&Path) -> IoResult<Metadata>`.  Allocates the
+/// canonical stdlib shape:
+///
+/// ```text
+/// Metadata { raw: FsMetadataRaw }
+/// FsMetadataRaw {
+///     size: Int,
+///     modified_secs: Int,
+///     modified_nanos: Int,
+///     accessed_secs: Int,
+///     accessed_nanos: Int,
+///     created_secs: Int,
+///     created_nanos: Int,
+///     mode: Int,
+///     is_dir: Int,
+///     is_file: Int,
+///     is_symlink: Int,
+/// }
+/// ```
+///
+/// Field count: Metadata=1, FsMetadataRaw=11.  Stdlib's
+/// `metadata.is_file()` / `is_dir()` / `is_symlink()` / `len()` / etc.
+/// reads the raw fields directly.
+fn intercept_metadata(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let path = extract_path_arg(state, args_start_reg, caller_base);
+    match std::fs::symlink_metadata(&path) {
+        Ok(m) => {
+            let ft = m.file_type();
+            let (msec, mnsec) = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| (d.as_secs() as i64, d.subsec_nanos() as i64))
+                .unwrap_or((0, 0));
+            let (asec, ansec) = m
+                .accessed()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| (d.as_secs() as i64, d.subsec_nanos() as i64))
+                .unwrap_or((0, 0));
+            let (csec, cnsec) = m
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| (d.as_secs() as i64, d.subsec_nanos() as i64))
+                .unwrap_or((0, 0));
+            #[cfg(unix)]
+            let mode = {
+                use std::os::unix::fs::PermissionsExt;
+                m.permissions().mode() as i64
+            };
+            #[cfg(not(unix))]
+            let mode = if m.permissions().readonly() { 0o444 } else { 0o644 };
+            let raw = alloc_record_n_fields(
+                state,
+                "FsMetadataRaw",
+                &[
+                    Value::from_i64(m.len() as i64),
+                    Value::from_i64(msec),
+                    Value::from_i64(mnsec),
+                    Value::from_i64(asec),
+                    Value::from_i64(ansec),
+                    Value::from_i64(csec),
+                    Value::from_i64(cnsec),
+                    Value::from_i64(mode),
+                    Value::from_i64(if ft.is_dir() { 1 } else { 0 }),
+                    Value::from_i64(if ft.is_file() { 1 } else { 0 }),
+                    Value::from_i64(if ft.is_symlink() { 1 } else { 0 }),
+                ],
+            )?;
+            let metadata = alloc_record_n_fields(state, "Metadata", &[raw])?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[metadata])?))
+        }
+        Err(e) => Ok(Some(build_io_err(state, &e)?)),
+    }
+}
+
+/// `core.io.fs.file_size(&Path) -> IoResult<Int>` — convenience wrapper.
+fn intercept_file_size(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let path = extract_path_arg(state, args_start_reg, caller_base);
+    match std::fs::metadata(&path) {
+        Ok(m) => Ok(Some(wrap_in_variant(
+            state,
+            "Result",
+            0,
+            &[Value::from_i64(m.len() as i64)],
+        )?)),
+        Err(e) => Ok(Some(build_io_err(state, &e)?)),
+    }
+}
+
+/// `rm` (recursive=false) and `rm_rf` (recursive=true).  When the target
+/// is a directory and `recursive` is true, removes the whole tree;
+/// when false, falls through to file-level remove (which fails on dirs
+/// per the OS — same semantics as the stdlib wrapper).
+fn intercept_rm_smart(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+    recursive: bool,
+) -> InterpreterResult<Option<Value>> {
+    let path = extract_path_arg(state, args_start_reg, caller_base);
+    if let Some(denied) = check_fs_permission(state, "write", &path) {
+        return Ok(Some(denied));
+    }
+    let p = std::path::Path::new(&path);
+    let result = if recursive {
+        match std::fs::symlink_metadata(p) {
+            Ok(m) if m.file_type().is_dir() => std::fs::remove_dir_all(p),
+            Ok(_) => std::fs::remove_file(p),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    } else {
+        std::fs::remove_file(p)
+    };
+    match result {
+        Ok(()) => Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?)),
+        Err(e) => Ok(Some(build_io_err(state, &e)?)),
+    }
+}
+
+/// `core.shell.builtins.which(name: &Text) -> Maybe<Path>` —
+/// resolves a program name in `$PATH`.
+fn intercept_which(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let name = extract_text_arg(state, args_start_reg, caller_base);
+    match resolve_in_path(&name) {
+        Some(p) => {
+            let text = alloc_string_value(state, &p)?;
+            let path = alloc_record_n_fields(state, "Path", &[text])?;
+            Ok(Some(wrap_in_variant(state, "Maybe", 1, &[path])?))
+        }
+        None => Ok(Some(wrap_in_variant(state, "Maybe", 0, &[])?)),
+    }
+}
+
+/// `core.shell.builtins.command_exists(name: &Text) -> Bool` —
+/// `which(name).is_some()` short-circuit.
+fn intercept_command_exists(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let name = extract_text_arg(state, args_start_reg, caller_base);
+    Ok(Some(Value::from_bool(resolve_in_path(&name).is_some())))
+}
+
+/// Walk the user's `PATH` env var looking for an executable named `name`.
+/// Returns the absolute path of the first match.  If `name` itself
+/// contains a `/`, treats it as a literal path (no PATH lookup).
+fn resolve_in_path(name: &str) -> Option<String> {
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains('/') {
+        let p = std::path::Path::new(name);
+        if p.is_file() && is_executable(p) {
+            return Some(name.to_string());
+        }
+        return None;
+    }
+    let path_env = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_env) {
+        let candidate = dir.join(name);
+        if candidate.is_file() && is_executable(&candidate) {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn is_executable(p: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_p: &std::path::Path) -> bool {
+    true
 }
 
 /// Two-arg `write(path, contents)` — choose between text and byte
