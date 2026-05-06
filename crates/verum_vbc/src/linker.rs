@@ -954,14 +954,25 @@ impl VbcLinker {
             match decode_instruction(src_bytes, &mut offset) {
                 Ok(instr) => instructions.push(instr),
                 Err(_) => {
-                    // Suppress the diagnostic noise — the linker
-                    // round-trip test prints its panic message which
-                    // includes the offset, and adding a stderr line
-                    // for every failed decode pollutes successful
-                    // builds.  When debugging, the per-instruction
-                    // decode path can be re-enabled with a tracing
-                    // line.
-                    let _ = start;
+                    if std::env::var("VBC_LINKER_TRACE").is_ok() {
+                        let opcode = src_bytes.get(start).copied().unwrap_or(0xFF);
+                        let dump: String = src_bytes
+                            .iter()
+                            .enumerate()
+                            .map(|(i, b)| {
+                                if i == start {
+                                    format!("[{:02x}]", b)
+                                } else {
+                                    format!("{:02x}", b)
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        eprintln!(
+                            "[linker-trace] decode failure at offset={} opcode=0x{:02X}: {}",
+                            start, opcode, dump
+                        );
+                    }
                     return Err(LinkError::TruncatedBytecode {
                         offset: start,
                         want: src_bytes.len(),
