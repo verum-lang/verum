@@ -20,6 +20,10 @@
 //  * `x25519.vr` — X25519 key-agreement (RFC 7748). The default
 //  ECDH primitive; pairs with Ed25519 for the
 //  "X3DH"-style triple Diffie-Hellman flows.
+//  * `vrf.vr`     — ECVRF-EDWARDS25519-SHA512-TAI per RFC 9381.
+//  Verifiable Random Function. Reuses the
+//  Edwards25519 keypair so a single account key
+//  serves both Ed25519 sign and ECVRF prove.
 //
 
 // Higher-level signature combinators (multi-sig, threshold,
@@ -37,3 +41,4 @@ module core.security.ecc;
 public module ed25519;
 public module p256;
 public module x25519;
+public module vrf;
