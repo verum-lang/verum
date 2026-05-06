@@ -1,0 +1,339 @@
+// =============================================================================
+// cli/builder.vr — Fluent builder API for CommandSpec
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.spec
+// Spec: internal/specs/cli-framework.md §4
+// =============================================================================
+//
+
+// `AppBuilder` is the imperative cousin of the (Phase 1) `@command` derive
+// macro. Both produce identical `CommandSpec` trees; the builder is the
+// `clap`-style escape hatch for cases where you want runtime-built CLIs
+// (plugins, dynamic command sets, configuration-driven tools).
+//
+
+// All builders are chainable; the final `.build()` returns an owned
+// `CommandSpec` that can be passed to `App.from_spec(...)`.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module builder;
+
+mount core.{Maybe, Result, List, Text, Char, Bool};
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    CommandSettings, RefinementHandle, CompletionSource, InteractivePolicy,
+    HandlerRef,
+};
+
+// =============================================================================
+// AppBuilder — root + nested command builder
+// =============================================================================
+
+/// Fluent builder for a `CommandSpec`. Reusable for both root commands
+/// and subcommands.
+public type AppBuilder is {
+    spec: CommandSpec,
+};
+
+implement AppBuilder {
+    /// Start a new builder with a name and one-line description.
+    public fn new(name: Text, about: Text) -> AppBuilder {
+        AppBuilder { spec: CommandSpec.new(name, about) }
+    }
+
+    /// Set the version string (printed via `--version`).
+    public fn version(mut self, v: Text) -> AppBuilder {
+        self.spec.version = Some(v);
+        self
+    }
+
+    /// Set a long-form description.
+    public fn long_about(mut self, la: Text) -> AppBuilder {
+        self.spec.long_about = Some(la);
+        self
+    }
+
+    /// Set the author string.
+    public fn author(mut self, a: Text) -> AppBuilder {
+        self.spec.author = Some(a);
+        self
+    }
+
+    /// Add an alias for this command.
+    public fn alias(mut self, a: Text) -> AppBuilder {
+        self.spec.aliases.push(a);
+        self
+    }
+
+    /// Add a positional argument (use `ArgBuilder` for richer config).
+    public fn arg(mut self, a: ArgSpec) -> AppBuilder {
+        self.spec.args.push(a);
+        self
+    }
+
+    /// Add a flag (use `FlagBuilder` for richer config).
+    public fn flag(mut self, f: FlagSpec) -> AppBuilder {
+        self.spec.flags.push(f);
+        self
+    }
+
+    /// Add a subcommand built via `AppBuilder::build`.
+    public fn subcommand(mut self, sc: CommandSpec) -> AppBuilder {
+        self.spec.subcommands.push(sc);
+        self
+    }
+
+    /// Add an argument group.
+    public fn group(mut self, g: Group) -> AppBuilder {
+        self.spec.groups.push(g);
+        self
+    }
+
+    /// Add a usage example.
+    public fn example(mut self, ex: Example) -> AppBuilder {
+        self.spec.examples.push(ex);
+        self
+    }
+
+    /// Mark the command hidden (won't appear in help / completion).
+    public fn hidden(mut self) -> AppBuilder {
+        self.spec.hidden = true;
+        self
+    }
+
+    /// Append epilogue text (after-help section).
+    public fn after_help(mut self, t: Text) -> AppBuilder {
+        self.spec.after_help = Some(t);
+        self
+    }
+
+    /// Replace the command settings wholesale.
+    public fn settings(mut self, s: CommandSettings) -> AppBuilder {
+        self.spec.settings = s;
+        self
+    }
+
+    /// Mark the command as requiring a subcommand at parse time.
+    public fn require_subcommand(mut self) -> AppBuilder {
+        self.spec.settings.subcommand_required = true;
+        self
+    }
+
+    /// Bind a named handler reference (resolved by runtime).
+    public fn handler(mut self, h: HandlerRef) -> AppBuilder {
+        self.spec.handler = h;
+        self
+    }
+
+    /// Finalise into an owned `CommandSpec`.
+    public fn build(self) -> CommandSpec { self.spec }
+}
+
+// =============================================================================
+// ArgBuilder — fluent positional argument
+// =============================================================================
+
+public type ArgBuilder is { spec: ArgSpec }
+
+implement ArgBuilder {
+    public fn new(name: Text, help: Text) -> ArgBuilder {
+        ArgBuilder { spec: ArgSpec.required(name, help) }
+    }
+
+    public fn optional(mut self) -> ArgBuilder {
+        self.spec.arity = Arity.optional();
+        self
+    }
+
+    public fn variadic(mut self) -> ArgBuilder {
+        self.spec.arity = Arity.Unlimited;
+        self
+    }
+
+    public fn arity(mut self, a: Arity) -> ArgBuilder {
+        self.spec.arity = a;
+        self
+    }
+
+    public fn placeholder(mut self, p: Text) -> ArgBuilder {
+        self.spec.placeholder = Some(p);
+        self
+    }
+
+    public fn long_help(mut self, t: Text) -> ArgBuilder {
+        self.spec.long_help = Some(t);
+        self
+    }
+
+    public fn default(mut self, v: Text) -> ArgBuilder {
+        self.spec.default_text = Some(v);
+        self.spec.arity = Arity.optional();
+        self
+    }
+
+    public fn env(mut self, name: Text) -> ArgBuilder {
+        self.spec.env_fallback = Some(name);
+        self
+    }
+
+    public fn config(mut self, path: Text) -> ArgBuilder {
+        self.spec.config_path = Some(path);
+        self
+    }
+
+    public fn refinement(mut self, expr: Text) -> ArgBuilder {
+        self.spec.refinement = Some(RefinementHandle {
+            expression: expr,
+            lower: None,
+            upper: None,
+        });
+        self
+    }
+
+    public fn completion(mut self, c: CompletionSource) -> ArgBuilder {
+        self.spec.completion = c;
+        self
+    }
+
+    public fn interactive(mut self, p: InteractivePolicy) -> ArgBuilder {
+        self.spec.interactive = p;
+        self
+    }
+
+    public fn hidden(mut self) -> ArgBuilder {
+        self.spec.hidden = true;
+        self
+    }
+
+    public fn kind(mut self, tag: Text) -> ArgBuilder {
+        self.spec.kind_hint = tag;
+        self
+    }
+
+    public fn build(self) -> ArgSpec { self.spec }
+}
+
+// =============================================================================
+// FlagBuilder — fluent flag
+// =============================================================================
+
+public type FlagBuilder is { spec: FlagSpec }
+
+implement FlagBuilder {
+    /// Build a switch flag.
+    public fn switch(long: Text, help: Text) -> FlagBuilder {
+        FlagBuilder { spec: FlagSpec.switch(long, help) }
+    }
+
+    /// Build a value-bearing flag.
+    public fn value(long: Text, help: Text) -> FlagBuilder {
+        FlagBuilder { spec: FlagSpec.value(long, help) }
+    }
+
+    public fn short(mut self, c: Char) -> FlagBuilder {
+        self.spec.short = Some(c);
+        self
+    }
+
+    public fn arity(mut self, a: Arity) -> FlagBuilder {
+        self.spec.arity = a;
+        self
+    }
+
+    public fn placeholder(mut self, p: Text) -> FlagBuilder {
+        self.spec.placeholder = Some(p);
+        self
+    }
+
+    public fn long_help(mut self, t: Text) -> FlagBuilder {
+        self.spec.long_help = Some(t);
+        self
+    }
+
+    public fn default(mut self, v: Text) -> FlagBuilder {
+        self.spec.default_text = Some(v);
+        self
+    }
+
+    public fn env(mut self, name: Text) -> FlagBuilder {
+        self.spec.env_fallback = Some(name);
+        self
+    }
+
+    public fn config(mut self, path: Text) -> FlagBuilder {
+        self.spec.config_path = Some(path);
+        self
+    }
+
+    public fn refinement(mut self, expr: Text) -> FlagBuilder {
+        self.spec.refinement = Some(RefinementHandle {
+            expression: expr,
+            lower: None,
+            upper: None,
+        });
+        self
+    }
+
+    public fn completion(mut self, c: CompletionSource) -> FlagBuilder {
+        self.spec.completion = c;
+        self
+    }
+
+    public fn interactive(mut self, p: InteractivePolicy) -> FlagBuilder {
+        self.spec.interactive = p;
+        self
+    }
+
+    public fn persistent(mut self) -> FlagBuilder {
+        self.spec.persistent = true;
+        self
+    }
+
+    public fn repeated(mut self) -> FlagBuilder {
+        self.spec.repeated = true;
+        self
+    }
+
+    public fn counter(mut self) -> FlagBuilder {
+        self.spec.counter = true;
+        self.spec.repeated = true;
+        self.spec.arity = Arity.Exactly(0);
+        self.spec.kind_hint = "Int".to_text();
+        self
+    }
+
+    public fn negatable(mut self) -> FlagBuilder {
+        self.spec.negatable = true;
+        self
+    }
+
+    public fn requires(mut self, other: Text) -> FlagBuilder {
+        self.spec.requires.push(other);
+        self
+    }
+
+    public fn conflicts_with(mut self, other: Text) -> FlagBuilder {
+        self.spec.conflicts_with.push(other);
+        self
+    }
+
+    public fn hidden(mut self) -> FlagBuilder {
+        self.spec.hidden = true;
+        self
+    }
+
+    public fn kind(mut self, tag: Text) -> FlagBuilder {
+        self.spec.kind_hint = tag;
+        self
+    }
+
+    public fn build(self) -> FlagSpec { self.spec }
+}

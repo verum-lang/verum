@@ -1,0 +1,39 @@
+// =============================================================================
+// cli/prelude.vr — Curated import surface for typical CLI scripts
+// =============================================================================
+// Layer: 5 (CLI)
+// Spec: internal/specs/cli-framework.md §4
+// =============================================================================
+//
+
+// `mount core.cli.prelude.*;` brings in everything a typical CLI script
+// needs from the framework, plus the most common Verum primitives. Use
+// this instead of separate `mount core.cli.{spec, builder, runtime, …}`
+// lines.
+//
+// What you get:
+//   * `App` / `HandlerContext` from `runtime`
+//   * `AppBuilder` / `ArgBuilder` / `FlagBuilder` from `builder`
+//   * `CommandSpec` / `ArgSpec` / `FlagSpec` / `Group` / `Arity` / `Example`
+//   * `ExitCode` / `ParseError`
+//   * `FromArg` / `ValueEnum` / `ArgKind`
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module prelude;
+
+public mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    HandlerRef, ColorChoice, ErrorFormat, TopicSeparator, InvocationStyle,
+    InteractivePolicy, CompletionSource, CommandSettings, RefinementHandle,
+};
+public mount core.cli.types.{FromArg, ValueEnum, ArgKind};
+public mount core.cli.error.{ParseError, ParseErrorKind, ParseDiagnostic, ExitCode};
+public mount core.cli.builder.{AppBuilder, ArgBuilder, FlagBuilder};
+public mount core.cli.runtime.{App, HandlerContext, dispatch};
+public mount core.cli.help.{render_help, HelpStyle};

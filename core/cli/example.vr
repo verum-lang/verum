@@ -1,0 +1,143 @@
+// =============================================================================
+// cli/example.vr — Worked example: a typical CLI built with the framework
+// =============================================================================
+// Layer: 5 (CLI)
+// Status: documentation / smoke
+// =============================================================================
+//
+
+// This file is `mount`-ed only when explicitly imported (e.g. by docs
+// or a contract test). It is not part of the public re-export surface in
+// `cli/mod.vr`. Its purpose is to demonstrate end-to-end usage of the
+// builder API and to serve as an executable spec for the desugaring
+// produced by the future `@command` derive macro.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module example;
+
+mount core.{Maybe, Result, List, Text, Bool};
+mount core.io.stdio;
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    HandlerRef,
+};
+mount core.cli.builder.{AppBuilder, ArgBuilder, FlagBuilder};
+mount core.cli.runtime.{App, HandlerContext};
+mount core.cli.error.ExitCode;
+
+// =============================================================================
+// Build the spec (the @command derive macro will emit code shaped like this)
+// =============================================================================
+
+/// Build the canonical demo CLI spec. Returns a fully-described
+/// `CommandSpec` ready to be passed to `App::from_spec`.
+public fn build_demo_spec() -> CommandSpec {
+    let verbose = FlagBuilder.switch("verbose".to_text(),
+                                     "Enable verbose output".to_text())
+        .short('v')
+        .persistent()
+        .build();
+
+    let config = FlagBuilder.value("config".to_text(),
+                                   "Path to config file".to_text())
+        .env("MYTOOL_CONFIG".to_text())
+        .persistent()
+        .build();
+
+    // Subcommand: build
+    let build_target = ArgBuilder.new("target".to_text(),
+                                      "Build target name".to_text())
+        .build();
+
+    let build_release = FlagBuilder.switch("release".to_text(),
+                                           "Build with optimisations".to_text())
+        .build();
+
+    let build_cmd = AppBuilder.new("build".to_text(),
+                                   "Build the project".to_text())
+        .arg(build_target)
+        .flag(build_release)
+        .handler(HandlerRef.NamedHandler("build_handler".to_text()))
+        .build();
+
+    // Subcommand: deploy
+    let deploy_env = FlagBuilder.value("env".to_text(),
+                                       "Deployment environment".to_text())
+        .short('e')
+        .env("DEPLOY_ENV".to_text())
+        .refinement("env in [dev, staging, prod]".to_text())
+        .build();
+
+    let deploy_dry_run = FlagBuilder.switch("dry-run".to_text(),
+                                            "Print actions without executing".to_text())
+        .build();
+
+    let deploy_cmd = AppBuilder.new("deploy".to_text(),
+                                    "Deploy a release".to_text())
+        .flag(deploy_env)
+        .flag(deploy_dry_run)
+        .handler(HandlerRef.NamedHandler("deploy_handler".to_text()))
+        .example(Example.new(
+            "mytool deploy --env=staging".to_text(),
+            "Deploy to staging".to_text(),
+        ))
+        .build();
+
+    AppBuilder.new("mytool".to_text(),
+                   "An example CLI built with vcli".to_text())
+        .version("1.0.0".to_text())
+        .author("you@example.com".to_text())
+        .flag(verbose)
+        .flag(config)
+        .subcommand(build_cmd)
+        .subcommand(deploy_cmd)
+        .build()
+}
+
+// =============================================================================
+// Handlers — pure functions over HandlerContext
+// =============================================================================
+
+public fn build_handler(ctx: &HandlerContext) -> ExitCode {
+    let target = ctx.arg_value(&"target".to_text())
+        .unwrap_or("unspecified".to_text());
+    let release = ctx.switch_set(&"release".to_text());
+    let verbose = ctx.switch_set(&"verbose".to_text());
+
+    if verbose {
+        stdio.println(&Text.from(f"[mytool] building {target} (release={release})"));
+    }
+    stdio.println(&Text.from(f"Built {target}"));
+    ExitCode.ok()
+}
+
+public fn deploy_handler(ctx: &HandlerContext) -> ExitCode {
+    let env_target = ctx.flag_value(&"env".to_text())
+        .unwrap_or("dev".to_text());
+    let dry_run = ctx.switch_set(&"dry-run".to_text());
+
+    if dry_run {
+        stdio.println(&Text.from(f"DRY-RUN: would deploy to {env_target}"));
+    } else {
+        stdio.println(&Text.from(f"Deploying to {env_target}"));
+    }
+    ExitCode.ok()
+}
+
+// =============================================================================
+// Wire-up — what user code looks like
+// =============================================================================
+
+/// Construct the demo `App`. Call `.run_or_exit()` from your `main()`.
+public fn build_demo_app() -> App {
+    App.from_spec(build_demo_spec())
+        .register("build_handler".to_text(), build_handler)
+        .register("deploy_handler".to_text(), deploy_handler)
+}

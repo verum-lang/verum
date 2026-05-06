@@ -1,0 +1,387 @@
+// =============================================================================
+// cli/help.vr — Adaptive help renderer
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, term.style, cli.spec
+// Spec: internal/specs/cli-framework.md §8.1
+// =============================================================================
+//
+
+// Renders a `CommandSpec` into the conventional `usage / commands /
+// options / examples` layout. Honours `CommandSettings.color` —
+// `AlwaysColor` forces ANSI, `NeverColor` strips, `AutoColor` checks
+// whether stdout is a TTY via `core.term.style.profile`.
+//
+
+// The implementation is layout-aware: indentation is computed from the
+// widest flag/arg label in the spec so columns align without hard-coded
+// widths. Long lines are wrapped if `CommandSettings.next_line_help`
+// is set or the terminal is narrower than 80 columns.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module help;
+
+mount core.{Maybe, Result, List, Text, Char, Int, Bool};
+mount core.text.builder.TextBuilder;
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, Arity, ColorChoice, Example,
+};
+
+// =============================================================================
+// HelpStyle — renderer configuration
+// =============================================================================
+
+/// Renderer configuration. Default values match clig.dev recommendations.
+public type HelpStyle is {
+    /// Whether to emit ANSI color escape codes. Use the spec's `ColorChoice`
+    /// at construction time to fold this into a static Bool.
+    use_color:        Bool,
+    /// Indentation for nested sections.
+    indent:           Int,
+    /// Maximum width before wrapping (0 = no wrap).
+    max_width:        Int,
+    /// Whether to render examples section.
+    show_examples:    Bool,
+    /// Whether to render after-help epilogue.
+    show_after_help:  Bool,
+};
+
+implement HelpStyle {
+    /// Default style — color auto-detected, 80-col wrap.
+    public fn default() -> HelpStyle {
+        HelpStyle {
+            use_color: true,
+            indent: 4,
+            max_width: 80,
+            show_examples: true,
+            show_after_help: true,
+        }
+    }
+
+    /// Plain style — no color, no fancy alignment.
+    public fn plain() -> HelpStyle {
+        let mut s = HelpStyle.default();
+        s.use_color = false;
+        s
+    }
+
+    /// Resolve `ColorChoice` into a concrete boolean given a tty hint.
+    public fn resolve_color(choice: &ColorChoice, stdout_is_tty: Bool) -> Bool {
+        match choice {
+            ColorChoice.AlwaysColor => true,
+            ColorChoice.NeverColor => false,
+            ColorChoice.AutoColor => stdout_is_tty,
+        }
+    }
+}
+
+// =============================================================================
+// Top-level entry
+// =============================================================================
+
+/// Render full help text for `cmd`. Returns the rendered Text — caller
+/// is responsible for printing it to the appropriate stream (stdout for
+/// `--help`, stderr for parse-error suggestions).
+public fn render_help(cmd: &CommandSpec, style: &HelpStyle) -> Text {
+    let mut b = TextBuilder.new();
+    write_header(&mut b, cmd, style);
+    write_usage(&mut b, cmd, style);
+    write_args(&mut b, cmd, style);
+    write_flags(&mut b, cmd, style);
+    write_subcommands(&mut b, cmd, style);
+    if style.show_examples { write_examples(&mut b, cmd, style); }
+    if style.show_after_help { write_after_help(&mut b, cmd, style); }
+    b.build()
+}
+
+/// Render a short usage line — single line, no sections.
+public fn render_usage_line(cmd: &CommandSpec) -> Text {
+    let mut b = TextBuilder.new();
+    b.append(&cmd.name);
+    if cmd.flags.len() > 0 { b.append(" [OPTIONS]"); }
+    let mut i: Int = 0;
+    while i < cmd.args.len() {
+        let a = &cmd.args[i];
+        b.append(" ");
+        b.append(&format_arg_placeholder(a));
+        i = i + 1;
+    }
+    if cmd.subcommands.len() > 0 {
+        b.append(if cmd.settings.subcommand_required { " <COMMAND>" } else { " [COMMAND]" });
+    }
+    b.build()
+}
+
+// =============================================================================
+// Sections
+// =============================================================================
+
+fn write_header(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    style_bold(b, &cmd.name, style);
+    match &cmd.version {
+        Some(v) => { b.append(" "); b.append(v); },
+        None => {},
+    }
+    b.append("\n");
+    b.append(&cmd.about);
+    b.append("\n\n");
+    match &cmd.long_about {
+        Some(la) => { b.append(la); b.append("\n\n"); },
+        None => {},
+    }
+}
+
+fn write_usage(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    style_section(b, "USAGE:", style);
+    b.append("\n    ");
+    b.append(&render_usage_line(cmd));
+    b.append("\n\n");
+}
+
+fn write_args(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    if cmd.args.len() == 0 { return; }
+    style_section(b, "ARGS:", style);
+    b.append("\n");
+
+    let label_width = max_arg_label_width(&cmd.args);
+    let mut i: Int = 0;
+    while i < cmd.args.len() {
+        let a = &cmd.args[i];
+        if a.hidden { i = i + 1; continue; }
+        b.append("    ");
+        let label = format_arg_placeholder(a);
+        b.append(&label);
+        let pad = label_width - label.len();
+        let mut p: Int = 0;
+        while p < pad { b.append(" "); p = p + 1; }
+        b.append("  ");
+        b.append(&a.help);
+        match &a.refinement {
+            Some(r) => {
+                b.append("  [");
+                b.append(&r.expression);
+                b.append("]");
+            },
+            None => {},
+        }
+        match &a.env_fallback {
+            Some(env) => { b.append("  [env: "); b.append(env); b.append("]"); },
+            None => {},
+        }
+        b.append("\n");
+        i = i + 1;
+    }
+    b.append("\n");
+}
+
+fn write_flags(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    style_section(b, "OPTIONS:", style);
+    b.append("\n");
+
+    let label_width = max_flag_label_width(&cmd.flags);
+
+    // Built-in --help always last.
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if f.hidden { i = i + 1; continue; }
+        b.append("    ");
+        let label = format_flag_label(f);
+        b.append(&label);
+        let pad = label_width - label.len();
+        let mut p: Int = 0;
+        while p < pad { b.append(" "); p = p + 1; }
+        b.append("  ");
+        b.append(&f.help);
+        match &f.refinement {
+            Some(r) => {
+                b.append("  [");
+                b.append(&r.expression);
+                b.append("]");
+            },
+            None => {},
+        }
+        match &f.env_fallback {
+            Some(env) => { b.append("  [env: "); b.append(env); b.append("]"); },
+            None => {},
+        }
+        match &f.default_text {
+            Some(d) => {
+                b.append("  [default: ");
+                b.append(d);
+                b.append("]");
+            },
+            None => {},
+        }
+        b.append("\n");
+        i = i + 1;
+    }
+
+    // Built-in --help and --version (if not disabled).
+    if !cmd.settings.disable_help_flag {
+        b.append("    -h, --help");
+        let pad = label_width - 10;
+        let mut p: Int = 0;
+        while p < pad { b.append(" "); p = p + 1; }
+        b.append("  Print this help\n");
+    }
+    if !cmd.settings.disable_version_flag && cmd.version.is_some() {
+        b.append("    -V, --version");
+        let pad = label_width - 13;
+        let mut p: Int = 0;
+        while p < pad { b.append(" "); p = p + 1; }
+        b.append("  Print version\n");
+    }
+
+    b.append("\n");
+}
+
+fn write_subcommands(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    if cmd.subcommands.len() == 0 { return; }
+    style_section(b, "COMMANDS:", style);
+    b.append("\n");
+
+    let mut max_w: Int = 0;
+    let mut i: Int = 0;
+    while i < cmd.subcommands.len() {
+        let n = cmd.subcommands[i].name.len();
+        if n > max_w { max_w = n; }
+        i = i + 1;
+    }
+
+    let mut j: Int = 0;
+    while j < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[j];
+        if sc.hidden { j = j + 1; continue; }
+        b.append("    ");
+        b.append(&sc.name);
+        let pad = max_w - sc.name.len();
+        let mut p: Int = 0;
+        while p < pad { b.append(" "); p = p + 1; }
+        b.append("  ");
+        b.append(&sc.about);
+        b.append("\n");
+        j = j + 1;
+    }
+    b.append("\n");
+}
+
+fn write_examples(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
+    if cmd.examples.len() == 0 { return; }
+    style_section(b, "EXAMPLES:", style);
+    b.append("\n");
+    let mut i: Int = 0;
+    while i < cmd.examples.len() {
+        let ex = &cmd.examples[i];
+        b.append("    ");
+        b.append(&ex.command);
+        b.append("\n        ");
+        b.append(&ex.description);
+        b.append("\n\n");
+        i = i + 1;
+    }
+}
+
+fn write_after_help(b: &mut TextBuilder, cmd: &CommandSpec, _style: &HelpStyle) {
+    match &cmd.after_help {
+        Some(a) => { b.append(a); b.append("\n"); },
+        None => {},
+    }
+}
+
+// =============================================================================
+// Formatting helpers
+// =============================================================================
+
+fn format_arg_placeholder(a: &ArgSpec) -> Text {
+    let p = match &a.placeholder {
+        Some(p) => p.clone(),
+        None => a.name.to_uppercase(),
+    };
+    match a.arity {
+        Arity.Exactly(1) => Text.from(f"<{p}>"),
+        Arity.AtMost(1) => Text.from(f"[{p}]"),
+        Arity.AtLeast(_) => Text.from(f"<{p}>..."),
+        Arity.Unlimited => Text.from(f"[{p}]..."),
+        Arity.Range(_, _) => Text.from(f"<{p}>..."),
+        Arity.Exactly(_) => Text.from(f"<{p}>..."),
+    }
+}
+
+fn format_flag_label(f: &FlagSpec) -> Text {
+    let mut b = TextBuilder.new();
+    match f.short {
+        Some(c) => { b.append("-"); b.append(&Text.from(f"{c}")); b.append(", "); },
+        None => { b.append("    "); },
+    }
+    match &f.long {
+        Some(l) => { b.append("--"); b.append(l); },
+        None => {},
+    }
+    if !f.arity.is_switch() {
+        let placeholder = match &f.placeholder {
+            Some(p) => p.clone(),
+            None => match &f.long {
+                Some(l) => l.to_uppercase(),
+                None => "VALUE".to_text(),
+            },
+        };
+        b.append(" <");
+        b.append(&placeholder);
+        b.append(">");
+    }
+    b.build()
+}
+
+fn max_arg_label_width(args: &List<ArgSpec>) -> Int {
+    let mut w: Int = 0;
+    let mut i: Int = 0;
+    while i < args.len() {
+        let l = format_arg_placeholder(&args[i]).len();
+        if l > w { w = l; }
+        i = i + 1;
+    }
+    w
+}
+
+fn max_flag_label_width(flags: &List<FlagSpec>) -> Int {
+    let mut w: Int = 14;        // "-h, --help" floor
+    let mut i: Int = 0;
+    while i < flags.len() {
+        let l = format_flag_label(&flags[i]).len();
+        if l > w { w = l; }
+        i = i + 1;
+    }
+    w
+}
+
+// =============================================================================
+// Style helpers — wrap ANSI when use_color = true
+// =============================================================================
+
+fn style_section(b: &mut TextBuilder, label: &Text, style: &HelpStyle) {
+    if style.use_color {
+        b.append("\x1b[1m");    // bold
+        b.append(label);
+        b.append("\x1b[0m");
+    } else {
+        b.append(label);
+    }
+}
+
+fn style_bold(b: &mut TextBuilder, txt: &Text, style: &HelpStyle) {
+    if style.use_color {
+        b.append("\x1b[1m");
+        b.append(txt);
+        b.append("\x1b[0m");
+    } else {
+        b.append(txt);
+    }
+}

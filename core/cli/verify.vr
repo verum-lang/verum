@@ -1,0 +1,236 @@
+// =============================================================================
+// cli/verify.vr — Coherence checks for the command graph
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.spec
+// Spec: internal/specs/cli-framework.md §11
+// Status: Phase 7 — Z3-side coupling lands later; this module ships the
+//         structural-only checks already implementable today.
+// =============================================================================
+//
+
+// `vcli` aspires to *prove* that a CLI's grammar is coherent — that
+// no help text disagrees with refinement bounds, that mutex groups
+// don't shadow each other, that every required flag is reachable
+// from at least one valid invocation. Phase 7 wires this into
+// `core.proof` (Z3); Phase 0 ships **structural** checks usable from
+// CI today: no two flags share a long-name; no two short-letters
+// collide; no group references a non-existent member; required
+// flags are not conflicting with each other.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module verify;
+
+mount core.{Maybe, Result, List, Set, Text, Char, Int, Bool};
+mount core.cli.spec.{CommandSpec, ArgSpec, FlagSpec, Group, GroupKind};
+
+// =============================================================================
+// VerificationReport — collected findings
+// =============================================================================
+
+public type Severity is
+    | Error
+    | Warning
+    | Info;
+
+public type Finding is {
+    severity: Severity,
+    /// Source location within the command tree, formatted as a path:
+    /// "tool", "tool > deploy", "tool > deploy > --env".
+    where_:   Text,
+    message:  Text,
+};
+
+public type VerificationReport is {
+    findings: List<Finding>,
+};
+
+implement VerificationReport {
+    public fn empty() -> VerificationReport {
+        VerificationReport { findings: List.new() }
+    }
+
+    /// True iff there are no findings of severity `Error`.
+    public fn is_clean(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.findings.len() {
+            match self.findings[i].severity {
+                Severity.Error => return false,
+                _ => {},
+            }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Render to a multi-line text suitable for stderr.
+    public fn to_text(&self) -> Text {
+        let mut b = core.text.builder.TextBuilder.new();
+        let mut i: Int = 0;
+        while i < self.findings.len() {
+            let f = &self.findings[i];
+            match f.severity {
+                Severity.Error => b.append("error"),
+                Severity.Warning => b.append("warn"),
+                Severity.Info => b.append("info"),
+            }
+            b.append(" [");
+            b.append(&f.where_);
+            b.append("]: ");
+            b.append(&f.message);
+            b.append("\n");
+            i = i + 1;
+        }
+        b.build()
+    }
+}
+
+// =============================================================================
+// Top-level entry
+// =============================================================================
+
+/// Walk `cmd` and produce a `VerificationReport` with all structural
+/// findings. Phase 7 will additionally invoke Z3 over the same
+/// `CommandSpec` for coherence proofs.
+public fn verify(cmd: &CommandSpec) -> VerificationReport {
+    let mut report = VerificationReport.empty();
+    verify_cmd_recursive(cmd, &cmd.name, &mut report);
+    report
+}
+
+fn verify_cmd_recursive(cmd: &CommandSpec, path: &Text, report: &mut VerificationReport) {
+    check_unique_long_names(cmd, path, report);
+    check_unique_short_letters(cmd, path, report);
+    check_groups_reference_real_flags(cmd, path, report);
+    check_required_not_conflicting(cmd, path, report);
+
+    let mut i: Int = 0;
+    while i < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[i];
+        let mut child_path = path.clone();
+        child_path.push_str(" > ");
+        child_path.push_str(&sc.name);
+        verify_cmd_recursive(sc, &child_path, report);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Structural checks
+// =============================================================================
+
+fn check_unique_long_names(cmd: &CommandSpec, path: &Text, r: &mut VerificationReport) {
+    let mut seen: Set<Text> = Set.new();
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        match &cmd.flags[i].long {
+            Some(l) => {
+                if seen.contains(l.clone()) {
+                    r.findings.push(Finding {
+                        severity: Severity.Error,
+                        where_: path.clone(),
+                        message: Text.from(f"duplicate long flag '--{l}'"),
+                    });
+                } else {
+                    seen.insert(l.clone());
+                }
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+}
+
+fn check_unique_short_letters(cmd: &CommandSpec, path: &Text, r: &mut VerificationReport) {
+    let mut seen: Set<Char> = Set.new();
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        match cmd.flags[i].short {
+            Some(c) => {
+                if seen.contains(c) {
+                    r.findings.push(Finding {
+                        severity: Severity.Error,
+                        where_: path.clone(),
+                        message: Text.from(f"duplicate short flag '-{c}'"),
+                    });
+                } else {
+                    seen.insert(c);
+                }
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+}
+
+fn check_groups_reference_real_flags(
+    cmd: &CommandSpec,
+    path: &Text,
+    r: &mut VerificationReport,
+) {
+    let mut g: Int = 0;
+    while g < cmd.groups.len() {
+        let group = &cmd.groups[g];
+        let mut m: Int = 0;
+        while m < group.members.len() {
+            let member = &group.members[m];
+            match cmd.find_flag_long(member) {
+                Some(_) => {},
+                None => {
+                    r.findings.push(Finding {
+                        severity: Severity.Error,
+                        where_: path.clone(),
+                        message: Text.from(
+                            f"group '{group.name}' references unknown flag '--{member}'"
+                        ),
+                    });
+                },
+            }
+            m = m + 1;
+        }
+        g = g + 1;
+    }
+}
+
+fn check_required_not_conflicting(
+    cmd: &CommandSpec,
+    path: &Text,
+    r: &mut VerificationReport,
+) {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if !f.arity.is_required() { i = i + 1; continue; }
+        let mut k: Int = 0;
+        while k < f.conflicts_with.len() {
+            // If A is required and conflicts with B, B must NOT also be
+            // required — otherwise the grammar admits no valid invocation.
+            let other = &f.conflicts_with[k];
+            match cmd.find_flag_long(other) {
+                Some(of) => if of.arity.is_required() {
+                    let key = match &f.long {
+                        Some(l) => l.clone(),
+                        None => "(this flag)".to_text(),
+                    };
+                    r.findings.push(Finding {
+                        severity: Severity.Error,
+                        where_: path.clone(),
+                        message: Text.from(
+                            f"required flag '--{key}' conflicts with required flag '--{other}'"
+                        ),
+                    });
+                },
+                None => {},
+            }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+}

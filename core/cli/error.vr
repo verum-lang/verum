@@ -1,0 +1,382 @@
+// =============================================================================
+// cli/error.vr — Parse errors, diagnostics, exit codes
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, base.string_distance
+// Spec: internal/specs/cli-framework.md §16
+// =============================================================================
+//
+
+// `ParseError` is the central failure type for the parser pipeline. It is
+// designed to be **empathetic** in clig.dev terms: every error variant
+// carries the field, the value, and (when applicable) the candidate set
+// for did-you-mean. The renderer in `help.vr` turns these into multi-line
+// messages with adaptive styling.
+//
+
+// `ExitCode` mirrors `sysexits.h` and clig.dev's recommended exit-code
+// table, with a few additions (130/143 for signal-killed processes).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module error;
+
+mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.base.protocols.{Display, Debug, Clone, Eq, Default};
+mount core.base.string_distance;
+
+// =============================================================================
+// ExitCode — sysexits.h-aligned (clig.dev §exit-codes)
+// =============================================================================
+
+/// Recommended exit codes. Construct via `ExitCode::ok()` / `::usage()` /
+/// custom via `ExitCode::custom(n)`. Convert to a raw `Int` via `.code()`
+/// before passing to `env::exit`.
+public type ExitCode is
+    | Ok                        // 0  — success
+    | GenericError              // 1  — generic error
+    | Usage                     // 2  — bad argv / parse error
+    | DataErr                   // 65 — invalid input data
+    | NoInput                   // 66 — input file unreadable
+    | NoUser                    // 67 — addressee unknown
+    | NoHost                    // 68 — host unknown
+    | Unavailable               // 69 — service unavailable
+    | Software                  // 70 — internal software error
+    | OsErr                     // 71 — OS-level error
+    | CantCreate                // 73 — cannot create output
+    | IoErr                     // 74 — generic I/O failure
+    | TempFail                  // 75 — temporary failure (try again)
+    | NoPerm                    // 77 — permission denied
+    | ConfigErr                 // 78 — configuration error
+    | SigInt                    // 130 — interrupted (Ctrl-C)
+    | SigTerm                   // 143 — terminated
+    | Custom(Int);
+
+implement ExitCode {
+    /// Raw POSIX exit code value.
+    public fn code(&self) -> Int {
+        match self {
+            ExitCode.Ok => 0,
+            ExitCode.GenericError => 1,
+            ExitCode.Usage => 2,
+            ExitCode.DataErr => 65,
+            ExitCode.NoInput => 66,
+            ExitCode.NoUser => 67,
+            ExitCode.NoHost => 68,
+            ExitCode.Unavailable => 69,
+            ExitCode.Software => 70,
+            ExitCode.OsErr => 71,
+            ExitCode.CantCreate => 73,
+            ExitCode.IoErr => 74,
+            ExitCode.TempFail => 75,
+            ExitCode.NoPerm => 77,
+            ExitCode.ConfigErr => 78,
+            ExitCode.SigInt => 130,
+            ExitCode.SigTerm => 143,
+            ExitCode.Custom(n) => *n,
+        }
+    }
+
+    @inline public fn ok() -> ExitCode { ExitCode.Ok }
+    @inline public fn usage() -> ExitCode { ExitCode.Usage }
+    @inline public fn fail() -> ExitCode { ExitCode.GenericError }
+}
+
+// =============================================================================
+// ParseDiagnostic — a single contextual hint
+// =============================================================================
+
+/// Structured hint attached to an error. Used to produce rich,
+/// machine-parseable error output (`--error-format json`) while still
+/// rendering nicely in human mode.
+public type ParseDiagnostic is
+    /// "did you mean X" — closest neighbour from a candidate list.
+    | DidYouMean(Text)
+    /// "expected one of [a, b, c]" — fixed alphabet.
+    | ExpectedOneOf(List<Text>)
+    /// "valid range: [lo..=hi]"
+    | ValidRange(Text)
+    /// "see {path} --help"
+    | SeeHelp(Text)
+    /// Free-form note line.
+    | Note(Text);
+
+implement ParseDiagnostic {
+    /// Render this diagnostic as a single-line hint suitable for
+    /// human-mode error output.
+    public fn to_text(&self) -> Text {
+        match self {
+            ParseDiagnostic.DidYouMean(s) =>
+                Text.from(f"did you mean '{s}'?"),
+            ParseDiagnostic.ExpectedOneOf(opts) => {
+                let mut out = Text.from("expected one of: ");
+                let mut i: Int = 0;
+                while i < opts.len() {
+                    if i > 0 { out.push_str(", "); }
+                    out.push_str(&opts[i]);
+                    i = i + 1;
+                }
+                out
+            },
+            ParseDiagnostic.ValidRange(r) =>
+                Text.from(f"valid range: {r}"),
+            ParseDiagnostic.SeeHelp(p) =>
+                Text.from(f"for more information, try '{p} --help'"),
+            ParseDiagnostic.Note(n) => n.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// ParseErrorKind — categorical tag
+// =============================================================================
+
+/// Categorical tag of a parse error — used by JSON-output and exit-code
+/// mapping. The textual content lives on the wrapping `ParseError`.
+public type ParseErrorKind is
+    | UnknownFlag
+    | UnknownSubcommand
+    | MissingRequired
+    | MissingValue
+    | InvalidValue
+    | DuplicateFlag
+    | TooFewValues
+    | TooManyValues
+    | RefinementFailed
+    | MutexConflict
+    | RequiresMissing
+    | NotATty
+    | InternalError;
+
+implement ParseErrorKind {
+    /// Map kind → exit code (clig.dev guidance).
+    public fn to_exit(&self) -> ExitCode {
+        match self {
+            ParseErrorKind.UnknownFlag => ExitCode.Usage,
+            ParseErrorKind.UnknownSubcommand => ExitCode.Usage,
+            ParseErrorKind.MissingRequired => ExitCode.Usage,
+            ParseErrorKind.MissingValue => ExitCode.Usage,
+            ParseErrorKind.InvalidValue => ExitCode.DataErr,
+            ParseErrorKind.DuplicateFlag => ExitCode.Usage,
+            ParseErrorKind.TooFewValues => ExitCode.Usage,
+            ParseErrorKind.TooManyValues => ExitCode.Usage,
+            ParseErrorKind.RefinementFailed => ExitCode.DataErr,
+            ParseErrorKind.MutexConflict => ExitCode.Usage,
+            ParseErrorKind.RequiresMissing => ExitCode.Usage,
+            ParseErrorKind.NotATty => ExitCode.GenericError,
+            ParseErrorKind.InternalError => ExitCode.Software,
+        }
+    }
+
+    /// Stable text tag used in JSON error output.
+    public fn tag(&self) -> Text {
+        match self {
+            ParseErrorKind.UnknownFlag => "UnknownFlag".to_text(),
+            ParseErrorKind.UnknownSubcommand => "UnknownSubcommand".to_text(),
+            ParseErrorKind.MissingRequired => "MissingRequired".to_text(),
+            ParseErrorKind.MissingValue => "MissingValue".to_text(),
+            ParseErrorKind.InvalidValue => "InvalidValue".to_text(),
+            ParseErrorKind.DuplicateFlag => "DuplicateFlag".to_text(),
+            ParseErrorKind.TooFewValues => "TooFewValues".to_text(),
+            ParseErrorKind.TooManyValues => "TooManyValues".to_text(),
+            ParseErrorKind.RefinementFailed => "RefinementFailed".to_text(),
+            ParseErrorKind.MutexConflict => "MutexConflict".to_text(),
+            ParseErrorKind.RequiresMissing => "RequiresMissing".to_text(),
+            ParseErrorKind.NotATty => "NotATty".to_text(),
+            ParseErrorKind.InternalError => "InternalError".to_text(),
+        }
+    }
+}
+
+// =============================================================================
+// ParseError — the user-facing error type
+// =============================================================================
+
+/// A parse-time error.
+public type ParseError is {
+    kind:        ParseErrorKind,
+    /// Field / flag / arg name involved (`--port`, `target`, etc.).
+    field:       Maybe<Text>,
+    /// The offending value, if any (after stripping `--flag=`).
+    value:       Maybe<Text>,
+    /// Human-readable, single-line summary.
+    message:     Text,
+    /// Structured hints for rendering / JSON.
+    diagnostics: List<ParseDiagnostic>,
+};
+
+implement ParseError {
+    /// Build an error with no field/value attached.
+    public fn bare(kind: ParseErrorKind, message: Text) -> ParseError {
+        ParseError {
+            kind: kind,
+            field: None,
+            value: None,
+            message: message,
+            diagnostics: List.new(),
+        }
+    }
+
+    /// "unknown flag" with did-you-mean suggestion.
+    public fn unknown_flag(name: Text, candidates: &List<Text>) -> ParseError {
+        let mut e = ParseError {
+            kind: ParseErrorKind.UnknownFlag,
+            field: Some(name.clone()),
+            value: None,
+            message: Text.from(f"unknown flag '{name}'"),
+            diagnostics: List.new(),
+        };
+        attach_did_you_mean(&mut e, &name, candidates);
+        e
+    }
+
+    /// "unknown subcommand" with did-you-mean.
+    public fn unknown_subcommand(name: Text, candidates: &List<Text>) -> ParseError {
+        let mut e = ParseError {
+            kind: ParseErrorKind.UnknownSubcommand,
+            field: Some(name.clone()),
+            value: None,
+            message: Text.from(f"unknown subcommand '{name}'"),
+            diagnostics: List.new(),
+        };
+        attach_did_you_mean(&mut e, &name, candidates);
+        e
+    }
+
+    /// "missing required" — flag or arg.
+    public fn missing_required(field: Text) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind.MissingRequired,
+            field: Some(field.clone()),
+            value: None,
+            message: Text.from(f"missing required value for '{field}'"),
+            diagnostics: List.new(),
+        }
+    }
+
+    /// "missing value" — flag is present but no value followed.
+    public fn missing_value(flag: Text) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind.MissingValue,
+            field: Some(flag.clone()),
+            value: None,
+            message: Text.from(f"flag '{flag}' requires a value"),
+            diagnostics: List.new(),
+        }
+    }
+
+    /// "invalid value" — `from_arg` returned Err.
+    public fn invalid_value(value: Text, expected: Text) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind.InvalidValue,
+            field: None,
+            value: Some(value.clone()),
+            message: Text.from(f"invalid value '{value}': expected {expected}"),
+            diagnostics: List.new(),
+        }
+    }
+
+    /// "duplicate flag".
+    public fn duplicate_flag(name: Text) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind.DuplicateFlag,
+            field: Some(name.clone()),
+            value: None,
+            message: Text.from(f"flag '{name}' specified more than once"),
+            diagnostics: List.new(),
+        }
+    }
+
+    /// "refinement failed" — parsed value violated a refinement predicate.
+    public fn refinement_failed(field: Text, value: Text, predicate: Text) -> ParseError {
+        let mut e = ParseError {
+            kind: ParseErrorKind.RefinementFailed,
+            field: Some(field.clone()),
+            value: Some(value.clone()),
+            message: Text.from(f"value '{value}' for '{field}' fails predicate"),
+            diagnostics: List.new(),
+        };
+        e.diagnostics.push(ParseDiagnostic.ValidRange(predicate));
+        e
+    }
+
+    /// "mutex conflict".
+    public fn mutex_conflict(group: Text, members: List<Text>) -> ParseError {
+        let mut e = ParseError {
+            kind: ParseErrorKind.MutexConflict,
+            field: Some(group.clone()),
+            value: None,
+            message: Text.from(f"conflicting flags in group '{group}'"),
+            diagnostics: List.new(),
+        };
+        e.diagnostics.push(ParseDiagnostic.ExpectedOneOf(members));
+        e
+    }
+
+    /// "requires missing" — flag A requires B which wasn't given.
+    public fn requires_missing(flag: Text, requires: Text) -> ParseError {
+        ParseError {
+            kind: ParseErrorKind.RequiresMissing,
+            field: Some(flag.clone()),
+            value: None,
+            message: Text.from(
+                f"flag '{flag}' requires '{requires}' to also be specified"
+            ),
+            diagnostics: List.new(),
+        }
+    }
+
+    /// Attach an additional diagnostic to an error.
+    public fn with_diagnostic(mut self, d: ParseDiagnostic) -> ParseError {
+        self.diagnostics.push(d);
+        self
+    }
+
+    /// Attach a "see ... --help" hint.
+    public fn with_see_help(self, app_name: Text) -> ParseError {
+        self.with_diagnostic(ParseDiagnostic.SeeHelp(app_name))
+    }
+
+    /// Categorical exit code for this error.
+    public fn exit_code(&self) -> ExitCode { self.kind.to_exit() }
+}
+
+// =============================================================================
+// Helpers — did-you-mean attachment
+// =============================================================================
+
+/// Attach a `DidYouMean` diagnostic if a close candidate exists.
+///
+/// Calls `string_distance.levenshtein` directly per-candidate to sidestep
+/// the slice-of-slice ergonomics of `string_distance.closest`. The
+/// threshold scales as `max(2, len/3)` — Cargo / Git style.
+fn attach_did_you_mean(e: &mut ParseError, query: &Text, candidates: &List<Text>) {
+    if candidates.len() == 0 { return; }
+
+    let q_bytes = query.as_bytes();
+    let threshold = if query.len() / 3 > 2 { query.len() / 3 } else { 2 };
+
+    let mut best_idx: Int = -1;
+    let mut best_d: Int = threshold + 1;
+
+    let mut i: Int = 0;
+    while i < candidates.len() {
+        let cand_bytes = candidates[i].as_bytes();
+        let d = string_distance.levenshtein(q_bytes, cand_bytes);
+        if d < best_d {
+            best_d = d;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+
+    if best_idx >= 0 {
+        e.diagnostics.push(ParseDiagnostic.DidYouMean(candidates[best_idx].clone()));
+    }
+}

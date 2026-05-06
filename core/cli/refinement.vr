@@ -1,0 +1,178 @@
+// =============================================================================
+// cli/refinement.vr — Bridge between refinement types and parse-time validation
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.spec, cli.error, cli.types
+// Spec: internal/specs/cli-framework.md §4.3
+// Status: Phase 2 — predicate-handle plumbing; SMT-side coupling lands later
+// =============================================================================
+//
+
+// Verum's refinement types (`port: Int where 1 <= port <= 65535`) are the
+// CLI framework's secret weapon: every refinement on a field automatically
+// becomes a parse-time validator. The user writes the predicate once;
+// the framework reads it for help-rendering, completion, validation,
+// and (Phase 7) Z3-coherence checks.
+//
+// Phase 2 implements the simplest path: a registry of named runtime
+// predicates that the macro pass populates. The `RefinementHandle` on
+// `ArgSpec` / `FlagSpec` carries the human-readable expression; the
+// validator looks the predicate function up by handle-name.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module refinement;
+
+mount core.{Maybe, Result, List, Map, Text, Int, Float, Bool};
+mount core.cli.spec.{ArgSpec, FlagSpec, RefinementHandle};
+mount core.cli.error.{ParseError, ParseDiagnostic, ParseErrorKind};
+
+// =============================================================================
+// Predicate types
+// =============================================================================
+
+/// A runtime predicate keyed on the parsed `Text`. Returns `Ok(())` if
+/// the value satisfies the refinement, `Err(reason)` otherwise. Reason
+/// is rendered into the resulting `ParseError`.
+public type TextPredicate is fn(&Text) -> Result<Unit, Text>;
+
+/// Predicate registry. The macro pass writes one entry per
+/// refinement-bearing field; the validator looks them up here.
+public type PredicateRegistry is {
+    by_name: Map<Text, TextPredicate>,
+};
+
+implement PredicateRegistry {
+    public fn new() -> PredicateRegistry {
+        PredicateRegistry { by_name: Map.new() }
+    }
+
+    /// Register a predicate under `name` (typically the field's mangled
+    /// fully-qualified path, e.g. `"Cli::port"`).
+    public fn register(mut self, name: Text, p: TextPredicate) -> PredicateRegistry {
+        self.by_name.insert(name, p);
+        self
+    }
+
+    public fn lookup(&self, name: &Text) -> Maybe<TextPredicate> {
+        self.by_name.get_optional(name.clone())
+    }
+}
+
+// =============================================================================
+// Validation
+// =============================================================================
+
+/// Validate a single value against an optional refinement.
+/// `field_name` is the user-visible field/flag name (for error messages).
+public fn validate_value(
+    field_name: &Text,
+    value: &Text,
+    refinement: &Maybe<RefinementHandle>,
+    registry: &PredicateRegistry,
+) -> Result<Unit, ParseError> {
+    match refinement {
+        None => Ok(()),
+        Some(r) => {
+            // The macro pass stores the predicate name in `r.expression`'s
+            // first line if a runtime predicate was registered. For Phase 2
+            // we look up by the same field_name as a fallback convention.
+            match registry.lookup(field_name) {
+                Some(p) => match p(value) {
+                    Ok(()) => Ok(()),
+                    Err(_reason) => Err(ParseError.refinement_failed(
+                        field_name.clone(),
+                        value.clone(),
+                        r.expression.clone(),
+                    )),
+                },
+                None => {
+                    // No runtime predicate registered — the refinement
+                    // has been declared but not desugared yet. The
+                    // expression itself surfaces in help output, so
+                    // there is no silent gap; we accept the value to
+                    // avoid breaking applications that haven't migrated
+                    // to the runtime-predicate model.
+                    Ok(())
+                },
+            }
+        },
+    }
+}
+
+// =============================================================================
+// Built-in validators (direct form — no closure capture)
+// =============================================================================
+//
+// These helpers take the bound parameters and the value directly. The
+// macro pass synthesises a top-level `fn` per refinement-bearing field
+// that calls into one of these (closure-free); the synthesised `fn` is
+// then registered in the `PredicateRegistry` as a `TextPredicate`.
+//
+
+/// Validate that `v` parses as an integer in `[lo, hi]`.
+public fn validate_int_range(v: &Text, lo: Int, hi: Int) -> Result<Unit, Text> {
+    match v.parse_int() {
+        Ok(n) => {
+            if n < lo {
+                Err(Text.from(f"value {n} is below minimum {lo}"))
+            } else if n > hi {
+                Err(Text.from(f"value {n} is above maximum {hi}"))
+            } else {
+                Ok(())
+            }
+        },
+        Err(_) => Err(Text.from(f"value '{v}' is not a valid integer")),
+    }
+}
+
+/// Validate that `v` parses as a float in `[lo, hi]`.
+public fn validate_float_range(v: &Text, lo: Float, hi: Float) -> Result<Unit, Text> {
+    match v.parse_float() {
+        Ok(x) => {
+            if x < lo {
+                Err(Text.from(f"value {x} is below minimum {lo}"))
+            } else if x > hi {
+                Err(Text.from(f"value {x} is above maximum {hi}"))
+            } else {
+                Ok(())
+            }
+        },
+        Err(_) => Err(Text.from(f"value '{v}' is not a valid float")),
+    }
+}
+
+/// Validate that `v.len()` is within `[min_len, max_len]`.
+public fn validate_text_length(v: &Text, min_len: Int, max_len: Int) -> Result<Unit, Text> {
+    let n = v.len();
+    if n < min_len {
+        Err(Text.from(f"length {n} is below minimum {min_len}"))
+    } else if n > max_len {
+        Err(Text.from(f"length {n} exceeds maximum {max_len}"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Validate that `v` is one of the candidate values.
+public fn validate_one_of(v: &Text, values: &List<Text>) -> Result<Unit, Text> {
+    let mut i: Int = 0;
+    while i < values.len() {
+        if &values[i] == v { return Ok(()); }
+        i = i + 1;
+    }
+    let mut hint = Text.from("expected one of: ");
+    let mut j: Int = 0;
+    while j < values.len() {
+        if j > 0 { hint.push_str(", "); }
+        hint.push_str(&values[j]);
+        j = j + 1;
+    }
+    Err(hint)
+}

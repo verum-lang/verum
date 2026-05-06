@@ -280,6 +280,11 @@ public module diagnostics;
 // Spec: internal/specs/shell-scripting.md
 public module shell;
 
+// Verum CLI Framework — declarative argv parsing, refinement-typed args,
+// adaptive help, completion / manpage emitters, typed dispatch.
+// Spec: internal/specs/cli-framework.md
+public module cli;
+
 // =============================================================================
 // Layer 5.5: Service mesh (Depends on: core.net.http2, core.protobuf, core.net.tls)
 // =============================================================================

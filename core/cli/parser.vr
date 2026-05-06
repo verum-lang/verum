@@ -1,0 +1,684 @@
+// =============================================================================
+// cli/parser.vr — argv tokenizer + recursive-descent parser
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, cli.spec, cli.error, cli.types
+// Spec: internal/specs/cli-framework.md §5
+// =============================================================================
+//
+
+// `parse_argv` walks an argv vector against a `CommandSpec` and produces
+// a `ParseOutcome` — the matched (sub)command, every captured flag, every
+// captured arg, and any non-fatal diagnostics. Fatal errors short-circuit
+// to `Err(ParseError)` but we still accumulate the full diagnostic list
+// when possible (multi-error mode — clig.dev §errors).
+//
+
+// The parser is GNU-getopt-compatible:
+//   --long value      // long flag with separate value token
+//   --long=value      // long flag with attached value
+//   -s value          // short with separate value
+//   -svalue           // short with attached value (when arity > 0)
+//   -abc              // bundled switches (when each is arity 0)
+//   --                // end-of-options sentinel
+//   -                 // bare dash is positional (stdin/stdout convention)
+//   --no-foo          // negation of `--foo` (when negatable=true)
+//
+// Topic separator (oclif-style colon) is supported via
+// `CommandSettings.topic_separator`.
+//
+// ParseOutcome captures values as Text — the `runtime` layer converts
+// to typed values via `FromArg` after parsing succeeds. This separation
+// keeps the parser pure and stateless wrt the user's type system.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module parser;
+
+mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool};
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity,
+    TopicSeparator, CommandSettings,
+};
+mount core.cli.error.{ParseError, ParseErrorKind, ParseDiagnostic};
+
+// =============================================================================
+// Captured values
+// =============================================================================
+
+/// A captured flag value as raw Text (typing happens in runtime layer).
+public type CapturedFlag is {
+    /// Flag long-name (preferred) or short-letter rendered as Text.
+    name:    Text,
+    /// All values captured for this flag (length matches arity).
+    /// For switches (arity Exactly(0)) this is empty and the count reflects occurrences.
+    values:  List<Text>,
+    /// Number of times the flag appeared (for counter / repeated tracking).
+    occurrences: Int,
+};
+
+/// A captured positional argument.
+public type CapturedArg is {
+    name:   Text,            // declared arg-spec name
+    values: List<Text>,
+};
+
+/// Outcome of parsing argv against a CommandSpec.
+public type ParseOutcome is {
+    /// Sequence of subcommand names traversed, root-first.
+    /// Example: argv `app deploy prod --env=staging` → ["app", "deploy", "prod"].
+    command_path: List<Text>,
+    /// Flags captured at every level along the path. Persistent flags appear
+    /// at the level they were declared; non-persistent at the level they
+    /// were given.
+    flags:        Map<Text, CapturedFlag>,
+    /// Positional arguments captured at the leaf command.
+    args:         List<CapturedArg>,
+    /// Argv tokens after `--` (passed verbatim to the leaf handler).
+    trailing:     List<Text>,
+    /// Non-fatal diagnostics gathered during recovery.
+    warnings:     List<ParseError>,
+    /// Whether help / version flag was seen — runtime short-circuits dispatch.
+    help_requested:    Bool,
+    version_requested: Bool,
+};
+
+// =============================================================================
+// ParseState — internal cursor over argv
+// =============================================================================
+
+/// Stateful cursor over argv. Construction is done by `parse_argv`;
+/// users typically don't touch this directly.
+public type ParseState is {
+    argv:   List<Text>,
+    cursor: Int,
+    /// Whether we've crossed `--` (everything after is positional).
+    after_double_dash: Bool,
+};
+
+implement ParseState {
+    public fn new(argv: List<Text>) -> ParseState {
+        ParseState { argv: argv, cursor: 0, after_double_dash: false }
+    }
+
+    @inline
+    fn at_end(&self) -> Bool { self.cursor >= self.argv.len() }
+
+    @inline
+    fn peek(&self) -> Maybe<&Text> {
+        if self.at_end() { None } else { Some(&self.argv[self.cursor]) }
+    }
+
+    @inline
+    fn advance(&mut self) -> Maybe<Text> {
+        if self.at_end() { None } else {
+            let tok = self.argv[self.cursor].clone();
+            self.cursor = self.cursor + 1;
+            Some(tok)
+        }
+    }
+}
+
+// =============================================================================
+// Token classification
+// =============================================================================
+
+/// Lexical class of an argv token.
+type TokenKind is
+    | TLong(Text, Maybe<Text>)   // (name, optional attached value)
+    | TShort(Text)               // raw bytes after single dash, e.g. "vvv" or "p8080"
+    | TDoubleDash                // standalone "--"
+    | TPositional(Text);         // bare token
+
+/// Classify a single argv token. Numbers like `-1` are positional iff
+/// `allow_negative_numbers = true` AND they parse as numbers.
+fn classify(tok: &Text, settings: &CommandSettings, after_dd: Bool) -> TokenKind {
+    if after_dd { return TokenKind.TPositional(tok.clone()); }
+    let dd = Text.from("--");
+    let dash = Text.from("-");
+    if tok == &dd { return TokenKind.TDoubleDash; }
+    if tok.len() < 2 || !tok.starts_with(&dash) {
+        return TokenKind.TPositional(tok.clone());
+    }
+    if tok == &dash { return TokenKind.TPositional(tok.clone()); }
+
+    // Long flag --name[=value]
+    let dash_dash = Text.from("--");
+    if tok.starts_with(&dash_dash) {
+        let body = tok.slice(2, tok.len());
+        let eq = Text.from("=");
+        match body.find(&eq) {
+            Some(eq_idx) => {
+                let name = body.slice(0, eq_idx);
+                let val = body.slice(eq_idx + 1, body.len());
+                TokenKind.TLong(name, Some(val))
+            },
+            None => TokenKind.TLong(body, None),
+        }
+    } else {
+        // Short flag(s): -abc, -p8080, -1 (negative number)
+        if settings.allow_negative_numbers && looks_like_number(tok) {
+            return TokenKind.TPositional(tok.clone());
+        }
+        TokenKind.TShort(tok.slice(1, tok.len()))
+    }
+}
+
+fn looks_like_number(s: &Text) -> Bool {
+    if s.len() < 2 { return false; }
+    let dash = Text.from("-");
+    if !s.starts_with(&dash) { return false; }
+    let rest = s.slice(1, s.len());
+    let mut i: Int = 0;
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    while i < rest.len() {
+        match rest.byte_at(i) {
+            Some(c) => {
+                if c >= b'0' && c <= b'9' {
+                    saw_digit = true;
+                } else if c == b'.' && !saw_dot {
+                    saw_dot = true;
+                } else {
+                    return false;
+                }
+            },
+            None => return false,
+        }
+        i = i + 1;
+    }
+    saw_digit
+}
+
+// =============================================================================
+// Top-level parser
+// =============================================================================
+
+/// Parse argv against a root CommandSpec. The first argv token (program
+/// name) is consumed as the root command name regardless of value —
+/// matches POSIX convention. Pass `argv_skip_zero = true` to elide the
+/// zeroth token if argv has been pre-stripped.
+public fn parse_argv(
+    root: &CommandSpec,
+    argv: List<Text>,
+) -> Result<ParseOutcome, ParseError> {
+    let mut state = ParseState.new(argv);
+
+    // Skip argv[0] (program name).
+    state.advance();
+
+    let mut outcome = ParseOutcome {
+        command_path: List.new(),
+        flags: Map.new(),
+        args: List.new(),
+        trailing: List.new(),
+        warnings: List.new(),
+        help_requested: false,
+        version_requested: false,
+    };
+
+    outcome.command_path.push(root.name.clone());
+    parse_command(root, &mut state, &mut outcome)?;
+    Ok(outcome)
+}
+
+/// Parse a single command level (potentially descending into subcommands).
+fn parse_command(
+    cmd: &CommandSpec,
+    state: &mut ParseState,
+    outcome: &mut ParseOutcome,
+) -> Result<Unit, ParseError> {
+    let mut positional_idx: Int = 0;
+
+    while !state.at_end() {
+        if state.after_double_dash {
+            match state.advance() {
+                Some(tok) => outcome.trailing.push(tok),
+                None => break,
+            }
+            continue;
+        }
+
+        let tok = state.peek().unwrap().clone();
+        let kind = classify(&tok, &cmd.settings, state.after_double_dash);
+
+        match kind {
+            TokenKind.TDoubleDash => {
+                state.advance();
+                state.after_double_dash = true;
+            },
+            TokenKind.TLong(name, attached) => {
+                state.advance();
+                handle_long(cmd, &name, attached, state, outcome)?;
+            },
+            TokenKind.TShort(body) => {
+                state.advance();
+                handle_short(cmd, &body, state, outcome)?;
+            },
+            TokenKind.TPositional(tok_text) => {
+                // Possible subcommand?
+                if positional_idx == 0 {
+                    match cmd.find_subcommand(&tok_text) {
+                        Some(sub) => {
+                            state.advance();
+                            outcome.command_path.push(sub.name.clone());
+                            return parse_command(sub, state, outcome);
+                        },
+                        None => {},
+                    }
+                }
+                state.advance();
+                handle_positional(cmd, &tok_text, &mut positional_idx, outcome)?;
+            },
+        }
+    }
+
+    // Check required-arg satisfaction at this leaf.
+    let mut i: Int = 0;
+    while i < cmd.args.len() {
+        let a = &cmd.args[i];
+        if a.arity.is_required() {
+            let captured = find_captured_arg(&outcome.args, &a.name);
+            match captured {
+                Some(_) => {},
+                None => return Err(ParseError.missing_required(a.name.clone())),
+            }
+        }
+        i = i + 1;
+    }
+
+    // Check required flags.
+    let mut j: Int = 0;
+    while j < cmd.flags.len() {
+        let f = &cmd.flags[j];
+        if f.arity.is_required() {
+            let key = flag_key(f);
+            if !outcome.flags.contains_key(&key) {
+                return Err(ParseError.missing_required(key));
+            }
+        }
+        j = j + 1;
+    }
+
+    // Check group constraints.
+    check_groups(cmd, outcome)?;
+
+    // Subcommand-required guard.
+    if cmd.settings.subcommand_required && cmd.subcommands.len() > 0 {
+        if outcome.command_path.len() == 1
+            || (outcome.command_path.len() > 0
+                && outcome.command_path[outcome.command_path.len() - 1] == cmd.name)
+        {
+            return Err(ParseError.bare(
+                ParseErrorKind.MissingRequired,
+                Text.from(f"command '{cmd.name}' requires a subcommand"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Long flags
+// =============================================================================
+
+fn handle_long(
+    cmd: &CommandSpec,
+    name: &Text,
+    attached: Maybe<Text>,
+    state: &mut ParseState,
+    outcome: &mut ParseOutcome,
+) -> Result<Unit, ParseError> {
+    // Built-in --help / --version short-circuits.
+    let help_t = Text.from("help");
+    let version_t = Text.from("version");
+    let no_prefix = Text.from("no-");
+    if !cmd.settings.disable_help_flag && name == &help_t {
+        outcome.help_requested = true;
+        return Ok(());
+    }
+    if !cmd.settings.disable_version_flag && name == &version_t {
+        outcome.version_requested = true;
+        return Ok(());
+    }
+
+    // Negation: --no-foo when foo.negatable = true.
+    if name.starts_with(&no_prefix) {
+        let positive_name = name.slice(3, name.len());
+        match cmd.find_flag_long(&positive_name) {
+            Some(f) => if f.negatable {
+                let key = flag_key(f);
+                let cap = CapturedFlag {
+                    name: key.clone(),
+                    values: { let mut v: List<Text> = List.new(); v.push(Text.from("false")); v },
+                    occurrences: 1,
+                };
+                outcome.flags.insert(key, cap);
+                return Ok(());
+            },
+            None => {},
+        }
+    }
+
+    let f = match cmd.find_flag_long(name) {
+        Some(f) => f,
+        None => {
+            return Err(
+                ParseError.unknown_flag(Text.from(f"--{name}"), &cmd.long_names())
+                    .with_see_help(cmd.name.clone())
+            );
+        },
+    };
+
+    capture_flag(f, attached, state, outcome)
+}
+
+// =============================================================================
+// Short flags (single + bundled + value-attached)
+// =============================================================================
+
+fn handle_short(
+    cmd: &CommandSpec,
+    body: &Text,
+    state: &mut ParseState,
+    outcome: &mut ParseOutcome,
+) -> Result<Unit, ParseError> {
+    if body.len() == 0 {
+        return Err(ParseError.bare(
+            ParseErrorKind.UnknownFlag,
+            Text.from("empty short flag"),
+        ));
+    }
+
+    let mut i: Int = 0;
+    while i < body.len() {
+        let ch = match body.char_at(i) {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+
+        // Built-in -h / -V.
+        if !cmd.settings.disable_help_flag && ch == 'h' {
+            outcome.help_requested = true;
+            return Ok(());
+        }
+        if !cmd.settings.disable_version_flag && ch == 'V' {
+            outcome.version_requested = true;
+            return Ok(());
+        }
+
+        let f = match cmd.find_flag_short(ch) {
+            Some(f) => f,
+            None => {
+                return Err(
+                    ParseError.unknown_flag(Text.from(f"-{ch}"), &cmd.long_names())
+                        .with_see_help(cmd.name.clone())
+                );
+            },
+        };
+
+        if f.arity.is_switch() {
+            // Switch — record presence and continue with rest of bundle.
+            let key = flag_key(f);
+            increment_capture(&mut outcome.flags, &key);
+            i = i + 1;
+            continue;
+        }
+
+        // Value-bearing short: rest of body is the attached value, if non-empty.
+        let rest = if i + 1 < body.len() {
+            Some(body.slice(i + 1, body.len()))
+        } else {
+            None
+        };
+        return capture_flag(f, rest, state, outcome);
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Generic flag-capture machinery
+// =============================================================================
+
+fn capture_flag(
+    f: &FlagSpec,
+    attached: Maybe<Text>,
+    state: &mut ParseState,
+    outcome: &mut ParseOutcome,
+) -> Result<Unit, ParseError> {
+    let key = flag_key(f);
+
+    if f.arity.is_switch() {
+        increment_capture(&mut outcome.flags, &key);
+        return Ok(());
+    }
+
+    // Determine how many values to consume.
+    let lower = f.arity.lower_bound();
+    let upper_opt = f.arity.upper_bound();
+
+    let mut values: List<Text> = List.new();
+
+    // First value: prefer attached, else next argv token.
+    match attached {
+        Some(v) => values.push(v),
+        None => {
+            match state.advance() {
+                Some(v) => values.push(v),
+                None => return Err(ParseError.missing_value(key)),
+            }
+        },
+    }
+
+    // Greedy consumption up to upper bound (only for AtLeast/Range/Unlimited).
+    let max_more = match upper_opt {
+        Some(hi) => hi - 1,
+        None => 1024,           // generous fallback
+    };
+    let mut took: Int = 1;
+    while took <= max_more {
+        match state.peek() {
+            Some(t) => {
+                let dash = Text.from("-");
+                if t.starts_with(&dash) && t != &dash { break; }
+                values.push(state.advance().unwrap());
+                took = took + 1;
+            },
+            None => break,
+        }
+    }
+
+    if took < lower {
+        return Err(ParseError.bare(
+            ParseErrorKind.TooFewValues,
+            Text.from(f"flag '{key}' requires at least {lower} values, got {took}"),
+        ));
+    }
+
+    let already = outcome.flags.get(&key);
+    match already {
+        Some(prev) => {
+            if !f.repeated && !f.counter {
+                return Err(ParseError.duplicate_flag(key));
+            }
+            // append + increment occurrences
+            let mut merged = prev.clone();
+            let mut k: Int = 0;
+            while k < values.len() {
+                merged.values.push(values[k].clone());
+                k = k + 1;
+            }
+            merged.occurrences = merged.occurrences + 1;
+            outcome.flags.insert(key, merged);
+        },
+        None => {
+            outcome.flags.insert(key.clone(), CapturedFlag {
+                name: key,
+                values: values,
+                occurrences: 1,
+            });
+        },
+    }
+    Ok(())
+}
+
+fn flag_key(f: &FlagSpec) -> Text {
+    match &f.long {
+        Some(long) => long.clone(),
+        None => match f.short {
+            Some(c) => Text.from(f"{c}"),
+            None => Text.from("?"),
+        },
+    }
+}
+
+fn default_captured(key: &Text) -> CapturedFlag {
+    CapturedFlag { name: key.clone(), values: List.new(), occurrences: 0 }
+}
+
+fn increment_capture(flags: &mut Map<Text, CapturedFlag>, key: &Text) {
+    match flags.get(key) {
+        Some(prev) => {
+            let mut updated = prev.clone();
+            updated.occurrences = updated.occurrences + 1;
+            flags.insert(key.clone(), updated);
+        },
+        None => {
+            flags.insert(key.clone(), CapturedFlag {
+                name: key.clone(),
+                values: List.new(),
+                occurrences: 1,
+            });
+        },
+    }
+}
+
+// =============================================================================
+// Positional arguments
+// =============================================================================
+
+fn handle_positional(
+    cmd: &CommandSpec,
+    tok: &Text,
+    pos_idx: &mut Int,
+    outcome: &mut ParseOutcome,
+) -> Result<Unit, ParseError> {
+    if *pos_idx >= cmd.args.len() {
+        // No matching arg-slot — surface as TooManyValues unless trailing
+        // positional is variadic.
+        if cmd.args.len() > 0 {
+            let last = &cmd.args[cmd.args.len() - 1];
+            if matches_unlimited(last) {
+                push_arg_value(outcome, &last.name, tok.clone());
+                return Ok(());
+            }
+        }
+        return Err(ParseError.bare(
+            ParseErrorKind.TooManyValues,
+            Text.from(f"unexpected positional argument '{tok}'"),
+        ));
+    }
+
+    let a = &cmd.args[*pos_idx];
+    push_arg_value(outcome, &a.name, tok.clone());
+
+    // Advance pos_idx unless this slot is variadic.
+    if !matches_unlimited(a) {
+        *pos_idx = *pos_idx + 1;
+    }
+    Ok(())
+}
+
+fn matches_unlimited(a: &ArgSpec) -> Bool {
+    match a.arity {
+        Arity.Unlimited => true,
+        Arity.AtLeast(_) => true,
+        _ => false,
+    }
+}
+
+fn push_arg_value(outcome: &mut ParseOutcome, name: &Text, value: Text) {
+    let mut idx: Int = 0;
+    while idx < outcome.args.len() {
+        if &outcome.args[idx].name == name {
+            outcome.args[idx].values.push(value);
+            return;
+        }
+        idx = idx + 1;
+    }
+    let mut new_arg = CapturedArg { name: name.clone(), values: List.new() };
+    new_arg.values.push(value);
+    outcome.args.push(new_arg);
+}
+
+fn find_captured_arg<'a>(args: &'a List<CapturedArg>, name: &Text) -> Maybe<&'a CapturedArg> {
+    let mut i: Int = 0;
+    while i < args.len() {
+        if &args[i].name == name { return Some(&args[i]); }
+        i = i + 1;
+    }
+    None
+}
+
+// =============================================================================
+// Group constraint checking
+// =============================================================================
+
+fn check_groups(cmd: &CommandSpec, outcome: &ParseOutcome) -> Result<Unit, ParseError> {
+    let mut i: Int = 0;
+    while i < cmd.groups.len() {
+        let g = &cmd.groups[i];
+        let present_count = count_present(&g.members, &outcome.flags);
+
+        match g.kind {
+            GroupKind.Exclusive => {
+                if present_count > 1 {
+                    return Err(ParseError.mutex_conflict(g.name.clone(), g.members.clone()));
+                }
+            },
+            GroupKind.Required => {
+                if present_count != 1 {
+                    return Err(ParseError.mutex_conflict(g.name.clone(), g.members.clone()));
+                }
+            },
+            GroupKind.RequiredAll => {
+                if present_count != g.members.len() {
+                    return Err(ParseError.bare(
+                        ParseErrorKind.MissingRequired,
+                        Text.from(f"all members of group '{g.name}' are required"),
+                    ));
+                }
+            },
+            GroupKind.OptionalAll => {
+                if present_count != 0 && present_count != g.members.len() {
+                    return Err(ParseError.bare(
+                        ParseErrorKind.RequiresMissing,
+                        Text.from(
+                            f"group '{g.name}' is all-or-nothing: \
+                              specify all members or none"
+                        ),
+                    ));
+                }
+            },
+        }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+fn count_present(members: &List<Text>, flags: &Map<Text, CapturedFlag>) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < members.len() {
+        if flags.contains_key(&members[i]) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}

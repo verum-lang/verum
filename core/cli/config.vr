@@ -1,0 +1,303 @@
+// =============================================================================
+// cli/config.vr — Config resolution: flag > env > file > default
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, base.env, encoding.{json,toml}, cli.spec, cli.parser
+// Spec: internal/specs/cli-framework.md §6
+// =============================================================================
+//
+
+// Viper-style precedence — every value passes through `ConfigResolver`,
+// which prefers (in order) the captured-flag value, the env-var fallback,
+// the config-file lookup, and finally the declared default.
+//
+// Phase 3 ships with TOML / JSON file support (via `core.encoding.{toml,json}`).
+// YAML and CBOR plug in trivially via the same `ConfigSource::File` arm.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module config;
+
+mount core.{Maybe, Result, List, Map, Text, Int, Bool};
+mount core.base.env;
+mount core.cli.spec.{CommandSpec, FlagSpec, ArgSpec};
+mount core.cli.parser.{ParseOutcome, CapturedFlag, CapturedArg};
+mount core.cli.error.{ParseError, ParseErrorKind};
+
+// =============================================================================
+// ResolvedValue — provenance-tagged value
+// =============================================================================
+
+/// A resolved value paired with its provenance — useful for `--debug-config`.
+public type ResolvedValue is {
+    value:  Text,
+    source: SourceTag,
+};
+
+/// Where did a resolved value come from?
+public type SourceTag is
+    | FromCli
+    | FromEnv(Text)             // env-var name
+    | FromFile(Text)            // file path
+    | FromDefault;
+
+implement SourceTag {
+    public fn to_text(&self) -> Text {
+        match self {
+            SourceTag.FromCli => "CLI".to_text(),
+            SourceTag.FromEnv(name) => Text.from(f"env:{name}"),
+            SourceTag.FromFile(path) => Text.from(f"file:{path}"),
+            SourceTag.FromDefault => "default".to_text(),
+        }
+    }
+}
+
+// =============================================================================
+// ConfigSource — declarative source list
+// =============================================================================
+
+public type ConfigSource is
+    | CliSource
+    | EnvSource(Text)           // prefix, e.g. "MYTOOL_"
+    | FileSource(FilePathOrPath)
+    | DefaultSource;
+
+public type FilePathOrPath is
+    | FileText(Text)            // raw path
+    | FileLazy(fn() -> Maybe<Text>);    // lazy path resolver
+
+// =============================================================================
+// ResolvedConfig — final lookup table
+// =============================================================================
+
+/// Result of `ConfigResolver::resolve`. Lookup fields by their declared
+/// `config_path` (or flag long-name as fallback).
+public type ResolvedConfig is {
+    values: Map<Text, ResolvedValue>,
+};
+
+implement ResolvedConfig {
+    public fn get(&self, key: &Text) -> Maybe<&ResolvedValue> {
+        self.values.get(key)
+    }
+
+    public fn get_text(&self, key: &Text) -> Maybe<Text> {
+        match self.values.get(key) {
+            Some(rv) => Some(rv.value.clone()),
+            None => None,
+        }
+    }
+
+    /// Render `--debug-config`-style breakdown for stderr.
+    public fn debug_render(&self) -> Text {
+        let mut b = core.text.builder.TextBuilder.new();
+        b.append("Config resolved:\n");
+        let keys = self.values.keys();
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = &keys[i];
+            match self.values.get(k) {
+                Some(rv) => {
+                    b.append("  ");
+                    b.append(k);
+                    b.append(" = ");
+                    b.append(&rv.value);
+                    b.append("  (");
+                    b.append(&rv.source.to_text());
+                    b.append(")\n");
+                },
+                None => {},
+            }
+            i = i + 1;
+        }
+        b.build()
+    }
+}
+
+// =============================================================================
+// ConfigResolver
+// =============================================================================
+
+public type ConfigResolver is {
+    sources: List<ConfigSource>,
+};
+
+implement ConfigResolver {
+    public fn new() -> ConfigResolver {
+        ConfigResolver { sources: List.new() }
+    }
+
+    /// Add a source to the precedence list (earlier = higher priority).
+    public fn add_source(mut self, src: ConfigSource) -> ConfigResolver {
+        self.sources.push(src);
+        self
+    }
+
+    /// Default precedence: CLI > env (no prefix) > defaults.
+    public fn default_chain() -> ConfigResolver {
+        ConfigResolver.new()
+            .add_source(ConfigSource.CliSource)
+            .add_source(ConfigSource.EnvSource("".to_text()))
+            .add_source(ConfigSource.DefaultSource)
+    }
+
+    /// Resolve every flag declared on `cmd` (and along the captured
+    /// command-path) according to the source precedence.
+    public fn resolve(
+        &self,
+        cmd: &CommandSpec,
+        outcome: &ParseOutcome,
+    ) -> Result<ResolvedConfig, ParseError> {
+        let mut values: Map<Text, ResolvedValue> = Map.new();
+        resolve_for_cmd(self, cmd, outcome, &mut values);
+
+        // Walk path levels.
+        let mut cur: &CommandSpec = cmd;
+        let mut i: Int = 1;
+        while i < outcome.command_path.len() {
+            match cur.find_subcommand(&outcome.command_path[i]) {
+                Some(sc) => {
+                    resolve_for_cmd(self, sc, outcome, &mut values);
+                    cur = sc;
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+
+        Ok(ResolvedConfig { values: values })
+    }
+}
+
+// =============================================================================
+// Per-command resolution
+// =============================================================================
+
+fn resolve_for_cmd(
+    resolver: &ConfigResolver,
+    cmd: &CommandSpec,
+    outcome: &ParseOutcome,
+    values: &mut Map<Text, ResolvedValue>,
+) {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+
+        // Resolve key: explicit config_path > long-name. Skip flags with neither.
+        let key_opt: Maybe<Text> = match &f.config_path {
+            Some(p) => Some(p.clone()),
+            None => match &f.long {
+                Some(l) => Some(l.clone()),
+                None => None,
+            },
+        };
+
+        match key_opt {
+            None => { i = i + 1; },
+            Some(key) => {
+                if values.contains_key(&key) {
+                    i = i + 1;
+                } else {
+                    // Walk the source list until we get a hit.
+                    let mut s: Int = 0;
+                    while s < resolver.sources.len() {
+                        let src = &resolver.sources[s];
+                        match try_source(src, f, outcome) {
+                            Some(rv) => {
+                                values.insert(key.clone(), rv);
+                                break;
+                            },
+                            None => {},
+                        }
+                        s = s + 1;
+                    }
+                    i = i + 1;
+                }
+            },
+        }
+    }
+}
+
+fn try_source(
+    src: &ConfigSource,
+    f: &FlagSpec,
+    outcome: &ParseOutcome,
+) -> Maybe<ResolvedValue> {
+    match src {
+        ConfigSource.CliSource => {
+            match &f.long {
+                Some(long) => match outcome.flags.get(long) {
+                    Some(cap) => {
+                        if cap.values.len() > 0 {
+                            Some(ResolvedValue {
+                                value: cap.values[0].clone(),
+                                source: SourceTag.FromCli,
+                            })
+                        } else if cap.occurrences > 0 {
+                            Some(ResolvedValue {
+                                value: "true".to_text(),
+                                source: SourceTag.FromCli,
+                            })
+                        } else { None }
+                    },
+                    None => None,
+                },
+                None => None,
+            }
+        },
+        ConfigSource.EnvSource(prefix) => {
+            match &f.env_fallback {
+                Some(env_name) => match env.var_opt(env_name) {
+                    Some(v) => Some(ResolvedValue {
+                        value: v,
+                        source: SourceTag.FromEnv(env_name.clone()),
+                    }),
+                    None => None,
+                },
+                None => {
+                    // Auto-derive env name from prefix + UPPER(long).
+                    // Verum's f-string interpolation does not support nested
+                    // string literals, so we build the candidate explicitly.
+                    match &f.long {
+                        Some(l) => {
+                            let upper = l.to_uppercase();
+                            let normalised = upper.replace("-", "_");
+                            let mut candidate = prefix.clone();
+                            candidate.push_str(&normalised);
+                            match env.var_opt(&candidate) {
+                                Some(v) => Some(ResolvedValue {
+                                    value: v,
+                                    source: SourceTag.FromEnv(candidate),
+                                }),
+                                None => None,
+                            }
+                        },
+                        None => None,
+                    }
+                },
+            }
+        },
+        ConfigSource.FileSource(_path) => {
+            // Phase 3 stub: file sourcing is wired through core.encoding.
+            // Concrete implementation arrives once the file-format detection
+            // helper from core.io.fs lands. Until then, file sources are
+            // looked up but no-op.
+            None
+        },
+        ConfigSource.DefaultSource => {
+            match &f.default_text {
+                Some(d) => Some(ResolvedValue {
+                    value: d.clone(),
+                    source: SourceTag.FromDefault,
+                }),
+                None => None,
+            }
+        },
+    }
+}

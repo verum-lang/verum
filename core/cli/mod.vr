@@ -1,0 +1,105 @@
+// =============================================================================
+// cli/mod.vr — Verum CLI Framework public API
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, io, term, encoding, context, security
+// Spec: internal/specs/cli-framework.md
+// =============================================================================
+//
+
+// Single-import surface for command-line interfaces. After
+// `mount core.cli.*;` a caller has access to:
+//
+
+//  * CommandSpec / ArgSpec / FlagSpec / Group / Arity — declarative model
+//  * App<E> — runtime that parses argv and dispatches handlers
+//  * Builder API — `App.new(...).flag(...).arg(...).subcommand(...).build()`
+//  * FromArg / ValueEnum / ArgKind — typed argument protocols
+//  * Parser<A> — combinator-based parser surface
+//  * ParseError / ParseDiagnostic — empathetic diagnostics with did-you-mean
+//  * help() — adaptive help renderer using core.term.style
+//  * ExitCode — sysexits.h-aligned exit codes
+//
+
+// The expectation is that scripts only need this one mount line plus
+// `mount core.*;` for primitives. Declarative `@command` derive support
+// arrives in Phase 1; the builder API is fully usable today.
+//
+
+// # Layered access (Phase 0 surface)
+//
+
+//   core.cli.spec      — type model
+//   core.cli.types     — FromArg / ValueEnum protocols
+//   core.cli.error     — ParseError, diagnostics
+//   core.cli.parser    — argv parser
+//   core.cli.help      — help renderer
+//   core.cli.builder   — fluent builder
+//   core.cli.runtime   — App<E> dispatcher
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module cli;
+
+// =============================================================================
+// Submodule declarations
+// =============================================================================
+
+public module spec;
+public module types;
+public module error;
+public module parser;
+public module help;
+public module builder;
+public module runtime;
+public module derive;
+public module refinement;
+public module completion;
+public module manpage;
+public module config;
+public module testing;
+public module verify;
+public module permissions;
+public module example;
+public module prelude;
+
+// =============================================================================
+// Convenience re-exports — the most common surface
+// =============================================================================
+
+public mount .spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind,
+    Arity, CommandSettings, ColorChoice, ErrorFormat,
+    TopicSeparator, InvocationStyle, InteractivePolicy,
+    CompletionSource, Example, DeprecationNote,
+};
+
+public mount .types.{
+    FromArg, ValueEnum, ArgKind,
+};
+
+public mount .error.{
+    ParseError, ParseErrorKind, ParseDiagnostic, ExitCode,
+};
+
+public mount .parser.{
+    ParseState, ParseOutcome, parse_argv,
+};
+
+public mount .help.{
+    render_help, HelpStyle,
+};
+
+public mount .builder.{
+    AppBuilder, ArgBuilder, FlagBuilder,
+};
+
+public mount .runtime.{
+    App, dispatch,
+};
