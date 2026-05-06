@@ -2708,110 +2708,108 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         }
 
         // ====================================================================
-        // Arithmetic Extended
+        // Extended-opcode encoding: opcode + sub_op + varint(operand_len)
+        // + operand_bytes.
+        //
+        // Pre-fix the encoder emitted just `opcode + sub_op +
+        // operands` with no length prefix.  The interpreter dispatch
+        // path read operands lazily per sub_op, but any sequential
+        // decoder (the linker's `rewrite_function_bytecode`,
+        // bytecode validators, the disassembler) had no way to know
+        // where the operand bytes ended and the next instruction
+        // began — `decode_instruction` left `*offset` pointing into
+        // the operand bytes, then read garbage as the next opcode.
+        // Empirical impact: `linker_round_trip_through_embedded_archive`
+        // failed on every function whose body contained a CBGR / Text
+        // / Math / etc. extended op.
+        //
+        // The varint length prefix is consumed by the interpreter's
+        // `handle_*_extended` dispatch (one read_varint after read_u8
+        // for sub_op) — see crates/verum_vbc/src/interpreter/
+        // dispatch_table/handlers/{cbgr,text,math,...}_extended.rs.
         // ====================================================================
         Instruction::ArithExtended { sub_op, operands } => {
             output.push(Opcode::ArithExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Tensor Extended
-        // ====================================================================
         Instruction::TensorExtended { sub_op, operands } => {
+            // TensorExtended uses structured per-sub_op decoding —
+            // its decoder reads operands positionally per
+            // TensorSubOpcode, so there's no length-prefix to add.
             output.push(Opcode::TensorExtended.to_byte());
             output.push(*sub_op);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Math Extended
-        // ====================================================================
         Instruction::MathExtended { sub_op, operands } => {
             output.push(Opcode::MathExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // SIMD Extended
-        // ====================================================================
         Instruction::SimdExtended { sub_op, operands } => {
             output.push(Opcode::SimdExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Char Extended
-        // ====================================================================
         Instruction::CharExtended { sub_op, operands } => {
             output.push(Opcode::CharExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // CBGR Extended
-        // ====================================================================
         Instruction::CbgrExtended { sub_op, operands } => {
             output.push(Opcode::CbgrExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Text Extended
-        // ====================================================================
         Instruction::TextExtended { sub_op, operands } => {
             output.push(Opcode::TextExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // GPU Extended
-        // ====================================================================
         Instruction::GpuExtended { sub_op, operands } => {
+            // GpuExtended uses structured per-sub_op decoding —
+            // its decoder reads operands positionally per
+            // GpuSubOpcode, so there's no length-prefix to add.
             output.push(Opcode::GpuExtended.to_byte());
             output.push(*sub_op);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // FFI Extended
-        // ====================================================================
         Instruction::FfiExtended { sub_op, operands } => {
             output.push(Opcode::FfiExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Memory Extended
-        // ====================================================================
         Instruction::MemExtended { sub_op, operands } => {
             output.push(Opcode::MemExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Generic Extended (#167 Part A)
-        // ====================================================================
         Instruction::Extended { sub_op, operands } => {
+            // NOTE: this generic Extended carrier does NOT use the
+            // length-prefixed format the other extended opcodes do
+            // — it shares the wire format with structural typed
+            // siblings like `MakeVariantTyped`, where the sub_op
+            // alone determines how many operand bytes follow.  The
+            // sequential decoder (decode_instruction) routes typed
+            // sub-ops to their dedicated parsers and falls back to
+            // the opaque path only for known-zero-operand sub-ops
+            // (Reserved=0x00, ProcessExit=0x10).
             output.push(Opcode::Extended.to_byte());
             output.push(*sub_op);
             output.extend_from_slice(operands);
         }
-
-        // ====================================================================
-        // Logging Extended
-        // ====================================================================
         Instruction::LogExtended { sub_op, operands } => {
             output.push(Opcode::LogExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
 
@@ -5250,10 +5248,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         Opcode::MemExtended => {
             let sub_op = decode_u8(data, offset)?;
-            Ok(Instruction::MemExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::MemExtended { sub_op, operands })
         }
 
         // ====================================================================
@@ -5298,103 +5294,55 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         // Arithmetic Extended Operations
         // ====================================================================
+        // ====================================================================
+        // Extended-opcode decoding: opcode + sub_op + varint(operand_len)
+        // + operand_bytes — see the symmetric encoder above.  Reading
+        // the operand bytes preserves them for the linker /
+        // disassembler / validator (which can't dispatch per-sub_op
+        // operand readers).  The interpreter dispatches via
+        // `handle_*_extended` which reads bytecode inline — those
+        // handlers skip the length varint after `sub_op` to land on
+        // the operand bytes for per-sub_op decoding.
+        // ====================================================================
         Opcode::ArithExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Decode based on arithmetic sub-opcode
-            Ok(Instruction::ArithExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::ArithExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // FFI Extended Operations
-        // ====================================================================
         Opcode::FfiExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Decode based on FFI sub-opcode
-            Ok(Instruction::FfiExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::FfiExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // Math Extended Operations (0x29)
-        // ====================================================================
         Opcode::MathExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Math sub-opcodes use uniform dst, src format
-            // Operands decoded inline by interpreter for ~2ns dispatch
-            Ok(Instruction::MathExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::MathExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // SIMD Extended Operations (0x2A)
-        // ====================================================================
         Opcode::SimdExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // SIMD sub-opcodes for platform-agnostic vector operations
-            // Operands decoded inline by interpreter
-            Ok(Instruction::SimdExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::SimdExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // Char Extended Operations (0x2B)
-        // ====================================================================
         Opcode::CharExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Character classification and conversion operations
-            // Operands decoded inline by interpreter
-            Ok(Instruction::CharExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::CharExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // CBGR Extended Operations (0x78)
-        // ====================================================================
         Opcode::CbgrExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // CBGR (Capability-Based Generational References) operations
-            // Operands decoded inline by interpreter for zero-cost dispatch
-            Ok(Instruction::CbgrExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::CbgrExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // Text Extended Operations (0x79)
-        // ====================================================================
         Opcode::TextExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Text parsing and conversion operations
-            // Operands decoded inline by interpreter for zero-cost dispatch
-            Ok(Instruction::TextExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::TextExtended { sub_op, operands })
         }
-
-        // ====================================================================
-        // Logging Extended Operations (0xBE)
-        // ====================================================================
         Opcode::LogExtended => {
             let sub_op = decode_u8(data, offset)?;
-            // Structured logging operations
-            // Operands decoded inline by interpreter
-            Ok(Instruction::LogExtended {
-                sub_op,
-                operands: vec![], // Operands decoded by interpreter
-            })
+            let operands = decode_extended_operands(data, offset)?;
+            Ok(Instruction::LogExtended { sub_op, operands })
         }
 
         // ====================================================================
@@ -5515,6 +5463,46 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         // ====================================================================
+        // TLS (Thread-Local Storage) + Variant Data Access
+        // ====================================================================
+        // Several instructions were encoded but missing decoder arms,
+        // leaving sequential decoders (linker / disassembler /
+        // validator) at the wildcard `Raw` arm which doesn't consume
+        // operand bytes — `*offset` then pointed into the operand
+        // sequence and corrupted subsequent decode.  Each arm below
+        // mirrors the encoder at bytecode.rs:2402-2700.
+        Opcode::TlsGet => {
+            let dst = decode_reg(data, offset)?;
+            let slot = decode_reg(data, offset)?;
+            Ok(Instruction::TlsGet { dst, slot })
+        }
+        Opcode::TlsSet => {
+            let slot = decode_reg(data, offset)?;
+            let val = decode_reg(data, offset)?;
+            Ok(Instruction::TlsSet { slot, val })
+        }
+        Opcode::GetVariantData => {
+            let dst = decode_reg(data, offset)?;
+            let variant = decode_reg(data, offset)?;
+            let field = decode_varint(data, offset)? as u32;
+            Ok(Instruction::GetVariantData {
+                dst,
+                variant,
+                field,
+            })
+        }
+        Opcode::GetVariantDataRef => {
+            let dst = decode_reg(data, offset)?;
+            let variant = decode_reg(data, offset)?;
+            let field = decode_varint(data, offset)? as u32;
+            Ok(Instruction::GetVariantDataRef {
+                dst,
+                variant,
+                field,
+            })
+        }
+
+        // ====================================================================
         // Reserved Opcodes
         // ====================================================================
         _ => Ok(Instruction::Raw {
@@ -5550,6 +5538,30 @@ fn decode_optional_reg(data: &[u8], offset: &mut usize) -> VbcResult<Option<Reg>
     }
 }
 
+/// Decodes the operand-bytes block of an extended-opcode
+/// instruction.  Pairs with the encoder, which writes
+/// `[sub_op:u8][len:varint][bytes:len]`.  Returns the operand
+/// bytes verbatim — the linker / disassembler / validator passes
+/// them through unmodified, while the interpreter dispatches via
+/// `handle_*_extended` which skips the length varint then reads
+/// operands per-sub_op.
+///
+/// Used by the 9 "blob" extended opcodes whose decoders don't
+/// structurally parse operands: ArithExtended, FfiExtended,
+/// MathExtended, SimdExtended, CharExtended, CbgrExtended,
+/// TextExtended, MemExtended, LogExtended.  TensorExtended and
+/// GpuExtended use per-sub_op structural decoding and don't
+/// carry a length prefix.
+fn decode_extended_operands(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8>> {
+    let len = decode_varint(data, offset)? as usize;
+    if *offset + len > data.len() {
+        return Err(VbcError::eof(*offset, len));
+    }
+    let bytes = data[*offset..*offset + len].to_vec();
+    *offset += len;
+    Ok(bytes)
+}
+
 /// Decodes a TypeRef.
 ///
 
@@ -5562,6 +5574,7 @@ fn decode_optional_reg(data: &[u8], offset: &mut usize) -> VbcResult<Option<Reg>
 /// - 0x05: Tuple(elems)
 /// - 0x06: Array { element, length }
 /// - 0x07: Slice(inner)
+/// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
 fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
     use smallvec::SmallVec;
 
@@ -5649,6 +5662,39 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
             // Slice(inner)
             let inner = Box::new(decode_type_ref(data, offset)?);
             Ok(TypeRef::Slice(inner))
+        }
+        0x08 => {
+            // Rank2Function { type_param_count, params, return_type, contexts }
+            //
+            // Pre-fix this discriminant was MISSING from the decoder
+            // — `encode_type_ref` writes it (bytecode.rs:2985) for
+            // every rank-2 polymorphic function type signature
+            // (`fn<R>(Reducer<B,R>) -> Reducer<A,R>` and friends),
+            // but the linker / interpreter / analyser would surface
+            // the resulting bytes as `InvalidTypeRef { discriminant:
+            // 8 }` when re-decoded.  In practice this hit the
+            // VBC linker's `rewrite_function_bytecode` pass on
+            // any stdlib body referencing a Transducer-shaped
+            // TypeRef — `linker_round_trip_through_embedded_archive`
+            // failed on the first such function.
+            let type_param_count = decode_varint(data, offset)? as u16;
+            let param_count = decode_varint(data, offset)? as usize;
+            let mut params = Vec::with_capacity(param_count);
+            for _ in 0..param_count {
+                params.push(decode_type_ref(data, offset)?);
+            }
+            let return_type = Box::new(decode_type_ref(data, offset)?);
+            let ctx_count = decode_varint(data, offset)? as usize;
+            let mut contexts = SmallVec::with_capacity(ctx_count);
+            for _ in 0..ctx_count {
+                contexts.push(ContextRef(decode_varint(data, offset)? as u32));
+            }
+            Ok(TypeRef::Rank2Function {
+                type_param_count,
+                params,
+                return_type,
+                contexts,
+            })
         }
         _ => Err(VbcError::InvalidTypeRef {
             offset: *offset as u32 - 1,
