@@ -16190,6 +16190,54 @@ impl TypeChecker {
                                                 let ty = scheme.instantiate();
                                                 return Ok(InferResult::new(ty));
                                             }
+                                            // Static-method dispatch fallback: when the
+                                            // receiver is a bare type-name path
+                                            // (`List.new`, `IndexedList.from_list`,
+                                            // …) and the field-name is not in env,
+                                            // search the inherent_methods bucket for
+                                            // `<TypeName>::<method_name>`.  Pre-fix
+                                            // every body-position `List.new()` /
+                                            // `IndexedList { items: List.new() }`
+                                            // failed E103 "Cannot access field 'new'
+                                            // on non-record type: List<_>" because
+                                            // the dispatch path didn't try the
+                                            // inherent-method bucket here — only the
+                                            // env-side associated-constant lookup
+                                            // above fired, and stdlib generic
+                                            // methods aren't in `env`, they're in
+                                            // `inherent_methods["List"]["new"]`.
+                                            //
+                                            // Also try the `$static$<method>` key
+                                            // that `register_inherent_methods_from_metadata`
+                                            // emits for static methods (no `self`
+                                            // receiver) — same convention as the
+                                            // AST-driven path.
+                                            //
+                                            // Stdlib-agnostic per CLAUDE.md: lookup
+                                            // is keyed by the user-written receiver
+                                            // name, no per-stdlib-type special case.
+                                            let type_name_str = id.name.as_str();
+                                            let methods_guard = self.inherent_methods.read();
+                                            if let Some(bucket) =
+                                                methods_guard.get(&Text::from(type_name_str))
+                                            {
+                                                let static_key: Text =
+                                                    format!("$static${}", field.name).into();
+                                                let bare_key: Text =
+                                                    field.name.as_str().into();
+                                                let scheme = bucket
+                                                    .get(&static_key)
+                                                    .or_else(|| bucket.get(&bare_key))
+                                                    .cloned();
+                                                drop(methods_guard);
+                                                if let Some(scheme) = scheme {
+                                                    return Ok(InferResult::new(
+                                                        scheme.instantiate(),
+                                                    ));
+                                                }
+                                            } else {
+                                                drop(methods_guard);
+                                            }
                                         }
                                     }
                                     {
