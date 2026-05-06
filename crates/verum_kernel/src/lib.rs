@@ -119,6 +119,7 @@ pub mod arch_counterfactual; // ATS-V counterfactual reasoning engine + metric e
 pub mod arch_adjunction; // ATS-V adjunction analyzer for refactoring
 pub mod arch_yoneda; // ATS-V Yoneda-equivalence checker
 pub mod arch_capability_inference; // ATS-V capability ontology — primitive-call → Capability
+pub mod arch_transitive; // ATS-V transitive peer-graph DFS for AP-019 / AP-024 multi-hop checks
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type

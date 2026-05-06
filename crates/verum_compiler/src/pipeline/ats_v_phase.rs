@@ -169,6 +169,24 @@ impl<'s> CompilationPipeline<'s> {
                 (Vec::new(), Vec::new(), Vec::new())
             };
 
+        // Transitive multi-hop checks (AP-019 + AP-024) using the
+        // session arch-shape registry.  Best-effort under single-pass:
+        // peers not yet processed get None lookup; check skips.
+        let (transitive_lifecycle_regressions, foundation_downgrades) =
+            if let Some(shape) = parsed_shape.as_ref() {
+                (
+                    self.session
+                        .resolve_transitive_lifecycle_regressions(
+                            module_name,
+                            shape.lifecycle.rank(),
+                        ),
+                    self.session
+                        .resolve_foundation_downgrades(module_name, &shape.foundation),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
         // Body-level capability inference (Q5).  The walker is
         // invoked at the CompilationPipeline::phase_ats_v level
         // where the full `Module` AST is available.  Per-attribute
@@ -183,6 +201,8 @@ impl<'s> CompilationPipeline<'s> {
             cited_lifecycles,
             callee_tiers,
             inferred_used_capabilities: inferred_used_capabilities.to_vec(),
+            transitive_lifecycle_regressions,
+            foundation_downgrades,
         };
         Some(verum_kernel::arch_phase::run_arch_phase_one_with(
             module_name.to_string(),
@@ -296,14 +316,15 @@ fn run_arch_phase_for_attrs(
         capability_ontology_registry: None, // use kernel-static default
         yoneda_verdicts_claimed: Vec::new(),
         foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
-        // Cross-cog fields are populated by the registry-aware
-        // wrapper `run_arch_phase_for_attrs_with_session` below;
-        // this helper only handles the per-attribute fast path.
+        // Cross-cog and transitive fields populated by the
+        // registry-aware wrapper; this helper only handles the
+        // per-attribute fast path.
         composed_foundations: Vec::new(),
         cited_lifecycles: Vec::new(),
         callee_tiers: Vec::new(),
-        // Body-level inference is also registry-aware-only.
         inferred_used_capabilities: Vec::new(),
+        transitive_lifecycle_regressions: Vec::new(),
+        foundation_downgrades: Vec::new(),
     };
     Some(run_arch_phase_one_with(
         module_name.to_string(),

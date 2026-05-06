@@ -347,6 +347,53 @@ impl Session {
             .collect()
     }
 
+    /// Resolve AP-024 TransitiveLifecycleRegression chains rooted
+    /// at `module_name` against the session's arch-shape registry.
+    /// Returns `(intermediate, terminal, terminal_lifecycle)` triples
+    /// for every transitively-reachable peer at depth ≥ 2 whose
+    /// lifecycle rank is strictly less than the cog's own rank.
+    /// AP-009 covers the depth-1 case independently.
+    pub fn resolve_transitive_lifecycle_regressions(
+        &self,
+        module_name: &str,
+        self_lifecycle_rank: u8,
+    ) -> Vec<(String, String, verum_kernel::arch::Lifecycle)> {
+        let registry = self.arch_shape_registry.read();
+        let snapshot: std::collections::BTreeMap<String, verum_kernel::arch::Shape> =
+            registry.clone();
+        verum_kernel::arch_transitive::resolve_transitive_lifecycle_regressions(
+            module_name,
+            self_lifecycle_rank,
+            &snapshot,
+        )
+    }
+
+    /// Resolve AP-019 FoundationDowngrade transitive chains rooted
+    /// at `module_name`.  Returns `(peer, peer_foundation,
+    /// downgraded_foundation)` triples for every transitively-
+    /// reachable peer at depth ≥ 2 whose foundation neither
+    /// subsumes nor is subsumed by the cog's foundation (i.e.
+    /// foreign foundation requiring a bridge).  AP-005 covers
+    /// the depth-1 case independently.
+    pub fn resolve_foundation_downgrades(
+        &self,
+        module_name: &str,
+        self_foundation: &verum_kernel::arch::Foundation,
+    ) -> Vec<(
+        String,
+        verum_kernel::arch::Foundation,
+        verum_kernel::arch::Foundation,
+    )> {
+        let registry = self.arch_shape_registry.read();
+        let snapshot: std::collections::BTreeMap<String, verum_kernel::arch::Shape> =
+            registry.clone();
+        verum_kernel::arch_transitive::resolve_transitive_foundation_downgrades(
+            module_name,
+            self_foundation,
+            &snapshot,
+        )
+    }
+
     /// Record the VBC module produced by the most recent compilation.
     /// Called by the pipeline immediately after `compile_ast_to_vbc`
     /// succeeds. Overwrites any prior recording — the slot reflects
