@@ -451,14 +451,45 @@ pub(in super::super) fn handle_set_field(
             message: "field end offset overflow".into(),
         })?;
     if field_end > header.size as usize {
+        // Diagnostic context — capture the call-stack tail and a
+        // window of bytecode around the offending PC so the panic
+        // message points at the actual user-side function rather
+        // than a bare offset.  Key for triaging mis-shaped record
+        // allocations (e.g. an intercept returning Unit where the
+        // codegen expected a multi-field record), where the failing
+        // SetField is far from the wrong-shape allocation site.
+        let backtrace: Vec<String> = state
+            .call_stack
+            .iter_rev()
+            .take(8)
+            .map(|frame| {
+                state
+                    .module
+                    .get_function(frame.function)
+                    .and_then(|f| state.module.get_string(f.name))
+                    .map(|s| format!("{}@pc={}", s, frame.pc))
+                    .unwrap_or_else(|| format!("?@pc={}", frame.pc))
+            })
+            .collect();
+        let type_name = state
+            .module
+            .types
+            .iter()
+            .find(|t| t.id == header.type_id)
+            .and_then(|t| state.module.get_string(t.name))
+            .unwrap_or("?");
         return Err(InterpreterError::Panic {
             message: format!(
-                "field write out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
+                "field write out of bounds: field index {} (offset {}+{} = {}) \
+                 exceeds object data size {} type_id={} type='{}' backtrace=[{}]",
                 field_idx,
                 field_offset,
                 std::mem::size_of::<Value>(),
                 field_end,
-                header.size
+                header.size,
+                header.type_id.0,
+                type_name,
+                backtrace.join(" <- ")
             ),
         });
     }

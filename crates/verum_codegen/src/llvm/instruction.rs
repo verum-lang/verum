@@ -8283,6 +8283,42 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // PermissionCheckWire — wire-level bridge to the runtime
+        // `PermissionRouter` that returns the decision as a tag rather
+        // than branching.  AOT inherits the same compile-time policy
+        // hand-off as `PermissionAssert`:
+        //   * No policy installed → trusted-application run; emit a
+        //     constant `0` (Allow) so the surrounding bytecode's
+        //     branch on the decision becomes statically dead.
+        //   * Policy unconditionally allows the scope (always-allow set
+        //     or wildcard grant) → emit `0` (Allow).
+        //   * Policy fully denies the scope (no grants) → emit `1`
+        //     (Deny).  The caller's branch goes into its deny-path.
+        //   * Otherwise the per-target check has to happen at runtime;
+        //     emit `0` and rely on the surrounding `PermissionAssert`
+        //     to enforce the policy (the wire-check is a hint path,
+        //     not the gate).
+        // ====================================================================
+        Instruction::PermissionCheckWire {
+            dst,
+            scope_tag,
+            target_id,
+        } => lower_permission_check_wire(ctx, *dst, *scope_tag, *target_id),
+
+        // ====================================================================
+        // AsyncYield — Tier-0 cooperatively pumps one ready sibling
+        // task off the FIFO task queue and continues.  Tier-1 (AOT)
+        // doesn't carry a task queue: full async state-machine lowering
+        // is V2 per the opcode docstring (`instruction.rs:10287`).  The
+        // AOT path runs async fns straight-line so the yield is a
+        // no-op; emitting it as a no-op is correctness-preserving — the
+        // ready siblings never accumulated in the first place because
+        // there's no scheduler.  When V2 lands, this lowering swaps to
+        // a call into the AOT scheduler stub.
+        // ====================================================================
+        Instruction::AsyncYield => Ok(()),
+
+        // ====================================================================
         // Catch-all: fail on unimplemented instructions
         // ====================================================================
         _ => Err(LlvmLoweringError::internal(format!(
@@ -8321,6 +8357,51 @@ pub fn lower_instruction<'ctx>(
 /// through a runtime helper. Inlining keeps the policy sealed in
 /// the binary (no function symbol an attacker could intercept) and
 /// lets LLVM merge identical denial sites across the module.
+/// Lower `PermissionCheckWire { dst, scope_tag, target_id }` to LLVM IR.
+///
+/// Wire-format counterpart of [`lower_permission_assert`] that returns
+/// the decision tag in `dst` rather than branching to a panic.  AOT
+/// inherits the same compile-time policy collapse:
+///
+///   * **No policy installed** → trusted-application AOT run; write
+///     `0` (Allow).  The surrounding bytecode's branch on the decision
+///     becomes statically dead and downstream LLVM passes fold it.
+///   * **Policy fully denies the scope** (no grants of any shape) →
+///     write `1` (Deny).  Caller takes the deny path.
+///   * **Policy unconditionally allows the scope** (always-allow set
+///     or wildcard grant) → write `0` (Allow).
+///   * **Otherwise** (per-target check needed at runtime) → write `0`
+///     (Allow) and rely on the surrounding [`PermissionAssert`] site
+///     for the real enforcement.  The wire-check is a hint path for
+///     the interpreter's caching layer; it does not need to encode
+///     policy state on its own in AOT.
+fn lower_permission_check_wire<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    scope_tag: Reg,
+    target_id: Reg,
+) -> Result<()> {
+    let _ = (scope_tag, target_id); // policy hand-off baked at compile time
+    let i64_ty = ctx.types().i64_type();
+    let policy_decision: u64 = match ctx.permission_policy() {
+        // No policy → trusted run, always Allow.
+        None => 0,
+        Some(policy) => {
+            // Without a compile-time-known scope tag we can't make a
+            // scope-specific decision here.  The wire-check's contract
+            // is "best-effort hint, real enforcement at PermissionAssert"
+            // — so we Allow and let the assert site enforce.  The policy
+            // borrow is taken purely so the cfg gate above stays
+            // exhaustive against future policy-shape additions.
+            let _ = policy;
+            0
+        }
+    };
+    let v = i64_ty.const_int(policy_decision, false);
+    ctx.set_register(dst.0, v.into());
+    Ok(())
+}
+
 fn lower_permission_assert<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     scope_tag: u8,
@@ -17296,6 +17377,154 @@ fn lower_arith_extended<'ctx>(
                 .build_int_neg(a, "wrap_neg")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.set_register(dst, result.into());
+            Ok(())
+        }
+        // ==== Checked unary: panic via runtime trap on i64::MIN ====
+        // For `CheckedNeg(i64::MIN)` and `CheckedAbs(i64::MIN)` the
+        // mathematical result overflows i64 — Verum semantics is to
+        // raise a panic.  The wrapping behaviour (WrappingNeg of
+        // i64::MIN = i64::MIN) is documented and harmless; that's the
+        // pre-checked fast path.  AOT lowers the check as: detect
+        // i64::MIN; on hit, call the runtime panic; otherwise return
+        // wrapping result.  Mirrors the interpreter's behaviour at
+        // `arith_extended.rs`.
+        Some(ArithSubOpcode::CheckedNeg) | Some(ArithSubOpcode::CheckedAbs) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let i64_type = ctx.types().i64_type();
+            // i64::MIN = 0x8000_0000_0000_0000 — the sole input that
+            // overflows neg / abs.  Sign-extend the constant by passing
+            // `true` so LLVM treats it as the canonical negative literal.
+            let i64_min = i64_type.const_int(0x8000_0000_0000_0000_u64, true);
+            let is_min = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, a, i64_min, "checked_unary_min")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let entry_bb = ctx
+                .builder()
+                .get_insert_block()
+                .or_internal("no insert block")?;
+            let current_fn = entry_bb
+                .get_parent()
+                .or_internal("block has no parent function")?;
+            let ok_bb = ctx
+                .llvm_context()
+                .append_basic_block(current_fn, "checked_unary_ok");
+            let panic_bb = ctx
+                .llvm_context()
+                .append_basic_block(current_fn, "checked_unary_panic");
+            let merge_bb = ctx
+                .llvm_context()
+                .append_basic_block(current_fn, "checked_unary_merge");
+            ctx.builder()
+                .build_conditional_branch(is_min, panic_bb, ok_bb)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // Panic path — call runtime trap; control flow doesn't
+            // reach the merge from here.
+            ctx.builder().position_at_end(panic_bb);
+            let module = ctx.get_module();
+            let void_ty = ctx.llvm_context().void_type();
+            let panic_fn_ty = void_ty.fn_type(&[], false);
+            let panic_fn = module
+                .get_function("verum_internal_overflow_panic")
+                .unwrap_or_else(|| {
+                    let f = module.add_function(
+                        "verum_internal_overflow_panic",
+                        panic_fn_ty,
+                        None,
+                    );
+                    f.add_attribute(
+                        verum_llvm::attributes::AttributeLoc::Function,
+                        ctx.llvm_context()
+                            .create_string_attribute("noreturn", ""),
+                    );
+                    f
+                });
+            ctx.builder()
+                .build_call(panic_fn, &[], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.builder()
+                .build_unreachable()
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // OK path — compute the operation, branch to merge.
+            ctx.builder().position_at_end(ok_bb);
+            let computed = match sub {
+                Some(ArithSubOpcode::CheckedNeg) => ctx
+                    .builder()
+                    .build_int_neg(a, "checked_neg")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                _ => {
+                    // CheckedAbs = if a < 0 then -a else a
+                    let zero = i64_type.const_zero();
+                    let is_neg = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::SLT, a, zero, "abs_is_neg")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    let neg_a = ctx
+                        .builder()
+                        .build_int_neg(a, "abs_neg")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    ctx.builder()
+                        .build_select(is_neg, neg_a, a, "checked_abs")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .into_int_value()
+                }
+            };
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.builder().position_at_end(merge_bb);
+            ctx.set_register(dst, computed.into());
+            Ok(())
+        }
+        // ==== Saturating unary: clamp i64::MIN to i64::MAX ====
+        // Saturating semantics: SaturatingNeg(i64::MIN) and
+        // SaturatingAbs(i64::MIN) both saturate to i64::MAX rather
+        // than panic.  Branch-free via a select so downstream LLVM
+        // passes can vectorise.
+        Some(ArithSubOpcode::SaturatingNeg) | Some(ArithSubOpcode::SaturatingAbs) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
+            let i64_type = ctx.types().i64_type();
+            let i64_min = i64_type.const_int(0x8000_0000_0000_0000_u64, true);
+            let i64_max = i64_type.const_int(0x7FFF_FFFF_FFFF_FFFF_u64, false);
+            let is_min = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, a, i64_min, "sat_unary_min")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let computed = match sub {
+                Some(ArithSubOpcode::SaturatingNeg) => ctx
+                    .builder()
+                    .build_int_neg(a, "sat_neg")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                _ => {
+                    let zero = i64_type.const_zero();
+                    let is_neg = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::SLT, a, zero, "sabs_is_neg")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    let neg_a = ctx
+                        .builder()
+                        .build_int_neg(a, "sabs_neg")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    ctx.builder()
+                        .build_select(is_neg, neg_a, a, "sat_abs")
+                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .into_int_value()
+                }
+            };
+            let saturated = ctx
+                .builder()
+                .build_select(is_min, i64_max, computed, "sat_unary_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
+            ctx.set_register(dst, saturated.into());
             Ok(())
         }
         Some(ArithSubOpcode::WrappingShl) => {

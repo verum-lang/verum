@@ -3454,8 +3454,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         Opcode::NewList => {
+            // Encoder writes `dst + varint(len)` — `Instruction::MakeList`
+            // and the legacy `Instruction::NewList { dst }` encoder share
+            // the same opcode byte after the latter was extended with a
+            // capacity-hint varint to keep the runtime handler's
+            // `read_varint` satisfied.  Always consume the varint so the
+            // decoder stays in sync with the byte stream regardless of
+            // which IR variant produced it.  Decode to `MakeList` since
+            // it's a strict superset (`NewList` ↔ `MakeList { len: 0 }`).
             let dst = decode_reg(data, offset)?;
-            Ok(Instruction::NewList { dst })
+            let len = decode_varint(data, offset)? as u16;
+            Ok(Instruction::MakeList { dst, len })
         }
 
         Opcode::ListPush => {
@@ -3471,8 +3480,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         Opcode::NewMap => {
+            // See NewList — encoder writes capacity_hint varint after dst.
             let dst = decode_reg(data, offset)?;
-            Ok(Instruction::NewMap { dst })
+            let capacity = decode_varint(data, offset)? as u16;
+            Ok(Instruction::MakeMap { dst, capacity })
         }
 
         Opcode::MapGet => {
@@ -5234,13 +5245,30 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         // ====================================================================
-        // Meta Operations
+        // Meta Operations — explicit per-opcode decoders so the linker /
+        // disassembler / validator stay in sync with the byte stream.
+        // The previous catch-all returned `Raw` without consuming any
+        // operand bytes, leaving `*offset` pointing into the operand
+        // stream and corrupting every subsequent instruction decode.
         // ====================================================================
-        Opcode::MetaEval | Opcode::MetaQuote | Opcode::MetaSplice | Opcode::MetaReflect => {
-            Ok(Instruction::Raw {
-                opcode,
-                data: vec![],
-            })
+        Opcode::MetaQuote => {
+            let dst = decode_reg(data, offset)?;
+            let bytes_const_id = decode_varint(data, offset)? as u32;
+            Ok(Instruction::MetaQuote { dst, bytes_const_id })
+        }
+        Opcode::MetaSplice => {
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::MetaSplice { src })
+        }
+        Opcode::MetaEval => {
+            let dst = decode_reg(data, offset)?;
+            let expr = decode_reg(data, offset)?;
+            Ok(Instruction::MetaEval { dst, expr })
+        }
+        Opcode::MetaReflect => {
+            let dst = decode_reg(data, offset)?;
+            let type_id = decode_varint(data, offset)? as u32;
+            Ok(Instruction::MetaReflect { dst, type_id })
         }
 
         // ====================================================================
@@ -5501,6 +5529,311 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 field,
             })
         }
+
+        // ====================================================================
+        // Linker / disassembler decoder arms — sequential decode parity
+        //
+        // Each arm here mirrors a SymmetricMembership encoder above so the
+        // linker's `decode_instructions` walker stays in sync with the
+        // byte stream.  A missing arm here would land in the wildcard
+        // (`Raw`) which doesn't consume operand bytes — leaving `*offset`
+        // pointing into the operand stream and corrupting every later
+        // instruction decode (the architectural failure mode tracked at
+        // commit 5f25a7bc).  Keep encoder-decoder pairs adjacent (or
+        // explicitly cross-referenced) when adding new instructions.
+        // ====================================================================
+
+        // ---------- String operations ----------
+        Opcode::Concat => {
+            let dst = decode_reg(data, offset)?;
+            let a = decode_reg(data, offset)?;
+            let b = decode_reg(data, offset)?;
+            Ok(Instruction::Concat { dst, a, b })
+        }
+        Opcode::ToString => {
+            let dst = decode_reg(data, offset)?;
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::ToString { dst, src })
+        }
+        Opcode::CharToStr => {
+            let dst = decode_reg(data, offset)?;
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::CharToStr { dst, src })
+        }
+
+        // ---------- Variants ----------
+        Opcode::MakeVariant => {
+            let dst = decode_reg(data, offset)?;
+            let tag = decode_varint(data, offset)? as u32;
+            let field_count = decode_varint(data, offset)? as u32;
+            Ok(Instruction::MakeVariant {
+                dst,
+                tag,
+                field_count,
+            })
+        }
+        Opcode::SetVariantData => {
+            let variant = decode_reg(data, offset)?;
+            let field = decode_varint(data, offset)? as u32;
+            let value = decode_reg(data, offset)?;
+            Ok(Instruction::SetVariantData {
+                variant,
+                field,
+                value,
+            })
+        }
+        Opcode::GetTag => {
+            let dst = decode_reg(data, offset)?;
+            let variant = decode_reg(data, offset)?;
+            Ok(Instruction::GetTag { dst, variant })
+        }
+
+        // ---------- Stack ----------
+        Opcode::Push => {
+            let src = decode_reg(data, offset)?;
+            Ok(Instruction::Push { src })
+        }
+        Opcode::Pop => {
+            let dst = decode_reg(data, offset)?;
+            Ok(Instruction::Pop { dst })
+        }
+
+        // ---------- Indirect call ----------
+        Opcode::CallR => {
+            let dst = decode_reg(data, offset)?;
+            let func = decode_reg(data, offset)?;
+            let argc = decode_u8(data, offset)?;
+            Ok(Instruction::CallR { dst, func, argc })
+        }
+
+        // ---------- Exception handling ----------
+        Opcode::Throw => {
+            let error = decode_reg(data, offset)?;
+            Ok(Instruction::Throw { error })
+        }
+        Opcode::TryBegin => {
+            let handler_offset = decode_signed_varint(data, offset)? as i32;
+            Ok(Instruction::TryBegin { handler_offset })
+        }
+        Opcode::TryEnd => Ok(Instruction::TryEnd),
+        Opcode::GetException => {
+            let dst = decode_reg(data, offset)?;
+            Ok(Instruction::GetException { dst })
+        }
+
+        // ---------- Future / Async ----------
+        Opcode::FutureReady => {
+            let dst = decode_reg(data, offset)?;
+            let future = decode_reg(data, offset)?;
+            Ok(Instruction::FutureReady { dst, future })
+        }
+        Opcode::FutureGet => {
+            let dst = decode_reg(data, offset)?;
+            let future = decode_reg(data, offset)?;
+            Ok(Instruction::FutureGet { dst, future })
+        }
+        Opcode::AsyncNext => {
+            let dst = decode_reg(data, offset)?;
+            let iter = decode_reg(data, offset)?;
+            Ok(Instruction::AsyncNext { dst, iter })
+        }
+
+        // ---------- Context (extended) ----------
+        Opcode::PushContext => {
+            let name = decode_varint(data, offset)? as u32;
+            let handler = decode_reg(data, offset)?;
+            Ok(Instruction::PushContext { name, handler })
+        }
+        Opcode::PopContext => {
+            let name = decode_varint(data, offset)? as u32;
+            Ok(Instruction::PopContext { name })
+        }
+        Opcode::Attenuate => {
+            let dst = decode_reg(data, offset)?;
+            let context = decode_reg(data, offset)?;
+            let capabilities = decode_varint(data, offset)? as u32;
+            Ok(Instruction::Attenuate {
+                dst,
+                context,
+                capabilities,
+            })
+        }
+
+        // ---------- Set / Deque / Range ----------
+        Opcode::NewSet => {
+            // Encoder writes `dst + varint(capacity_hint)` — handler
+            // reads the varint regardless of which IR variant produced
+            // it, so decoder always consumes both.  Decode to MakeSet
+            // (NewSet ↔ MakeSet { capacity: 0 }).
+            let dst = decode_reg(data, offset)?;
+            let capacity = decode_varint(data, offset)? as u16;
+            Ok(Instruction::MakeSet { dst, capacity })
+        }
+        Opcode::NewDeque => {
+            let dst = decode_reg(data, offset)?;
+            let _capacity_hint = decode_varint(data, offset)?;
+            Ok(Instruction::NewDeque { dst })
+        }
+        Opcode::NewRange => {
+            let dst = decode_reg(data, offset)?;
+            let start = decode_reg(data, offset)?;
+            let end = decode_reg(data, offset)?;
+            let inclusive = decode_u8(data, offset)? != 0;
+            Ok(Instruction::NewRange {
+                dst,
+                start,
+                end,
+                inclusive,
+            })
+        }
+        Opcode::SetInsert => {
+            let set = decode_reg(data, offset)?;
+            let elem = decode_reg(data, offset)?;
+            Ok(Instruction::SetInsert { set, elem })
+        }
+        Opcode::SetContains => {
+            let dst = decode_reg(data, offset)?;
+            let set = decode_reg(data, offset)?;
+            let elem = decode_reg(data, offset)?;
+            Ok(Instruction::SetContains { dst, set, elem })
+        }
+        Opcode::SetRemove => {
+            let set = decode_reg(data, offset)?;
+            let elem = decode_reg(data, offset)?;
+            Ok(Instruction::SetRemove { set, elem })
+        }
+
+        // ---------- V-LLSI system ----------
+        Opcode::SyscallLinux => {
+            let dst = decode_reg(data, offset)?;
+            let num = decode_reg(data, offset)?;
+            let a1 = decode_reg(data, offset)?;
+            let a2 = decode_reg(data, offset)?;
+            let a3 = decode_reg(data, offset)?;
+            let a4 = decode_reg(data, offset)?;
+            let a5 = decode_reg(data, offset)?;
+            let a6 = decode_reg(data, offset)?;
+            Ok(Instruction::SyscallLinux {
+                dst,
+                num,
+                a1,
+                a2,
+                a3,
+                a4,
+                a5,
+                a6,
+            })
+        }
+        Opcode::Mmap => {
+            let dst = decode_reg(data, offset)?;
+            let addr = decode_reg(data, offset)?;
+            let len = decode_reg(data, offset)?;
+            let prot = decode_reg(data, offset)?;
+            let flags = decode_reg(data, offset)?;
+            let fd = decode_reg(data, offset)?;
+            let mmap_offset = decode_reg(data, offset)?;
+            Ok(Instruction::Mmap {
+                dst,
+                addr,
+                len,
+                prot,
+                flags,
+                fd,
+                offset: mmap_offset,
+            })
+        }
+        Opcode::Munmap => {
+            let dst = decode_reg(data, offset)?;
+            let addr = decode_reg(data, offset)?;
+            let len = decode_reg(data, offset)?;
+            Ok(Instruction::Munmap { dst, addr, len })
+        }
+        Opcode::IoSubmit => {
+            let dst = decode_reg(data, offset)?;
+            let engine = decode_reg(data, offset)?;
+            let ops = decode_reg(data, offset)?;
+            Ok(Instruction::IoSubmit { dst, engine, ops })
+        }
+        Opcode::IoPoll => {
+            let dst = decode_reg(data, offset)?;
+            let engine = decode_reg(data, offset)?;
+            let timeout = decode_reg(data, offset)?;
+            Ok(Instruction::IoPoll {
+                dst,
+                engine,
+                timeout,
+            })
+        }
+
+        // ---------- Structured concurrency (Nursery) ----------
+        Opcode::NurseryInit => {
+            let dst = decode_reg(data, offset)?;
+            Ok(Instruction::NurseryInit { dst })
+        }
+        Opcode::NurseryConfig => {
+            // NurseryConfig wire format:
+            //   `[opcode][reg:nursery][varint:config_type][reg:value]`
+            // config_type (0=Timeout, 1=MaxTasks, 2=ErrorBehavior,
+            // 3=Enter, 4=Exit) selects which IR variant the bytes
+            // round-trip back into.  Enter/Exit ignore the value reg
+            // (encoder writes the nursery reg as a placeholder) so we
+            // accept and discard it during decode.
+            let nursery = decode_reg(data, offset)?;
+            let config_type = decode_varint(data, offset)?;
+            let value = decode_reg(data, offset)?;
+            match config_type {
+                0 => Ok(Instruction::NurserySetTimeout {
+                    nursery,
+                    timeout: value,
+                }),
+                1 => Ok(Instruction::NurserySetMaxTasks {
+                    nursery,
+                    max_tasks: value,
+                }),
+                2 => Ok(Instruction::NurserySetErrorBehavior {
+                    nursery,
+                    behavior: value,
+                }),
+                3 => Ok(Instruction::NurseryEnter { nursery }),
+                4 => Ok(Instruction::NurseryExit { nursery }),
+                _ => Ok(Instruction::Raw {
+                    opcode,
+                    data: vec![],
+                }),
+            }
+        }
+        Opcode::NurserySpawn => {
+            let dst = decode_reg(data, offset)?;
+            let nursery = decode_reg(data, offset)?;
+            let task = decode_reg(data, offset)?;
+            Ok(Instruction::NurserySpawn { dst, nursery, task })
+        }
+        Opcode::NurseryAwait => {
+            // Encoder order: success-reg first, then nursery.
+            let success = decode_reg(data, offset)?;
+            let nursery = decode_reg(data, offset)?;
+            Ok(Instruction::NurseryAwaitAll { nursery, success })
+        }
+        Opcode::NurseryError => {
+            let dst = decode_reg(data, offset)?;
+            let nursery = decode_reg(data, offset)?;
+            Ok(Instruction::NurseryGetError { nursery, dst })
+        }
+        Opcode::NurseryCancel => {
+            let nursery = decode_reg(data, offset)?;
+            Ok(Instruction::NurseryCancel { nursery })
+        }
+
+        // GpuExtended / CubicalExtended deliberately fall through to the
+        // wildcard — their encoders write per-sub-op layouts WITHOUT a
+        // length prefix (parity with the structured TensorExtended
+        // decoder above).  Adding generic length-varint arms here would
+        // mis-decode the first operand byte as a length and corrupt the
+        // stream.  Per-sub-op structured decoders for these carriers
+        // remain a separate task; for now sequential decoding on a
+        // module that emits these will surface as a downstream type
+        // error rather than a silent miscompile, which the linker round
+        // trip already catches.
 
         // ====================================================================
         // Reserved Opcodes
