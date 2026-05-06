@@ -2101,7 +2101,28 @@ impl TypeChecker {
             }
             Self::push_referenced_type_names(&return_ty, &mut referenced);
             let fn_ty = Type::function(params, return_ty);
-            bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty));
+            // Determine whether the method is static (no `self`
+            // receiver).  Static-method dispatch sites
+            // (`Text.with_capacity(64)`, `Heap.alloc(layout)` …)
+            // read from the `$static$<method>` bucket key;
+            // instance-method dispatch reads the bare key.  The
+            // AST-driven registration path elsewhere in this file
+            // follows the same convention.  Pre-fix every
+            // metadata-loaded static method was registered ONLY
+            // under the bare key, so every `Type.static_method(...)`
+            // call site failed typecheck despite the body being in
+            // the precompiled archive.
+            let is_static = fn_desc
+                .params
+                .first()
+                .map(|p| p.name.as_str() != "self")
+                .unwrap_or(true);
+            bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty.clone()));
+            if is_static {
+                let static_key: Text =
+                    format!("$static${}", method_name.as_str()).into();
+                bucket.entry(static_key).or_insert_with(|| TypeScheme::mono(fn_ty));
+            }
         }
         referenced
     }
