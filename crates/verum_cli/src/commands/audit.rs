@@ -10556,6 +10556,8 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
  // Stable order matches `verum_kernel::intrinsic_dispatch`
  // available_intrinsics() listing.
     let arch_intrinsics: &[(&str, &str)] = &[
+        // 8 base intrinsics — capability/boundary/composition/lifecycle
+        // foundation/anti-pattern/CVE-closure/soundness-v0.
         ("kernel_arch_capability_discipline", "Capability discipline (AP-001 + AP-002)"),
         ("kernel_arch_boundary_check", "Boundary type check"),
         ("kernel_arch_composition_check", "Composition algebra check"),
@@ -10564,6 +10566,56 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
         ("kernel_arch_anti_pattern_check", "Generic anti-pattern dispatcher"),
         ("kernel_arch_cve_closure", "CVE-closure check (AP-010, strict mode)"),
         ("kernel_arch_soundness_v0", "End-to-end soundness witness"),
+        // 4 surface intrinsics — Verum-side core/architecture/ cogs
+        // (mtac, counterfactual, adjunction, yoneda).
+        ("kernel_arch_mtac_calculus", "Modal-Temporal Architectural Calculus primitives"),
+        (
+            "kernel_arch_counterfactual_engine",
+            "Counterfactual reasoning engine (non-destructive evaluation)",
+        ),
+        (
+            "kernel_arch_adjunction_analyzer",
+            "Adjunction analyzer (refactoring as F ⊣ G)",
+        ),
+        (
+            "kernel_arch_yoneda_equivalence",
+            "Yoneda-equivalence checker (5-roster observer projection)",
+        ),
+        // 4 operational-engine intrinsics — composition / corpus /
+        // phase / parse cogs.
+        (
+            "kernel_arch_composition_engine",
+            "A ⊗ B composition engine (5-rule typed operation)",
+        ),
+        (
+            "kernel_arch_composition_associative",
+            "Composition associativity pin",
+        ),
+        (
+            "kernel_arch_corpus_verify",
+            "Cross-cog corpus invariants (4-roster: cycle/foundation/LAbs/closure)",
+        ),
+        (
+            "kernel_arch_phase_orchestrator",
+            "ATS-V Phase 6.5 orchestrator (no-early-exit walk)",
+        ),
+        // 4 red-team closure intrinsics — defeat AT-1..AT-5 attack vectors.
+        (
+            "kernel_arch_capability_ontology_check",
+            "AT-1: Capability.Custom tags must be registry-canonical",
+        ),
+        (
+            "kernel_arch_yoneda_canonical_roster_complete",
+            "AT-3: Yoneda verdict must span full canonical 5-roster",
+        ),
+        (
+            "kernel_arch_theorem_cve_required",
+            "AT-2: Lifecycle.Theorem requires full CVE+ regardless of strict",
+        ),
+        (
+            "kernel_arch_consumes_format_check",
+            "AT-5: consumes entries must match <resource>/<int> <unit> format",
+        ),
     ];
 
  // Dispatch each intrinsic and collect verdicts.

@@ -1427,7 +1427,181 @@ fn walk_core_vr_files(dir: &std::path::Path, f: &mut impl FnMut(&std::path::Path
 }
 
 // =============================================================================
-// 23. Internal/ references must NOT appear in any architecture .vr file
+// 23. Audit-bundle CLI walks all 16 ATS-V intrinsics
+// =============================================================================
+
+#[test]
+fn pin_audit_bundle_walks_all_ats_v_intrinsics() {
+    // The verum_cli `verum audit --arch-discharges` gate iterates
+    // a static `arch_intrinsics` list and dispatches each entry.
+    // This pin ensures the list covers all 16 ATS-V intrinsics:
+    //   * 8 base (capability/boundary/composition/lifecycle/foundation/
+    //     anti_pattern/cve_closure/soundness_v0)
+    //   * 4 surface (mtac/counterfactual/adjunction/yoneda)
+    //   * 4 operational engine (composition_engine/_associative/
+    //     corpus_verify/phase_orchestrator)
+    //   * 4 red-team (capability_ontology/yoneda_canonical_roster/
+    //     theorem_cve_required/consumes_format)
+    //
+    // = 16 unique intrinsic names.  Adding a new ATS-V intrinsic
+    // requires extending the audit-bundle list AND this pin in
+    // the same change-set.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let audit_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_cli")
+            .join("src")
+            .join("commands")
+            .join("audit.rs"),
+    )
+    .expect("read audit.rs");
+
+    let expected_ats_v_intrinsics: &[&str] = &[
+        // Base 8.
+        "kernel_arch_capability_discipline",
+        "kernel_arch_boundary_check",
+        "kernel_arch_composition_check",
+        "kernel_arch_lifecycle_check",
+        "kernel_arch_foundation_consistency",
+        "kernel_arch_anti_pattern_check",
+        "kernel_arch_cve_closure",
+        "kernel_arch_soundness_v0",
+        // Surface 4.
+        "kernel_arch_mtac_calculus",
+        "kernel_arch_counterfactual_engine",
+        "kernel_arch_adjunction_analyzer",
+        "kernel_arch_yoneda_equivalence",
+        // Operational engine 4.
+        "kernel_arch_composition_engine",
+        "kernel_arch_composition_associative",
+        "kernel_arch_corpus_verify",
+        "kernel_arch_phase_orchestrator",
+        // Red-team 4.
+        "kernel_arch_capability_ontology_check",
+        "kernel_arch_yoneda_canonical_roster_complete",
+        "kernel_arch_theorem_cve_required",
+        "kernel_arch_consumes_format_check",
+    ];
+    assert_eq!(
+        expected_ats_v_intrinsics.len(),
+        20,
+        "expected total ATS-V intrinsic count drifted (was 8 base + 4 surface + 4 engine + 4 red-team = 20; \
+         the 'archive 16' name in earlier docs counts only the 12 dispatcher + 4 red-team)"
+    );
+
+    for intrinsic in expected_ats_v_intrinsics {
+        let needle = format!("\"{}\"", intrinsic);
+        assert!(
+            audit_src.contains(&needle),
+            "audit.rs arch_intrinsics list missing entry: {}",
+            intrinsic,
+        );
+    }
+}
+
+// =============================================================================
+// 24. Q4 cross-cog peer resolution wiring
+// =============================================================================
+
+#[test]
+fn pin_phase_inputs_cross_cog_fields_present() {
+    // PhaseInputs gained 3 cross-cog slots in Q4:
+    // composed_foundations / cited_lifecycles / callee_tiers.
+    // These activate AP-005 / AP-009 / AP-004 when the compiler
+    // resolves peers from the session-level arch-shape registry.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("arch_phase.rs"),
+    )
+    .expect("read arch_phase.rs");
+    for needle in &[
+        "pub composed_foundations:",
+        "pub cited_lifecycles:",
+        "pub callee_tiers:",
+    ] {
+        assert!(
+            src.contains(needle),
+            "PhaseInputs missing cross-cog field: {}",
+            needle,
+        );
+    }
+    for needle in &[
+        "ctx.composed_foundations = inputs.composed_foundations.clone()",
+        "ctx.cited_lifecycles = inputs.cited_lifecycles.clone()",
+        "ctx.callee_tiers = inputs.callee_tiers.clone()",
+    ] {
+        assert!(
+            src.contains(needle),
+            "run_arch_phase_one_with not propagating cross-cog field: {}",
+            needle,
+        );
+    }
+}
+
+#[test]
+fn pin_compiler_session_arch_shape_registry_present() {
+    // Q4 requires the compiler-side Session to maintain a
+    // per-module arch-shape registry; phase_ats_v populates it
+    // and resolves peers' Foundation/Lifecycle/Tier from it.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let session_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("session.rs"),
+    )
+    .expect("read session.rs");
+    for needle in &[
+        "arch_shape_registry:",
+        "pub fn register_arch_shape",
+        "pub fn resolve_composed_foundations",
+        "pub fn resolve_cited_lifecycles",
+        "pub fn resolve_callee_tiers",
+    ] {
+        assert!(
+            session_src.contains(needle),
+            "session.rs missing arch-shape registry surface: {}",
+            needle,
+        );
+    }
+
+    let phase_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("pipeline")
+            .join("ats_v_phase.rs"),
+    )
+    .expect("read ats_v_phase.rs");
+    for needle in &[
+        "run_arch_phase_for_attrs_registry_aware",
+        ".register_arch_shape(",
+        ".resolve_composed_foundations(",
+        ".resolve_cited_lifecycles(",
+        ".resolve_callee_tiers(",
+    ] {
+        assert!(
+            phase_src.contains(needle),
+            "ats_v_phase.rs missing registry-aware wiring: {}",
+            needle,
+        );
+    }
+}
+
+// =============================================================================
+// 25. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

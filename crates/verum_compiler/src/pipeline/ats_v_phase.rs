@@ -46,7 +46,12 @@ impl<'s> CompilationPipeline<'s> {
         let mut total_violations = 0usize;
 
         // 1. Module-level @arch_module(...) — the primary surface.
-        if let Some(result) = run_arch_phase_for_attrs(&module.attributes, "<module>") {
+        //   Use the registry-aware entry so cross-cog peer resolution
+        //   (composed_foundations / cited_lifecycles / callee_tiers)
+        //   activates AP-004 / AP-005 / AP-009 in production.
+        if let Some(result) =
+            self.run_arch_phase_for_attrs_registry_aware(&module.attributes, "<module>")
+        {
             total_violations += result.violations.len();
             self.emit_arch_phase_result(&result, module);
         }
@@ -61,7 +66,9 @@ impl<'s> CompilationPipeline<'s> {
             // @arch_module).  Per-decl inner attributes (decl_attrs)
             // we skip here because @arch_module is conventionally
             // an outer item attribute.
-            if let Some(result) = run_arch_phase_for_attrs(&item.attributes, &item_name) {
+            if let Some(result) =
+                self.run_arch_phase_for_attrs_registry_aware(&item.attributes, &item_name)
+            {
                 total_violations += result.violations.len();
                 self.emit_arch_phase_result(&result, module);
             }
@@ -74,6 +81,75 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
         Ok(())
+    }
+
+    /// Registry-aware variant of `run_arch_phase_for_attrs`.  Reads
+    /// the per-attribute Shape, registers it into the session-level
+    /// arch-shape registry, then performs cross-cog peer resolution
+    /// for `composes_with` to populate
+    /// `PhaseInputs.composed_foundations` / `cited_lifecycles` /
+    /// `callee_tiers` from peer Shapes already in the registry.
+    ///
+    /// Order-dependence: a peer processed AFTER this module gets a
+    /// `None` lookup and its check skips.  No false-positive — the
+    /// registry is "best-effort known-at-this-point".
+    fn run_arch_phase_for_attrs_registry_aware(
+        &self,
+        attrs: &List<verum_ast::attr::Attribute>,
+        module_name: &str,
+    ) -> Option<ModuleArchResult> {
+        // First pass: locate the @arch_module attribute and parse it
+        // to extract the Shape.  We need the Shape's composes_with /
+        // foundation / lifecycle / at_tier BEFORE running the check
+        // so we can both register it and resolve peers.
+        let mut arch_module_args: Option<&[verum_ast::expr::Expr]> = None;
+        for attr in attrs.iter() {
+            if attr.name.as_str() == "arch_module" {
+                arch_module_args = Some(match &attr.args {
+                    Maybe::Some(args) => args.as_slice(),
+                    Maybe::None => &[],
+                });
+            }
+        }
+        let args_slice = arch_module_args?;
+
+        // Parse Shape upfront so we can resolve peers from
+        // composes_with.  parse_arch_module is the same path the
+        // kernel-side run_arch_phase_one_with would take.
+        let parsed_shape = verum_kernel::arch_parse::parse_arch_module(args_slice).ok();
+
+        // Register THIS module's Shape into the session.
+        if let Some(shape) = parsed_shape.as_ref() {
+            self.session
+                .register_arch_shape(module_name.to_string(), shape.clone());
+        }
+
+        // Resolve cross-cog peer data from registry.  Best-effort
+        // under single-pass architecture.
+        let (composed_foundations, cited_lifecycles, callee_tiers) =
+            if let Some(shape) = parsed_shape.as_ref() {
+                (
+                    self.session.resolve_composed_foundations(&shape.composes_with),
+                    self.session.resolve_cited_lifecycles(&shape.composes_with),
+                    self.session.resolve_callee_tiers(&shape.composes_with),
+                )
+            } else {
+                (Vec::new(), Vec::new(), Vec::new())
+            };
+
+        let inputs = PhaseInputs {
+            capability_ontology_registry: None,
+            yoneda_verdicts_claimed: Vec::new(),
+            foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
+            composed_foundations,
+            cited_lifecycles,
+            callee_tiers,
+        };
+        Some(verum_kernel::arch_phase::run_arch_phase_one_with(
+            module_name.to_string(),
+            args_slice,
+            &inputs,
+        ))
     }
 
     /// Lower one `ModuleArchResult` (one parse + check pass) into
@@ -181,6 +257,12 @@ fn run_arch_phase_for_attrs(
         capability_ontology_registry: None, // use kernel-static default
         yoneda_verdicts_claimed: Vec::new(),
         foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
+        // Cross-cog fields are populated by the registry-aware
+        // wrapper `run_arch_phase_for_attrs_with_session` below;
+        // this helper only handles the per-attribute fast path.
+        composed_foundations: Vec::new(),
+        cited_lifecycles: Vec::new(),
+        callee_tiers: Vec::new(),
     };
     Some(run_arch_phase_one_with(
         module_name.to_string(),
