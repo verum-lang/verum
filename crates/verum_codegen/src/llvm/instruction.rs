@@ -20392,6 +20392,320 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
 
+        // ===================================================================
+        // Slice element access (0x06, 0x07)
+        // ===================================================================
+        0x06 | 0x07 => {
+            // SliceGet (bounds-checked) / SliceGetUnchecked
+            // dst = slice[idx].  Slice layout: Pack { ptr: i64, len: i64 }
+            // (24-byte header).  GetE on the slice register would also work
+            // for these in principle, but the dedicated sub-ops carry the
+            // bounds-check discipline through a runtime extern so the
+            // checked variant raises a panic on OOB rather than reading
+            // adjacent memory.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let slice = ctx.get_register(op_reg(operands, 1))?;
+            let idx = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "sg_idx")?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let extern_name = if sub_op == 0x06 {
+                "verum_cbgr_slice_get"
+            } else {
+                "verum_cbgr_slice_get_unchecked"
+            };
+            let fn_type = i64_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let f = module
+                .get_function(extern_name)
+                .unwrap_or_else(|| module.add_function(extern_name, fn_type, None));
+            let slice_ptr = as_ptr(ctx, slice, "sg_slice")?;
+            let result = ctx
+                .builder()
+                .build_call(f, &[slice_ptr.into(), idx.into()], "slice_get")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| {
+                    LlvmLoweringError::internal("SliceGet: expected return value")
+                })?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+
+        // ===================================================================
+        // Capability ops (0x11, 0x14, 0x15)
+        // ===================================================================
+        0x11 => {
+            // CapTransfer — transfer capabilities between two refs.
+            // verum_cbgr_cap_transfer(dst_ref: ptr, src_ref: ptr) -> void
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst_ref = ctx.get_register(op_reg(operands, 0))?;
+            let src_ref = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = ctx
+                .types()
+                .void_type()
+                .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+            let f = module
+                .get_function("verum_cbgr_cap_transfer")
+                .unwrap_or_else(|| {
+                    module.add_function("verum_cbgr_cap_transfer", fn_type, None)
+                });
+            let dst_ptr = as_ptr(ctx, dst_ref, "cap_xfer_dst")?;
+            let src_ptr = as_ptr(ctx, src_ref, "cap_xfer_src")?;
+            ctx.builder()
+                .build_call(f, &[dst_ptr.into(), src_ptr.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            Ok(())
+        }
+        0x14 | 0x15 => {
+            // MakeShared(0x14) / MakeExclusive(0x15) — convert ref kind.
+            // verum_cbgr_make_{shared,exclusive}(ref: ptr) -> ptr
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let extern_name = if sub_op == 0x14 {
+                "verum_cbgr_make_shared"
+            } else {
+                "verum_cbgr_make_exclusive"
+            };
+            let fn_type = ptr_ty.fn_type(&[ptr_ty.into()], false);
+            let f = module
+                .get_function(extern_name)
+                .unwrap_or_else(|| module.add_function(extern_name, fn_type, None));
+            let src_ptr = as_ptr(ctx, src, "mk_share_src")?;
+            let result = ctx
+                .builder()
+                .build_call(f, &[src_ptr.into()], "make_share")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| {
+                    LlvmLoweringError::internal("MakeShared/Exclusive: expected return value")
+                })?;
+            // Pack ptr back as i64 since the receiving register slot
+            // mirrors the interpreter's NaN-boxed Value.
+            let ptr_as_i64 = ctx
+                .builder()
+                .build_ptr_to_int(result.into_pointer_value(), i64_ty, "share_ptr_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, ptr_as_i64.into());
+            Ok(())
+        }
+
+        // ===================================================================
+        // Epoch queries (0x21, 0x24)
+        // ===================================================================
+        0x21 => {
+            // GetEpoch — read the epoch field from a CBGR ref (i64).
+            // verum_cbgr_get_epoch(ref: ptr) -> i64
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = i64_ty.fn_type(&[ptr_ty.into()], false);
+            let f = module
+                .get_function("verum_cbgr_get_epoch")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_get_epoch", fn_type, None));
+            let src_ptr = as_ptr(ctx, src, "get_epoch_ref")?;
+            let result = ctx
+                .builder()
+                .build_call(f, &[src_ptr.into()], "epoch")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmLoweringError::internal("GetEpoch: expected return value"))?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+        0x24 => {
+            // CurrentEpoch — read the global epoch counter (i64).
+            // verum_cbgr_current_epoch() -> i64
+            if operands.is_empty() {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[], false);
+            let f = module
+                .get_function("verum_cbgr_current_epoch")
+                .unwrap_or_else(|| {
+                    module.add_function("verum_cbgr_current_epoch", fn_type, None)
+                });
+            let result = ctx
+                .builder()
+                .build_call(f, &[], "cur_epoch")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| {
+                    LlvmLoweringError::internal("CurrentEpoch: expected return value")
+                })?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+
+        // ===================================================================
+        // Reborrow (0x34)
+        // ===================================================================
+        0x34 => {
+            // Reborrow — produce a fresh ref from an existing one.
+            // verum_cbgr_reborrow(ref: ptr) -> ptr
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ptr_ty.fn_type(&[ptr_ty.into()], false);
+            let f = module
+                .get_function("verum_cbgr_reborrow")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_reborrow", fn_type, None));
+            let src_ptr = as_ptr(ctx, src, "reborrow_src")?;
+            let result = ctx
+                .builder()
+                .build_call(f, &[src_ptr.into()], "reborrow")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmLoweringError::internal("Reborrow: expected return value"))?;
+            let ptr_as_i64 = ctx
+                .builder()
+                .build_ptr_to_int(result.into_pointer_value(), i64_ty, "reborrow_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, ptr_as_i64.into());
+            Ok(())
+        }
+
+        // ===================================================================
+        // Bypass region (0x53, 0x54)
+        // ===================================================================
+        0x53 => {
+            // BypassBegin — enter an unsafe bypass region (no-op for AOT).
+            // The runtime's `verum_cbgr_bypass_begin` is a counter increment
+            // for diagnostics; under AOT the counter has no observable
+            // effect on user code, so a no-op preserves semantics.  When
+            // the AOT runtime gains a bypass-region tracker, this becomes
+            // a function call with no return value.
+            Ok(())
+        }
+        0x54 => {
+            // BypassEnd — exit unsafe bypass region (no-op for AOT).
+            Ok(())
+        }
+
+        // ===================================================================
+        // Allocator primitives (0x60-0x63) — runtime-routed mallocs.
+        // ===================================================================
+        0x60 | 0x61 => {
+            // Alloc(0x60) / AllocZeroed(0x61) — allocate `size` bytes.
+            // verum_cbgr_alloc{,_zeroed}(size: i64) -> ptr
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let size = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "alloc_size")?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let extern_name = if sub_op == 0x60 {
+                "verum_cbgr_alloc"
+            } else {
+                "verum_cbgr_alloc_zeroed"
+            };
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let f = module
+                .get_function(extern_name)
+                .unwrap_or_else(|| module.add_function(extern_name, fn_type, None));
+            let result = ctx
+                .builder()
+                .build_call(f, &[size.into()], "alloc")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmLoweringError::internal("Alloc: expected return value"))?;
+            let ptr_as_i64 = ctx
+                .builder()
+                .build_ptr_to_int(result.into_pointer_value(), i64_ty, "alloc_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, ptr_as_i64.into());
+            Ok(())
+        }
+        0x62 => {
+            // Dealloc — free a previously-allocated block.
+            // verum_cbgr_dealloc(ptr: ptr, size: i64) -> void
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let ptr = ctx.get_register(op_reg(operands, 0))?;
+            let size = if operands.len() >= 2 {
+                as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "dealloc_size")?
+            } else {
+                ctx.types().i64_type().const_zero()
+            };
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ctx
+                .types()
+                .void_type()
+                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let f = module
+                .get_function("verum_cbgr_dealloc")
+                .unwrap_or_else(|| module.add_function("verum_cbgr_dealloc", fn_type, None));
+            let ptr_val = as_ptr(ctx, ptr, "dealloc_ptr")?;
+            ctx.builder()
+                .build_call(f, &[ptr_val.into(), size.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            Ok(())
+        }
+        0x63 => {
+            // SecureZero — overwrite a memory region with zeros, in a
+            // way the optimiser can't elide.  Routes through a runtime
+            // extern that uses `volatile` stores under the hood.
+            // verum_cbgr_secure_zero(ptr: ptr, size: i64) -> void
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let ptr = ctx.get_register(op_reg(operands, 0))?;
+            let size = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "sz_size")?;
+            let module = ctx.get_module();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = ctx
+                .types()
+                .void_type()
+                .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+            let f = module
+                .get_function("verum_cbgr_secure_zero")
+                .unwrap_or_else(|| {
+                    module.add_function("verum_cbgr_secure_zero", fn_type, None)
+                });
+            let ptr_val = as_ptr(ctx, ptr, "sz_ptr")?;
+            ctx.builder()
+                .build_call(f, &[ptr_val.into(), size.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            Ok(())
+        }
+
         _ => {
             ctx.emit_unimplemented_sub_op("CbgrExtended", sub_op);
             Ok(())
@@ -21618,6 +21932,157 @@ fn lower_simd_extended<'ctx>(
             let src = op_reg(operands, 1);
             let val = ctx.get_register(src)?;
             ctx.set_register(dst, val);
+            Ok(())
+        }
+
+        // ===================================================================
+        // Bitwise mask helper: AndNot — `a & !b` (common SIMD primitive
+        // for clearing bits matching a mask).
+        // ===================================================================
+        Some(SimdSubOpcode::AndNot) => {
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "andnot_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "andnot_b")?;
+            let i64_ty = ctx.types().i64_type();
+            let neg_one = i64_ty.const_all_ones();
+            let not_b = ctx
+                .builder()
+                .build_xor(b, neg_one, "andnot_notb")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let res = ctx
+                .builder()
+                .build_and(a, not_b, "andnot_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, res.into());
+            Ok(())
+        }
+        // ===================================================================
+        // Element-shuffling ops: scalar-fallback semantics (single
+        // element, so most rearrangements are identity).  Compress /
+        // Expand pass through the source value; InterleaveHigh /
+        // InterleaveLow / Concat / Permute / Reverse / Rotate also
+        // identity-pass at scalar width = 1.
+        // ===================================================================
+        Some(SimdSubOpcode::Compress)
+        | Some(SimdSubOpcode::Expand)
+        | Some(SimdSubOpcode::InterleaveHigh)
+        | Some(SimdSubOpcode::InterleaveLow)
+        | Some(SimdSubOpcode::Concat)
+        | Some(SimdSubOpcode::Permute)
+        | Some(SimdSubOpcode::Reverse)
+        | Some(SimdSubOpcode::Rotate) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = op_reg(operands, 1);
+            let val = ctx.get_register(src)?;
+            ctx.set_register(dst, val);
+            Ok(())
+        }
+        // ===================================================================
+        // Float-int conversions (scalar fallback — i64↔f64 round trip).
+        // ===================================================================
+        Some(SimdSubOpcode::ConvertFloatToInt) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = ctx.get_register(op_reg(operands, 1))?;
+            let i64_ty = ctx.types().i64_type();
+            let f64_val = if src.is_float_value() {
+                src.into_float_value()
+            } else {
+                let bits = as_i64(ctx, src, "ftoi_bits")?;
+                ctx.builder()
+                    .build_bit_cast(bits, ctx.types().f64_type(), "ftoi_cast")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .into_float_value()
+            };
+            let res = ctx
+                .builder()
+                .build_float_to_signed_int(f64_val, i64_ty, "simd_ftoi")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, res.into());
+            Ok(())
+        }
+        Some(SimdSubOpcode::ConvertIntToFloat) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let i = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "itof_int")?;
+            let f64_ty = ctx.types().f64_type();
+            let res = ctx
+                .builder()
+                .build_signed_int_to_float(i, f64_ty, "simd_itof")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, res.into());
+            Ok(())
+        }
+        // ConvertF32ToF64 / ConvertF64ToF32 — at scalar width with our
+        // f64 storage these are no-op precision changes; identity-pass.
+        Some(SimdSubOpcode::ConvertF32ToF64) | Some(SimdSubOpcode::ConvertF64ToF32) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
+            ctx.set_register(dst, val);
+            Ok(())
+        }
+        // MaskFirstTrue — first set bit; scalar-fallback returns 0
+        // when src!=0, sentinel -1 (i64::MAX as i64) when src==0.
+        Some(SimdSubOpcode::MaskFirstTrue) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let src = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "mft_src")?;
+            let i64_ty = ctx.types().i64_type();
+            let zero = i64_ty.const_zero();
+            let neg_one = i64_ty.const_all_ones();
+            let is_zero = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, src, zero, "mft_zero")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let result = ctx
+                .builder()
+                .build_select(is_zero, neg_one, zero, "mft_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
+        // ReduceAnd / ReduceOr / ReduceXor — at scalar width = 1, the
+        // reduction is identity over the single lane.
+        Some(SimdSubOpcode::ReduceAnd)
+        | Some(SimdSubOpcode::ReduceOr)
+        | Some(SimdSubOpcode::ReduceXor) => {
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
+            ctx.set_register(dst, val);
+            Ok(())
+        }
+        // ShiftRightArith — signed (arithmetic) shift right.  Distinct
+        // from ShiftRight which is logical; this preserves the sign bit.
+        Some(SimdSubOpcode::ShiftRightArith) => {
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "asr_a")?;
+            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "asr_b")?;
+            let res = ctx
+                .builder()
+                .build_right_shift(a, b, true, "simd_asr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, res.into());
             Ok(())
         }
 
