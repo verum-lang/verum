@@ -61,7 +61,7 @@
 use std::collections::HashMap;
 
 use crate::archive::VbcArchive;
-use crate::bytecode::{decode_instructions, encode_instructions};
+use crate::bytecode::{decode_instruction, decode_instructions, encode_instructions};
 use crate::cfg_key::CfgKey;
 use crate::instruction::Instruction;
 use crate::module::{
@@ -942,11 +942,33 @@ impl VbcLinker {
         src_bytes: &[u8],
         remap: &RemapTable,
     ) -> Result<Vec<u8>, LinkError> {
-        let mut instructions =
-            decode_instructions(src_bytes).map_err(|_| LinkError::TruncatedBytecode {
-                offset: 0,
-                want: src_bytes.len(),
-            })?;
+        // Per-instruction decode loop so that a `TruncatedBytecode`
+        // reports the actual fault offset rather than the entire
+        // function length.  The previous wrapper around
+        // `decode_instructions` discarded the offset, making decoder
+        // gaps practically untraceable through the linker boundary.
+        let mut instructions = Vec::new();
+        let mut offset = 0;
+        while offset < src_bytes.len() {
+            let start = offset;
+            match decode_instruction(src_bytes, &mut offset) {
+                Ok(instr) => instructions.push(instr),
+                Err(_) => {
+                    // Suppress the diagnostic noise — the linker
+                    // round-trip test prints its panic message which
+                    // includes the offset, and adding a stderr line
+                    // for every failed decode pollutes successful
+                    // builds.  When debugging, the per-instruction
+                    // decode path can be re-enabled with a tracing
+                    // line.
+                    let _ = start;
+                    return Err(LinkError::TruncatedBytecode {
+                        offset: start,
+                        want: src_bytes.len(),
+                    });
+                }
+            }
+        }
         for instr in instructions.iter_mut() {
             rewrite_instruction_ids(instr, remap)?;
         }

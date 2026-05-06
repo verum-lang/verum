@@ -2052,6 +2052,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         Instruction::NewList { dst } => {
             output.push(Opcode::NewList.to_byte());
             encode_reg(*dst, output);
+            // No capacity-hint varint — the codegen only emits
+            // `Instruction::NewList { dst }` (the empty-list form;
+            // see expressions.rs:5525, 11237, 11262, 11356, 11377,
+            // 11407, 17472, 19075).  `Instruction::MakeList { dst,
+            // len }` exists in the IR but no codegen path emits it,
+            // so the archive only contains the no-varint shape.
+            // The symmetric decoder must read no varint.
         }
         Instruction::ListPush { list, val } => {
             output.push(Opcode::ListPush.to_byte());
@@ -2999,6 +3006,173 @@ fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
 // Instruction Decoding
 // ============================================================================
 
+/// Registry-driven `TensorExtended` operand arity for sub-ops emitted
+/// by `emit_intrinsic_tensor_extended` (registry strategy
+/// `TensorExtendedOpcode(...)`).  The arity is `param_count + 1`
+/// (the leading `dst` register slot).  Returns `None` for sub-ops
+/// not in the register-encoded list — the decoder then dispatches
+/// to the structured per-sub_op arms.
+///
+/// Source of truth: `crates/verum_vbc/src/intrinsics/registry.rs`.
+/// When a new `TensorExtendedOpcode`-strategy intrinsic lands, add
+/// (sub_op_byte, param_count + 1) here.  Without the entry, the
+/// linker round trip surfaces it as `InvalidOpcode` against the
+/// structured arms.
+fn registry_driven_tensor_arity(sub_op: u8) -> Option<usize> {
+    use crate::instruction::TensorSubOpcode as T;
+    let kind = T::from_byte(sub_op)?;
+    Some(match kind {
+        // Tensor creation (registry param_count + 1 dst).
+        T::NewFromArgs => 3,
+        T::FillFromArgs => 4,
+        T::FromSliceArgs => 4,
+        T::Arange => 5,
+        T::ArangeUsize => 4,
+        T::Linspace => 5,
+        T::Rand => 4,
+        T::RandomFloat01 => 1,
+        T::Identity => 3,
+        T::Clone => 2,
+        T::Uniform => 4,
+        T::FromArray => 2,
+        T::TensorFromSliceUsize => 2,
+        // Reshape / view ops.
+        T::ReshapeFromArgs => 3,
+        T::TransposeFromArgs => 2,
+        T::Permute => 3,
+        T::SliceFromArgs => 3,
+        T::Index => 3,
+        T::Squeeze => 3,
+        T::Broadcast => 3,
+        T::Repeat => 3,
+        T::Stack => 3,
+        T::Concat => 3,
+        T::ToDevice => 3,
+        T::Contiguous => 2,
+        // Element access.
+        T::GetElementFromArgs => 3,
+        T::SetElementFromArgs => 4,
+        T::GetScalar => 3,
+        T::SetScalar => 4,
+        T::Gather => 4,
+        T::GatherNd => 3,
+        T::MaskedSelect => 3,
+        T::MaskedFill => 4,
+        T::Nonzero => 2,
+        T::Where => 4,
+        T::Cast => 3,
+        T::Lerp => 4,
+        T::Clamp => 4,
+        T::Cmp => 4,
+        T::Bincount => 3,
+        T::OneHot => 4,
+        T::Split => 4,
+        T::SplitAt => 4,
+        T::Diag => 2,
+        // Element-wise / unary ops.
+        T::UnopFromArgs => 2,
+        T::BinopFromArgs => 4,
+        T::Tanh => 2,
+        T::LeakyRelu => 3,
+        T::Expm => 2,
+        T::Inverse => 2,
+        T::Tril => 2,
+        T::Triu => 2,
+        T::IsTraining => 1,
+        T::SumAll => 2,
+        T::Unsqueeze => 3,
+        T::FormatValue => 2,
+        T::FunctionSchemaToJson => 2,
+        T::JsonSchemaToJson => 2,
+        T::ParseFunctionCalls => 2,
+        T::ParseToolCall => 2,
+        T::Cumulative => 4,
+        // Reductions.
+        T::ReduceFromArgs => 3,
+        T::Argmax => 3,
+        T::Topk => 4,
+        T::Trace => 2,
+        T::TensorNorm => 2,
+        // Linear algebra.
+        T::MatmulFromArgs => 3,
+        T::BatchMatmul => 3,
+        T::Dot => 3,
+        T::Outer => 3,
+        T::Einsum => 3,
+        T::Conv => 3,
+        T::Solve => 3,
+        T::TriSolve => 3,
+        T::QR => 2,
+        T::SVD => 2,
+        T::LU => 2,
+        T::Eig => 2,
+        T::EigSymmetric => 2,
+        T::Cholesky => 2,
+        T::Det => 2,
+        T::QuantizedMatmul => 5,
+        // ML / neural-net layer ops.
+        T::Softmax => 3,
+        T::LayerNorm => 5,
+        T::BatchNorm => 6,
+        T::PagedAttention => 5,
+        // FFT / signal.
+        T::Rfft => 3,
+        T::Irfft => 3,
+        T::ComplexMul => 3,
+        T::ComplexPow => 3,
+        T::SsmScan => 5,
+        // Distribution / parallelism.
+        T::AllReduce => 4,
+        T::AllGather => 3,
+        T::ReduceScatter => 4,
+        T::Barrier => 2,
+        T::DistGetRank => 2,
+        T::DistNewGroup => 2,
+        T::DistWorldGroup => 1,
+        T::CollectiveGather => 4,
+        T::CollectiveScatter => 3,
+        T::P2PSend => 3,
+        T::P2PRecv => 2,
+        T::MeshSelect => 3,
+        T::PmapTransform => 5,
+        T::PmapAllGather => 3,
+        T::PmapPmax => 3,
+        T::PmapPmean => 3,
+        T::PmapPsum => 3,
+        T::VmapTransform => 4,
+        // Sampling.
+        T::SampleTemperature => 3,
+        T::SampleTopP => 3,
+        T::GenerateRequestId => 1,
+        // Tokenizer.
+        T::TokenizerEncode => 3,
+        T::TokenizerDecode => 3,
+        T::TokenizerLoadBpe => 3,
+        T::TokenizerLoadPretrained => 2,
+        T::TokenizerLoadSpm => 2,
+        T::TokenizerSpmEncode => 3,
+        T::TokenizerSpmDecode => 3,
+        // RDMA / networking.
+        T::RdmaCreateRef => 3,
+        T::RdmaCheckValid => 2,
+        T::RdmaFetch => 2,
+        T::RdmaWrite => 3,
+        // Autodiff / actor.
+        T::GetGrad => 2,
+        T::SetGrad => 3,
+        T::ModuleBackward => 2,
+        T::BucketGradients => 3,
+        T::ActorNewId => 1,
+        // Regex (under tensor sub-op space).
+        T::RegexFindAll => 3,
+        T::RegexIsMatch => 3,
+        T::RegexReplaceAll => 4,
+        T::RegexSplit => 3,
+        // Anything else: fall through to structured arms.
+        _ => return None,
+    })
+}
+
 /// Decodes an instruction from bytecode.
 ///
 
@@ -3454,17 +3628,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         Opcode::NewList => {
-            // Encoder writes `dst + varint(len)` — `Instruction::MakeList`
-            // and the legacy `Instruction::NewList { dst }` encoder share
-            // the same opcode byte after the latter was extended with a
-            // capacity-hint varint to keep the runtime handler's
-            // `read_varint` satisfied.  Always consume the varint so the
-            // decoder stays in sync with the byte stream regardless of
-            // which IR variant produced it.  Decode to `MakeList` since
-            // it's a strict superset (`NewList` ↔ `MakeList { len: 0 }`).
+            // Encoder for `Instruction::NewList { dst }` writes
+            // `opcode + dst` with NO capacity-hint varint.  The
+            // codegen never emits `Instruction::MakeList { dst, len }`
+            // (despite the IR variant existing — see expressions.rs
+            // emit sites at 5525 / 11237 / 11262 / …) so the archive
+            // only contains the no-varint shape.  Decoder mirrors the
+            // emitted shape; if a future codegen path starts emitting
+            // `MakeList`, the encoder must allocate a distinct opcode.
             let dst = decode_reg(data, offset)?;
-            let len = decode_varint(data, offset)? as u16;
-            Ok(Instruction::MakeList { dst, len })
+            Ok(Instruction::NewList { dst })
         }
 
         Opcode::ListPush => {
@@ -3860,6 +4033,44 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let sub_opcode_byte = decode_u8(data, offset)?;
             let sub_opcode = TensorSubOpcode::from_byte(sub_opcode_byte);
 
+            // Registry-driven dispatch — every TensorSubOpcode whose
+            // intrinsic registry strategy is `TensorExtendedOpcode(...)`
+            // is emitted by `emit_intrinsic_tensor_extended`, which
+            // packs operands as `[dst:1-2b][arg0:1-2b]…` register-
+            // encoded bytes per the registry's `param_count`.  This
+            // top-level dispatch covers all 114 such sub-ops in one
+            // sweep so sequential decoding doesn't fall into the
+            // structured arms below — those structured arms encode
+            // dead `Instruction::Tensor*` IR variants that codegen
+            // never emits.  Letting them match first caused
+            // mis-decoding (e.g. BatchNorm/SVD reading register-
+            // encoded bytes as f32 fields) and broke linker round
+            // trip on real bytecode.
+            //
+            // When a new sub-op is added to the registry with
+            // `TensorExtendedOpcode` strategy, add (sub_op,
+            // param_count + 1) here.  See registry.rs for the source
+            // of truth on each intrinsic's arity.
+            if let Some(arity) =
+                registry_driven_tensor_arity(sub_opcode_byte)
+            {
+                let mut operands = Vec::new();
+                for _ in 0..arity {
+                    let b = decode_u8(data, offset)?;
+                    if b & 0x80 != 0 {
+                        let lo = decode_u8(data, offset)?;
+                        operands.push(b);
+                        operands.push(lo);
+                    } else {
+                        operands.push(b);
+                    }
+                }
+                return Ok(Instruction::TensorExtended {
+                    sub_op: sub_opcode_byte,
+                    operands,
+                });
+            }
+
             match sub_opcode {
                 Some(TensorSubOpcode::Pool) => {
                     // Pool sub-opcode: decode pool-specific operands
@@ -3891,8 +4102,26 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         padding,
                     })
                 }
-                // Register-based tensor ops — decode as generic TensorExtended
-                // The interpreter reads operands directly from the byte stream.
+                // Register-based tensor ops emitted via
+                // `emit_intrinsic_tensor_extended` — operands packed as
+                // `[dst:1-2b][arg0:1-2b][arg1:1-2b]…` variable-width.
+                // The decoder reads exactly N register-encoded operands
+                // (1 dst + arity args) per the intrinsic registry's
+                // `param_count`.  Pre-fix this match covered ~12
+                // sub-ops; uncovered sub-ops fell through to the
+                // wildcard `Err(InvalidOpcode)` and broke sequential
+                // decode for any module emitting them (Split, OneHot,
+                // Repeat, Tanh, …).
+                //
+                // The full set comes from
+                // `crates/verum_vbc/src/intrinsics/registry.rs` —
+                // every `Intrinsic` whose strategy is
+                // `InlineSequence(InlineSequenceId::Tensor*)` (which
+                // maps to `emit_intrinsic_tensor_extended`) lands
+                // here.  When a new sub-op is added to the registry
+                // with an `InlineSequence` tensor strategy, ITS arity
+                // MUST be added here too — otherwise the linker round
+                // trip surfaces it as `InvalidOpcode`.
                 Some(TensorSubOpcode::NewFromArgs)
                 | Some(TensorSubOpcode::FillFromArgs)
                 | Some(TensorSubOpcode::FromSliceArgs)
@@ -3904,17 +4133,44 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 | Some(TensorSubOpcode::TransposeFromArgs)
                 | Some(TensorSubOpcode::SliceFromArgs)
                 | Some(TensorSubOpcode::GetElementFromArgs)
-                | Some(TensorSubOpcode::SetElementFromArgs) => {
-                    // Read remaining bytes as raw operands
-                    let _remaining_start = *offset;
-                    // Estimate operand length by reading registers until end
-                    // For roundtrip safety, read 2-4 registers (max operand count)
-                    let mut operands = Vec::new();
-                    // The operands were encoded by emit_intrinsic_tensor_extended which puts
-                    // [dst:1-2b] [arg0:1-2b] [arg1:1-2b] ... — variable length.
-                    // For decode, we need to reconstruct the raw bytes.
-                    // Since these sub-opcodes have known parameter counts, read accordingly.
+                | Some(TensorSubOpcode::SetElementFromArgs)
+                | Some(TensorSubOpcode::OneHot)
+                | Some(TensorSubOpcode::Split)
+                | Some(TensorSubOpcode::SplitAt)
+                | Some(TensorSubOpcode::Bincount)
+                | Some(TensorSubOpcode::Tanh)
+                | Some(TensorSubOpcode::Repeat)
+                | Some(TensorSubOpcode::ToDevice)
+                | Some(TensorSubOpcode::Diag)
+                | Some(TensorSubOpcode::Expm)
+                | Some(TensorSubOpcode::Inverse)
+                | Some(TensorSubOpcode::Tril)
+                | Some(TensorSubOpcode::Triu)
+                | Some(TensorSubOpcode::Uniform)
+                | Some(TensorSubOpcode::Contiguous)
+                | Some(TensorSubOpcode::SumAll)
+                | Some(TensorSubOpcode::Unsqueeze)
+                | Some(TensorSubOpcode::IsTraining)
+                | Some(TensorSubOpcode::LeakyRelu)
+                | Some(TensorSubOpcode::GatherNd)
+                | Some(TensorSubOpcode::GetScalar)
+                | Some(TensorSubOpcode::SetScalar)
+                | Some(TensorSubOpcode::MaskedSelect)
+                | Some(TensorSubOpcode::Nonzero)
+                | Some(TensorSubOpcode::ArangeUsize)
+                | Some(TensorSubOpcode::ComplexMul)
+                | Some(TensorSubOpcode::ComplexPow)
+                | Some(TensorSubOpcode::Rfft)
+                | Some(TensorSubOpcode::Irfft)
+                | Some(TensorSubOpcode::FromArray)
+                | Some(TensorSubOpcode::RegexFindAll)
+                | Some(TensorSubOpcode::RegexIsMatch)
+                | Some(TensorSubOpcode::RegexReplaceAll)
+                | Some(TensorSubOpcode::RegexSplit)
+                | Some(TensorSubOpcode::SsmScan)
+                | Some(TensorSubOpcode::BatchNorm) => {
                     let param_count = match sub_opcode.unwrap() {
+                        // Original 12 — kept verbatim for clarity.
                         TensorSubOpcode::NewFromArgs => 3,        // dst, shape, dtype
                         TensorSubOpcode::FillFromArgs => 4,       // dst, shape, value, dtype
                         TensorSubOpcode::FromSliceArgs => 4,      // dst, data, shape, dtype
@@ -3927,8 +4183,45 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         TensorSubOpcode::SliceFromArgs => 3,      // dst, src, ranges
                         TensorSubOpcode::GetElementFromArgs => 3, // dst, src, index
                         TensorSubOpcode::SetElementFromArgs => 4, // dst, src, index, value
+                        // Added — registry param_count + 1 (dst).
+                        TensorSubOpcode::OneHot => 4,             // dst, indices, num_classes, dtype
+                        TensorSubOpcode::Split => 4,              // dst, tensor, chunks, axis
+                        TensorSubOpcode::SplitAt => 4,            // dst, tensor, indices, axis
+                        TensorSubOpcode::Bincount => 3,           // dst, tensor, weights
+                        TensorSubOpcode::Tanh => 2,               // dst, tensor
+                        TensorSubOpcode::Repeat => 3,             // dst, tensor, repeats
+                        TensorSubOpcode::ToDevice => 3,           // dst, tensor, device
+                        TensorSubOpcode::Diag => 2,               // dst, tensor
+                        TensorSubOpcode::Expm => 2,               // dst, tensor
+                        TensorSubOpcode::Inverse => 2,            // dst, tensor
+                        TensorSubOpcode::Tril => 2,               // dst, tensor
+                        TensorSubOpcode::Triu => 2,               // dst, tensor
+                        TensorSubOpcode::Uniform => 4,            // dst, shape, low, high
+                        TensorSubOpcode::Contiguous => 2,         // dst, tensor
+                        TensorSubOpcode::SumAll => 2,             // dst, tensor
+                        TensorSubOpcode::Unsqueeze => 3,          // dst, tensor, axis
+                        TensorSubOpcode::IsTraining => 1,         // dst
+                        TensorSubOpcode::LeakyRelu => 3,          // dst, tensor, negative_slope
+                        TensorSubOpcode::GatherNd => 3,           // dst, tensor, indices
+                        TensorSubOpcode::GetScalar => 3,          // dst, tensor, index
+                        TensorSubOpcode::SetScalar => 4,          // dst, tensor, index, value
+                        TensorSubOpcode::MaskedSelect => 3,       // dst, tensor, mask
+                        TensorSubOpcode::Nonzero => 2,            // dst, tensor
+                        TensorSubOpcode::ArangeUsize => 4,        // dst, start, end, step
+                        TensorSubOpcode::ComplexMul => 3,         // dst, a, b
+                        TensorSubOpcode::ComplexPow => 3,         // dst, base, exponent
+                        TensorSubOpcode::Rfft => 3,               // dst, tensor, n
+                        TensorSubOpcode::Irfft => 3,              // dst, tensor, n
+                        TensorSubOpcode::FromArray => 2,          // dst, array
+                        TensorSubOpcode::RegexFindAll => 3,       // dst, pattern, text
+                        TensorSubOpcode::RegexIsMatch => 3,       // dst, pattern, text
+                        TensorSubOpcode::RegexReplaceAll => 4,    // dst, pattern, text, replacement
+                        TensorSubOpcode::RegexSplit => 3,         // dst, pattern, text
+                        TensorSubOpcode::SsmScan => 5,            // dst, tensor, A, B, C
+                        TensorSubOpcode::BatchNorm => 6,          // dst, tensor, mean, var, weight, bias
                         _ => 0,
                     };
+                    let mut operands = Vec::new();
                     for _ in 0..param_count {
                         let b = decode_u8(data, offset)?;
                         if b & 0x80 != 0 {
@@ -4377,28 +4670,26 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         eps,
                     })
                 }
-                Some(TensorSubOpcode::BatchNorm) => {
-                    let dst = decode_reg(data, offset)?;
-                    let input = decode_reg(data, offset)?;
-                    let gamma = decode_optional_reg(data, offset)?;
-                    let beta = decode_optional_reg(data, offset)?;
-                    let running_mean = decode_optional_reg(data, offset)?;
-                    let running_var = decode_optional_reg(data, offset)?;
-                    let training = decode_u8(data, offset)? != 0;
-                    let momentum = decode_f32(data, offset)?;
-                    let eps = decode_f32(data, offset)?;
-                    Ok(Instruction::TensorBatchNorm {
-                        dst,
-                        input,
-                        gamma,
-                        beta,
-                        running_mean,
-                        running_var,
-                        training,
-                        momentum,
-                        eps,
-                    })
-                }
+                // BatchNorm — disabled structured decoder arm.
+                //
+                // The structured `Instruction::TensorBatchNorm` IR
+                // variant is never emitted by codegen (verified across
+                // `crates/verum_vbc/src/codegen/`).  Real bytecode for
+                // the BatchNorm intrinsic (registry strategy
+                // `TensorExtendedOpcode(TensorSubOpcode::BatchNorm)`,
+                // sub_op = 0xFF) flows through
+                // `emit_intrinsic_tensor_extended`, which packs the
+                // operands as `[dst][args:5]` register-encoded bytes —
+                // not the `[dst][input][4× optional_reg][training_byte]
+                // [momentum:f32][eps:f32]` shape this structured arm
+                // expects.  Letting the structured arm match first
+                // caused the linker round-trip to read past the actual
+                // operand bytes and bail with TruncatedBytecode.
+                //
+                // Sub_op 0xFF is now handled by the register-based arm
+                // below (TensorSubOpcode::BatchNorm is listed there
+                // with `param_count = 6` = dst + 5 args).
+                Some(TensorSubOpcode::BatchNorm) if false => unreachable!(),
 
                 // Try TensorExtSubOpcode for overflow operations
                 None => {
@@ -5824,16 +6115,34 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             Ok(Instruction::NurseryCancel { nursery })
         }
 
-        // GpuExtended / CubicalExtended deliberately fall through to the
-        // wildcard — their encoders write per-sub-op layouts WITHOUT a
+        // ---------- Cubical type theory (0xDE) ----------
+        // Encoder format (bytecode.rs:2873):
+        //   `opcode + sub_op:u8 + dst:u8 + args_len:u8 + args[0..N]:u8`
+        // Each arg is a single byte (raw register index, low 8 bits)
+        // — the Cubical lowering uses a fixed small register space so
+        // the compact encoding is sufficient.  Decoder mirrors the
+        // exact byte layout so sequential decoding through the linker
+        // stays in sync.
+        Opcode::CubicalExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let dst = Reg(decode_u8(data, offset)? as u16);
+            let args_len = decode_u8(data, offset)? as usize;
+            let mut args = Vec::with_capacity(args_len);
+            for _ in 0..args_len {
+                args.push(Reg(decode_u8(data, offset)? as u16));
+            }
+            Ok(Instruction::CubicalExtended { sub_op, dst, args })
+        }
+
+        // GpuExtended deliberately falls through to the wildcard —
+        // its per-sub-op encoder writes layouts WITHOUT a generic
         // length prefix (parity with the structured TensorExtended
-        // decoder above).  Adding generic length-varint arms here would
-        // mis-decode the first operand byte as a length and corrupt the
-        // stream.  Per-sub-op structured decoders for these carriers
-        // remain a separate task; for now sequential decoding on a
-        // module that emits these will surface as a downstream type
-        // error rather than a silent miscompile, which the linker round
-        // trip already catches.
+        // decoder above).  Adding a generic length-varint arm here
+        // would mis-decode the first operand byte.  Per-sub-op
+        // structured decoder for the carrier remains a separate task;
+        // for now sequential decoding on a module that emits a Gpu
+        // op will surface as a downstream error rather than silent
+        // miscompile.
 
         // ====================================================================
         // Reserved Opcodes
