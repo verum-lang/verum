@@ -2117,11 +2117,54 @@ impl TypeChecker {
                 .first()
                 .map(|p| p.name.as_str() != "self")
                 .unwrap_or(true);
-            bucket.insert(method_name.clone(), TypeScheme::mono(fn_ty.clone()));
+            // Wrap in a polymorphic TypeScheme when the method's
+            // signature contains free TypeVars (introduced by
+            // `parse_descriptor_type_string`'s
+            // `__generic_N`/`__opaque_type_N` → fresh-TypeVar
+            // conversion).  These represent the method's generic
+            // parameters: e.g. `Shared.new(value: T) -> Shared<T>`
+            // gets `fn(_TyVar_a) -> Shared<_TyVar_a>` after
+            // structural parsing.
+            //
+            // Pre-fix the method was registered as `mono(fn_ty)`,
+            // which means the SAME TypeVars are reused on every
+            // lookup.  First call site `Shared<Int>.new(42)` binds
+            // `_TyVar_a := Int` in the unifier's substitution
+            // table; second call site `Shared<Bool>.new(true)`
+            // looks up the SAME scheme, sees `_TyVar_a` already
+            // bound to `Int`, and rejects `true: Bool` with
+            // `expected 'Int', found 'Bool'`.
+            //
+            // Wrapping with `TypeScheme::poly(bound_vars, fn_ty)`
+            // forces fresh instantiation of every bound TypeVar
+            // on each `instantiate()` call — the canonical
+            // Hindley-Milner discipline already used by the AST-
+            // driven impl-block path (`register_impl_method` and
+            // `compile_pending_default_methods` produce poly
+            // schemes; the metadata-driven path was just missing
+            // the wrapper).
+            //
+            // Stdlib-agnostic — the bound-vars list is harvested
+            // from the parsed signature itself via
+            // `collect_type_vars` (already used by the
+            // dependent-types subsystem), no hardcoded type-name
+            // list.
+            let scheme = {
+                use crate::dependent_helpers::collect_type_vars;
+                let vars = collect_type_vars(&fn_ty);
+                if vars.is_empty() {
+                    TypeScheme::mono(fn_ty.clone())
+                } else {
+                    let var_list: List<crate::ty::TypeVar> =
+                        vars.iter().copied().collect();
+                    TypeScheme::poly(var_list, fn_ty.clone())
+                }
+            };
+            bucket.insert(method_name.clone(), scheme.clone());
             if is_static {
                 let static_key: Text =
                     format!("$static${}", method_name.as_str()).into();
-                bucket.entry(static_key).or_insert_with(|| TypeScheme::mono(fn_ty));
+                bucket.entry(static_key).or_insert(scheme);
             }
         }
         referenced
