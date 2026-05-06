@@ -1,5 +1,10 @@
 // Default-busy-handler delay schedule.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.busy_retry_policy.schedule;
 
 mount base.{Bool, Int64};

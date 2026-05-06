@@ -1,5 +1,10 @@
 // sqlite3_str builder — append + finish lifecycle.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.sqlite3_str_builder_api.builder;
 
 mount base.{Bool, Int64, Text};

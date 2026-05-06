@@ -13,6 +13,11 @@
 //  3 — same as 2, vtab may even skip equality-ties of the ORDER BY column
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vtab_distinct_api;
 
 public module mode;

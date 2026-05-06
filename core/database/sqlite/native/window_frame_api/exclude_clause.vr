@@ -1,5 +1,10 @@
 // EXCLUDE clause — row-skip policy applied after frame computation.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.window_frame_api.exclude_clause;
 
 mount base.{Bool, Text};

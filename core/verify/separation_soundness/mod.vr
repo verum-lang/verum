@@ -26,6 +26,11 @@
 //   * `points_to_disjointness` — sep_conj's heap-split invariant.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.separation_soundness.mod;
 
 mount super.separation_logic_alignment.{kernel_separation_logic_alignment_is_sound};

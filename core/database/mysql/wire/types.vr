@@ -4,6 +4,11 @@
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.mysql.wire.types;
 
 mount core.*;

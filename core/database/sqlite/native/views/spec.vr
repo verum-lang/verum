@@ -12,6 +12,11 @@
 // declared column list (if any) renames the SELECT projections.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.views.spec;
 
 mount core.*;

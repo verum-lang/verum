@@ -16,6 +16,11 @@
 // code traps via the standard "no body for intrinsic" path.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.intrinsics.lowlevel.mmio;
 
 mount core.*;

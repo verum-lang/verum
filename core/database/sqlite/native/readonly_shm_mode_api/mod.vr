@@ -12,6 +12,11 @@
 //  NO_SHM — VFS returns SQLITE_IOERR_SHMLOCK; SQLite falls back to heap shm
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.readonly_shm_mode_api;
 
 public module mode;

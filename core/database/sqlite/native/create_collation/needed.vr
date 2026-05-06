@@ -9,6 +9,11 @@
 // collation on-the-fly; if it doesn't, the schema open fails.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.create_collation.needed;
 
 mount core.*;

@@ -8,6 +8,11 @@
 // sqlite3.h as SQLITE_VERSION_NUMBER = 1_000_000 * M + 1_000 * m + p.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.version_api.identity;
 
 mount core.*;

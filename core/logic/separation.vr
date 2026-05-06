@@ -88,6 +88,11 @@
 // dispatcher's verdict is what closes a separation goal.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.logic.separation;
 
 mount core.prelude.{Bool, Heap, Maybe, Text};

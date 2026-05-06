@@ -1,5 +1,10 @@
 // Why the planner won't swap two tables in a join order.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.omit_join_ordering.reason;
 
 mount base.{Bool, Text};

@@ -34,6 +34,11 @@
 //
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.separation_soundness.separation_logic_alignment;
 
 mount core.prelude.{Bool};

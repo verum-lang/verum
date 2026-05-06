@@ -25,6 +25,11 @@
 // This is the analogue of CompCert's external-call axiom.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.codegen_soundness.machine_code_emission;
 
 mount core.prelude.{Bool};

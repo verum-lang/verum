@@ -35,6 +35,11 @@
 // - Protocols: `Eq`, `Ord`, `Clone`, `Debug`, `Display`, `Default`, `Hash`
 // - Functions: `panic`, `assert`, `unreachable`, `todo`
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.base;
 
 // =============================================================================

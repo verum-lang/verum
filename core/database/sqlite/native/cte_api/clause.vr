@@ -1,5 +1,10 @@
 // WITH clause — a group of CTE definitions.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.cte_api.clause;
 
 mount core.database.sqlite.native.cte_api.definition.{

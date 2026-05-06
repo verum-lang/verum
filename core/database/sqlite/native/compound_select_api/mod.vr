@@ -5,6 +5,11 @@
 // Spec §13.6 — compound selects.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.compound_select_api;
 
 public module op;

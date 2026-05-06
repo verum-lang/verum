@@ -5,6 +5,11 @@
 // On: a LIKE b is byte-exact for the entire ASCII range.
 // Note: SQLite never folds non-ASCII characters even in OFF mode unless ICU.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.case_sensitive_like_pragma.pragma_;
 
 mount base.{Bool, Text};

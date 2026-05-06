@@ -14,6 +14,11 @@
 //  sqlite3_stmt_isexplain(stmt) → 1 if stmt is EXPLAIN (any variant)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stmt_introspect.flags;
 
 mount core.*;

@@ -8,6 +8,11 @@
 // (101), or an error code. We wrap that into a typed state.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.changeset_iter.iter_state;
 
 mount core.*;

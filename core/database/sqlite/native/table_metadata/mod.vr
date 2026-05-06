@@ -20,6 +20,11 @@
 //  * `query` — TableColumnQuery + Outcome (found/unknown table/column)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.table_metadata;
 
 public module column_info;

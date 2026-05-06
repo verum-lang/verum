@@ -1,5 +1,10 @@
 // Row shape emitted by json_each / json_tree.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.json_each_api.row_shape;
 
 mount base.{Bool, Text, Int64};

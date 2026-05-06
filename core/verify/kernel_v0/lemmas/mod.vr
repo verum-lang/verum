@@ -47,6 +47,11 @@
 //  until Verum compiler can ingest mathlib proofs.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.lemmas.mod;
 
 mount super.beta.{church_rosser_confluence};

@@ -1,5 +1,10 @@
 // Per-column index sort spec.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_key_sort_api.key_column;
 
 mount core.database.sqlite.native.index_key_sort_api.nulls_policy.{

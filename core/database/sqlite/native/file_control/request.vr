@@ -9,6 +9,11 @@
 // model the varargs union; downstream modules provide typed wrappers.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.file_control.request;
 
 mount core.*;

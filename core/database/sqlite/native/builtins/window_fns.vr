@@ -20,6 +20,11 @@
 //  FIRST_VALUE(X) / LAST_VALUE(X) / NTH_VALUE(X, N)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.builtins.window_fns;
 
 mount core.*;

@@ -9,6 +9,11 @@
 // Default: 1000 frames. 0 disables auto-checkpointing.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.wal_autocheckpoint_pragma;
 
 public module setting;

@@ -9,6 +9,11 @@
 // causing deep nesting. SQLite returns SQLITE_TOOBIG (18) when exceeded.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.trigger_recursion_limit;
 
 public module gate;

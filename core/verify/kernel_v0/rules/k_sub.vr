@@ -74,6 +74,11 @@
 // Once ZFC + 2-inacc is taken as foundational, T-Sub is automatic.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.rules.k_sub;
 
 mount core.prelude.{Heap, Maybe};

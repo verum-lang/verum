@@ -1,5 +1,10 @@
 // carray() vtab — element-type taxonomy + filter argv shape.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.carray_vtab_api.vtab;
 
 mount base.{Bool, Int64, Text};

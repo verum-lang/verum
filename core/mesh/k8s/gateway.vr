@@ -5,6 +5,11 @@
 //  https://gateway-api.sigs.k8s.io/api-types/gatewayclass/
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.mesh.k8s.gateway;
 
 mount core.*;

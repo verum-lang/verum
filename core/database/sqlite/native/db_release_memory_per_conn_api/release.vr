@@ -1,5 +1,10 @@
 // sqlite3_db_release_memory — best-effort per-connection heap release.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.db_release_memory_per_conn_api.release;
 
 mount base.{Bool, Int64, Text};

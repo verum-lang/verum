@@ -6,6 +6,11 @@
 // Spec §13.4 — WHERE-clause analysis.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.where_clause_term_api;
 
 public module operator;

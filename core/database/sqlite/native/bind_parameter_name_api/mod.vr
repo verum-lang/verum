@@ -6,6 +6,11 @@
 // anonymous `?` parameters. Spec App E.B.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bind_parameter_name_api;
 
 public module reverse;

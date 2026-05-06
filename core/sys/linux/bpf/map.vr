@@ -7,6 +7,11 @@
 // IP/CIDR lookups), and more.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.sys.linux.bpf.map;
 
 mount core.*;

@@ -8,6 +8,11 @@
 // (slot 0 is not valid, to match sqlite3_bind_* convention).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bind_pointer.engine;
 
 mount core.*;

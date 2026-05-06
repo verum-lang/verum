@@ -6,6 +6,11 @@
 //  * large slots (size = sz_large bytes) — used for VDBE programs, sorters
 // A request larger than sz_large bypasses lookaside entirely (heap malloc).
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.lookaside_two_size_api.pool;
 
 mount base.{Bool, Int64, Text};

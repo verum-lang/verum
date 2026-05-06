@@ -15,6 +15,11 @@
 // tracestate = <key1>=<val1>,<key2>=<val2>,...
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.tracing.propagation;
 
 mount core.*;

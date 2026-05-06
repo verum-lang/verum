@@ -1,5 +1,10 @@
 // Flatten-context + probe function that finds the first blocking rule.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.query_flattening_rule.context;
 
 mount core.database.sqlite.native.query_flattening_rule.rule.{

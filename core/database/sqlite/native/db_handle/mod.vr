@@ -18,6 +18,11 @@
 //  * `engine` — pure accessors matching the C-API names
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.db_handle;
 
 public module handle;

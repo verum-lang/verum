@@ -11,6 +11,11 @@
 //  SQLITE_SOURCE_ID = "YYYY-MM-DD HH:MM:SS hash"
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.sqlite_version_fmt;
 
 public module version;

@@ -23,6 +23,11 @@
 // Fixed-length string / fixed-length integer: caller-known length.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.mysql.wire;
 
 public module frame;

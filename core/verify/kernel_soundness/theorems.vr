@@ -54,6 +54,11 @@
 // re-check rather than a rubber-stamp.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_soundness.theorems;
 
 mount core.verify.kernel_soundness.model.{CoreTerm, CoreType, UniverseLevel, universe_is_prop};

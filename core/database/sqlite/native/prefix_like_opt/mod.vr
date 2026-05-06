@@ -13,6 +13,11 @@
 // Spec §13.4 — planner WHERE-term optimization.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.prefix_like_opt;
 
 public module pattern;

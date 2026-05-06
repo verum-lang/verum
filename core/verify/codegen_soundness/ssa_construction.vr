@@ -21,6 +21,11 @@
 // evaluate to `store(v)` post-mem2reg.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.codegen_soundness.ssa_construction;
 
 mount core.prelude.{Bool};

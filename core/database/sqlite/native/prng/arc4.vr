@@ -9,6 +9,11 @@
 // updates the state and returns one byte of keystream.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.prng.arc4;
 
 mount core.*;

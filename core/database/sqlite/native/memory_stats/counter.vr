@@ -8,6 +8,11 @@
 // limits. All fields are Int64 (bytes) to match sqlite3_*64 APIs.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.memory_stats.counter;
 
 mount core.*;

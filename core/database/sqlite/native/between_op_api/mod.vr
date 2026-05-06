@@ -6,6 +6,11 @@
 // affinity of X. Spec §15.5.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.between_op_api;
 
 public module rewrite;

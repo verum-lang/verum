@@ -9,6 +9,11 @@
 // regular row payload — see serial_type_api for the per-column tag.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stat4_sample_blob;
 
 public module shape;

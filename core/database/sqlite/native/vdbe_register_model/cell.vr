@@ -1,5 +1,10 @@
 // Mem cell — kind-discriminated variant + flags bitmap.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vdbe_register_model.cell;
 
 mount core.database.sqlite.native.vdbe_register_model.kind.{

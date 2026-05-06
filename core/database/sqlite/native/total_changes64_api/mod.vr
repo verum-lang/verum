@@ -6,6 +6,11 @@
 // Added 3.37.0. Spec App E.C.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.total_changes64_api;
 
 public module counters;

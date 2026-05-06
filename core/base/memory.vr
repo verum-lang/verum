@@ -20,6 +20,11 @@
 
 // Import native CBGR allocator
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.base.memory;
 mount super.super.mem.allocator.{
     cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc,

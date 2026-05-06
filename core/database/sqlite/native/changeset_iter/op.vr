@@ -11,6 +11,11 @@
 //  bIndirect = 1 if the change was applied indirectly (by a trigger)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.changeset_iter.op;
 
 mount core.*;

@@ -6,6 +6,11 @@
 // Spec §11.5 — VDBE sorter.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.sorter_config_api;
 
 public module config;

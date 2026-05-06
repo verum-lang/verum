@@ -11,6 +11,11 @@
 //  2 / FAST — zero only the reserved-bytes tail (3.31+)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.secure_delete_api;
 
 public module mode;

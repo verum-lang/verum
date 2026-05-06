@@ -18,6 +18,11 @@
 // - core.net.http2 + core.protobuf — gRPC transport (intrinsic-backed).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.security.spiffe;
 
 public module id;

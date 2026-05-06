@@ -7,6 +7,11 @@
 // Spec §22 — session extension.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.changeset_apply_policy;
 
 public module flags;

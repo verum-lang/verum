@@ -20,6 +20,11 @@
 //  * `reset` — ResetRequest (per-stmt or per-op)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.scanstatus_v2;
 
 public module flags;

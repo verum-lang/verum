@@ -49,6 +49,11 @@
 // (msfs + lurie_htt + adamek_rosicky) propagates transitively.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.s_definable.lemma_3_4;
 
 mount core.math.strata.{MathObject};

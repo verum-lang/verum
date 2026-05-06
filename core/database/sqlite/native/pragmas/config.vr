@@ -15,6 +15,11 @@
 // here only when read via `PRAGMA page_size`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.pragmas.config;
 
 mount core.*;

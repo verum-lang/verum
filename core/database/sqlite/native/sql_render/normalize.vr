@@ -16,6 +16,11 @@
 //  simple and documents that in the header).
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.sql_render.normalize;
 
 mount core.*;

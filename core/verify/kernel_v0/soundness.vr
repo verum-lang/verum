@@ -65,6 +65,11 @@
 // audit bundle reports L4-load-bearing under ZFC + 2-inacc alone.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.soundness;
 
 mount core.prelude.{Heap, List};

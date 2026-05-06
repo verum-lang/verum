@@ -10,6 +10,11 @@
 //  SQLITE_INDEX_SCAN_HEX (0x02) — idxNum is hex-coded for display
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_scan_hint_api;
 
 public module flag;

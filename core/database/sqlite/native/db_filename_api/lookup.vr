@@ -1,5 +1,10 @@
 // sqlite3_db_filename — schema → filename lookup.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.db_filename_api.lookup;
 
 mount base.{Bool, Text};

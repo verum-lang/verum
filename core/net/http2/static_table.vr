@@ -6,6 +6,11 @@
 // combined index space.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.http2.static_table;
 
 mount core.*;

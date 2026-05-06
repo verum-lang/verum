@@ -1,5 +1,10 @@
 // Expression-node taxonomy + affinity resolver.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.expr_affinity_resolver.node;
 
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{

@@ -1,5 +1,10 @@
 // Classify a declared-type string into an Affinity using SQLite §3.1 rules.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.affinity_matrix_api.classify;
 
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{

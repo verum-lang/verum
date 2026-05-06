@@ -18,6 +18,11 @@
 
 // Re-export text types
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.text;
 public mount .text.Text;
 public mount .text.Utf8Error;

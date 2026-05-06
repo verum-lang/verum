@@ -54,6 +54,11 @@
 // discharge T-Pi-Form first to amortize the proof effort.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.kernel_v0.rules.k_app_elim;
 
 mount core.prelude.{Heap, Maybe};

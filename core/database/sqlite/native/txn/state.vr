@@ -12,6 +12,11 @@
 // sqlite3_txn_state returns -1 if the supplied schema name is unknown.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.txn.state;
 
 mount core.*;

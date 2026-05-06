@@ -10,6 +10,11 @@
 // (Modern values: 0=none, 1=read, 2=write.) Added 3.34.0. Spec App E.T.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.txn_state_api;
 
 public module state;

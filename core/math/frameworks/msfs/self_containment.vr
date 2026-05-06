@@ -45,6 +45,11 @@
 // claim "the MSFS-side prerequisites are already verified".
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.frameworks.msfs.self_containment;
 
 mount core.proof.kernel_bridge.{

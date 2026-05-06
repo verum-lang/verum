@@ -19,6 +19,11 @@
 //  `max_output` parameter caps this.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.net.http2.huffman;
 
 mount core.*;

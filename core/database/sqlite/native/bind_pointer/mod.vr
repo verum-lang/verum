@@ -21,6 +21,11 @@
 //  * `engine` — bind/value slot + type-gated fetch
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bind_pointer;
 
 public module tag;

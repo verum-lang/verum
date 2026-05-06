@@ -1336,7 +1336,98 @@ fn pin_compiler_phase_wires_foreign_foundation_constructs() {
 }
 
 // =============================================================================
-// 22. Internal/ references must NOT appear in any architecture .vr file
+// 22. Universal @arch_module discipline across the entire core/ stdlib
+// =============================================================================
+
+/// **Universal pin** — every `.vr` file under `core/` (recursive)
+/// must carry the `@arch_module(...)` self-attestation declaration.
+/// This is the architectural promise that ATS-V annotation
+/// discipline applies UNIFORMLY across the stdlib, not just the
+/// math / verify / proof / architecture sub-trees.
+///
+/// Files exempt from the pin (very narrow exception list):
+///   * Files with no `module core.X.Y;` declaration are not cogs
+///     in the Verum sense — they are auxiliary helper files (test
+///     fixtures, generated stubs).  None currently exist in core/
+///     but the pin allows the future case.
+///
+/// Adding a new `.vr` cog requires either annotating it with
+/// `@arch_module(...)` OR adding an explicit exemption with a
+/// rationale comment.
+#[test]
+fn pin_universal_arch_module_coverage_in_core() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let core = workspace_root.join("core");
+
+    let mut total_cogs: usize = 0;
+    let mut missing: Vec<String> = Vec::new();
+    walk_core_vr_files(&core, &mut |path| {
+        let text = std::fs::read_to_string(path).expect("read .vr");
+        // A file qualifies as a cog iff it contains `^module core.X.Y;`.
+        // Files without that declaration are auxiliary (none currently).
+        let mut module_lines = 0;
+        for line in text.lines() {
+            if line.starts_with("module core") {
+                module_lines += 1;
+            }
+        }
+        if module_lines == 0 {
+            return;
+        }
+        total_cogs += 1;
+        if !text.contains("@arch_module") {
+            missing.push(
+                path.strip_prefix(&core)
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| path.display().to_string()),
+            );
+        }
+    });
+
+    assert!(
+        missing.is_empty(),
+        "{} of {} cogs under core/ missing @arch_module attestation: {}",
+        missing.len(),
+        total_cogs,
+        missing.join(", "),
+    );
+    // Sanity floor: stdlib has at least 1500 cogs.  If this drops
+    // sharply something deleted a directory by accident.
+    assert!(
+        total_cogs >= 1500,
+        "core/ should contain >= 1500 annotated cogs, found {}",
+        total_cogs,
+    );
+}
+
+fn walk_core_vr_files(dir: &std::path::Path, f: &mut impl FnMut(&std::path::Path)) {
+    if !dir.is_dir() {
+        return;
+    }
+    // Skip target/ — build artifacts.
+    if dir.file_name().and_then(|s| s.to_str()) == Some("target") {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_core_vr_files(&path, f);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("vr") {
+            f(&path);
+        }
+    }
+}
+
+// =============================================================================
+// 23. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

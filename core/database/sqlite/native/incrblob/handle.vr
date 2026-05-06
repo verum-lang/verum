@@ -9,6 +9,11 @@
 // can answer in O(1) without re-reading the column.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.incrblob.handle;
 
 mount core.*;

@@ -1,5 +1,10 @@
 // SQLite reserved-word table — sqlite3_keyword_count / _name / _check.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.keyword_check_api.table;
 
 mount base.{Bool, Text};

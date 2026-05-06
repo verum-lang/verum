@@ -32,6 +32,11 @@
 //  core.math.giry — LlmOracle (for stochastic translation)
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.theory_interop.core;
 
 mount core.math.epistemic.{

@@ -1,5 +1,10 @@
 // VFS xRandomness — entropy source for the engine's PRNG seed.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vfs_xrandomness_api.method;
 
 mount base.{Bool, Int64, Text};

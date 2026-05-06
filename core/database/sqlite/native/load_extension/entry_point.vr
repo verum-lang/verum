@@ -11,6 +11,11 @@
 // file's stem (e.g. "libfoo.so" → "sqlite3_foo_init").
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.load_extension.entry_point;
 
 mount core.*;

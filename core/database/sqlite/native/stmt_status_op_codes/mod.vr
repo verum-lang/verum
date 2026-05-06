@@ -5,6 +5,11 @@
 // Values mirror sqlite3.h.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stmt_status_op_codes;
 
 public module op;

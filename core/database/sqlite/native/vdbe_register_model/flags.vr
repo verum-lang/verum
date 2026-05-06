@@ -1,5 +1,10 @@
 // Mem-cell flag bitmap (MEM_* constants from sqliteInt.h).
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vdbe_register_model.flags;
 
 mount base.{Bool, Int64};

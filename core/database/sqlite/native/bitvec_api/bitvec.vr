@@ -1,5 +1,10 @@
 // High-level bitvec handle — rowid range + current node kind + counters.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.bitvec_api.bitvec;
 
 mount core.database.sqlite.native.bitvec_api.node.{

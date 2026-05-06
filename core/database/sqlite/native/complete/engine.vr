@@ -11,6 +11,11 @@
 // same byte-oriented scanner; this façade only exposes the UTF-8 form.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.complete.engine;
 
 mount core.*;

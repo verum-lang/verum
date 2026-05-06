@@ -1,5 +1,10 @@
 // BTREE_SEEK_EQ / BTREE_BULKLOAD / BTREE_HINT_FLAGS bit set.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.cursor_hint_codes.flag;
 
 mount base.{Bool, Int64};

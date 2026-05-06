@@ -8,6 +8,11 @@
 // used to satisfy small allocations without touching the heap.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.db_release_memory_api.lookaside;
 
 mount core.*;

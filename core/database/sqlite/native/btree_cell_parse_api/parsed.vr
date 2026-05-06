@@ -1,5 +1,10 @@
 // Parsed B-tree cell metadata.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.btree_cell_parse_api.parsed;
 
 mount core.database.sqlite.native.btree_cell_parse_api.cell_kind.{

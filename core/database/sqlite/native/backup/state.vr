@@ -22,6 +22,11 @@
 // Throttling is the caller's responsibility — see `policy.vr`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.backup.state;
 
 mount core.*;

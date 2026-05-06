@@ -9,6 +9,11 @@
 // rules; we reproduce them here. NULL → 0/0.0/empty Text/empty Blob.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.column.coerce;
 
 mount core.*;

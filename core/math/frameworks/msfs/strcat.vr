@@ -34,6 +34,11 @@
 // at this layer.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.frameworks.msfs.strcat;
 
 mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};

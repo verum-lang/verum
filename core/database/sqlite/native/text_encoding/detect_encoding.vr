@@ -9,6 +9,11 @@
 //  3. Otherwise default to UTF-8.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.text_encoding.detect_encoding;
 
 mount core.*;

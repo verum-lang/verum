@@ -1,6 +1,11 @@
 // Compute the half-open range [lo, hi) that covers all values matching the
 // given literal prefix.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.prefix_like_opt.range;
 
 mount base.{Bool, Text};

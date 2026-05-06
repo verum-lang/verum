@@ -1,5 +1,10 @@
 // Mem-cell type kind — roughly mirrors MEM_Null / MEM_Int / MEM_Real / MEM_Str / MEM_Blob.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vdbe_register_model.kind;
 
 mount base.{Bool, Text};

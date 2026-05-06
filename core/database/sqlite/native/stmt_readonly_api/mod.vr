@@ -6,6 +6,11 @@
 // Spec §11.1 — stmt_readonly.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.stmt_readonly_api;
 
 public module classify;

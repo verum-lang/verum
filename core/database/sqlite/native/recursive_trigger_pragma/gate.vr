@@ -5,6 +5,11 @@
 // a trigger body executes with trigger-firing temporarily suppressed.
 // When ON: triggers may cascade up to SQLITE_LIMIT_TRIGGER_DEPTH levels.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.recursive_trigger_pragma.gate;
 
 mount base.{Bool, Text};

@@ -1,5 +1,10 @@
 // NULLS FIRST / NULLS LAST policy.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.index_key_sort_api.nulls_policy;
 
 mount base.{Bool, Text};

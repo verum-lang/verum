@@ -17,6 +17,11 @@
 //  by the engine when re-walking the source tree.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.vacuum.relocator;
 
 mount core.*;

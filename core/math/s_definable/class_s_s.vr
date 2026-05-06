@@ -43,6 +43,11 @@
 // `lemma_3_4.vr`.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.s_definable.class_s_s;
 
 mount core.math.frameworks.msfs.key_symbols.{InfinityNCat};

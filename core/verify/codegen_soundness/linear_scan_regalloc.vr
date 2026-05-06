@@ -21,6 +21,11 @@
 // evicted while it is still live.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.verify.codegen_soundness.linear_scan_regalloc;
 
 mount core.prelude.{Bool};

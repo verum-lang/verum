@@ -5,6 +5,11 @@
 // comparator. Spec §15.4 — collations.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.collation_policy_api;
 
 public module policy;

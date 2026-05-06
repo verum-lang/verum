@@ -1,5 +1,10 @@
 // WAL file header record.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.wal_frame_layout.file_header;
 
 mount core.database.sqlite.native.wal_frame_layout.constants.{

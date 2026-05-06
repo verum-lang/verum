@@ -8,6 +8,11 @@
 // progress reporting while driving sqlite3_recover_step in a loop.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.recover.stats;
 
 mount core.*;

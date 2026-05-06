@@ -1,5 +1,10 @@
 // PRAGMA secure_delete mode taxonomy.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.secure_delete_api.mode;
 
 mount base.{Bool, Text, Maybe};

@@ -15,6 +15,11 @@
 // one of UNLOCK/LOCK with one of SHARED/EXCLUSIVE.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.shm_flags;
 
 mount core.*;

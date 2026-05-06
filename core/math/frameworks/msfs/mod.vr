@@ -33,6 +33,11 @@
 // --by-theorem` enumerates them on every transitively-citing theorem.
 // =============================================================================
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.math.frameworks.msfs;
 
 // `public mount` so downstream theorem files can `mount

@@ -1,5 +1,10 @@
 // sqlite3_value_pointer — type-tagged pointer retrieval.
 
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
 module core.database.sqlite.native.value_pointer_type_api.retrieve;
 
 mount base.{Bool, Text};
