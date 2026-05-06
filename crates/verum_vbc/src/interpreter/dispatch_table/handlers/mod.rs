@@ -69,6 +69,20 @@ pub(super) mod stdio_runtime;
 // re-implement the body in Rust against the heap layout.
 pub(super) mod path_ops_runtime;
 
+// High-level Rust intercepts for `Text.*` static factory methods
+// (`Text.new`, `Text.with_capacity`, `Text.from_static`,
+// `Text.from_str`, `Text.from_char`, `Text.from_utf8`, …).
+// Sibling to `path_ops_runtime` — closes the same architectural
+// gap for the canonical stdlib-Text static surface.  When a user
+// script writes `Text.with_capacity(64)` and codegen emits
+// `Call { func_id: <archive_id> }`, the user module has no body
+// for that id (the body lives in the precompiled archive); the
+// synthesised RetV stub returns Unit and downstream
+// `s.len()` / `s.capacity()` crash with `method not found on
+// receiver of runtime kind ()`.  This intercept fires first and
+// returns the canonical empty-or-built Text value.
+pub(super) mod text_static_runtime;
+
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via
