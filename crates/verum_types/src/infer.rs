@@ -1582,50 +1582,68 @@ impl TypeChecker {
         metadata: &crate::core_metadata::CoreMetadata,
     ) {
         use crate::protocol::{Protocol, ProtocolMethod};
-        // Idempotent guard.
-        {
-            let pc = self.protocol_checker.read();
-            if pc.get_protocol(name).is_some() {
-                return;
-            }
-        }
         let protocol_desc = match metadata.protocols.get(name) {
             Some(d) => d,
             None => return,
         };
 
+        // Capture any existing protocol's associated_types and
+        // associated_consts so the hardcoded
+        // `register_standard_protocols` defaults (which seed only
+        // `Item` for Iterator, `Output` for math ops, etc.) survive
+        // when we replace the methods table with the VBCA-derived
+        // signatures.  Without this preservation, overwriting the
+        // hardcoded Iterator wipes its `Item` associated type and
+        // user code that names `MyIter::Item` fails to resolve.
+        //
+        // Idempotent skip: if we already registered a protocol whose
+        // methods cover the metadata-required surface (count >=
+        // required_methods + default_methods), there's nothing to
+        // do.  This avoids re-running the parse on every
+        // `ensure_stdlib_type_loaded` call for an already-loaded
+        // protocol.
+        let (existing_assoc_types, existing_assoc_consts, existing_method_count) = {
+            let pc = self.protocol_checker.read();
+            match pc.get_protocol(name) {
+                Maybe::Some(p) => (
+                    p.associated_types.clone(),
+                    p.associated_consts.clone(),
+                    p.methods.len(),
+                ),
+                Maybe::None => (verum_common::Map::new(), verum_common::Map::new(), 0),
+            }
+        };
+        let needed = protocol_desc.required_methods.len() + protocol_desc.default_methods.len();
+        if existing_method_count >= needed && needed > 0 {
+            return;
+        }
+
+        // Parse param/return type strings via
+        // `parse_descriptor_type_string` — the same parser used by
+        // `register_inherent_methods_from_metadata`.  Pre-fix this
+        // helper used `Self::text_to_path(&p.ty)` which treats the
+        // entire string as a single identifier — that yields
+        // `Type::Named { path: "List<T>", args: [] }`, an
+        // ill-formed type that never unifies with the structural
+        // `Type::Generic { name: "List", args: [T] }` produced at
+        // user-code call sites.  The descriptor parser handles
+        // primitives, bare names, generic instantiations
+        // (`Maybe<T>`), references (`&T`), and function types
+        // correctly so the protocol method's parameter / return
+        // shape round-trips through the typechecker's unifier.
+        let to_type = |s: &Text| -> Type { parse_descriptor_type_string(s.as_str()) };
         let mut methods = verum_common::Map::new();
         for m in protocol_desc.required_methods.iter() {
-            let params: List<Type> = m
-                .params
-                .iter()
-                .map(|p| Type::Named {
-                    path: Self::text_to_path(&p.ty),
-                    args: List::new(),
-                })
-                .collect();
-            let return_type = Type::Named {
-                path: Self::text_to_path(&m.return_type),
-                args: List::new(),
-            };
+            let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
+            let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =
                 ProtocolMethod::simple(m.name.clone(), method_type, false);
             methods.insert(m.name.clone(), protocol_method);
         }
         for m in protocol_desc.default_methods.iter() {
-            let params: List<Type> = m
-                .params
-                .iter()
-                .map(|p| Type::Named {
-                    path: Self::text_to_path(&p.ty),
-                    args: List::new(),
-                })
-                .collect();
-            let return_type = Type::Named {
-                path: Self::text_to_path(&m.return_type),
-                args: List::new(),
-            };
+            let params: List<Type> = m.params.iter().map(|p| to_type(&p.ty)).collect();
+            let return_type = to_type(&m.return_type);
             let method_type = Type::function(params, return_type);
             let protocol_method =
                 ProtocolMethod::simple(m.name.clone(), method_type, true);
@@ -1656,8 +1674,8 @@ impl TypeChecker {
                 })
                 .collect(),
             methods,
-            associated_types: verum_common::Map::new(),
-            associated_consts: verum_common::Map::new(),
+            associated_types: existing_assoc_types,
+            associated_consts: existing_assoc_consts,
             super_protocols: protocol_desc
                 .super_protocols
                 .iter()
