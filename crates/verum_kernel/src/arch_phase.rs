@@ -165,6 +165,19 @@ pub struct PhaseInputs {
     pub yoneda_verdicts_claimed: Vec<(String, Vec<String>)>,
     /// Foreign-foundation constructs detected in the body.
     pub foreign_foundation_constructs: Vec<(String, crate::arch::Foundation)>,
+    /// Cross-cog peer foundations for AP-005 FoundationDrift.
+    /// Populated by the compiler's session-level arch-shape
+    /// registry from each `composes_with` peer's `@arch_module(foundation: ...)`
+    /// declaration.
+    pub composed_foundations: Vec<(String, crate::arch::Foundation)>,
+    /// Cross-cog peer lifecycles for AP-009 LifecycleRegression
+    /// (and AP-024 transitive variant).  Populated from each peer's
+    /// `@arch_module(lifecycle: ...)` declaration.
+    pub cited_lifecycles: Vec<(String, crate::arch::Lifecycle)>,
+    /// Cross-cog peer tiers for AP-004 TierMixing.  Populated from
+    /// each peer's `@arch_module(at_tier: ...)` declaration plus
+    /// any direct callee resolution from body analysis.
+    pub callee_tiers: Vec<(String, crate::arch::Tier)>,
 }
 
 /// Run the phase for a single module with caller-supplied inputs.
@@ -200,6 +213,12 @@ pub fn run_arch_phase_one_with(
         .unwrap_or_else(crate::arch::canonical_capability_registry);
     ctx.yoneda_verdicts_claimed = inputs.yoneda_verdicts_claimed.clone();
     ctx.foreign_foundation_constructs = inputs.foreign_foundation_constructs.clone();
+    // Cross-cog peer resolution — activates AP-004 TierMixing,
+    // AP-005 FoundationDrift, AP-009 LifecycleRegression in
+    // production builds.
+    ctx.composed_foundations = inputs.composed_foundations.clone();
+    ctx.cited_lifecycles = inputs.cited_lifecycles.clone();
+    ctx.callee_tiers = inputs.callee_tiers.clone();
 
     let violations = check_all_anti_patterns(&shape_for_checks, &ctx);
 

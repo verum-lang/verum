@@ -226,6 +226,27 @@ pub struct Session {
     /// elides every `PermissionAssert` site (matching the
     /// interpreter's allow-all default when no policy is wired).
     aot_permission_policy: Shared<RwLock<Option<verum_codegen::llvm::AotPermissionPolicy>>>,
+
+    /// ATS-V Phase 6.5 cross-cog peer registry.  Maps
+    /// fully-qualified module name (`core.architecture.types`,
+    /// `my_app.payment.checkout`, …) to the parsed `Shape` from
+    /// that module's `@arch_module(...)` declaration.
+    ///
+    /// The registry is populated incrementally as
+    /// `phase_ats_v` processes each module.  Subsequent modules
+    /// look up their `composes_with` peers here to populate the
+    /// `composed_foundations` / `cited_lifecycles` / `callee_tiers`
+    /// fields of `PhaseInputs`, which activate the cross-cog
+    /// anti-patterns AP-004 TierMixing, AP-005 FoundationDrift,
+    /// AP-009 LifecycleRegression in real builds.
+    ///
+    /// Order-dependence: a module whose peer is processed AFTER
+    /// it gets `None` on the lookup and the corresponding cross-cog
+    /// check skips for that peer (no false-positive — the registry
+    /// is "best-effort known-at-this-point").  A future two-pass
+    /// architecture will close this by extracting all Shapes in a
+    /// pre-pass.
+    arch_shape_registry: Shared<RwLock<std::collections::BTreeMap<String, verum_kernel::arch::Shape>>>,
 }
 
 impl Session {
@@ -263,7 +284,67 @@ impl Session {
             pending_exit_code: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
+            arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
         }
+    }
+
+    /// Register a module's parsed `@arch_module(...)` Shape into
+    /// the cross-cog peer registry.  Called by `phase_ats_v` after
+    /// the per-module Shape is parsed.  Subsequent modules'
+    /// `composes_with` lookups read from this registry to populate
+    /// AP-004/005/009 production-level checks.
+    pub fn register_arch_shape(&self, module_name: String, shape: verum_kernel::arch::Shape) {
+        self.arch_shape_registry.write().insert(module_name, shape);
+    }
+
+    /// Resolve every entry in `composes_with` to its `(peer_name,
+    /// Foundation)` pair, skipping peers not yet in the registry.
+    /// Used by `phase_ats_v` to populate
+    /// `PhaseInputs.composed_foundations`.  Best-effort under the
+    /// current single-pass architecture.
+    pub fn resolve_composed_foundations(
+        &self,
+        composes_with: &[String],
+    ) -> Vec<(String, verum_kernel::arch::Foundation)> {
+        let registry = self.arch_shape_registry.read();
+        composes_with
+            .iter()
+            .filter_map(|peer| {
+                registry
+                    .get(peer)
+                    .map(|s| (peer.clone(), s.foundation.clone()))
+            })
+            .collect()
+    }
+
+    /// Resolve every entry in `composes_with` to its `(peer_name,
+    /// Lifecycle)` pair, skipping peers not yet in the registry.
+    pub fn resolve_cited_lifecycles(
+        &self,
+        composes_with: &[String],
+    ) -> Vec<(String, verum_kernel::arch::Lifecycle)> {
+        let registry = self.arch_shape_registry.read();
+        composes_with
+            .iter()
+            .filter_map(|peer| {
+                registry
+                    .get(peer)
+                    .map(|s| (peer.clone(), s.lifecycle.clone()))
+            })
+            .collect()
+    }
+
+    /// Resolve every entry in `composes_with` to its `(peer_name,
+    /// Tier)` pair, skipping peers not yet in the registry.
+    pub fn resolve_callee_tiers(
+        &self,
+        composes_with: &[String],
+    ) -> Vec<(String, verum_kernel::arch::Tier)> {
+        let registry = self.arch_shape_registry.read();
+        composes_with
+            .iter()
+            .filter_map(|peer| registry.get(peer).map(|s| (peer.clone(), s.at_tier.clone())))
+            .collect()
     }
 
     /// Record the VBC module produced by the most recent compilation.
@@ -828,6 +909,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             pending_exit_code: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
             aot_permission_policy: Shared::new(RwLock::new(None)),
+            arch_shape_registry: Shared::new(RwLock::new(std::collections::BTreeMap::new())),
         }
     }
 
