@@ -1532,6 +1532,239 @@ impl TypeChecker {
         for r in referenced {
             pending.push(r);
         }
+
+        // #130 — When the loaded type is itself a Protocol, register
+        // its body (methods / super-protocols / type-params) into
+        // `protocol_checker` so impl-registration consumers can look
+        // up its method signatures.  The eager
+        // `load_stdlib_from_metadata` registers every protocol
+        // upfront via `metadata.protocols`; the lazy path needs the
+        // same hook gated to this single name.
+        if matches!(
+            type_desc.kind,
+            crate::core_metadata::TypeDescriptorKind::Protocol { .. }
+        ) {
+            self.register_stdlib_protocol_for_name(name, &metadata);
+        }
+
+        // #130 — register protocol implementations that target this
+        // type.  Pre-fix the lazy loader registered the type
+        // definition + inherent methods but NOT the protocol impls
+        // recorded in `metadata.implementations`, so
+        // `protocol_checker.get_implementations(IntoList<_>)` returned
+        // empty — the canonical `xs.into_iter().map(f).collect()`
+        // chain failed at type-check because the dispatcher had no
+        // impl to walk for `IntoList<_>`.
+        //
+        // Pairs with the archive_metadata fix that populates
+        // `ImplementationDescriptor.protocol` from the VBC type
+        // table's `ProtocolId` field (was hardcoded `Text::default()`).
+        //
+        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // the impl list comes from `metadata.implementations`, not a
+        // hardcoded mapping.  Adding `Foldable` / `Functor` / etc.
+        // implementations to a stdlib type works identically.
+        let proto_deps = self.register_stdlib_impls_for_target(name, &metadata);
+        for proto_name in proto_deps {
+            pending.push(proto_name);
+        }
+    }
+
+    /// Register the body of a single stdlib protocol from
+    /// `metadata.protocols[name]` into `protocol_checker`.  Idempotent
+    /// (no-op if `protocol_checker.get_protocol(name)` already returns
+    /// `Some`).  Mirror of the eager loop in
+    /// `load_stdlib_from_metadata` lines ~2178-2275, gated to a
+    /// single name for the lazy path.
+    fn register_stdlib_protocol_for_name(
+        &mut self,
+        name: &Text,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        use crate::protocol::{Protocol, ProtocolMethod};
+        // Idempotent guard.
+        {
+            let pc = self.protocol_checker.read();
+            if pc.get_protocol(name).is_some() {
+                return;
+            }
+        }
+        let protocol_desc = match metadata.protocols.get(name) {
+            Some(d) => d,
+            None => return,
+        };
+
+        let mut methods = verum_common::Map::new();
+        for m in protocol_desc.required_methods.iter() {
+            let params: List<Type> = m
+                .params
+                .iter()
+                .map(|p| Type::Named {
+                    path: Self::text_to_path(&p.ty),
+                    args: List::new(),
+                })
+                .collect();
+            let return_type = Type::Named {
+                path: Self::text_to_path(&m.return_type),
+                args: List::new(),
+            };
+            let method_type = Type::function(params, return_type);
+            let protocol_method =
+                ProtocolMethod::simple(m.name.clone(), method_type, false);
+            methods.insert(m.name.clone(), protocol_method);
+        }
+        for m in protocol_desc.default_methods.iter() {
+            let params: List<Type> = m
+                .params
+                .iter()
+                .map(|p| Type::Named {
+                    path: Self::text_to_path(&p.ty),
+                    args: List::new(),
+                })
+                .collect();
+            let return_type = Type::Named {
+                path: Self::text_to_path(&m.return_type),
+                args: List::new(),
+            };
+            let method_type = Type::function(params, return_type);
+            let protocol_method =
+                ProtocolMethod::simple(m.name.clone(), method_type, true);
+            methods.insert(m.name.clone(), protocol_method);
+        }
+
+        let protocol = Protocol {
+            name: name.clone(),
+            kind: crate::protocol::ProtocolKind::Constraint,
+            type_params: protocol_desc
+                .generic_params
+                .iter()
+                .map(|g| crate::protocol::TypeParam {
+                    name: g.name.clone(),
+                    bounds: g
+                        .bounds
+                        .iter()
+                        .map(|b| crate::protocol::ProtocolBound {
+                            protocol: Self::text_to_path(b),
+                            args: List::new(),
+                            is_negative: false,
+                        })
+                        .collect(),
+                    default: g.default.as_ref().map(|d| Type::Named {
+                        path: Self::text_to_path(d),
+                        args: List::new(),
+                    }),
+                })
+                .collect(),
+            methods,
+            associated_types: verum_common::Map::new(),
+            associated_consts: verum_common::Map::new(),
+            super_protocols: protocol_desc
+                .super_protocols
+                .iter()
+                .map(|sp| crate::protocol::ProtocolBound {
+                    protocol: Self::text_to_path(sp),
+                    args: List::new(),
+                    is_negative: false,
+                })
+                .collect(),
+            specialization_info: Maybe::None,
+            defining_crate: Maybe::None,
+            span: Span::default(),
+        };
+        let _ = self.protocol_checker.write().register_protocol(protocol);
+    }
+
+    /// Register every protocol implementation in
+    /// `metadata.implementations` that targets `type_name`.  Returns
+    /// the set of protocol names referenced by these impls so the
+    /// caller can push them onto the pending queue (so the protocol's
+    /// own type-definition + body load before any subsequent
+    /// dispatch tries to resolve a default method on the impl).
+    /// Mirror of the eager loop in `load_stdlib_from_metadata` lines
+    /// ~2278-2320, gated to a single target.
+    fn register_stdlib_impls_for_target(
+        &mut self,
+        type_name: &Text,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> Vec<Text> {
+        use crate::protocol::ProtocolImpl;
+        let mut proto_deps: Vec<Text> = Vec::new();
+        for impl_desc in metadata.implementations.iter() {
+            if impl_desc.target_type.as_str() != type_name.as_str() {
+                continue;
+            }
+            if impl_desc.protocol.as_str().is_empty() {
+                continue;
+            }
+            // Make sure the protocol body is registered so we can
+            // pull its method-signature map.  Idempotent — a no-op
+            // when this protocol was already loaded earlier.
+            self.register_stdlib_protocol_for_name(&impl_desc.protocol, metadata);
+
+            // Idempotent guard: skip if THIS impl (target_type,
+            // protocol) was already registered.  The protocol-checker
+            // uses (type-key, protocol-key) as its impl-index key —
+            // duplicate registrations would still overwrite cleanly,
+            // but skipping spares the repeated allocation.
+            let for_type = Type::Named {
+                path: Self::text_to_path(&impl_desc.target_type),
+                args: List::new(),
+            };
+            {
+                let pc = self.protocol_checker.read();
+                if pc.get_implementations(&for_type).iter().any(|i| {
+                    i.protocol
+                        .as_ident()
+                        .map(|id| id.as_str() == impl_desc.protocol.as_str())
+                        .unwrap_or(false)
+                }) {
+                    proto_deps.push(impl_desc.protocol.clone());
+                    continue;
+                }
+            }
+
+            let associated_types: verum_common::Map<Text, Type> = impl_desc
+                .associated_types
+                .iter()
+                .map(|(name, type_name)| {
+                    let ty = Type::Named {
+                        path: Self::text_to_path(type_name),
+                        args: List::new(),
+                    };
+                    (name.clone(), ty)
+                })
+                .collect();
+
+            let methods: verum_common::Map<Text, Type> = {
+                let pc = self.protocol_checker.read();
+                if let Maybe::Some(protocol) = pc.get_protocol(&impl_desc.protocol) {
+                    protocol
+                        .methods
+                        .iter()
+                        .map(|(name, method)| (name.clone(), method.ty.clone()))
+                        .collect()
+                } else {
+                    verum_common::Map::new()
+                }
+            };
+
+            let protocol_impl = ProtocolImpl {
+                protocol: Self::text_to_path(&impl_desc.protocol),
+                protocol_args: List::new(),
+                for_type,
+                where_clauses: List::new(),
+                methods,
+                associated_types,
+                associated_consts: verum_common::Map::new(),
+                specialization: Maybe::None,
+                impl_crate: Maybe::None,
+                span: Span::default(),
+                type_param_fn_bounds: verum_common::Map::new(),
+            };
+            let _ = self.protocol_checker.write().register_impl(protocol_impl);
+            proto_deps.push(impl_desc.protocol.clone());
+        }
+        proto_deps
     }
 
     /// Walk a parsed Type and push every named-type reference

@@ -109,7 +109,7 @@ fn register_module_metadata(
         };
 
         if meta.types.contains_key(&type_name) {
-            collect_type_impls(ty, module, &mut meta.implementations);
+            collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);
             continue;
         }
 
@@ -301,6 +301,26 @@ fn register_module_metadata(
             }
         };
 
+        // #130 — populate `implements` from the VBC type
+        // descriptor's `protocols` table.  Each entry's
+        // `ProtocolImpl.protocol: ProtocolId` is an index into the
+        // same module's type table (protocols ARE types).  Resolve
+        // each ProtocolId → protocol name and gather them so the
+        // typechecker's protocol-impl registration path
+        // (`metadata.implementations` consumer at infer.rs:2401) and
+        // dispatcher (`get_implementations(receiver)`) can see the
+        // impl.  Pre-fix this list was hardcoded empty so every
+        // `xs.into_iter().map(f)` chain failed at type-check.
+        let implements: List<Text> = ty
+            .protocols
+            .iter()
+            .filter_map(|pi| {
+                type_id_to_name
+                    .get(&pi.protocol.0)
+                    .map(|s| Text::from(s.as_str()))
+            })
+            .collect();
+
         let descriptor = TypeDescriptor {
             name: type_name.clone(),
             module_path: module_path.clone(),
@@ -317,12 +337,12 @@ fn register_module_metadata(
                 Maybe::None
             },
             methods: List::new(),
-            implements: List::new(),
+            implements,
         };
         meta.types.insert(type_name.clone(), descriptor);
         meta.type_declaration_order.push(type_name);
 
-        collect_type_impls(ty, module, &mut meta.implementations);
+        collect_type_impls(ty, module, &mut meta.implementations, &type_id_to_name);
     }
 
     // Pass 2: functions.
@@ -449,14 +469,24 @@ fn collect_type_impls(
     ty: &verum_vbc::types::TypeDescriptor,
     module: &VbcModule,
     impls: &mut List<ImplementationDescriptor>,
+    type_id_to_name: &HashMap<u32, String>,
 ) {
     let target_name = match module.strings.get(ty.name) {
         Some(s) => Text::from(s),
         None => return,
     };
     for proto_impl in ty.protocols.iter() {
+        // #130 — resolve ProtocolId → protocol name via the
+        // module's type table.  Pre-fix this was hardcoded empty
+        // and the typechecker's `metadata.implementations` consumer
+        // at infer.rs:2401 silently registered every impl under a
+        // blank protocol name.
+        let protocol_name = match type_id_to_name.get(&proto_impl.protocol.0) {
+            Some(s) => Text::from(s.as_str()),
+            None => continue,
+        };
         let descriptor = ImplementationDescriptor {
-            protocol: Text::default(),
+            protocol: protocol_name,
             target_type: target_name.clone(),
             generic_params: List::new(),
             where_clause: List::new(),
