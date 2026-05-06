@@ -171,6 +171,9 @@ pub use typed::{
     // Concurrency attributes
     DeadlockDetectionAttr,
     DecreasesAttr,
+    // Deterministic floating-point — @deterministic_fp / @deterministic_fp(strict).
+    DeterministicFpAttr,
+    DeterministicFpStrictness,
     DifferentiableAttr,
     EnactAttr,
     EndianAttr,

@@ -150,6 +150,11 @@ module core.math;
 // Layer 0: Foundation (primitives, IEEE 754, bits)
 // Note: SIMD types are in core/simd, intrinsics in core/intrinsics
 public module ieee754;      // IEEE 754 floating-point utilities
+/// Correctly-rounded transcendentals — the canonical libm subset
+/// callable from `@deterministic_fp` bodies. Bit-for-bit reproducible
+/// across CPU/GPU/OS/libm vendor; required for consensus paths,
+/// CPTP-step Lindbladian dynamics, STARK trace generation.
+public module ieee754_deterministic;
 public module integers;     // Integer operations and division modes
 public module bits;         // Bit manipulation operations
 public module checked;      // Overflow-checked arithmetic

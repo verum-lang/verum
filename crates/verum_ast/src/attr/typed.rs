@@ -1374,6 +1374,125 @@ impl Spanned for VerifyAttr {
 }
 
 // =============================================================================
+// DETERMINISTIC FLOATING-POINT ATTRIBUTE
+// =============================================================================
+
+/// `@deterministic_fp` — declare a function as requiring bit-for-bit
+/// reproducible floating-point semantics across every conformant
+/// implementation.
+///
+/// # Why this exists
+///
+/// IEEE-754 specifies the *result* of basic operations (`+ − × ÷ √`)
+/// down to the bit, but not the *path*: an LLVM backend is free to
+/// fuse `a*b + c` into a single FMA on hardware that has one, and
+/// FMA's rounding is *different* (one rounding instead of two).
+/// Likewise, `libm` transcendentals (sin, cos, exp, log, …) are not
+/// IEEE-754-mandated — every libc ships its own implementation with
+/// its own ULP error budget, so `sin(x)` on glibc and on macOS libm
+/// can differ in the last bit.
+///
+/// For a blockchain validator running consensus, a CPTP channel
+/// computing a holon's Lindbladian step, or a STARK prover laying
+/// out trace polynomials, that bit-for-bit divergence is a
+/// soundness fault, not a performance footnote.
+///
+/// `@deterministic_fp` makes the requirement load-bearing at the
+/// type level:
+///
+///   * Round-mode is locked to round-to-nearest-even (the IEEE-754
+///     default; the attribute makes it explicit and forbids
+///     `with_rounding(...)` scopes).
+///   * FMA contraction is forbidden; the compiler emits separate
+///     mul + add instructions even on hardware with cheap FMA.
+///   * Calls into the runtime libm are restricted to the canonical
+///     `core.math.ieee754_deterministic` subset (CORE-MATH-derived
+///     correctly-rounded implementations); calls to system libm or
+///     to user code that does not itself carry `@deterministic_fp`
+///     are diagnostics-flagged.
+///
+/// The property *propagates*: a `@deterministic_fp` body calling
+/// a non-deterministic-fp function is a compile-time error in
+/// strict mode (warning otherwise — to ease incremental adoption).
+///
+/// # Example
+///
+/// ```verum
+/// @deterministic_fp
+/// fn cptp_step(rho: &Matrix7x7, h_eff: &Matrix7x7, dt: Float) -> Matrix7x7 {
+///     // Lindbladian step on a holon density matrix.
+///     // Every validator computing this gets bit-identical bytes.
+///     ...
+/// }
+///
+/// @deterministic_fp(strict)
+/// fn consensus_state_root(state: &State) -> [Byte; 32] {
+///     // Block-validator path — strict mode rejects any non-determinism.
+///     ...
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeterministicFpAttr {
+    /// Strictness — how the compiler handles calls to
+    /// non-deterministic-fp callees.
+    pub strictness: DeterministicFpStrictness,
+    pub span: Span,
+}
+
+/// How aggressively `@deterministic_fp` flags non-determinism.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum DeterministicFpStrictness {
+    /// Default — calling a non-deterministic-fp function emits a
+    /// warning. Intended for incremental adoption: an existing
+    /// codebase opts a leaf into determinism without re-annotating
+    /// every transitive callee in the same patch.
+    #[default]
+    Warn,
+    /// Strict — calling any non-deterministic-fp function from a
+    /// `@deterministic_fp` body is a compile-time error. Intended
+    /// for the consensus / kernel / state-transition path.
+    Strict,
+}
+
+impl DeterministicFpAttr {
+    pub fn new(strictness: DeterministicFpStrictness, span: Span) -> Self {
+        Self { strictness, span }
+    }
+
+    /// `@deterministic_fp` with default strictness (Warn).
+    pub fn default_at(span: Span) -> Self {
+        Self::new(DeterministicFpStrictness::Warn, span)
+    }
+
+    /// `@deterministic_fp(strict)` — error-on-non-deterministic-callee mode.
+    pub fn strict(span: Span) -> Self {
+        Self::new(DeterministicFpStrictness::Strict, span)
+    }
+
+    /// True iff calling a non-deterministic-fp function is a hard error
+    /// rather than just a warning.
+    pub fn is_strict(&self) -> bool {
+        self.strictness == DeterministicFpStrictness::Strict
+    }
+}
+
+impl DeterministicFpStrictness {
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        match s {
+            "warn" => Maybe::Some(DeterministicFpStrictness::Warn),
+            "strict" => Maybe::Some(DeterministicFpStrictness::Strict),
+            _ => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for DeterministicFpAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+// =============================================================================
 // TERMINATION PROOF ATTRIBUTES
 // Gradual verification attributes for incremental safety assurance.
 // =============================================================================

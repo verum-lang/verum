@@ -16,6 +16,7 @@ use verum_ast::attr::{
     BitfieldAttr,
     BitsAttr,
     ColdAttr,
+    DeterministicFpAttr,
     EndianAttr,
     FeatureAttr,
     HotAttr,
@@ -763,6 +764,72 @@ fn register_safety_attributes(registry: &mut AttributeRegistry) {
                 .build(),
         )
         .expect("pure registration");
+
+    // @deterministic_fp / @deterministic_fp(strict)
+    //
+    // Bit-for-bit reproducible floating-point semantics. Locks the
+    // function to round-to-nearest-even, forbids FMA contraction,
+    // restricts libm calls to the canonical
+    // `core.math.ieee754_deterministic` subset. The optional ident
+    // argument selects strictness: omitted = warn-on-non-determ-callee
+    // (default), `strict` = error-on-non-determ-callee.
+    //
+    // Property propagates: a `@deterministic_fp` body calling a
+    // non-deterministic-fp function emits a diagnostic at the call
+    // site (warning or error per strictness). Cross-tier consensus
+    // paths (validator block hash, holon CPTP step, STARK trace
+    // generation) MUST carry `@deterministic_fp(strict)`.
+    registry
+        .register(
+            AttributeMetadata::new("deterministic_fp")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::Optional(ArgType::Ident))
+                .category(AttributeCategory::Safety)
+                .doc("Lock function to bit-for-bit reproducible floating-point")
+                .doc_extended(
+                    r#"
+## Usage
+
+- `@deterministic_fp` — warn-mode (default; eases incremental adoption).
+- `@deterministic_fp(strict)` — strict-mode (call to non-deterministic-fp
+  callee is a compile-time error).
+
+## What's locked
+
+1. **Round mode** — round-to-nearest-even. The `with_rounding(...)`
+   scope cannot be opened inside the body.
+2. **FMA contraction** — forbidden. The codegen emits separate mul +
+   add instructions even on hardware with native FMA. Two roundings,
+   not one.
+3. **Library calls** — only `core.math.ieee754_deterministic.*`
+   (CORE-MATH-derived correctly-rounded transcendentals). System libm
+   calls (where `sin/cos/exp/log` differ between glibc and macOS libm
+   in the last bit) are diagnostics-flagged.
+
+## Why
+
+For a blockchain validator running consensus, a CPTP channel computing
+a holon's Lindbladian step, or a STARK prover laying out trace
+polynomials, FP-determinism is a soundness requirement. Without
+`@deterministic_fp`, two validators on different microarchitectures
+can sign blocks whose state-roots differ in the last bit — a fork.
+
+## Example
+
+```verum
+@deterministic_fp(strict)
+fn cptp_step(rho: &Matrix7x7, h_eff: &Matrix7x7, dt: Float) -> Matrix7x7 {
+    // Lindbladian step. Every validator gets bit-identical bytes.
+    ...
+}
+```
+"#,
+                )
+                .typed_as::<DeterministicFpAttr>()
+                .builtin()
+                .build(),
+        )
+        .expect("deterministic_fp registration");
 }
 
 // =============================================================================
