@@ -1,0 +1,253 @@
+// =============================================================================
+// security/pq/sphincs_plus.vr — FIPS 205 SLH-DSA (SPHINCS+)
+// =============================================================================
+// Stateless hash-based digital-signature scheme. Post-quantum secure
+// under the same assumption as the underlying hash function:
+// collision-resistance + second-preimage-resistance. Has *no* algebraic
+// structure — relies only on hash family — so quantum algorithms
+// known today (Grover, Brassard's variant) bound the attack to
+// generic O(2^(n/2)) work for n-bit security.
+//
+// Trade-off vs ML-DSA (FIPS 204):
+//
+//   * Larger signatures (~7-49 KB depending on parameter set) but
+//     smallest key sizes of any PQ signature scheme.
+//   * Slower signing (per Round 3 NIST benchmarks: ~3 ms / 100 ms
+//     depending on `s` vs `f` variant).
+//   * Verification is fast (~30 µs / 200 µs).
+//
+// Recommended *hedge against algebraic-structure breaks* of ML-DSA —
+// SPHINCS+ is explicitly the "if lattice cryptanalysis advances
+// faster than expected" backup. Many high-assurance deployments
+// pair both schemes (X.509 hybrid certificates).
+//
+// =============================================================================
+//
+// # Variants — FIPS 205 §10.1
+//
+// Naming: SLH-DSA-<HASH>-<sec>{s|f}
+//   HASH ∈ {SHA2, SHAKE}
+//   sec  ∈ {128, 192, 256}  (bits of post-quantum security)
+//   s/f: small-signature (s, smaller σ but slower sign) vs
+//        fast-signature (f, larger σ but faster sign).
+//
+// | Variant            | Cat | PK   | SK   | Signature |
+// |--------------------|-----|------|------|-----------|
+// | SLH-DSA-SHA2-128s  | 1   | 32   | 64   | 7,856     |
+// | SLH-DSA-SHA2-128f  | 1   | 32   | 64   | 17,088    |
+// | SLH-DSA-SHA2-192s  | 3   | 48   | 96   | 16,224    |
+// | SLH-DSA-SHA2-192f  | 3   | 48   | 96   | 35,664    |
+// | SLH-DSA-SHA2-256s  | 5   | 64   | 128  | 29,792    |
+// | SLH-DSA-SHA2-256f  | 5   | 64   | 128  | 49,856    |
+// | SLH-DSA-SHAKE-128s | 1   | 32   | 64   | 7,856     |
+// | SLH-DSA-SHAKE-128f | 1   | 32   | 64   | 17,088    |
+// | SLH-DSA-SHAKE-192s | 3   | 48   | 96   | 16,224    |
+// | SLH-DSA-SHAKE-192f | 3   | 48   | 96   | 35,664    |
+// | SLH-DSA-SHAKE-256s | 5   | 64   | 128  | 29,792    |
+// | SLH-DSA-SHAKE-256f | 5   | 64   | 128  | 49,856    |
+//
+// All sizes in bytes. NIST category 1 ≈ AES-128, 3 ≈ AES-192,
+// 5 ≈ AES-256 — bits of post-quantum security.
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module core.security.pq.sphincs_plus;
+
+mount core.*;
+mount core.security.pq.ml_kem.{PqError};
+
+// =============================================================================
+// Constants — FIPS 205 §10.1 Table 2
+// =============================================================================
+
+// SHA-2 parameter sets
+
+public const SLH_DSA_SHA2_128S_PK_LEN:  Int = 32;
+public const SLH_DSA_SHA2_128S_SK_LEN:  Int = 64;
+public const SLH_DSA_SHA2_128S_SIG_LEN: Int = 7856;
+
+public const SLH_DSA_SHA2_128F_PK_LEN:  Int = 32;
+public const SLH_DSA_SHA2_128F_SK_LEN:  Int = 64;
+public const SLH_DSA_SHA2_128F_SIG_LEN: Int = 17088;
+
+public const SLH_DSA_SHA2_192S_PK_LEN:  Int = 48;
+public const SLH_DSA_SHA2_192S_SK_LEN:  Int = 96;
+public const SLH_DSA_SHA2_192S_SIG_LEN: Int = 16224;
+
+public const SLH_DSA_SHA2_192F_PK_LEN:  Int = 48;
+public const SLH_DSA_SHA2_192F_SK_LEN:  Int = 96;
+public const SLH_DSA_SHA2_192F_SIG_LEN: Int = 35664;
+
+public const SLH_DSA_SHA2_256S_PK_LEN:  Int = 64;
+public const SLH_DSA_SHA2_256S_SK_LEN:  Int = 128;
+public const SLH_DSA_SHA2_256S_SIG_LEN: Int = 29792;
+
+public const SLH_DSA_SHA2_256F_PK_LEN:  Int = 64;
+public const SLH_DSA_SHA2_256F_SK_LEN:  Int = 128;
+public const SLH_DSA_SHA2_256F_SIG_LEN: Int = 49856;
+
+// SHAKE parameter sets — same sizes; different hash function
+
+public const SLH_DSA_SHAKE_128S_PK_LEN:  Int = 32;
+public const SLH_DSA_SHAKE_128S_SK_LEN:  Int = 64;
+public const SLH_DSA_SHAKE_128S_SIG_LEN: Int = 7856;
+
+public const SLH_DSA_SHAKE_128F_PK_LEN:  Int = 32;
+public const SLH_DSA_SHAKE_128F_SK_LEN:  Int = 64;
+public const SLH_DSA_SHAKE_128F_SIG_LEN: Int = 17088;
+
+public const SLH_DSA_SHAKE_192S_PK_LEN:  Int = 48;
+public const SLH_DSA_SHAKE_192S_SK_LEN:  Int = 96;
+public const SLH_DSA_SHAKE_192S_SIG_LEN: Int = 16224;
+
+public const SLH_DSA_SHAKE_192F_PK_LEN:  Int = 48;
+public const SLH_DSA_SHAKE_192F_SK_LEN:  Int = 96;
+public const SLH_DSA_SHAKE_192F_SIG_LEN: Int = 35664;
+
+public const SLH_DSA_SHAKE_256S_PK_LEN:  Int = 64;
+public const SLH_DSA_SHAKE_256S_SK_LEN:  Int = 128;
+public const SLH_DSA_SHAKE_256S_SIG_LEN: Int = 29792;
+
+public const SLH_DSA_SHAKE_256F_PK_LEN:  Int = 64;
+public const SLH_DSA_SHAKE_256F_SK_LEN:  Int = 128;
+public const SLH_DSA_SHAKE_256F_SIG_LEN: Int = 49856;
+
+// =============================================================================
+// Variants
+// =============================================================================
+
+public type SphincsPlusVariant is
+    | SlhDsaSha2_128s | SlhDsaSha2_128f
+    | SlhDsaSha2_192s | SlhDsaSha2_192f
+    | SlhDsaSha2_256s | SlhDsaSha2_256f
+    | SlhDsaShake_128s | SlhDsaShake_128f
+    | SlhDsaShake_192s | SlhDsaShake_192f
+    | SlhDsaShake_256s | SlhDsaShake_256f;
+
+implement SphincsPlusVariant {
+    public fn public_key_len(&self) -> Int {
+        match self {
+            SlhDsaSha2_128s   => SLH_DSA_SHA2_128S_PK_LEN,
+            SlhDsaSha2_128f   => SLH_DSA_SHA2_128F_PK_LEN,
+            SlhDsaSha2_192s   => SLH_DSA_SHA2_192S_PK_LEN,
+            SlhDsaSha2_192f   => SLH_DSA_SHA2_192F_PK_LEN,
+            SlhDsaSha2_256s   => SLH_DSA_SHA2_256S_PK_LEN,
+            SlhDsaSha2_256f   => SLH_DSA_SHA2_256F_PK_LEN,
+            SlhDsaShake_128s  => SLH_DSA_SHAKE_128S_PK_LEN,
+            SlhDsaShake_128f  => SLH_DSA_SHAKE_128F_PK_LEN,
+            SlhDsaShake_192s  => SLH_DSA_SHAKE_192S_PK_LEN,
+            SlhDsaShake_192f  => SLH_DSA_SHAKE_192F_PK_LEN,
+            SlhDsaShake_256s  => SLH_DSA_SHAKE_256S_PK_LEN,
+            SlhDsaShake_256f  => SLH_DSA_SHAKE_256F_PK_LEN,
+        }
+    }
+
+    public fn secret_key_len(&self) -> Int {
+        match self {
+            SlhDsaSha2_128s   => SLH_DSA_SHA2_128S_SK_LEN,
+            SlhDsaSha2_128f   => SLH_DSA_SHA2_128F_SK_LEN,
+            SlhDsaSha2_192s   => SLH_DSA_SHA2_192S_SK_LEN,
+            SlhDsaSha2_192f   => SLH_DSA_SHA2_192F_SK_LEN,
+            SlhDsaSha2_256s   => SLH_DSA_SHA2_256S_SK_LEN,
+            SlhDsaSha2_256f   => SLH_DSA_SHA2_256F_SK_LEN,
+            SlhDsaShake_128s  => SLH_DSA_SHAKE_128S_SK_LEN,
+            SlhDsaShake_128f  => SLH_DSA_SHAKE_128F_SK_LEN,
+            SlhDsaShake_192s  => SLH_DSA_SHAKE_192S_SK_LEN,
+            SlhDsaShake_192f  => SLH_DSA_SHAKE_192F_SK_LEN,
+            SlhDsaShake_256s  => SLH_DSA_SHAKE_256S_SK_LEN,
+            SlhDsaShake_256f  => SLH_DSA_SHAKE_256F_SK_LEN,
+        }
+    }
+
+    public fn signature_len(&self) -> Int {
+        match self {
+            SlhDsaSha2_128s   => SLH_DSA_SHA2_128S_SIG_LEN,
+            SlhDsaSha2_128f   => SLH_DSA_SHA2_128F_SIG_LEN,
+            SlhDsaSha2_192s   => SLH_DSA_SHA2_192S_SIG_LEN,
+            SlhDsaSha2_192f   => SLH_DSA_SHA2_192F_SIG_LEN,
+            SlhDsaSha2_256s   => SLH_DSA_SHA2_256S_SIG_LEN,
+            SlhDsaSha2_256f   => SLH_DSA_SHA2_256F_SIG_LEN,
+            SlhDsaShake_128s  => SLH_DSA_SHAKE_128S_SIG_LEN,
+            SlhDsaShake_128f  => SLH_DSA_SHAKE_128F_SIG_LEN,
+            SlhDsaShake_192s  => SLH_DSA_SHAKE_192S_SIG_LEN,
+            SlhDsaShake_192f  => SLH_DSA_SHAKE_192F_SIG_LEN,
+            SlhDsaShake_256s  => SLH_DSA_SHAKE_256S_SIG_LEN,
+            SlhDsaShake_256f  => SLH_DSA_SHAKE_256F_SIG_LEN,
+        }
+    }
+
+    /// Bit-level NIST security category (1, 3, or 5).
+    public fn nist_category(&self) -> Int {
+        match self {
+            SlhDsaSha2_128s | SlhDsaSha2_128f
+            | SlhDsaShake_128s | SlhDsaShake_128f => 1,
+            SlhDsaSha2_192s | SlhDsaSha2_192f
+            | SlhDsaShake_192s | SlhDsaShake_192f => 3,
+            SlhDsaSha2_256s | SlhDsaSha2_256f
+            | SlhDsaShake_256s | SlhDsaShake_256f => 5,
+        }
+    }
+
+    /// True for the "fast-signature" variants, false for "small".
+    public fn is_fast(&self) -> Bool {
+        match self {
+            SlhDsaSha2_128f | SlhDsaSha2_192f | SlhDsaSha2_256f
+            | SlhDsaShake_128f | SlhDsaShake_192f | SlhDsaShake_256f => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type SphincsPlusKeyPair is {
+    variant:    SphincsPlusVariant,
+    public_key: List<Byte>,
+    secret_key: List<Byte>,
+}
+
+public type SphincsPlusSignature is {
+    variant: SphincsPlusVariant,
+    bytes:   List<Byte>,
+}
+
+// =============================================================================
+// API
+// =============================================================================
+
+/// Generate a fresh keypair under the given parameter set. RNG is
+/// taken from the runtime CSPRNG.
+public fn slh_dsa_keygen(variant: SphincsPlusVariant) -> Result<SphincsPlusKeyPair, PqError> {
+    @intrinsic("verum.pq.slh_dsa_keygen", variant)
+}
+
+/// Sign `message`. Hedged signing — fresh per-signature randomness from
+/// the runtime CSPRNG XOR'd with a deterministic nonce derived from the
+/// secret key + message (FIPS 205 §10.2 strict). Failure of the runtime
+/// CSPRNG falls back to deterministic signing.
+public fn slh_dsa_sign(
+    variant:    SphincsPlusVariant,
+    secret_key: &[Byte],
+    message:    &[Byte],
+) -> Result<SphincsPlusSignature, PqError> {
+    @intrinsic("verum.pq.slh_dsa_sign", variant, secret_key, message)
+}
+
+/// Verify `signature` against `message` under `public_key`. Returns
+/// `Ok(true)` for valid; `Ok(false)` for clean reject (wrong signature
+/// against right key); `Err(...)` for malformed inputs.
+public fn slh_dsa_verify(
+    variant:    SphincsPlusVariant,
+    public_key: &[Byte],
+    message:    &[Byte],
+    signature:  &[Byte],
+) -> Result<Bool, PqError> {
+    @intrinsic("verum.pq.slh_dsa_verify", variant, public_key, message, signature)
+}

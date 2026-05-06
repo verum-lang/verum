@@ -24,6 +24,13 @@
 // | ML-DSA-44 | 2 | 1312 | 2560 | 2420 |
 // | ML-DSA-65 | 3 | 1952 | 4032 | 3309 |
 // | ML-DSA-87 | 5 | 2592 | 4896 | 4627 |
+// | SLH-DSA-SHA2-128s | 1 | 32 | 64 | 7,856 |
+// | SLH-DSA-SHA2-128f | 1 | 32 | 64 | 17,088 |
+// | SLH-DSA-SHA2-192s | 3 | 48 | 96 | 16,224 |
+// | SLH-DSA-SHA2-192f | 3 | 48 | 96 | 35,664 |
+// | SLH-DSA-SHA2-256s | 5 | 64 | 128 | 29,792 |
+// | SLH-DSA-SHA2-256f | 5 | 64 | 128 | 49,856 |
+// | SLH-DSA-SHAKE-{128,192,256}{s,f} | as above | as above | as above | as above |
 //
 
 // All sizes in bytes.
@@ -46,6 +53,10 @@ module core.security.pq;
 
 public module ml_kem;
 public module ml_dsa;
+/// FIPS 205 SLH-DSA (SPHINCS+). Stateless hash-based signatures —
+/// post-quantum secure under collision-resistance + second-preimage
+/// of the underlying hash family (no algebraic structure).
+public module sphincs_plus;
 
 public mount .ml_kem.MlKemVariant;
 public mount .ml_kem.MlKemKeyPair;
@@ -60,5 +71,12 @@ public mount .ml_dsa.MlDsaSignature;
 public mount .ml_dsa.ml_dsa_keygen;
 public mount .ml_dsa.ml_dsa_sign;
 public mount .ml_dsa.ml_dsa_verify;
+
+public mount .sphincs_plus.SphincsPlusVariant;
+public mount .sphincs_plus.SphincsPlusKeyPair;
+public mount .sphincs_plus.SphincsPlusSignature;
+public mount .sphincs_plus.slh_dsa_keygen;
+public mount .sphincs_plus.slh_dsa_sign;
+public mount .sphincs_plus.slh_dsa_verify;
 
 public mount .ml_kem.PqError;
