@@ -1601,7 +1601,46 @@ fn pin_compiler_session_arch_shape_registry_present() {
 }
 
 // =============================================================================
-// 25. Internal/ references must NOT appear in any architecture .vr file
+// 25. Q2 — module-wide @framework citation aggregation
+// =============================================================================
+
+#[test]
+fn pin_compiler_phase_aggregates_module_wide_framework_citations() {
+    // Q2: AP-026 FoundationContentMismatch needs to see citations
+    // from EVERY item in the module body, not just citations on the
+    // module-level @arch_module declaration.  The compiler's
+    // ats_v_phase aggregates them via collect_module_wide_foreign_foundations
+    // before running the module-level check.
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root resolvable")
+        .to_path_buf();
+    let phase_src = std::fs::read_to_string(
+        workspace_root
+            .join("crates")
+            .join("verum_compiler")
+            .join("src")
+            .join("pipeline")
+            .join("ats_v_phase.rs"),
+    )
+    .expect("read ats_v_phase.rs");
+    assert!(
+        phase_src.contains("fn collect_module_wide_foreign_foundations("),
+        "ats_v_phase.rs missing collect_module_wide_foreign_foundations helper"
+    );
+    assert!(
+        phase_src.contains("collect_module_wide_foreign_foundations(module)"),
+        "ats_v_phase.rs phase_ats_v must call collect_module_wide_foreign_foundations"
+    );
+    assert!(
+        phase_src.contains("for item in &module.items"),
+        "ats_v_phase.rs collector must iterate module.items"
+    );
+}
+
+// =============================================================================
+// 26. Internal/ references must NOT appear in any architecture .vr file
 // =============================================================================
 
 #[test]

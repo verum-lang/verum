@@ -45,13 +45,23 @@ impl<'s> CompilationPipeline<'s> {
     pub(super) fn phase_ats_v(&self, module: &Module) -> Result<()> {
         let mut total_violations = 0usize;
 
+        // Aggregate every `@framework(corpus, "...")` annotation
+        // across the module — both at the module level and on
+        // each item — so AP-026 FoundationContentMismatch fires
+        // when ANY body construct cites a foreign foundation, not
+        // just citations attached to the module declaration itself.
+        let module_wide_foreign_constructs =
+            collect_module_wide_foreign_foundations(module);
+
         // 1. Module-level @arch_module(...) — the primary surface.
         //   Use the registry-aware entry so cross-cog peer resolution
         //   (composed_foundations / cited_lifecycles / callee_tiers)
         //   activates AP-004 / AP-005 / AP-009 in production.
-        if let Some(result) =
-            self.run_arch_phase_for_attrs_registry_aware(&module.attributes, "<module>")
-        {
+        if let Some(result) = self.run_arch_phase_for_attrs_registry_aware(
+            &module.attributes,
+            "<module>",
+            &module_wide_foreign_constructs,
+        ) {
             total_violations += result.violations.len();
             self.emit_arch_phase_result(&result, module);
         }
@@ -66,9 +76,18 @@ impl<'s> CompilationPipeline<'s> {
             // @arch_module).  Per-decl inner attributes (decl_attrs)
             // we skip here because @arch_module is conventionally
             // an outer item attribute.
-            if let Some(result) =
-                self.run_arch_phase_for_attrs_registry_aware(&item.attributes, &item_name)
-            {
+            //
+            // For items, foreign-foundation constructs are scoped to
+            // the item's own attribute list (the module-wide list is
+            // for the module-level Shape; each item gets a local
+            // view).
+            let item_foreign_constructs =
+                extract_foreign_foundation_constructs(&item.attributes);
+            if let Some(result) = self.run_arch_phase_for_attrs_registry_aware(
+                &item.attributes,
+                &item_name,
+                &item_foreign_constructs,
+            ) {
                 total_violations += result.violations.len();
                 self.emit_arch_phase_result(&result, module);
             }
@@ -97,6 +116,7 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         attrs: &List<verum_ast::attr::Attribute>,
         module_name: &str,
+        foreign_foundation_constructs: &[(String, verum_kernel::arch::Foundation)],
     ) -> Option<ModuleArchResult> {
         // First pass: locate the @arch_module attribute and parse it
         // to extract the Shape.  We need the Shape's composes_with /
@@ -140,7 +160,7 @@ impl<'s> CompilationPipeline<'s> {
         let inputs = PhaseInputs {
             capability_ontology_registry: None,
             yoneda_verdicts_claimed: Vec::new(),
-            foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
+            foreign_foundation_constructs: foreign_foundation_constructs.to_vec(),
             composed_foundations,
             cited_lifecycles,
             callee_tiers,
@@ -269,6 +289,27 @@ fn run_arch_phase_for_attrs(
         args_slice,
         &inputs,
     ))
+}
+
+/// Walk the entire module — both module-level attributes AND
+/// every item's attributes — collecting every `@framework(corpus,
+/// ...)` annotation.  Used by `phase_ats_v` to feed AP-026
+/// FoundationContentMismatch with the complete set of foreign-
+/// foundation citations across the module body, not just those
+/// attached to the module declaration.
+///
+/// Q2 closure — without this aggregation, AP-026 only fires on
+/// citations directly on the module-level `@arch_module(...)` site.
+/// A function deep in the body that cites `@framework(hott, ...)`
+/// would be invisible to the cog-level check.
+fn collect_module_wide_foreign_foundations(
+    module: &Module,
+) -> Vec<(String, verum_kernel::arch::Foundation)> {
+    let mut out = extract_foreign_foundation_constructs(&module.attributes);
+    for item in &module.items {
+        out.extend(extract_foreign_foundation_constructs(&item.attributes));
+    }
+    out
 }
 
 /// Walk an attribute list and surface every `@framework(corpus, ...)`
