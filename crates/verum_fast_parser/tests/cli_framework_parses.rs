@@ -111,6 +111,54 @@ fn cli_example_parses() {
 }
 
 #[test]
+fn cli_context_parses() {
+    parse_one(&project_core_cli().join("context.vr")).expect("context.vr should parse");
+}
+
+#[test]
+fn cli_frontmatter_parses() {
+    parse_one(&project_core_cli().join("frontmatter.vr"))
+        .expect("frontmatter.vr should parse");
+}
+
+#[test]
+fn cli_repl_parses() {
+    parse_one(&project_core_cli().join("repl.vr")).expect("repl.vr should parse");
+}
+
+#[test]
+fn cli_plugin_parses() {
+    parse_one(&project_core_cli().join("plugin.vr")).expect("plugin.vr should parse");
+}
+
+#[test]
+fn cli_json_schema_parses() {
+    parse_one(&project_core_cli().join("json_schema.vr"))
+        .expect("json_schema.vr should parse");
+}
+
+#[test]
+fn cli_tainted_parses() {
+    parse_one(&project_core_cli().join("tainted.vr")).expect("tainted.vr should parse");
+}
+
+#[test]
+fn cli_prelude_parses() {
+    parse_one(&project_core_cli().join("prelude.vr")).expect("prelude.vr should parse");
+}
+
+#[test]
+fn cli_permissions_parses() {
+    parse_one(&project_core_cli().join("permissions.vr"))
+        .expect("permissions.vr should parse");
+}
+
+#[test]
+fn cli_verify_parses() {
+    parse_one(&project_core_cli().join("verify.vr")).expect("verify.vr should parse");
+}
+
+#[test]
 fn every_cli_vr_parses() {
     let dir = project_core_cli();
     let mut failures = Vec::new();

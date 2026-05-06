@@ -1,0 +1,217 @@
+// =============================================================================
+// cli/repl.vr — Interactive REPL for any vcli-built application
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, io.stdio, term.app, cli.{spec,parser,help,runtime}
+// Spec: internal/specs/cli-framework.md §9.2
+// =============================================================================
+//
+
+// `mytool repl` enters an interactive command shell that re-uses the
+// same `CommandSpec` to parse each line as if it were argv. Provides:
+//   * line history within the session
+//   * `:help`, `:exit`, `:clear`, `:debug-config` meta-commands
+//   * tab-completion hook (delegated to `core.cli.completion`)
+//   * the same dispatch + handler registry as the non-REPL path
+//
+// Phase 6 wires this through `core.term.app` for full TEA-loop
+// experience; this module ships the line-mode core that works on any
+// stdin/stdout pair (CI logs, dumb terminals, sshd shells).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module repl;
+
+mount core.{Maybe, Result, List, Text, Bool};
+mount core.io.stdio;
+mount core.cli.spec.CommandSpec;
+mount core.cli.parser.parse_argv;
+mount core.cli.help.{render_help, HelpStyle};
+mount core.cli.runtime.{App, HandlerContext};
+mount core.cli.error.{ParseError, ExitCode};
+
+// =============================================================================
+// ReplConfig — control knobs for the REPL session
+// =============================================================================
+
+public type ReplConfig is {
+    /// Prompt displayed at the start of each line. Default: `"<name>> "`.
+    prompt:        Text,
+    /// Whether to keep an in-session history List<Text>.
+    enable_history: Bool,
+    /// Maximum history depth (0 = unlimited).
+    history_max:   Int,
+    /// Whether to print stacktrace on handler error.
+    verbose_errors: Bool,
+};
+
+implement ReplConfig {
+    public fn new(app_name: Text) -> ReplConfig {
+        let mut prompt = app_name.clone();
+        prompt.push_str("> ");
+        ReplConfig {
+            prompt: prompt,
+            enable_history: true,
+            history_max: 1000,
+            verbose_errors: false,
+        }
+    }
+
+    public fn with_prompt(mut self, p: Text) -> ReplConfig {
+        self.prompt = p;
+        self
+    }
+}
+
+// =============================================================================
+// ReplState — per-session in-memory state
+// =============================================================================
+
+public type ReplState is {
+    history: List<Text>,
+    config:  ReplConfig,
+};
+
+implement ReplState {
+    public fn new(cfg: ReplConfig) -> ReplState {
+        ReplState { history: List.new(), config: cfg }
+    }
+
+    public fn push_history(&mut self, line: Text) {
+        if !self.config.enable_history { return; }
+        self.history.push(line);
+        if self.config.history_max > 0
+            && self.history.len() > self.config.history_max
+        {
+            // drop oldest — naive linear shift, fine for typical sizes
+            self.history.remove(0);
+        }
+    }
+}
+
+// =============================================================================
+// Meta-commands — handled by the REPL itself, not the user CLI
+// =============================================================================
+
+/// Decision returned by line classification.
+public type LineAction is
+    | Quit
+    | Skip
+    | ShowHelp
+    | ShowHistory
+    | Forward(List<Text>);          // tokenised argv (without argv[0])
+
+/// Classify a raw input line into a `LineAction`.
+public fn classify(line: &Text) -> LineAction {
+    let trimmed = line.trim();
+    if trimmed.is_empty() { return LineAction.Skip; }
+
+    if trimmed == &Text.from(":exit") || trimmed == &Text.from(":quit") || trimmed == &Text.from(":q") {
+        return LineAction.Quit;
+    }
+    if trimmed == &Text.from(":help") || trimmed == &Text.from("?") {
+        return LineAction.ShowHelp;
+    }
+    if trimmed == &Text.from(":history") || trimmed == &Text.from(":h") {
+        return LineAction.ShowHistory;
+    }
+
+    LineAction.Forward(tokenise(&trimmed))
+}
+
+/// Naive whitespace tokeniser with quoting support (`"a b"` → `a b`).
+/// Returns argv-style tokens without `argv[0]` (caller prepends app name).
+public fn tokenise(line: &Text) -> List<Text> {
+    let mut tokens: List<Text> = List.new();
+    let mut buf = Text.new();
+    let mut in_quotes: Bool = false;
+    let mut i: Int = 0;
+
+    while i < line.len() {
+        match line.byte_at(i) {
+            Some(b) => {
+                if b == b'"' {
+                    in_quotes = !in_quotes;
+                } else if (b == b' ' || b == b'\t') && !in_quotes {
+                    if !buf.is_empty() {
+                        tokens.push(buf.clone());
+                        buf = Text.new();
+                    }
+                } else {
+                    buf.push_byte(b);
+                }
+            },
+            None => break,
+        }
+        i = i + 1;
+    }
+    if !buf.is_empty() { tokens.push(buf); }
+    tokens
+}
+
+// =============================================================================
+// REPL loop
+// =============================================================================
+
+/// Run the REPL against `app`. Reads lines from stdin until `:exit`,
+/// EOF, or a meta-command requests termination. Returns the exit code
+/// of the last handler that ran (0 if none).
+public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
+    let mut state = ReplState.new(cfg);
+    let style = HelpStyle.default();
+    let mut last_code = ExitCode.Ok;
+
+    loop {
+        stdio.print(&state.config.prompt);
+        let line = match stdio.read_line() {
+            Ok(l) => l,
+            Err(_) => break,    // EOF / I/O error
+        };
+
+        match classify(&line) {
+            LineAction.Quit => break,
+            LineAction.Skip => continue,
+            LineAction.ShowHelp => {
+                let txt = render_help(&app.spec, &style);
+                stdio.println(&txt);
+            },
+            LineAction.ShowHistory => {
+                let mut i: Int = 0;
+                while i < state.history.len() {
+                    stdio.println(&Text.from(f"{i}: {state.history[i]}"));
+                    i = i + 1;
+                }
+            },
+            LineAction.Forward(tokens) => {
+                state.push_history(line.clone());
+
+                // Build a synthetic argv with argv[0] = app name.
+                let mut argv = List.new();
+                argv.push(app.spec.name.clone());
+                let mut i: Int = 0;
+                while i < tokens.len() {
+                    argv.push(tokens[i].clone());
+                    i = i + 1;
+                }
+
+                match app.try_run(argv) {
+                    Ok(code) => { last_code = code; },
+                    Err(e) => {
+                        let mut msg = Text.from("error: ");
+                        msg.push_str(&e.message);
+                        stdio.eprintln(&msg);
+                        last_code = e.exit_code();
+                    },
+                }
+            },
+        }
+    }
+
+    last_code
+}

@@ -1,0 +1,340 @@
+// =============================================================================
+// cli/json_schema.vr — Render a CommandSpec as a JSON description
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, cli.spec
+// Spec: internal/specs/cli-framework.md §8.4
+// =============================================================================
+//
+
+// Emit `<bin> __spec --format json` style description so IDE plugins,
+// GUI wrappers (Warp, Fig, Inshellisense), and REST-shim generators can
+// consume the CLI without re-implementing the Verum type-checker. The
+// shape is intentionally close to clap's --json output but carries
+// extra fields (refinement, env-fallback, completion-source) that vcli
+// uniquely tracks.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module json_schema;
+
+mount core.{Maybe, Result, List, Text, Int, Bool};
+mount core.text.builder.TextBuilder;
+mount core.cli.spec.{
+    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity,
+    CompletionSource,
+};
+
+// =============================================================================
+// Top-level entry
+// =============================================================================
+
+/// Render `cmd` as a pretty-printed JSON string with 2-space indent.
+public fn render(cmd: &CommandSpec) -> Text {
+    let mut b = TextBuilder.new();
+    write_command(&mut b, cmd, 0);
+    b.push("\n");
+    b.build()
+}
+
+/// Render `cmd` as a compact (single-line) JSON string.
+public fn render_compact(cmd: &CommandSpec) -> Text {
+    let mut b = TextBuilder.new();
+    write_command_compact(&mut b, cmd);
+    b.build()
+}
+
+// =============================================================================
+// Pretty-printed writer
+// =============================================================================
+
+fn write_command(b: &mut TextBuilder, cmd: &CommandSpec, depth: Int) {
+    indent(b, depth);
+    b.push("{\n");
+
+    write_str_field(b, "name", &cmd.name, depth + 1, false);
+    write_str_field(b, "about", &cmd.about, depth + 1, false);
+    match &cmd.version {
+        Some(v) => write_str_field(b, "version", v, depth + 1, false),
+        None => {},
+    }
+    match &cmd.author {
+        Some(a) => write_str_field(b, "author", a, depth + 1, false),
+        None => {},
+    }
+    match &cmd.long_about {
+        Some(la) => write_str_field(b, "long_about", la, depth + 1, false),
+        None => {},
+    }
+
+    if cmd.aliases.len() > 0 {
+        write_str_array(b, "aliases", &cmd.aliases, depth + 1);
+    }
+
+    write_args(b, &cmd.args, depth + 1);
+    write_flags(b, &cmd.flags, depth + 1);
+    write_groups(b, &cmd.groups, depth + 1);
+    write_subcommands(b, &cmd.subcommands, depth + 1);
+
+    write_bool_field(b, "hidden", cmd.hidden, depth + 1, true);
+    indent(b, depth);
+    b.push("}");
+}
+
+fn write_args(b: &mut TextBuilder, args: &List<ArgSpec>, depth: Int) {
+    indent(b, depth);
+    b.push("\"args\": [");
+    if args.len() == 0 {
+        b.push("],\n");
+        return;
+    }
+    b.push("\n");
+    let mut i: Int = 0;
+    while i < args.len() {
+        let a = &args[i];
+        indent(b, depth + 1);
+        b.push("{");
+        b.push("\"name\": "); write_quoted(b, &a.name);
+        b.push(", \"help\": "); write_quoted(b, &a.help);
+        b.push(", \"arity\": "); write_arity(b, &a.arity);
+        b.push(", \"kind\": "); write_quoted(b, &a.kind_hint);
+        match &a.placeholder {
+            Some(p) => { b.push(", \"placeholder\": "); write_quoted(b, p); },
+            None => {},
+        }
+        match &a.refinement {
+            Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            None => {},
+        }
+        match &a.env_fallback {
+            Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
+            None => {},
+        }
+        b.push("}");
+        if i + 1 < args.len() { b.push(","); }
+        b.push("\n");
+        i = i + 1;
+    }
+    indent(b, depth);
+    b.push("],\n");
+}
+
+fn write_flags(b: &mut TextBuilder, flags: &List<FlagSpec>, depth: Int) {
+    indent(b, depth);
+    b.push("\"flags\": [");
+    if flags.len() == 0 {
+        b.push("],\n");
+        return;
+    }
+    b.push("\n");
+    let mut i: Int = 0;
+    while i < flags.len() {
+        let f = &flags[i];
+        indent(b, depth + 1);
+        b.push("{");
+        match &f.long {
+            Some(l) => { b.push("\"long\": "); write_quoted(b, l); },
+            None => { b.push("\"long\": null"); },
+        }
+        match f.short {
+            Some(c) => {
+                b.push(", \"short\": ");
+                let s = Text.from(f"{c}");
+                write_quoted(b, &s);
+            },
+            None => {},
+        }
+        b.push(", \"help\": "); write_quoted(b, &f.help);
+        b.push(", \"arity\": "); write_arity(b, &f.arity);
+        b.push(", \"kind\": "); write_quoted(b, &f.kind_hint);
+        b.push(", \"persistent\": "); b.push(if f.persistent { "true" } else { "false" });
+        b.push(", \"counter\": "); b.push(if f.counter { "true" } else { "false" });
+        b.push(", \"repeated\": "); b.push(if f.repeated { "true" } else { "false" });
+        b.push(", \"negatable\": "); b.push(if f.negatable { "true" } else { "false" });
+        match &f.refinement {
+            Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            None => {},
+        }
+        match &f.env_fallback {
+            Some(e) => { b.push(", \"env\": "); write_quoted(b, e); },
+            None => {},
+        }
+        b.push("}");
+        if i + 1 < flags.len() { b.push(","); }
+        b.push("\n");
+        i = i + 1;
+    }
+    indent(b, depth);
+    b.push("],\n");
+}
+
+fn write_groups(b: &mut TextBuilder, groups: &List<Group>, depth: Int) {
+    if groups.len() == 0 { return; }
+    indent(b, depth);
+    b.push("\"groups\": [\n");
+    let mut i: Int = 0;
+    while i < groups.len() {
+        let g = &groups[i];
+        indent(b, depth + 1);
+        b.push("{");
+        b.push("\"name\": "); write_quoted(b, &g.name);
+        b.push(", \"kind\": ");
+        let kind_text = match g.kind {
+            GroupKind.Exclusive => Text.from("exclusive"),
+            GroupKind.Required => Text.from("required"),
+            GroupKind.RequiredAll => Text.from("required_all"),
+            GroupKind.OptionalAll => Text.from("optional_all"),
+        };
+        write_quoted(b, &kind_text);
+        b.push(", \"members\": ");
+        write_string_array_inline(b, &g.members);
+        b.push("}");
+        if i + 1 < groups.len() { b.push(","); }
+        b.push("\n");
+        i = i + 1;
+    }
+    indent(b, depth);
+    b.push("],\n");
+}
+
+fn write_subcommands(
+    b: &mut TextBuilder,
+    subs: &List<CommandSpec>,
+    depth: Int,
+) {
+    indent(b, depth);
+    b.push("\"subcommands\": [");
+    if subs.len() == 0 {
+        b.push("],\n");
+        return;
+    }
+    b.push("\n");
+    let mut i: Int = 0;
+    while i < subs.len() {
+        write_command(b, &subs[i], depth + 1);
+        if i + 1 < subs.len() { b.push(","); }
+        b.push("\n");
+        i = i + 1;
+    }
+    indent(b, depth);
+    b.push("],\n");
+}
+
+// =============================================================================
+// Compact writer (single-line)
+// =============================================================================
+
+fn write_command_compact(b: &mut TextBuilder, cmd: &CommandSpec) {
+    b.push("{\"name\":");
+    write_quoted(b, &cmd.name);
+    b.push(",\"about\":");
+    write_quoted(b, &cmd.about);
+    match &cmd.version {
+        Some(v) => { b.push(",\"version\":"); write_quoted(b, v); },
+        None => {},
+    }
+    b.push(",\"flags_count\":");
+    b.push(&Text.from(f"{cmd.flags.len()}"));
+    b.push(",\"args_count\":");
+    b.push(&Text.from(f"{cmd.args.len()}"));
+    b.push(",\"subcommands_count\":");
+    b.push(&Text.from(f"{cmd.subcommands.len()}"));
+    b.push("}");
+}
+
+// =============================================================================
+// Field helpers
+// =============================================================================
+
+fn write_str_field(b: &mut TextBuilder, key: &str, val: &Text, depth: Int, last: Bool) {
+    indent(b, depth);
+    b.push("\"");
+    b.push(key);
+    b.push("\": ");
+    write_quoted(b, val);
+    if !last { b.push(","); }
+    b.push("\n");
+}
+
+fn write_bool_field(b: &mut TextBuilder, key: &str, val: Bool, depth: Int, last: Bool) {
+    indent(b, depth);
+    b.push("\"");
+    b.push(key);
+    b.push("\": ");
+    b.push(if val { "true" } else { "false" });
+    if !last { b.push(","); }
+    b.push("\n");
+}
+
+fn write_str_array(b: &mut TextBuilder, key: &str, vs: &List<Text>, depth: Int) {
+    indent(b, depth);
+    b.push("\"");
+    b.push(key);
+    b.push("\": ");
+    write_string_array_inline(b, vs);
+    b.push(",\n");
+}
+
+fn write_string_array_inline(b: &mut TextBuilder, vs: &List<Text>) {
+    b.push("[");
+    let mut i: Int = 0;
+    while i < vs.len() {
+        if i > 0 { b.push(", "); }
+        write_quoted(b, &vs[i]);
+        i = i + 1;
+    }
+    b.push("]");
+}
+
+fn write_arity(b: &mut TextBuilder, a: &Arity) {
+    match a {
+        Arity.Exactly(n) => { b.push("{\"kind\": \"exactly\", \"n\": "); b.push(&Text.from(f"{n}")); b.push("}"); },
+        Arity.AtMost(n)  => { b.push("{\"kind\": \"at_most\", \"n\": "); b.push(&Text.from(f"{n}")); b.push("}"); },
+        Arity.AtLeast(n) => { b.push("{\"kind\": \"at_least\", \"n\": "); b.push(&Text.from(f"{n}")); b.push("}"); },
+        Arity.Range(lo, hi) => {
+            b.push("{\"kind\": \"range\", \"lo\": ");
+            b.push(&Text.from(f"{lo}"));
+            b.push(", \"hi\": ");
+            b.push(&Text.from(f"{hi}"));
+            b.push("}");
+        },
+        Arity.Unlimited => b.push("{\"kind\": \"unlimited\"}"),
+    }
+}
+
+fn indent(b: &mut TextBuilder, depth: Int) {
+    let mut i: Int = 0;
+    while i < depth {
+        b.push("  ");
+        i = i + 1;
+    }
+}
+
+/// Quote-and-escape a Text for JSON output. Handles `"`, `\`, control
+/// characters; non-ASCII passes through as UTF-8 (valid in JSON).
+fn write_quoted(b: &mut TextBuilder, s: &Text) {
+    b.push("\"");
+    let mut i: Int = 0;
+    while i < s.len() {
+        match s.byte_at(i) {
+            Some(c) => {
+                if c == b'"' { b.push("\\\""); }
+                else if c == b'\\' { b.push("\\\\"); }
+                else if c == b'\n' { b.push("\\n"); }
+                else if c == b'\r' { b.push("\\r"); }
+                else if c == b'\t' { b.push("\\t"); }
+                else if c < 0x20 { b.push("?"); }
+                else { b.push_byte(c); }
+            },
+            None => break,
+        }
+        i = i + 1;
+    }
+    b.push("\"");
+}

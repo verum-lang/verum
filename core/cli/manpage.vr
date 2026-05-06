@@ -76,15 +76,15 @@ public fn render(cmd: &CommandSpec, section: Section) -> Text {
     let mut b = TextBuilder.new();
 
     // .TH header
-    b.append(".TH ");
-    b.append(&cmd.name.to_uppercase());
-    b.append(" ");
-    b.append(&Text.from(f"{section.number()}"));
+    b.push(".TH ");
+    b.push(&cmd.name.to_uppercase());
+    b.push(" ");
+    b.push(&Text.from(f"{section.number()}"));
     match &cmd.version {
-        Some(v) => { b.append(" \""); b.append(v); b.append("\""); },
-        None => { b.append(" \"\""); },
+        Some(v) => { b.push(" \""); b.push(v); b.push("\""); },
+        None => { b.push(" \"\""); },
     }
-    b.append(" \"User Commands\"\n");
+    b.push(" \"User Commands\"\n");
 
     write_name(&mut b, cmd);
     write_synopsis(&mut b, cmd);
@@ -111,90 +111,90 @@ public fn render(cmd: &CommandSpec, section: Section) -> Text {
 // =============================================================================
 
 fn write_name(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH NAME\n");
-    b.append(&cmd.name);
-    b.append(" \\- ");
-    b.append(&cmd.about);
-    b.append("\n");
+    b.push(".SH NAME\n");
+    b.push(&cmd.name);
+    b.push(" \\- ");
+    b.push(&cmd.about);
+    b.push("\n");
 }
 
 fn write_synopsis(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH SYNOPSIS\n");
-    b.append(".B ");
-    b.append(&cmd.name);
-    b.append("\n");
+    b.push(".SH SYNOPSIS\n");
+    b.push(".B ");
+    b.push(&cmd.name);
+    b.push("\n");
     if cmd.flags.len() > 0 {
-        b.append("[\\fIOPTIONS\\fR] ");
+        b.push("[\\fIOPTIONS\\fR] ");
     }
     let mut i: Int = 0;
     while i < cmd.args.len() {
         let a = &cmd.args[i];
-        b.append("\\fI");
+        b.push("\\fI");
         match &a.placeholder {
-            Some(p) => b.append(p),
-            None => b.append(&a.name.to_uppercase()),
+            Some(p) => b.push(p),
+            None => b.push(&a.name.to_uppercase()),
         }
-        b.append("\\fR ");
+        b.push("\\fR ");
         i = i + 1;
     }
     if cmd.subcommands.len() > 0 {
-        b.append("\\fICOMMAND\\fR");
+        b.push("\\fICOMMAND\\fR");
     }
-    b.append("\n");
+    b.push("\n");
 }
 
 fn write_description(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH DESCRIPTION\n");
+    b.push(".SH DESCRIPTION\n");
     match &cmd.long_about {
-        Some(la) => { b.append(la); b.append("\n"); },
-        None => { b.append(&cmd.about); b.append("\n"); },
+        Some(la) => { b.push(la); b.push("\n"); },
+        None => { b.push(&cmd.about); b.push("\n"); },
     }
 }
 
 fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH OPTIONS\n");
+    b.push(".SH OPTIONS\n");
 
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
         if f.hidden { i = i + 1; continue; }
-        b.append(".TP\n");
+        b.push(".TP\n");
         match f.short {
             Some(c) => {
-                b.append("\\fB-");
-                b.append(&Text.from(f"{c}"));
-                b.append("\\fR, ");
+                b.push("\\fB-");
+                b.push(&Text.from(f"{c}"));
+                b.push("\\fR, ");
             },
             None => {},
         }
         match &f.long {
             Some(l) => {
-                b.append("\\fB--");
-                b.append(l);
-                b.append("\\fR");
+                b.push("\\fB--");
+                b.push(l);
+                b.push("\\fR");
             },
             None => {},
         }
         if !f.arity.is_switch() {
-            b.append(" \\fI");
+            b.push(" \\fI");
             match &f.placeholder {
-                Some(p) => b.append(p),
+                Some(p) => b.push(p),
                 None => match &f.long {
-                    Some(l) => b.append(&l.to_uppercase()),
-                    None => b.append("VALUE"),
+                    Some(l) => b.push(&l.to_uppercase()),
+                    None => b.push("VALUE"),
                 },
             }
-            b.append("\\fR");
+            b.push("\\fR");
         }
-        b.append("\n");
-        b.append(&f.help);
-        b.append("\n");
+        b.push("\n");
+        b.push(&f.help);
+        b.push("\n");
         match &f.refinement {
             Some(r) => {
-                b.append(".RS\n");
-                b.append("Constraint: ");
-                b.append(&r.expression);
-                b.append(".\n.RE\n");
+                b.push(".RS\n");
+                b.push("Constraint: ");
+                b.push(&r.expression);
+                b.push(".\n.RE\n");
             },
             None => {},
         }
@@ -204,43 +204,43 @@ fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
     let mut j: Int = 0;
     while j < cmd.args.len() {
         let a = &cmd.args[j];
-        b.append(".TP\n\\fI");
+        b.push(".TP\n\\fI");
         match &a.placeholder {
-            Some(p) => b.append(p),
-            None => b.append(&a.name.to_uppercase()),
+            Some(p) => b.push(p),
+            None => b.push(&a.name.to_uppercase()),
         }
-        b.append("\\fR\n");
-        b.append(&a.help);
-        b.append("\n");
+        b.push("\\fR\n");
+        b.push(&a.help);
+        b.push("\n");
         j = j + 1;
     }
 }
 
 fn write_commands(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH COMMANDS\n");
+    b.push(".SH COMMANDS\n");
     let mut i: Int = 0;
     while i < cmd.subcommands.len() {
         let sc = &cmd.subcommands[i];
         if sc.hidden { i = i + 1; continue; }
-        b.append(".SS ");
-        b.append(&sc.name);
-        b.append("\n");
-        b.append(&sc.about);
-        b.append("\n");
+        b.push(".SS ");
+        b.push(&sc.name);
+        b.push("\n");
+        b.push(&sc.about);
+        b.push("\n");
         i = i + 1;
     }
 }
 
 fn write_examples(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH EXAMPLES\n");
+    b.push(".SH EXAMPLES\n");
     let mut i: Int = 0;
     while i < cmd.examples.len() {
         let ex = &cmd.examples[i];
-        b.append(".PP\n");
-        b.append(&ex.description);
-        b.append("\n.RS\n.EX\n");
-        b.append(&ex.command);
-        b.append("\n.EE\n.RE\n");
+        b.push(".PP\n");
+        b.push(&ex.description);
+        b.push("\n.RS\n.EX\n");
+        b.push(&ex.command);
+        b.push("\n.EE\n.RE\n");
         i = i + 1;
     }
 }
@@ -260,20 +260,20 @@ fn has_env_fallbacks(cmd: &CommandSpec) -> Bool {
 }
 
 fn write_environment(b: &mut TextBuilder, cmd: &CommandSpec) {
-    b.append(".SH ENVIRONMENT\n");
+    b.push(".SH ENVIRONMENT\n");
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         match &cmd.flags[i].env_fallback {
             Some(env) => {
-                b.append(".TP\n\\fB");
-                b.append(env);
-                b.append("\\fR\n");
-                b.append("Fallback for \\fB--");
+                b.push(".TP\n\\fB");
+                b.push(env);
+                b.push("\\fR\n");
+                b.push("Fallback for \\fB--");
                 match &cmd.flags[i].long {
-                    Some(l) => b.append(l),
-                    None => b.append("(this flag)"),
+                    Some(l) => b.push(l),
+                    None => b.push("(this flag)"),
                 }
-                b.append("\\fR.\n");
+                b.push("\\fR.\n");
             },
             None => {},
         }
@@ -282,21 +282,21 @@ fn write_environment(b: &mut TextBuilder, cmd: &CommandSpec) {
 }
 
 fn write_exit_status(b: &mut TextBuilder) {
-    b.append(".SH EXIT STATUS\n");
-    b.append(".TP\n0\nSuccess.\n");
-    b.append(".TP\n1\nGeneric error.\n");
-    b.append(".TP\n2\nUsage error (invalid argv).\n");
-    b.append(".TP\n65\nInvalid input data.\n");
-    b.append(".TP\n77\nPermission denied.\n");
-    b.append(".TP\n78\nConfiguration error.\n");
+    b.push(".SH EXIT STATUS\n");
+    b.push(".TP\n0\nSuccess.\n");
+    b.push(".TP\n1\nGeneric error.\n");
+    b.push(".TP\n2\nUsage error (invalid argv).\n");
+    b.push(".TP\n65\nInvalid input data.\n");
+    b.push(".TP\n77\nPermission denied.\n");
+    b.push(".TP\n78\nConfiguration error.\n");
 }
 
 fn write_author(b: &mut TextBuilder, cmd: &CommandSpec) {
     match &cmd.author {
         Some(a) => {
-            b.append(".SH AUTHOR\n");
-            b.append(a);
-            b.append("\n");
+            b.push(".SH AUTHOR\n");
+            b.push(a);
+            b.push("\n");
         },
         None => {},
     }

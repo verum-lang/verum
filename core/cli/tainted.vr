@@ -1,0 +1,156 @@
+// =============================================================================
+// cli/tainted.vr — Taint-tracked argument input (capability-style)
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.error
+// Spec: internal/specs/cli-framework.md §17.2
+// =============================================================================
+//
+
+// `Tainted<T>` wraps a value parsed from argv that originated from
+// untrusted user input. The wrapper is deliberately *opaque* — direct
+// access requires explicit sanitisation:
+//
+//   let raw: Tainted<Text> = ctx.tainted_arg("script");
+//   let safe: Text = raw.sanitize_shell()?;
+//   let s = sh#"bash -c ${safe}";    // OK — type-checked
+//
+// Compile-time integration with `core.shell.escape` ensures that any
+// `sh#"..."` interpolation against a raw `Tainted<Text>` is a type
+// error: only `Text` (untainted) is acceptable. Phase 0 ships the
+// runtime tracking; the compile-time refusal is wired in
+// `core.shell.escape::ShellEscape` which only implements coercion for
+// the untainted side.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module tainted;
+
+mount core.{Maybe, Result, List, Text, Bool};
+mount core.cli.error.ParseError;
+
+// =============================================================================
+// Tainted<T>
+// =============================================================================
+
+/// Capability-style wrapper marking `inner` as user-supplied / untrusted.
+public type Tainted<T> is {
+    /// The raw value. Field is `pub(super)`-equivalent — direct access
+    /// requires the caller to be inside the `cli.tainted` module.
+    inner: T,
+    /// Optional provenance tag for diagnostics ("flag:--script",
+    /// "arg:user_input").
+    origin: Text,
+};
+
+implement<T> Tainted<T> {
+    /// Construct from a raw value with an explicit origin label.
+    /// Intended for runtime use only — user code goes through
+    /// `Tainted::from_arg` / `Tainted::from_flag`.
+    public fn new(inner: T, origin: Text) -> Tainted<T> {
+        Tainted { inner: inner, origin: origin }
+    }
+
+    /// Read the origin label without unwrapping the value.
+    public fn origin(&self) -> &Text { &self.origin }
+
+    /// Unwrap the inner value with an explicit `unsafe`-style escape
+    /// hatch. Use this only if no sanitiser fits — the caller is
+    /// responsible for justifying safety.
+    @inline
+    public fn into_unchecked(self) -> T { self.inner }
+}
+
+// =============================================================================
+// Sanitisers
+// =============================================================================
+
+implement Tainted<Text> {
+    /// Validate the tainted text against shell-escape rules. Returns
+    /// the original `Text` only if the value contains no characters
+    /// requiring quoting; otherwise returns an `Err` describing the
+    /// offending byte.
+    public fn sanitize_shell(self) -> Result<Text, Text> {
+        let s = &self.inner;
+        let mut i: Int = 0;
+        while i < s.len() {
+            match s.byte_at(i) {
+                Some(b) => {
+                    if !is_safe_shell_byte(b) {
+                        return Err(Text.from(
+                            f"value from {self.origin} contains unsafe shell character"
+                        ));
+                    }
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+        Ok(self.inner)
+    }
+
+    /// Escape and return wrapped in single quotes, suitable for direct
+    /// inclusion in a shell command without further processing.
+    public fn quote_shell(self) -> Text {
+        let mut out = Text.from("'");
+        let mut i: Int = 0;
+        while i < self.inner.len() {
+            match self.inner.byte_at(i) {
+                Some(b) => {
+                    if b == b'\'' { out.push_str("'\\''"); }
+                    else { out.push_byte(b); }
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+        out.push_str("'");
+        out
+    }
+
+    /// Validate against an allow-list of byte categories. Returns the
+    /// inner value only if every byte is alphanumeric, dash, dot,
+    /// underscore, or slash — the conservative default for filenames.
+    public fn sanitize_filename(self) -> Result<Text, Text> {
+        let mut i: Int = 0;
+        while i < self.inner.len() {
+            match self.inner.byte_at(i) {
+                Some(b) => {
+                    if !is_safe_filename_byte(b) {
+                        return Err(Text.from(
+                            f"value from {self.origin} contains unsafe filename character"
+                        ));
+                    }
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+        Ok(self.inner)
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn is_safe_shell_byte(b: Byte) -> Bool {
+    (b >= b'a' && b <= b'z')
+        || (b >= b'A' && b <= b'Z')
+        || (b >= b'0' && b <= b'9')
+        || b == b'-' || b == b'_' || b == b'.' || b == b'/'
+        || b == b':' || b == b'='
+}
+
+fn is_safe_filename_byte(b: Byte) -> Bool {
+    (b >= b'a' && b <= b'z')
+        || (b >= b'A' && b <= b'Z')
+        || (b >= b'0' && b <= b'9')
+        || b == b'-' || b == b'_' || b == b'.' || b == b'/'
+}

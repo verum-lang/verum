@@ -77,15 +77,15 @@ implement VerificationReport {
         while i < self.findings.len() {
             let f = &self.findings[i];
             match f.severity {
-                Severity.Error => b.append("error"),
-                Severity.Warning => b.append("warn"),
-                Severity.Info => b.append("info"),
+                Severity.Error => b.push("error"),
+                Severity.Warning => b.push("warn"),
+                Severity.Info => b.push("info"),
             }
-            b.append(" [");
-            b.append(&f.where_);
-            b.append("]: ");
-            b.append(&f.message);
-            b.append("\n");
+            b.push(" [");
+            b.push(&f.where_);
+            b.push("]: ");
+            b.push(&f.message);
+            b.push("\n");
             i = i + 1;
         }
         b.build()
