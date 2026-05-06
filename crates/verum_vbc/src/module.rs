@@ -506,6 +506,70 @@ impl VbcModule {
         None
     }
 
+    /// Like [`find_function_by_name`] but always tries a `.name`
+    /// suffix match against fully-qualified registrations even when
+    /// the input doesn't contain a dot.  Returns `Some` only when
+    /// EXACTLY ONE function ends with `.name` (otherwise the lookup
+    /// would be ambiguous — multiple stdlib types might define a
+    /// method with the same simple name and silently picking one
+    /// would mask a bug class as a wrong-dispatch).
+    ///
+    /// Used by the interpreter's method-dispatch fallback when
+    /// codegen emitted a CallM with a BARE method name (because
+    /// `infer_expr_type_name` couldn't statically determine the
+    /// receiver's type at codegen time).
+    pub fn find_function_by_unique_bare_suffix(&self, bare_name: &str) -> Option<FunctionId> {
+        if let Some(id) = self.find_function_by_name(bare_name) {
+            return Some(id);
+        }
+        let suffix = format!(".{}", bare_name);
+        let mut found: Option<FunctionId> = None;
+        for (idx, desc) in self.functions.iter().enumerate() {
+            if let Some(fname) = self.get_string(desc.name) {
+                if fname.ends_with(&suffix) {
+                    if found.is_some() {
+                        // Ambiguous — multiple types own a method
+                        // with this simple name.  Refuse the lookup;
+                        // the caller's qualified-form path or a
+                        // type-aware dispatch should disambiguate.
+                        return None;
+                    }
+                    found = Some(FunctionId(idx as u32));
+                }
+            }
+        }
+        found
+    }
+
+    /// TypeId-aware bare-name lookup for the runtime method-dispatch
+    /// fallback.  When codegen emits a CallM with a BARE method name
+    /// (because `infer_expr_type_name` couldn't statically determine
+    /// the receiver's type), the user-compiled body lives under
+    /// `<TypeName>.<bare>` in the function table — `find_function_by_name`
+    /// misses it because the exact match fails and suffix-match is
+    /// gated on `.` in the input.
+    ///
+    /// This helper takes the receiver's runtime TypeId, walks the
+    /// type table to recover the type name, then looks up
+    /// `<type_name>.<bare>` exactly.  Returns None when the TypeId
+    /// has no descriptor in this module (stdlib types are NOT
+    /// imported into user modules — only the methods they declare).
+    pub fn find_method_by_receiver_type(
+        &self,
+        receiver_type: TypeId,
+        bare_method: &str,
+    ) -> Option<FunctionId> {
+        let type_name = self
+            .types
+            .iter()
+            .find(|t| t.id == receiver_type)
+            .and_then(|t| self.get_string(t.name))?;
+        let qualified = format!("{}.{}", type_name, bare_method);
+        // Use the qualified-form path of `find_function_by_name`
+        // (exact match + .qualified suffix match).
+        self.find_function_by_name(&qualified)
+    }
+
     /// Adds a constant to the pool.
     pub fn add_constant(&mut self, constant: Constant) -> ConstId {
         let id = ConstId(self.constants.len() as u32);

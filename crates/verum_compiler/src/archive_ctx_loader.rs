@@ -418,9 +418,47 @@ impl ArchiveCtxCache {
         // to ~1-2 modules — the rest are O(1) string-prefix checks
         // against the archive index entries (which are already
         // decoded as part of the archive header).
+        // Build module-prefix gate.  For each wanted qualified name
+        // (`core.io.path.Path`), we visit not just the direct parent
+        // module (`core.io.path`) but also up to TWO ancestors above
+        // — the precompiled-stdlib archive bundles a `.vr` file's
+        // functions under the GRANDPARENT module's archive entry when
+        // the source declares `module X;` with just the leaf segment
+        // and the parent directory has its own `mod.vr`.  Empirical
+        // observation:
+        //  * `core/io/path.vr` declares `module path;` → its
+        //    PathBuf.* methods land in archive entry `core.io`.
+        //  * `core/shell/builtins.vr` declares `module builtins;` →
+        //    its functions land in archive entry `core.shell`.
+        // So a wanted qualified name two levels deep (`core.io.path`)
+        // needs to reach the grandparent (`core.io`) to find the
+        // method bodies.
+        //
+        // BOUNDED to two ancestors: walking all the way to `core`
+        // would visit nearly every archive entry — including
+        // unrelated modules that happen to define a same-named
+        // variant (e.g. `core.tracing.span`'s `SpanStatusCode is
+        // Unset|Ok|Error` collides with `core.base.result.Result`'s
+        // `Ok` constructor and breaks user-side variant
+        // resolution).  The two-hop bound finds cross-file siblings
+        // and grandparent-bundled methods without polluting the
+        // variant-constructor parent map.
         let wanted_module_prefixes: std::collections::HashSet<String> = wanted
             .iter()
-            .filter_map(|name| name.rfind('.').map(|i| name[..i].to_string()))
+            .flat_map(|name| {
+                let mut prefixes: Vec<String> = Vec::new();
+                let mut cur = name.as_str();
+                let mut hops = 0;
+                while let Some(idx) = cur.rfind('.') {
+                    cur = &cur[..idx];
+                    prefixes.push(cur.to_string());
+                    hops += 1;
+                    if hops >= 2 {
+                        break;
+                    }
+                }
+                prefixes
+            })
             .collect();
         for entry in &archive.index {
             // Skip decode unless this module name matches a
@@ -742,8 +780,30 @@ fn register_module_filtered(
             None => continue,
         };
         let qualified = format!("{}.{}", module_name, simple_name);
-        // Filter: only register if simple OR qualified is wanted.
-        if !wanted.contains(&simple_name) && !wanted.contains(&qualified) {
+        // Filter: register if (a) simple OR qualified is wanted,
+        // OR (b) the function is a static/inherent method of a
+        // wanted TYPE — i.e. simple_name has the form
+        // `<wanted_type>.<method>` where `<wanted_type>` itself
+        // appears in the wanted set.  Without (b), mounting a type
+        // T (`mount core.io.path.Path`) would NOT load T's static
+        // methods (Path.new, Path.from_str, …) — every
+        // user-side `Path.new(&"...")` then surfaces at runtime
+        // as `method 'new' not found on receiver of runtime kind
+        // Int` because the static-method dispatcher in
+        // `compile_method_call` falls through to the regular
+        // method-call path which evaluates `Path` as a value
+        // expression.
+        let is_method_of_wanted_type = simple_name
+            .find('.')
+            .map(|dot_idx| {
+                let parent = &simple_name[..dot_idx];
+                wanted.contains(parent)
+            })
+            .unwrap_or(false);
+        if !wanted.contains(&simple_name)
+            && !wanted.contains(&qualified)
+            && !is_method_of_wanted_type
+        {
             continue;
         }
         let variant_hit = variant_index
