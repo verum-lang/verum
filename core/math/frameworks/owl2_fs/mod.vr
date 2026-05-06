@@ -26,31 +26,35 @@
 //  assertion — §2.3.6 Table 10: 7 ABox assertions
 //
 
-// Total axiom count : 63 + 1 (count_o) = 64 trusted operators.
+// Total axiom count : 64 + 1 (count_o_spec) = 65 trusted operators,
+// each with a load-bearing HOL `ensures` clause (see V2 status below).
 //
 
-// **V1 status (this commit).** Each axiom ships as a *trusted-
-// boundary marker* — a `public axiom Name() -> Bool ensures true;`
-// declaration that `verum audit --framework-axioms --by-lineage
-// owl2_fs` enumerates exactly. The HOL-definition body from
-// Shkotin's "HOL-definition body" column is *not yet* installed —
-// Future work will replace each `ensures true;` with the verbatim Table-row
-// body so SMT dispatch via CVC5 FMF can decide the encoded
-// obligation.
+// **V2 status (current).** All 65 axioms now carry their verbatim
+// W3C OWL 2 DS §X.Y / Shkotin 2019 Table-N HOL-definition bodies as
+// concrete `ensures` clauses over the `Interpretation` protocol — see
+// `class_axiom.vr` (4), `class_expr.vr` (25), `object_property_axiom.vr`
+// (14), `data_property_axiom.vr` (6), `data_range.vr` (5),
+// `datatype_definition.vr` (1), `key.vr` (1), `assertion.vr` (7),
+// `object_property.vr` (1), `types.vr` (1, count_o_spec). Earlier
+// `ensures true;` placeholders are replaced; only the historical
+// notes in this file's body retain that wording for context.
 //
 
-// **Why ship V1 now?** The trusted boundary is the *contract* OWL 2
-// consumers (Protégé, HermiT, Pellet) read. Shipping V1 unlocks:
-//  - `verum audit --coord` projects owl2_fs to ν=1 (DL-decidable);
-//  - `verum audit --framework-axioms` enumerates the OWL 2
-//  dependency footprint of any corpus;
-//  - downstream `OwlAttr` family (VVA C8) can reference axioms
-//  by name without waiting on body completion;
-//  - cross-framework bridges (VVA C7b, F6) can be authored
-//  against the named operators.
+// **V1 baseline (preserved).** Each axiom ships as a trusted-
+// boundary marker that `verum audit --framework-axioms --by-lineage
+// owl2_fs` enumerates exactly. V1 → V2 transition was non-breaking:
+// every previously-named axiom kept its name and arity; only the
+// `ensures` clause grew from `true` to the load-bearing HOL body.
+// Downstream cogs that bound to V1 names continue to compile.
 //
 
-// ships HOL bodies + SMT routing per VVA §21.5.
+// **Why this matters for the SMT dispatch path.** With the HOL bodies
+// in place, `@verify(certified)` obligations stated in OWL 2 terms
+// route through the standard kernel + SMT pipeline: the obligation
+// inlines the relevant axiom's `ensures` clause, the SMT backend
+// (CVC5 FMF for OWL 2 DL) decides it, and the proof certificate
+// replays through both kernels at validator load time.
 //
 
 // References:
