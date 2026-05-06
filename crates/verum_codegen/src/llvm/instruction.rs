@@ -24452,16 +24452,73 @@ fn lower_ffi_extended<'ctx>(
             let dst_reg = op_reg(operands, 0);
             let module = ctx.get_module();
             if super::target_triple::target_is_windows(&module) {
-                // TODO: declare and call kernel32.dll::GetLastError().
-                // Until then, emit a const-zero with a tracing warning.
-                tracing::warn!(
-                    "GetLastError on Windows target — placeholder const-zero \
-                     until kernel32.GetLastError is wired in (#80 follow-up)"
-                );
+                // Windows target — call kernel32.dll::GetLastError()
+                // directly.  Per the no-libc architecture
+                // (docs/architecture/no-libc-architecture.md), Windows
+                // verum binaries link only against kernel32.dll and
+                // ntdll.dll — never against MSVCRT or UCRT.  The
+                // declaration uses the `__stdcall` (system) calling
+                // convention which `kernel32.dll!GetLastError` exports.
+                //
+                // Signature: `DWORD WINAPI GetLastError(void)` →
+                // Rust-side `extern "system" fn() -> u32`.  We declare
+                // it as `i32` return (LLVM's i32 maps to DWORD) and
+                // sign-extend to i64 for the Verum NaN-boxed Value
+                // shape.  The `__imp_` prefix is the load-bearing
+                // import-symbol convention that the COFF linker
+                // resolves through the kernel32 import table.
+                let i32_ty = ctx.llvm_context().i32_type();
+                let i64_ty = ctx.types().i64_type();
+                let fn_ty = i32_ty.fn_type(&[], false);
+                let get_last_error_fn = module
+                    .get_function("GetLastError")
+                    .unwrap_or_else(|| {
+                        let f = module.add_function("GetLastError", fn_ty, None);
+                        // Mark as imported from a Windows DLL so the
+                        // COFF linker emits the right relocation kind.
+                        // `dllimport` storage class is what kernel32
+                        // headers use; without it the linker tries to
+                        // resolve the symbol locally and fails.
+                        f.as_global_value().set_dll_storage_class(
+                            verum_llvm::DLLStorageClass::Import,
+                        );
+                        // x86_64 / aarch64 Windows have a unified
+                        // calling convention; the default `C` matches
+                        // kernel32's exported convention there.  On
+                        // 32-bit x86 GetLastError uses __stdcall, but
+                        // Verum doesn't target 32-bit Windows in
+                        // production AOT (per the no-libc architecture
+                        // section of `docs/architecture/`).
+                        f
+                    });
+                let result = ctx
+                    .builder()
+                    .build_call(get_last_error_fn, &[], "win_last_error")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| {
+                        LlvmLoweringError::internal(
+                            "GetLastError: expected return value",
+                        )
+                    })?;
+                // Sign-extend i32 → i64 for the Verum value shape.
+                let extended = ctx
+                    .builder()
+                    .build_int_z_extend(
+                        result.into_int_value(),
+                        i64_ty,
+                        "last_error_i64",
+                    )
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                ctx.set_register(dst_reg, extended.into());
+                return Ok(());
             }
-            // Non-Windows OR not-yet-implemented Windows path: return 0.
-            // Per POSIX programs don't use GetLastError; this is the
-            // safe sentinel.
+            // Non-Windows path: GetLastError is a Windows-specific
+            // intrinsic; on POSIX we return the sentinel zero.  Verum
+            // programs targeting POSIX shouldn't observe
+            // `GetLastError` directly — they use `errno` via the
+            // appropriate `core.sys` wrapper.
             let zero = ctx.types().i64_type().const_zero();
             ctx.set_register(dst_reg, zero.into());
             Ok(())
