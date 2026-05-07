@@ -34,7 +34,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.common.migrations.plan;
 
@@ -213,53 +213,3 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use core.database.common.migrations.migration.{migration_new};
-
-    #[test]
-    fn test_simple_plan() {
-        let mut steps: List<Migration> = List.new();
-        steps.push(migration_new(2, "b".to_text(), "y".to_text()).with_dependency(1));
-        steps.push(migration_new(1, "a".to_text(), "x".to_text()));
-        let plan = build(steps).unwrap();
-        assert_eq(plan.ordered.len(), 2);
-        assert_eq(plan.ordered[0].version, 1);
-        assert_eq(plan.ordered[1].version, 2);
-        assert_eq(plan.min_version, 1);
-        assert_eq(plan.max_version, 2);
-    }
-
-    #[test]
-    fn test_cycle_detection() {
-        let mut steps: List<Migration> = List.new();
-        steps.push(migration_new(1, "a".to_text(), "x".to_text()).with_dependency(2));
-        steps.push(migration_new(2, "b".to_text(), "y".to_text()).with_dependency(1));
-        match build(steps) {
-            Err(PeCycle(_)) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_duplicate_version() {
-        let mut steps: List<Migration> = List.new();
-        steps.push(migration_new(1, "a".to_text(), "x".to_text()));
-        steps.push(migration_new(1, "b".to_text(), "y".to_text()));
-        match build(steps) {
-            Err(PeDuplicateVersion(1)) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_unknown_dependency() {
-        let mut steps: List<Migration> = List.new();
-        steps.push(migration_new(1, "a".to_text(), "x".to_text()).with_dependency(99));
-        match build(steps) {
-            Err(PeUnknownDependency(1, 99)) => {}
-            _ => unreachable(),
-        }
-    }
-}

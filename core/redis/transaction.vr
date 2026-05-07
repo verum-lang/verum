@@ -30,7 +30,7 @@
         anchoring: Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:   Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.transaction;
 
@@ -93,6 +93,6 @@ pub async fn run_simple(
         RespValue.NullArray | RespValue.NullBulk | RespValue.Nil_ => Ok(TxResult.Aborted),
         RespValue.Array(arr) => Ok(TxResult.Committed(arr)),
         RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"EXEC unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"EXEC unexpected: {other}")),
     }
 }

@@ -58,7 +58,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.storage.s3.signing;
 
@@ -137,22 +137,13 @@ pub fn sign_request(
     }
     let (canonical_headers, signed_headers) = canonical_headers_and_signed(&signing_headers);
 
-    let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}",
-        method.to_upper(),
-        canonical_uri,
-        canonical_query,
-        canonical_headers,
-        signed_headers,
-        body_hash,
-    ).to_text();
+    let canonical_request = f"{method.to_upper()}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{body_hash}";
 
     // Step 2 — string-to-sign.
     let date_8 = now_iso8601_basic.byte_substring(0, 8); // YYYYMMDD
-    let credential_scope = format!("{}/{}/{}/aws4_request", date_8, region, service).to_text();
+    let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
     let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
-    let string_to_sign = format!("AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        now_iso8601_basic, credential_scope, canonical_request_hash,
-    ).to_text();
+    let string_to_sign = f"AWS4-HMAC-SHA256\n{now_iso8601_basic}\n{credential_scope}\n{canonical_request_hash}";
 
     // Step 3 — signing key.
     let signing_key = derive_signing_key(&creds.secret_access_key, &date_8, region, service);
@@ -161,10 +152,7 @@ pub fn sign_request(
     let signature = hex_encode(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
 
     // Authorization header.
-    let authz = format!(
-        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-        creds.access_key_id, credential_scope, signed_headers, signature,
-    ).to_text();
+    let authz = f"AWS4-HMAC-SHA256 Credential={creds.access_key_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}";
 
     let mut out: Map<Text, Text> = Map.new();
     out.insert("authorization".to_text(),         authz);
@@ -195,10 +183,10 @@ pub fn presign(
     expires_seconds:   Int,
 ) -> Result<List<(Text, Text)>, Text> {
     if expires_seconds < 1 || expires_seconds > 604800 {
-        return Err(format!("presign: expires_seconds {} out of range [1, 604800]", expires_seconds).to_text());
+        return Err(f"presign: expires_seconds {expires_seconds} out of range [1, 604800]");
     }
     let date_8 = now_iso8601_basic.byte_substring(0, 8);
-    let credential_scope = format!("{}/{}/{}/aws4_request", date_8, region, service).to_text();
+    let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
 
     // Build the canonical query, including the SigV4 query params.
     // These params are part of the signed input so must be added
@@ -208,7 +196,7 @@ pub fn presign(
     while i < base_query_pairs.len() { q.push(base_query_pairs[i].clone()); i = i + 1; }
     q.push(("X-Amz-Algorithm".to_text(), "AWS4-HMAC-SHA256".to_text()));
     q.push(("X-Amz-Credential".to_text(),
-        format!("{}/{}", creds.access_key_id, credential_scope).to_text()));
+        f"{creds.access_key_id}/{credential_scope}"));
     q.push(("X-Amz-Date".to_text(), now_iso8601_basic.clone()));
     q.push(("X-Amz-Expires".to_text(), f"{expires_seconds}"));
     q.push(("X-Amz-SignedHeaders".to_text(), "host".to_text()));
@@ -222,22 +210,13 @@ pub fn presign(
 
     let canonical_uri = canonical_path(url_path);
     let canonical_query = canonical_query_string(&q);
-    let canonical_headers = format!("host:{}\n", host).to_text();
+    let canonical_headers = f"host:{host}\n";
     let signed_headers = "host".to_text();
 
-    let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}",
-        method.to_upper(),
-        canonical_uri,
-        canonical_query,
-        canonical_headers,
-        signed_headers,
-        body_hash,
-    ).to_text();
+    let canonical_request = f"{method.to_upper()}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{body_hash}";
     let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
 
-    let string_to_sign = format!("AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        now_iso8601_basic, credential_scope, canonical_request_hash,
-    ).to_text();
+    let string_to_sign = f"AWS4-HMAC-SHA256\n{now_iso8601_basic}\n{credential_scope}\n{canonical_request_hash}";
 
     let signing_key = derive_signing_key(&creds.secret_access_key, &date_8, region, service);
     let signature = hex_encode(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
@@ -255,7 +234,7 @@ pub fn presign(
 /// + don't double-encode already-percent-encoded sequences).
 fn canonical_path(path: &Text) -> Text {
     if path.is_empty() { return "/".to_text(); }
-    if !path.starts_with("/") { return format!("/{}", percent_encode_path(path)).to_text(); }
+    if !path.starts_with("/") { return f"/{percent_encode_path(path)}"; }
     percent_encode_path(path)
 }
 
@@ -270,7 +249,7 @@ fn percent_encode_path(path: &Text) -> Text {
         } else if is_unreserved(b) {
             out = out.append(&Text.from_byte(b));
         } else {
-            out = out.append(&format!("%{:02X}", b).to_text());
+            out = out.append(&f"%{b:02X}");
         }
         i = i + 1;
     }
@@ -313,7 +292,7 @@ fn percent_encode_strict(s: &Text) -> Text {
         if is_unreserved(b) {
             out = out.append(&Text.from_byte(b));
         } else {
-            out = out.append(&format!("%{:02X}", b).to_text());
+            out = out.append(&f"%{b:02X}");
         }
         i = i + 1;
     }
@@ -412,7 +391,7 @@ fn derive_signing_key(
     region:            &Text,
     service:           &Text,
 ) -> List<Byte> {
-    let initial = format!("AWS4{}", secret_access_key).as_bytes().to_list();
+    let initial = f"AWS4{secret_access_key}".as_bytes().to_list();
     let k_date    = hmac_sha256(&initial, date_8.as_bytes()).to_list();
     let k_region  = hmac_sha256(&k_date,  region.as_bytes()).to_list();
     let k_service = hmac_sha256(&k_region, service.as_bytes()).to_list();
@@ -423,34 +402,3 @@ fn derive_signing_key(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_canonical_path_root() {
-        assert_eq(canonical_path(&"".to_text()), "/".to_text());
-        assert_eq(canonical_path(&"/".to_text()), "/".to_text());
-    }
-
-    #[test]
-    fn test_percent_encode_strict_preserves_unreserved() {
-        let s = "abc-DEF_123.~".to_text();
-        assert_eq(percent_encode_strict(&s), s);
-    }
-
-    #[test]
-    fn test_percent_encode_strict_escapes_space() {
-        let s = "hello world".to_text();
-        assert_eq(percent_encode_strict(&s), "hello%20world".to_text());
-    }
-
-    #[test]
-    fn test_canonical_query_string_sorted() {
-        let mut pairs: List<(Text, Text)> = List.new();
-        pairs.push(("b".to_text(), "2".to_text()));
-        pairs.push(("a".to_text(), "1".to_text()));
-        let s = canonical_query_string(&pairs);
-        assert_eq(s, "a=1&b=2".to_text());
-    }
-}

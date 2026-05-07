@@ -35,7 +35,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.h3.client;
 
@@ -150,13 +150,13 @@ implement Display for H3ClientError {
 implement Debug for H3ClientError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UrlParse(e)            => f.write_str(f"UrlParse({e:?})".as_str()),
+            UrlParse(e)            => f.write_str(f"UrlParse({e})".as_str()),
             UnsupportedScheme(s)   => f.write_str(f"UnsupportedScheme({s})".as_str()),
             Resolve(reason)        => f.write_str(f"Resolve({reason})".as_str()),
-            Trust(e)               => f.write_str(f"Trust({e:?})".as_str()),
+            Trust(e)               => f.write_str(f"Trust({e})".as_str()),
             Transport(reason)      => f.write_str(f"Transport({reason})".as_str()),
             Handshake(reason)      => f.write_str(f"Handshake({reason})".as_str()),
-            H3Layer(e)             => f.write_str(f"H3Layer({e:?})".as_str()),
+            H3Layer(e)             => f.write_str(f"H3Layer({e})".as_str()),
             Timeout                => f.write_str("Timeout"),
             EarlyDataTooLarge(n)   => f.write_str(f"EarlyDataTooLarge({n})".as_str()),
             Closed                 => f.write_str("Closed"),

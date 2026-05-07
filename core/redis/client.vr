@@ -59,7 +59,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.client;
 
@@ -423,7 +423,7 @@ async fn handshake(conn: &mut RedisConnection, cfg: &RedisConfig) -> Result<(), 
                 return Err(RedisError.Backend(f"HELLO: {msg}"));
             }
         }
-        other => return Err(RedisError.InvalidReply(f"unexpected HELLO reply: {other:?}")),
+        other => return Err(RedisError.InvalidReply(f"unexpected HELLO reply: {other}")),
     }
     if cfg.db != 0 {
         let mut sel: List<Text> = List.new();

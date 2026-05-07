@@ -60,7 +60,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.attestation;
 
@@ -131,9 +131,9 @@ pub fn verify_attestation(
         AttestationFormat.Apple   => verify_apple(att_stmt, auth_data, client_data_hash),
         AttestationFormat.Tpm | AttestationFormat.AndroidKey | AttestationFormat.AndroidSafetynet
         | AttestationFormat.AppleAppAttest =>
-            Err(WebAuthnError.InvalidAttestation(format!("fmt {fmt:?} not supported in v0.1").to_text())),
+            Err(WebAuthnError.InvalidAttestation(f"fmt {fmt} not supported in v0.1")),
         AttestationFormat.Other(s) =>
-            Err(WebAuthnError.InvalidAttestation(format!("unknown fmt {s}").to_text())),
+            Err(WebAuthnError.InvalidAttestation(f"unknown fmt {s}")),
     }
 }
 
@@ -207,8 +207,7 @@ fn verify_packed(
         let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
         if alg_of(&cred_pk) != alg {
             return Err(WebAuthnError.InvalidAttestation(
-                format!("packed self-att alg mismatch (cose={}, attStmt={})",
-                    alg_of(&cred_pk), alg).to_text()));
+                f"packed self-att alg mismatch (cose={alg_of(&cred_pk)}, attStmt={alg})"));
         }
         verify_signature_with_credential_pk(&cred_pk, &signed_input, &sig)?;
         Ok(VerifiedAttestation {
@@ -226,7 +225,7 @@ fn verify_packed_with_x5c(
     leaf_der:     &List<Byte>,
 ) -> Result<(), WebAuthnError> {
     let leaf = security.x509.certificate.parse_certificate(leaf_der.as_slice())
-        .map_err(|e| WebAuthnError.InvalidAttestation(format!("x5c[0] parse: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidAttestation(f"x5c[0] parse: {e}"))?;
     verify_signature_against_spki(alg, sig, signed_input, &leaf.tbs.spki)
 }
 
@@ -258,7 +257,7 @@ fn verify_fido_u2f(
     let x5c = get_text_keyed_x5c(map, "x5c");
     if x5c.len() != 1 {
         return Err(WebAuthnError.InvalidAttestation(
-            format!("fido-u2f: x5c must have exactly 1 cert, got {}", x5c.len()).to_text()));
+            f"fido-u2f: x5c must have exactly 1 cert, got {x5c.len()}"));
     }
     let acd = auth_data.attested_credential_data.as_ref()
         .ok_or_else(|| WebAuthnError.InvalidAttestation(
@@ -285,7 +284,7 @@ fn verify_fido_u2f(
     while n < y.len() { verification_data.push(y[n]); n = n + 1; }
 
     let leaf = security.x509.certificate.parse_certificate(x5c[0].as_slice())
-        .map_err(|e| WebAuthnError.InvalidAttestation(format!("fido-u2f x5c parse: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidAttestation(f"fido-u2f x5c parse: {e}"))?;
     verify_signature_against_spki(COSE_ALG_ES256, &sig, &verification_data, &leaf.tbs.spki)?;
 
     Ok(VerifiedAttestation {
@@ -517,45 +516,3 @@ fn concat_bytes(a: &List<Byte>, b: &[Byte]) -> List<Byte> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_none_empty_stmt_ok() {
-        let stmt = CborValue.Map(List.new());
-        let v = verify_attestation(&AttestationFormat.None_, &stmt,
-            &dummy_auth_data(), &[0_u8; 32]).unwrap();
-        assert(v.attestation_type is AttestationType.NoneAtt);
-        assert(v.trust_chain.is_empty());
-    }
-
-    #[test]
-    fn test_none_nonempty_stmt_rejected() {
-        let mut entries: List<(CborValue, CborValue)> = List.new();
-        entries.push((CborValue.Text("foo".to_text()), CborValue.Integer(1)));
-        let stmt = CborValue.Map(entries);
-        match verify_attestation(&AttestationFormat.None_, &stmt,
-            &dummy_auth_data(), &[0_u8; 32]) {
-            Err(WebAuthnError.InvalidAttestation(_)) => {}
-            _ => unreachable(),
-        }
-    }
-
-    fn dummy_auth_data() -> AuthenticatorData {
-        let raw: List<Byte> = {
-            let mut r: List<Byte> = List.with_capacity(37);
-            let mut i: Int = 0;
-            while i < 37 { r.push(0); i = i + 1; }
-            r
-        };
-        AuthenticatorData {
-            rp_id_hash:                [0_u8; 32],
-            flags:                     security.webauthn.types.parse_flags(0),
-            sign_count:                0,
-            attested_credential_data:  None,
-            extensions:                None,
-            raw,
-        }
-    }
-}

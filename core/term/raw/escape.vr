@@ -112,7 +112,7 @@ public fn scroll_down(n: Int) -> Text { f"\x1b[{n}T" }
 
 /// Set scrolling region (top and bottom are 0-indexed).
 public fn set_scroll_region(top: Int, bottom: Int) -> Text {
-    f"\x1b[{top + 1};{bottom + 1}r"
+    f"\x1b[{top + 1};{bottom + 1}"
 }
 
 /// Reset scrolling region to full screen.

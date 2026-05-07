@@ -45,7 +45,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.verify.kernel_v0.mod;
 

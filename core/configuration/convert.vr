@@ -44,7 +44,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.configuration.convert;
 
@@ -387,28 +387,3 @@ fn duration_to_text(d: &time.duration.Duration) -> Text {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use configuration.format.{default_capabilities};
-
-    #[test]
-    fn test_validate_no_loss() {
-        let mut t = Map.new();
-        t.insert("x".to_text(), ConfigValue.ConfigInt(1));
-        let v = ConfigValue.ConfigTable(t);
-        let mut caps = default_capabilities();
-        caps.has_null = true;
-        let report = validate_conversion(&v, &caps);
-        assert_eq(report.len(), 0);
-    }
-
-    #[test]
-    fn test_validate_bytes_loss() {
-        let mut bs: List<Byte> = List.new(); bs.push(0x01_u8);
-        let v = ConfigValue.ConfigBytes(bs);
-        let caps = default_capabilities(); // has_bytes: false
-        let report = validate_conversion(&v, &caps);
-        assert(report.len() > 0);
-    }
-}

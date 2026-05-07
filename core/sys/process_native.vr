@@ -49,7 +49,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.sys.process_native;
 
@@ -172,20 +172,20 @@ public fn native_spawn(
 
         if capture_stdin {
             if let Err(e) = make_pipe(&mut stdin_pipe) {
-                return Err(f"pipe(stdin) failed: {e:?}");
+                return Err(f"pipe(stdin) failed: {e}");
             }
         }
         if capture_stdout {
             if let Err(e) = make_pipe(&mut stdout_pipe) {
                 close_pipe(&stdin_pipe);
-                return Err(f"pipe(stdout) failed: {e:?}");
+                return Err(f"pipe(stdout) failed: {e}");
             }
         }
         if capture_stderr {
             if let Err(e) = make_pipe(&mut stderr_pipe) {
                 close_pipe(&stdin_pipe);
                 close_pipe(&stdout_pipe);
-                return Err(f"pipe(stderr) failed: {e:?}");
+                return Err(f"pipe(stderr) failed: {e}");
             }
         }
 
@@ -204,7 +204,7 @@ public fn native_spawn(
             Ok(p)  => p,
             Err(e) => {
                 close_pipe(&stdin_pipe); close_pipe(&stdout_pipe); close_pipe(&stderr_pipe);
-                return Err(f"fork() failed: {e:?}");
+                return Err(f"fork() failed: {e}");
             }
         };
 
@@ -404,7 +404,7 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
                 buf.truncate(n as usize);
                 Ok(buf)
             }
-            Err(e) => Err(f"read failed: {e:?}"),
+            Err(e) => Err(f"read failed: {e}"),
         }
     }
     @cfg(target_os = "windows")

@@ -52,7 +52,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.mem.heap;
 mount super.segment.{
@@ -1327,7 +1327,7 @@ implement Debug for HeapError {
             InvalidPointer                    => f.write_str("InvalidPointer"),
             InvalidSize { size }              => f.write_str(f"InvalidSize {{ size: {size} }}".as_str()),
             InvalidAlignment { alignment }    => f.write_str(f"InvalidAlignment {{ alignment: {alignment} }}".as_str()),
-            SegmentError { inner }            => f.write_str(f"SegmentError {{ inner: {inner:?} }}".as_str()),
+            SegmentError { inner }            => f.write_str(f"SegmentError {{ inner: {inner} }}".as_str()),
             UseAfterFree                      => f.write_str("UseAfterFree"),
         }
     }

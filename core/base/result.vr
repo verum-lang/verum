@@ -10,7 +10,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.base.result;
 
@@ -99,7 +99,7 @@ implement<T, E> Result<T, E> {
     where E: Debug {
         match self {
             Ok(v) => v,
-            Err(e) => panic(f"called unwrap() on Err: {e:?}"),
+            Err(e) => panic(f"called unwrap() on Err: {e}"),
         }
     }
 
@@ -108,7 +108,7 @@ implement<T, E> Result<T, E> {
     public fn unwrap_err(self) -> E
     where T: Debug {
         match self {
-            Ok(v) => panic(f"called unwrap_err() on Ok: {v:?}"),
+            Ok(v) => panic(f"called unwrap_err() on Ok: {v}"),
             Err(e) => e,
         }
     }
@@ -119,7 +119,7 @@ implement<T, E> Result<T, E> {
     where E: Debug {
         match self {
             Ok(v) => v,
-            Err(e) => panic(f"{msg}: {e:?}"),
+            Err(e) => panic(f"{msg}: {e}"),
         }
     }
 
@@ -128,7 +128,7 @@ implement<T, E> Result<T, E> {
     public fn expect_err(self, msg: &Text) -> E
     where T: Debug {
         match self {
-            Ok(v) => panic(f"{msg}: {v:?}"),
+            Ok(v) => panic(f"{msg}: {v}"),
             Err(e) => e,
         }
     }

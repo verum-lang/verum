@@ -1,7 +1,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.l5_sql.compile;
 
@@ -89,10 +89,10 @@ implement Display for CompileError {
 implement Debug for CompileError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            CeLex(e)     => f.write_str(f"CeLex({e:?})".as_str()),
-            CeParse(e)   => f.write_str(f"CeParse({e:?})".as_str()),
-            CePlan(e)    => f.write_str(f"CePlan({e:?})".as_str()),
-            CeCodegen(e) => f.write_str(f"CeCodegen({e:?})".as_str()),
+            CeLex(e)     => f.write_str(f"CeLex({e})".as_str()),
+            CeParse(e)   => f.write_str(f"CeParse({e})".as_str()),
+            CePlan(e)    => f.write_str(f"CePlan({e})".as_str()),
+            CeCodegen(e) => f.write_str(f"CeCodegen({e})".as_str()),
         }
     }
 }

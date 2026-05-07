@@ -49,8 +49,8 @@ mount core.shell.result.{ShellError};
 /// Copy a file. Overwrites destination if it exists.
 public fn cp(from: &Path, to: &Path) -> Result<Int, ShellError> {
     fs_copy(from, to).map_err(|io| ShellError.SpawnFailed {
-        command: f"cp {from:?} {to:?}",
-        reason:  f"{io:?}",
+        command: f"cp {from} {to}",
+        reason:  f"{io}",
     })
 }
 
@@ -61,8 +61,8 @@ public fn mv(from: &Path, to: &Path) -> Result<(), ShellError> {
         Err(_) => {
             let _ = cp(from, to)?;
             fs_remove_file(from).map_err(|io| ShellError.SpawnFailed {
-                command: f"mv {from:?} {to:?}",
-                reason:  f"{io:?}",
+                command: f"mv {from} {to}",
+                reason:  f"{io}",
             })
         }
     }
@@ -71,8 +71,8 @@ public fn mv(from: &Path, to: &Path) -> Result<(), ShellError> {
 /// Remove a single file.
 public fn rm(path: &Path) -> Result<(), ShellError> {
     fs_remove_file(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"rm {path:?}",
-        reason:  f"{io:?}",
+        command: f"rm {path}",
+        reason:  f"{io}",
     })
 }
 
@@ -81,8 +81,8 @@ public fn rm_rf(path: &Path) -> Result<(), ShellError> {
     match fs_metadata(path) {
         Ok(m) if m.is_dir() =>
             fs_remove_dir_all(path).map_err(|io| ShellError.SpawnFailed {
-                command: f"rm -rf {path:?}",
-                reason:  f"{io:?}",
+                command: f"rm -rf {path}",
+                reason:  f"{io}",
             }),
         Ok(_) => rm(path),
         Err(_) => Ok(()),  // already gone
@@ -92,48 +92,48 @@ public fn rm_rf(path: &Path) -> Result<(), ShellError> {
 /// Create directory. Errors if it already exists.
 public fn mkdir(path: &Path) -> Result<(), ShellError> {
     fs_create_dir(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"mkdir {path:?}",
-        reason:  f"{io:?}",
+        command: f"mkdir {path}",
+        reason:  f"{io}",
     })
 }
 
 /// Create directory and all missing parents (mkdir -p).
 public fn mkdir_p(path: &Path) -> Result<(), ShellError> {
     fs_create_dir_all(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"mkdir -p {path:?}",
-        reason:  f"{io:?}",
+        command: f"mkdir -p {path}",
+        reason:  f"{io}",
     })
 }
 
 /// Read entire file as bytes.
 public fn cat_bytes(path: &Path) -> Result<List<Byte>, ShellError> {
     fs_read(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"cat {path:?}",
-        reason:  f"{io:?}",
+        command: f"cat {path}",
+        reason:  f"{io}",
     })
 }
 
 /// Read entire file as Text (UTF-8). Errors on invalid UTF-8.
 public fn cat(path: &Path) -> Result<Text, ShellError> {
     fs_read_to_string(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"cat {path:?}",
-        reason:  f"{io:?}",
+        command: f"cat {path}",
+        reason:  f"{io}",
     })
 }
 
 /// Write bytes — overwrites.
 public fn write(path: &Path, content: &[Byte]) -> Result<(), ShellError> {
     fs_write(path, content).map_err(|io| ShellError.SpawnFailed {
-        command: f"write {path:?}",
-        reason:  f"{io:?}",
+        command: f"write {path}",
+        reason:  f"{io}",
     })
 }
 
 /// Write text — overwrites.
 public fn write_str(path: &Path, content: &Text) -> Result<(), ShellError> {
     fs_write_str(path, content).map_err(|io| ShellError.SpawnFailed {
-        command: f"write_str {path:?}",
-        reason:  f"{io:?}",
+        command: f"write_str {path}",
+        reason:  f"{io}",
     })
 }
 
@@ -145,8 +145,8 @@ public fn append(path: &Path, content: &[Byte]) -> Result<(), ShellError> {
     };
     for b in content.iter() { existing.push(*b); }
     fs_write(path, &existing).map_err(|io| ShellError.SpawnFailed {
-        command: f"append {path:?}",
-        reason:  f"{io:?}",
+        command: f"append {path}",
+        reason:  f"{io}",
     })
 }
 

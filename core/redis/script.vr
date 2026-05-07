@@ -31,7 +31,7 @@
         anchoring: Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:   Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.script;
 
@@ -50,7 +50,7 @@ pub async fn script_load(client: &RedisClient, source: &Text) -> Result<Text, Re
         RespValue.BulkString(b)   => Text.from_utf8(b.as_slice())
             .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT LOAD unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SCRIPT LOAD unexpected: {other}")),
     }
 }
 
@@ -100,7 +100,7 @@ pub async fn script_exists(client: &RedisClient, sha: &Text) -> Result<Bool, Red
             _ => Err(RedisError.InvalidReply("SCRIPT EXISTS: bad inner".to_text())),
         },
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT EXISTS unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SCRIPT EXISTS unexpected: {other}")),
     }
 }
 
@@ -110,6 +110,6 @@ pub async fn script_flush(client: &RedisClient) -> Result<(), RedisError> {
     match exec(client, a.as_slice()).await? {
         RespValue.SimpleString(_) => Ok(()),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCRIPT FLUSH unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SCRIPT FLUSH unexpected: {other}")),
     }
 }

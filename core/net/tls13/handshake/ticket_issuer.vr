@@ -27,7 +27,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.tls13.handshake.ticket_issuer;
 
@@ -95,7 +95,7 @@ implement Display for IssueError {
 implement Debug for IssueError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Ticket(e) => f.write_str(f"Ticket({e:?})".as_str()),
+            Ticket(e) => f.write_str(f"Ticket({e})".as_str()),
         }
     }
 }

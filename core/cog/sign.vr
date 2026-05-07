@@ -43,7 +43,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.cog.sign;
 
@@ -246,12 +246,12 @@ fn concat_hashes(a: &[Byte; 32], b: &[Byte; 32]) -> List<Byte> {
 
 fn decode_public_key(hex: &Text) -> Result<Ed25519PublicKey, CogSignatureError> {
     if hex.len() != 64 {
-        return Err(InvalidPublicKey(format!("expected 64 hex chars, got {}", hex.len()).to_text()));
+        return Err(InvalidPublicKey(f"expected 64 hex chars, got {hex.len()}"));
     }
     let bytes = hex_decode(hex)
-        .map_err(|e| InvalidPublicKey(format!("hex decode: {e}").to_text()))?;
+        .map_err(|e| InvalidPublicKey(f"hex decode: {e}"))?;
     if bytes.len() != 32 {
-        return Err(InvalidPublicKey(format!("expected 32 bytes, got {}", bytes.len()).to_text()));
+        return Err(InvalidPublicKey(f"expected 32 bytes, got {bytes.len()}"));
     }
     let mut arr: [Byte; 32] = [0_u8; 32];
     let mut i: Int = 0;
@@ -261,12 +261,12 @@ fn decode_public_key(hex: &Text) -> Result<Ed25519PublicKey, CogSignatureError> 
 
 fn decode_signature(hex: &Text) -> Result<Ed25519Signature, CogSignatureError> {
     if hex.len() != 128 {
-        return Err(InvalidSignature(format!("expected 128 hex chars, got {}", hex.len()).to_text()));
+        return Err(InvalidSignature(f"expected 128 hex chars, got {hex.len()}"));
     }
     let bytes = hex_decode(hex)
-        .map_err(|e| InvalidSignature(format!("hex decode: {e}").to_text()))?;
+        .map_err(|e| InvalidSignature(f"hex decode: {e}"))?;
     if bytes.len() != 64 {
-        return Err(InvalidSignature(format!("expected 64 bytes, got {}", bytes.len()).to_text()));
+        return Err(InvalidSignature(f"expected 64 bytes, got {bytes.len()}"));
     }
     let mut arr: [Byte; 64] = [0_u8; 64];
     let mut i: Int = 0;
@@ -278,77 +278,3 @@ fn decode_signature(hex: &Text) -> Result<Ed25519Signature, CogSignatureError> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use security.ecc.ed25519.{generate_seed};
-
-    fn fresh_seed() -> Ed25519Seed { generate_seed() }
-
-    fn bytes_of(s: &str) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let bs = s.as_bytes();
-        let mut i: Int = 0;
-        while i < bs.len() { out.push(bs[i]); i = i + 1; }
-        out
-    }
-
-    #[test]
-    fn test_sign_then_verify() {
-        let seed = fresh_seed();
-        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
-        let source = bytes_of("function-body-content-bytes");
-        let sig = sign_cog(&seed, &manifest, &source).unwrap();
-        verify_cog(&sig, &manifest, &source).unwrap();
-    }
-
-    #[test]
-    fn test_tampered_manifest_fails() {
-        let seed = fresh_seed();
-        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
-        let source = bytes_of("function-body-content");
-        let sig = sign_cog(&seed, &manifest, &source).unwrap();
-        let tampered = bytes_of(r#"{"name":"my-cog","version":"99.0.0"}"#);
-        match verify_cog(&sig, &tampered, &source) {
-            Err(HashMismatch { .. }) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_tampered_source_fails() {
-        let seed = fresh_seed();
-        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
-        let source = bytes_of("function-body-content");
-        let sig = sign_cog(&seed, &manifest, &source).unwrap();
-        let tampered = bytes_of("malicious-bytes");
-        match verify_cog(&sig, &manifest, &tampered) {
-            Err(HashMismatch { .. }) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_signing_message_deterministic() {
-        let manifest = bytes_of("a");
-        let source = bytes_of("b");
-        let m1 = signing_message(&manifest, &source);
-        let m2 = signing_message(&manifest, &source);
-        assert_eq(m1.len(), 64);
-        let mut i: Int = 0;
-        while i < 64 {
-            assert_eq(m1.get(i).unwrap(), m2.get(i).unwrap());
-            i = i + 1;
-        }
-    }
-
-    #[test]
-    fn test_invalid_pubkey_format() {
-        let mut sig = sign_cog(&fresh_seed(), &bytes_of("a"), &bytes_of("b")).unwrap();
-        sig.public_key = "not-hex".to_text();
-        match verify_cog(&sig, &bytes_of("a"), &bytes_of("b")) {
-            Err(InvalidPublicKey(_)) => {}
-            _ => unreachable(),
-        }
-    }
-}

@@ -103,8 +103,8 @@ public fn bootstrap(source: &Text) -> Result<ShellContext, ShellError> {
 /// verum CLI when invoking a script.
 public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
     let source = fs_read_to_string(path).map_err(|io| ShellError.SpawnFailed {
-        command: f"<bootstrap_from_file {path:?}>",
-        reason:  f"{io:?}",
+        command: f"<bootstrap_from_file {path}>",
+        reason:  f"{io}",
     })?;
     bootstrap(&source)
 }

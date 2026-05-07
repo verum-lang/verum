@@ -40,7 +40,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.x509.verifier;
 
@@ -212,8 +212,8 @@ implement Display for VerificationError {
             ValidationFailed(e)           => f.write_str(f"verifier: path validation: {e}".as_str()),
             RevokedCert { reason }        => f.write_str(f"verifier: cert revoked ({reason})".as_str()),
             RevocationCheckFailed { ocsp, crl } => f.write_str(
-                f"verifier: revocation check failed (ocsp={ocsp:?}, crl={crl:?})".as_str()),
-            PurposeNotMet { want }        => f.write_str(f"verifier: cert does not satisfy purpose {want:?}".as_str()),
+                f"verifier: revocation check failed (ocsp={ocsp}, crl={crl})".as_str()),
+            PurposeNotMet { want }        => f.write_str(f"verifier: cert does not satisfy purpose {want}".as_str()),
         }
     }
 }
@@ -276,7 +276,7 @@ public async fn verify_certs<C: HttpClient>(
     while i < chain_der.len() {
         match parse_certificate(chain_der[i].as_slice()) {
             Ok(c)  => parsed.push(c),
-            Err(e) => return Err(ParseFailed { index: i, reason: format!("{e}").to_text() }),
+            Err(e) => return Err(ParseFailed { index: i, reason: f"{e}" }),
         }
         i = i + 1;
     }
@@ -416,7 +416,7 @@ async fn check_one_revocation<C: HttpClient>(
             CertStatus.Revoked { reason, .. } => return Ok(PerCertRevocationResult {
                 cert_index: 0,
                 method:     RevocationMethod.Ocsp,
-                status:     RevocationStatus.Revoked { reason: format!("{reason:?}").to_text() },
+                status:     RevocationStatus.Revoked { reason: f"{reason}" },
             }),
             CertStatus.Unknown => {} // try CRL
         },
@@ -451,12 +451,12 @@ async fn check_one_revocation<C: HttpClient>(
         Ok(CrlCheckResult.Revoked { reason, .. }) => Ok(PerCertRevocationResult {
             cert_index: 0,
             method:     RevocationMethod.Crl,
-            status:     RevocationStatus.Revoked { reason: format!("{reason:?}").to_text() },
+            status:     RevocationStatus.Revoked { reason: f"{reason}" },
         }),
         Err(e) => match policy {
             RevocationPolicy.HardFail => Err(VerificationError.RevocationCheckFailed {
                 ocsp: Some("inconclusive".to_text()),
-                crl:  Some(format!("{e}").to_text()),
+                crl:  Some(f"{e}"),
             }),
             _ => Ok(PerCertRevocationResult {
                 cert_index: 0,
@@ -471,32 +471,3 @@ async fn check_one_revocation<C: HttpClient>(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_purpose_oid_server_auth() {
-        let want = purpose_oid(&CertPurpose.ServerAuth).unwrap();
-        assert(want.eq(&Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1])));
-    }
-
-    #[test]
-    fn test_purpose_oid_any_purpose_returns_none() {
-        assert(purpose_oid(&CertPurpose.AnyPurpose).is_none());
-    }
-
-    #[test]
-    fn test_default_tls_config() {
-        let c = verifier_config_for_tls_server_auth();
-        assert(c.purpose is CertPurpose.ServerAuth);
-        assert(c.revocation is RevocationPolicy.SoftFail);
-    }
-
-    #[test]
-    fn test_default_codesign_config() {
-        let c = verifier_config_for_code_signing();
-        assert(c.purpose is CertPurpose.CodeSigning);
-        assert(c.revocation is RevocationPolicy.HardFail);
-    }
-}

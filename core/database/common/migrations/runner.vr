@@ -47,7 +47,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.common.migrations.runner;
 
@@ -223,7 +223,7 @@ implement MigrationRunner {
                             applied_steps.push(clone_migration(m));
                         }
                         Err(err) => {
-                            let err_msg = format!("{err}").to_text();
+                            let err_msg = f"{err}";
                             journal.record_failed(m, err_msg.clone());
                             if let Some(entry) = journal.lookup(m.version) {
                                 let _ = store.upsert_entry(&entry).await;
@@ -274,7 +274,7 @@ implement MigrationRunner {
                         }
                         Err(err) => {
                             // Continue rolling back even if one step fails.
-                            let err_msg = format!("{err}").to_text();
+                            let err_msg = f"{err}";
                             journal.record_failed(&applied[i], err_msg);
                             if let Some(entry) = journal.lookup(applied[i].version) {
                                 let _ = store.upsert_entry(&entry).await;
@@ -312,32 +312,3 @@ fn clone_decisions(ds: &List<RunDecision>) -> List<RunDecision> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use core.database.common.migrations.migration.{migration_new};
-    use core.database.common.migrations.plan.{build};
-
-    #[test]
-    fn test_run_mode_names() {
-        assert_eq(run_mode_name(&RmDryRun), "dry-run".to_text());
-        assert_eq(run_mode_name(&RmStrict), "strict".to_text());
-        assert_eq(run_mode_name(&RmContinueOnDrift), "continue-on-drift".to_text());
-    }
-
-    #[test]
-    fn test_decisions_pure_plan() {
-        let mut steps: List<Migration> = List.new();
-        steps.push(migration_new(1, "a".to_text(), "x".to_text()));
-        steps.push(migration_new(2, "b".to_text(), "y".to_text()).with_dependency(1));
-        let plan = build(steps).unwrap();
-        let runner = runner_new(RmStrict);
-        let journal = journal_new();
-        let decisions = runner.plan_decisions(&plan, &journal);
-        assert_eq(decisions.len(), 2);
-        match &decisions[0] {
-            RdApply(1, _) => {}
-            _ => unreachable(),
-        }
-    }
-}

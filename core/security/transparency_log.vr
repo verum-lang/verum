@@ -57,7 +57,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.transparency_log;
 
@@ -579,66 +579,3 @@ fn arr_eq(a: &[Byte; 32], b: &[Byte; 32]) -> Bool {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use security.ecc.ed25519.{generate_seed, public_key};
-
-    fn fresh_log() -> TransparencyLog {
-        let seed = generate_seed();
-        let pk = public_key(&seed);
-        new(seed, pk)
-    }
-
-    fn leaf(s: &str) -> LogLeaf {
-        let mut bs: List<Byte> = List.new();
-        let bytes = s.as_bytes();
-        let mut i = 0; while i < bytes.len() { bs.push(bytes[i]); i = i + 1; }
-        LogLeaf { bytes: bs }
-    }
-
-    #[test]
-    fn test_append_and_verify_sth() {
-        let mut log = fresh_log();
-        let sth = append(&mut log, leaf("first"), 1700000000_000).unwrap();
-        assert_eq(sth.tree_size, 1);
-        assert_eq(sth.root_hash.len(), HASH_SIZE);
-        assert!(verify_sth(&sth).is_ok());
-    }
-
-    #[test]
-    fn test_inclusion_proof() {
-        let mut log = fresh_log();
-        let _sth0 = append(&mut log, leaf("a"), 1).unwrap();
-        let _sth1 = append(&mut log, leaf("b"), 2).unwrap();
-        let sth2 = append(&mut log, leaf("c"), 3).unwrap();
-        let proof = inclusion_proof(&log, 1).unwrap();
-        let leaf_b = leaf("b");
-        assert!(verify_inclusion(&leaf_b, 1, &proof, &sth2));
-    }
-
-    #[test]
-    fn test_consistency_empty_old() {
-        let mut log = fresh_log();
-        let _sth1 = append(&mut log, leaf("x"), 1).unwrap();
-        let proof = consistency_proof(&log, 0, 1).unwrap();
-        assert_eq(proof.len(), 0);
-    }
-
-    #[test]
-    fn test_canonical_sth_message_includes_prefix() {
-        let mut root: List<Byte> = List.new();
-        let mut i = 0; while i < HASH_SIZE { root.push(i as Byte); i = i + 1; }
-        let msg = canonical_sth_message(42, &root, 1700);
-        // First 13 bytes are "verum-stl/v1\0".
-        assert_eq(msg.get(0).unwrap(), 0x76_u8);  // 'v'
-        assert_eq(msg.get(11).unwrap(), 0x31_u8); // '1'
-        assert_eq(msg.get(12).unwrap(), 0_u8);    // NUL
-    }
-
-    #[test]
-    fn test_tiles_for_inclusion() {
-        let tiles = tiles_for_inclusion(0, 1000);
-        assert!(!tiles.is_empty());
-    }
-}

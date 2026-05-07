@@ -1,7 +1,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.l7_api.database;
 
@@ -136,9 +136,9 @@ implement Debug for SqliteApiDbError {
             DbAuthDenied          => f.write_str("DbAuthDenied"),
             DbBindRange(i)        => f.write_str(f"DbBindRange({i})".as_str()),
             DbNotADatabase        => f.write_str("DbNotADatabase"),
-            DbCompileError(e)     => f.write_str(f"DbCompileError({e:?})".as_str()),
-            DbConnectionError(e)  => f.write_str(f"DbConnectionError({e:?})".as_str()),
-            DbStmtError(e)        => f.write_str(f"DbStmtError({e:?})".as_str()),
+            DbCompileError(e)     => f.write_str(f"DbCompileError({e})".as_str()),
+            DbConnectionError(e)  => f.write_str(f"DbConnectionError({e})".as_str()),
+            DbStmtError(e)        => f.write_str(f"DbStmtError({e})".as_str()),
             DbUnsupported(m)      => f.write_str(f"DbUnsupported({m})".as_str()),
         }
     }

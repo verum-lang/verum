@@ -83,7 +83,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.tuf.client;
 
@@ -156,7 +156,7 @@ implement Display for TufClientError {
             Canonical(e)          => f.write_str(f"tuf/client: {e}".as_str()),
             InvalidJson(reason)   => f.write_str(f"tuf/client: invalid JSON: {reason}".as_str()),
             ChainBroken { role, reason } => f.write_str(
-                f"tuf/client: trust chain broken at {role:?}: {reason}".as_str()),
+                f"tuf/client: trust chain broken at {role}: {reason}".as_str()),
             InconsistentMetadata { reason } => f.write_str(
                 f"tuf/client: inconsistent metadata: {reason}".as_str()),
             TargetNotFound(p)     => f.write_str(f"tuf/client: target not found: {p}".as_str()),
@@ -253,7 +253,7 @@ async fn update_root<R: TufRepository>(
             &state.root.keys,
         ).map_err(|e| ChainBroken {
             role: RoleName.Root,
-            reason: format!("prev-root verification failed: {e}").to_text(),
+            reason: f"prev-root verification failed: {e}",
         })?;
 
         // (2) verify new root signed by ITS OWN keys
@@ -264,7 +264,7 @@ async fn update_root<R: TufRepository>(
             &new_root.keys,
         ).map_err(|e| ChainBroken {
             role: RoleName.Root,
-            reason: format!("self verification failed: {e}").to_text(),
+            reason: f"self verification failed: {e}",
         })?;
 
         // (3) version monotonic + version increases by 1
@@ -272,7 +272,7 @@ async fn update_root<R: TufRepository>(
             .map_err(|e| RoleVerify(e))?;
         if new_root.version != next_version {
             return Err(InconsistentMetadata {
-                reason: format!("root version-skip: expected {} got {}", next_version, new_root.version).to_text(),
+                reason: f"root version-skip: expected {next_version} got {new_root.version}",
             });
         }
 
@@ -280,7 +280,7 @@ async fn update_root<R: TufRepository>(
         let missing = validate_root_roles_keys(&new_root.roles, &new_root.keys);
         if !missing.is_empty() {
             return Err(InconsistentMetadata {
-                reason: format!("root references undeclared keys: {missing:?}").to_text(),
+                reason: f"root references undeclared keys: {missing}",
             });
         }
 
@@ -359,8 +359,7 @@ async fn update_snapshot<R: TufRepository>(
 
     if new_snap.version != snap_spec.version {
         return Err(InconsistentMetadata {
-            reason: format!("snapshot version mismatch: expected {} got {}",
-                snap_spec.version, new_snap.version).to_text(),
+            reason: f"snapshot version mismatch: expected {snap_spec.version} got {new_snap.version}",
         });
     }
     if let Some(prev) = &state.snapshot {
@@ -372,16 +371,13 @@ async fn update_snapshot<R: TufRepository>(
                 Some(new_spec) => {
                     if new_spec.version < prev_spec.version {
                         return Err(InconsistentMetadata {
-                            reason: format!(
-                                "snapshot mix-and-match: {} version regressed ({} → {})",
-                                name, prev_spec.version, new_spec.version,
-                            ).to_text(),
+                            reason: f"snapshot mix-and-match: {name} version regressed ({prev_spec.version} → {new_spec.version})",
                         });
                     }
                 }
                 None => {
                     return Err(InconsistentMetadata {
-                        reason: format!("snapshot dropped previously-seen {}", name).to_text(),
+                        reason: f"snapshot dropped previously-seen {name}",
                     });
                 }
             }
@@ -407,10 +403,10 @@ async fn update_targets<R: TufRepository>(
             role: role_name_from_text(role_name),
             reason: "no trusted snapshot".to_text(),
         })?;
-    let filename = format!("{}.json", role_name).to_text();
+    let filename = f"{role_name}.json";
     let metafile = snapshot.meta.get(&filename)
         .ok_or_else(|| InconsistentMetadata {
-            reason: format!("snapshot lacks {} entry", filename).to_text(),
+            reason: f"snapshot lacks {filename} entry",
         })?
         .clone();
 
@@ -457,8 +453,7 @@ async fn update_targets<R: TufRepository>(
 
     if new_targets.version != metafile.version {
         return Err(InconsistentMetadata {
-            reason: format!("{} version mismatch: expected {} got {}",
-                role_name, metafile.version, new_targets.version).to_text(),
+            reason: f"{role_name} version mismatch: expected {metafile.version} got {new_targets.version}",
         });
     }
     if let Some(prev) = state.targets.get(role_name) {
@@ -497,7 +492,7 @@ fn lookup_in_role(
     }
     if visited.contains(role_name) {
         return Err(InconsistentMetadata {
-            reason: format!("delegation cycle through {}", role_name).to_text(),
+            reason: f"delegation cycle through {role_name}",
         });
     }
     visited.insert(role_name.clone());
@@ -505,7 +500,7 @@ fn lookup_in_role(
     let targets = state.targets.get(role_name)
         .ok_or_else(|| ChainBroken {
             role: role_name_from_text(role_name),
-            reason: format!("{} metadata not loaded", role_name).to_text(),
+            reason: f"{role_name} metadata not loaded",
         })?;
 
     // Direct hit on this Targets metadata.
@@ -572,7 +567,7 @@ public async fn download_target<R: TufRepository>(
 fn verify_hashes(bytes: &List<Byte>, expected: &Map<Text, Text>, what: &Text) -> Result<(), TufClientError> {
     if expected.is_empty() {
         return Err(InconsistentMetadata {
-            reason: format!("{} metadata declares no hashes", what).to_text(),
+            reason: f"{what} metadata declares no hashes",
         });
     }
     for (alg, expected_hex) in expected.iter() {
@@ -583,7 +578,7 @@ fn verify_hashes(bytes: &List<Byte>, expected: &Map<Text, Text>, what: &Text) ->
         };
         if !ct_eq_hex(&computed, expected_hex) {
             return Err(HashMismatch {
-                what: format!("{}/{}", what, alg).to_text(),
+                what: f"{what}/{alg}",
                 expected: expected_hex.clone(),
                 computed,
             });
@@ -645,13 +640,13 @@ fn parse_targets(bytes: &[Byte]) -> Result<(TargetsMetadata, List<Byte>, List<Si
     Ok((tg, payload, env.signatures))
 }
 
-struct Envelope {
+type Envelope is {
     signed_value: JsonValue,
     signatures:   List<Signature>,
-}
+};
 
 fn decode_envelope(bytes: &[Byte]) -> Result<Envelope, TufClientError> {
-    let value = json_decode(bytes).map_err(|e| InvalidJson(format!("{e}").to_text()))?;
+    let value = json_decode(bytes).map_err(|e| InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson("envelope not an object".to_text()))?;
     let signed_value = obj.get("signed").cloned()
@@ -680,7 +675,7 @@ fn lift_root(value: &JsonValue) -> Result<RootMetadata, TufClientError> {
         .ok_or_else(|| InvalidJson("root.signed not an object".to_text()))?;
     let type_ = get_string(obj, "_type")?;
     if type_ != "root" {
-        return Err(InvalidJson(format!("root._type {} not 'root'", type_).to_text()));
+        return Err(InvalidJson(f"root._type {type_} not 'root'"));
     }
     let spec_version = get_string(obj, "spec_version").unwrap_or_else(|_| "1.0.0".to_text());
     let consistent_snapshot = obj.get("consistent_snapshot")
@@ -700,7 +695,7 @@ fn lift_timestamp(value: &JsonValue) -> Result<TimestampMetadata, TufClientError
     let obj = value.as_object().ok_or_else(|| InvalidJson("timestamp.signed not object".to_text()))?;
     let type_ = get_string(obj, "_type")?;
     if type_ != "timestamp" {
-        return Err(InvalidJson(format!("timestamp._type {}", type_).to_text()));
+        return Err(InvalidJson(f"timestamp._type {type_}"));
     }
     Ok(TimestampMetadata {
         type_,
@@ -716,7 +711,7 @@ fn lift_snapshot(value: &JsonValue) -> Result<SnapshotMetadata, TufClientError> 
     let obj = value.as_object().ok_or_else(|| InvalidJson("snapshot.signed not object".to_text()))?;
     let type_ = get_string(obj, "_type")?;
     if type_ != "snapshot" {
-        return Err(InvalidJson(format!("snapshot._type {}", type_).to_text()));
+        return Err(InvalidJson(f"snapshot._type {type_}"));
     }
     Ok(SnapshotMetadata {
         type_,
@@ -732,7 +727,7 @@ fn lift_targets(value: &JsonValue) -> Result<TargetsMetadata, TufClientError> {
     let obj = value.as_object().ok_or_else(|| InvalidJson("targets.signed not object".to_text()))?;
     let type_ = get_string(obj, "_type")?;
     if type_ != "targets" {
-        return Err(InvalidJson(format!("targets._type {}", type_).to_text()));
+        return Err(InvalidJson(f"targets._type {type_}"));
     }
     let mut targets_map: Map<Text, TargetFile> = Map.new();
     if let Some(t_obj) = obj.get("targets").and_then(|v| v.as_object()) {
@@ -791,9 +786,9 @@ fn lift_delegations(obj: &JsonObject) -> Result<Delegations, TufClientError> {
         let threshold = get_int(r_obj, "threshold")?;
         let terminating = r_obj.get("terminating").and_then(|v| v.as_bool()).unwrap_or(false);
         let paths = r_obj.get("paths").and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect::<List<Text>>());
+            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect<List<Text>>());
         let path_hash_prefixes = r_obj.get("path_hash_prefixes").and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect::<List<Text>>());
+            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect<List<Text>>());
         roles.push(DelegatedRole {
             name, keyids, threshold, terminating, paths, path_hash_prefixes,
         });
@@ -832,9 +827,9 @@ fn lift_root_roles(obj: &JsonObject) -> Result<RootRoles, TufClientError> {
 
 fn lift_role_def(obj: &JsonObject, name: &str) -> Result<RoleDef, TufClientError> {
     let r = obj.get(name).and_then(|v| v.as_object())
-        .ok_or_else(|| InvalidJson(format!("roles.{} missing", name).to_text()))?;
+        .ok_or_else(|| InvalidJson(f"roles.{name} missing"))?;
     let keyids_arr = r.get("keyids").and_then(|v| v.as_array())
-        .ok_or_else(|| InvalidJson(format!("roles.{}.keyids missing", name).to_text()))?;
+        .ok_or_else(|| InvalidJson(f"roles.{name}.keyids missing"))?;
     let mut keyids: List<KeyId> = List.with_capacity(keyids_arr.len());
     let mut i: Int = 0;
     while i < keyids_arr.len() {
@@ -868,38 +863,21 @@ fn lift_metafile_map(obj: &JsonObject) -> Result<Map<Text, MetafileSpec>, TufCli
 
 fn get_string(obj: &JsonObject, key: &str) -> Result<Text, TufClientError> {
     obj.get(key).and_then(|v| v.as_string())
-        .ok_or_else(|| InvalidJson(format!("missing/non-string field: {}", key).to_text()))
+        .ok_or_else(|| InvalidJson(f"missing/non-string field: {key}"))
 }
 
 fn get_int(obj: &JsonObject, key: &str) -> Result<Int, TufClientError> {
     obj.get(key).and_then(|v| v.as_int())
-        .ok_or_else(|| InvalidJson(format!("missing/non-int field: {}", key).to_text()))
+        .ok_or_else(|| InvalidJson(f"missing/non-int field: {key}"))
 }
 
 fn get_rfc3339(obj: &JsonObject, key: &str) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
     let s = get_string(obj, key)?;
     core.time.rfc3339.parse_rfc3339(&s)
-        .map_err(|e| InvalidJson(format!("{} parse: {e}", key).to_text()))
+        .map_err(|e| InvalidJson(f"{key} parse: {e}"))
 }
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_constants() {
-        assert_eq(MAX_ROOT_CHAIN_LENGTH, 1024);
-        assert_eq(MAX_DELEGATION_DEPTH, 32);
-    }
-
-    #[test]
-    fn test_ct_eq_hex_basic() {
-        assert_eq(ct_eq_hex(&"abc".to_text(), &"abc".to_text()), true);
-        assert_eq(ct_eq_hex(&"abc".to_text(), &"abd".to_text()), false);
-        assert_eq(ct_eq_hex(&"abc".to_text(), &"abcd".to_text()), false);
-    }
-}

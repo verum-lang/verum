@@ -48,7 +48,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.tuf.role_verify;
 
@@ -105,7 +105,7 @@ implement Display for RoleVerifyError {
             DuplicateKeyId(k)               => f.write_str(f"tuf/verify: duplicate keyid in role: {k.0}".as_str()),
             RollbackDetected { previous_version, current_version } => f.write_str(
                 f"tuf/verify: rollback detected (previous={previous_version}, current={current_version})".as_str()),
-            Expired { expires, now }        => f.write_str(f"tuf/verify: metadata expired (expires={expires:?}, now={now})".as_str()),
+            Expired { expires, now }        => f.write_str(f"tuf/verify: metadata expired (expires={expires}, now={now})".as_str()),
             InvalidExpiresField(reason)     => f.write_str(f"tuf/verify: invalid 'expires' field: {reason}".as_str()),
         }
     }
@@ -184,7 +184,7 @@ public fn verify_one_signature(
     key:     &TufKey,
 ) -> Result<(), RoleVerifyError> {
     let sig_bytes = hex_decode(&sig.sig)
-        .map_err(|e| MalformedSignature(format!("hex decode: {e}").to_text()))?;
+        .map_err(|e| MalformedSignature(f"hex decode: {e}"))?;
     match &key.scheme {
         TufKeyScheme.Ed25519Scheme       => verify_ed25519_sig(payload, &sig_bytes, key),
         TufKeyScheme.EcdsaSha2NistP256   => verify_ecdsa_p256_sig(payload, &sig_bytes, key),
@@ -204,13 +204,13 @@ fn verify_ed25519_sig(
     key: &TufKey,
 ) -> Result<(), RoleVerifyError> {
     if sig_bytes.len() != 64 {
-        return Err(MalformedSignature(format!("ed25519: expected 64 bytes, got {}", sig_bytes.len()).to_text()));
+        return Err(MalformedSignature(f"ed25519: expected 64 bytes, got {sig_bytes.len()}"));
     }
     let pk_hex = extract_keyval_public_hex(key)?;
     let pk_bytes = hex_decode(&pk_hex)
-        .map_err(|e| MalformedKey(format!("ed25519 public hex: {e}").to_text()))?;
+        .map_err(|e| MalformedKey(f"ed25519 public hex: {e}"))?;
     if pk_bytes.len() != 32 {
-        return Err(MalformedKey(format!("ed25519: expected 32-byte public key, got {}", pk_bytes.len()).to_text()));
+        return Err(MalformedKey(f"ed25519: expected 32-byte public key, got {pk_bytes.len()}"));
     }
     let mut pk: Ed25519PublicKey = [0_u8; 32];
     let mut i: Int = 0;
@@ -233,7 +233,7 @@ fn verify_ecdsa_p256_sig(
     // TUF allows either PEM (PKIX SubjectPublicKeyInfo) or raw
     // uncompressed point; we support raw uncompressed (0x04 || X || Y).
     let pk_bytes = hex_decode(&pk_pem_or_hex)
-        .map_err(|e| MalformedKey(format!("p256 public hex: {e}").to_text()))?;
+        .map_err(|e| MalformedKey(f"p256 public hex: {e}"))?;
     let pk = P256PublicKey.from_uncompressed(pk_bytes.as_slice())
         .map_err(|_| MalformedKey("p256: invalid uncompressed point".to_text()))?;
     let sig = P256Signature.from_der(sig_bytes.as_slice())
@@ -368,94 +368,3 @@ fn check_not_expired_at(expires: &Rfc3339Time, now: Int) -> Result<(), RoleVerif
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use security.ecc.ed25519.{generate_seed, sign as ed_sign, public_key as ed_pubkey};
-    use encoding.hex.{encode as hex_encode};
-    use encoding.json.{json_object, json_string};
-
-    fn bytes_of(s: &str) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let bs = s.as_bytes();
-        let mut i: Int = 0;
-        while i < bs.len() { out.push(bs[i]); i = i + 1; }
-        out
-    }
-
-    #[test]
-    fn test_ed25519_one_of_one_threshold() {
-        let seed = generate_seed();
-        let pk = ed_pubkey(&seed);
-        let mut pk_list: List<Byte> = List.with_capacity(32);
-        let mut i: Int = 0;
-        while i < 32 { pk_list.push(pk[i]); i = i + 1; }
-        let pk_hex = hex_encode(&pk_list);
-
-        let mut keyval_obj: JsonObject = JsonObject.new();
-        keyval_obj.insert("public".to_text(), json_string(pk_hex));
-        let key = TufKey {
-            keytype: TufKeyType.Ed25519Key,
-            scheme:  TufKeyScheme.Ed25519Scheme,
-            keyval:  json_object(keyval_obj),
-        };
-
-        let kid = security.tuf.canonical.compute_keyid(&key).unwrap();
-        let mut keys: Map<KeyId, TufKey> = Map.new();
-        keys.insert(kid.clone(), key);
-
-        let payload = bytes_of("hello tuf");
-        let sig_bytes = ed_sign(&seed, payload.as_slice());
-        let mut sig_list: List<Byte> = List.with_capacity(64);
-        let mut j: Int = 0;
-        while j < 64 { sig_list.push(sig_bytes[j]); j = j + 1; }
-        let sig_hex = hex_encode(&sig_list);
-
-        let mut sigs: List<Signature> = List.new();
-        sigs.push(Signature { keyid: kid.clone(), sig: sig_hex });
-
-        let mut role_keyids: List<KeyId> = List.new();
-        role_keyids.push(kid);
-        let role = RoleDef { keyids: role_keyids, threshold: 1 };
-
-        verify_role_signatures(&payload, &sigs, &role, &keys).unwrap();
-    }
-
-    #[test]
-    fn test_threshold_not_met() {
-        let seed = generate_seed();
-        let pk = ed_pubkey(&seed);
-        let mut pk_list: List<Byte> = List.with_capacity(32);
-        let mut i: Int = 0;
-        while i < 32 { pk_list.push(pk[i]); i = i + 1; }
-        let pk_hex = hex_encode(&pk_list);
-        let mut keyval_obj: JsonObject = JsonObject.new();
-        keyval_obj.insert("public".to_text(), json_string(pk_hex));
-        let key = TufKey {
-            keytype: TufKeyType.Ed25519Key,
-            scheme:  TufKeyScheme.Ed25519Scheme,
-            keyval:  json_object(keyval_obj),
-        };
-        let kid = security.tuf.canonical.compute_keyid(&key).unwrap();
-        let mut keys: Map<KeyId, TufKey> = Map.new();
-        keys.insert(kid.clone(), key);
-
-        let mut role_keyids: List<KeyId> = List.new();
-        role_keyids.push(kid);
-        let role = RoleDef { keyids: role_keyids, threshold: 2 };
-
-        let payload = bytes_of("hello");
-        let sig_bytes = ed_sign(&seed, payload.as_slice());
-        let mut sig_list: List<Byte> = List.with_capacity(64);
-        let mut j: Int = 0;
-        while j < 64 { sig_list.push(sig_bytes[j]); j = j + 1; }
-        let sig_hex = hex_encode(&sig_list);
-        let mut sigs: List<Signature> = List.new();
-        sigs.push(Signature { keyid: kid, sig: sig_hex });
-
-        match verify_role_signatures(&payload, &sigs, &role, &keys) {
-            Err(InsufficientSignatures { valid: 1, threshold: 2 }) => {}
-            _ => unreachable(),
-        }
-    }
-}

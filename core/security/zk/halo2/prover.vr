@@ -27,7 +27,7 @@
     lifecycle: Lifecycle.Conditional([
         "Halo2 stdlib parent module conditions hold",
     ]),
-    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu])
 )
 module core.security.zk.halo2.prover;
 mount core.*;
@@ -127,7 +127,7 @@ public fn prove<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
 ) -> Result<Proof, ProverError> {
     let result = @intrinsic(
         "verum.crypto.halo2_prove",
-        pk, public_inputs, synthesize,
+        pk, public_inputs, synthesize
     );
     match result {
         ProveResult.Ok(p)            => Ok(p),
@@ -148,7 +148,7 @@ public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitErro
 ) -> Result<Proof, ProverError> {
     let result = @intrinsic(
         "verum.crypto.halo2_prove_with_aux",
-        pk, public_inputs, aux, synthesize,
+        pk, public_inputs, aux, synthesize
     );
     match result {
         ProveResult.Ok(p)            => Ok(p),

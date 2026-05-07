@@ -9,7 +9,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.quic.error;
 
@@ -142,11 +142,11 @@ implement Debug for QuicError {
             QuicError.HandshakeFailed(reason) =>
                 f.write_str(f"HandshakeFailed({reason})".as_str()),
             QuicError.TransportError { code, frame_type, reason } =>
-                f.write_str(f"TransportError {{ code: {code:?}, frame_type: 0x{frame_type:x}, reason: {reason} }}".as_str()),
+                f.write_str(f"TransportError {{ code: {code}, frame_type: 0x{frame_type:x}, reason: {reason} }}".as_str()),
             QuicError.ApplicationError { code, reason } =>
-                f.write_str(f"ApplicationError {{ code: {code:?}, reason: {reason} }}".as_str()),
+                f.write_str(f"ApplicationError {{ code: {code}, reason: {reason} }}".as_str()),
             QuicError.StreamReset { stream_id, code } =>
-                f.write_str(f"StreamReset {{ stream_id: {stream_id}, code: {code:?} }}".as_str()),
+                f.write_str(f"StreamReset {{ stream_id: {stream_id}, code: {code} }}".as_str()),
             QuicError.IdleTimeout                       => f.write_str("IdleTimeout"),
             QuicError.StatelessReset                    => f.write_str("StatelessReset"),
             QuicError.VersionMismatch                   => f.write_str("VersionMismatch"),

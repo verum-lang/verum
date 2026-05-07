@@ -36,7 +36,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.search.meilisearch.client;
 
@@ -49,7 +49,7 @@ mount encoding.json.{
     encode as json_encode, decode as json_decode,
 };
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
-mount async_::sleep_seconds;
+mount async_.sleep_seconds;
 
 mount core.search.types.{
     SearchIndex, SearchError, SearchQuery, SearchResults, SearchHit,
@@ -98,7 +98,7 @@ pub fn meili_client<C: HttpClient>(config: MeiliConfig, http: C) -> MeiliClient<
 implement<C: HttpClient> SearchIndex for MeiliClient<C> {
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, SearchError> {
         let body = build_search_body(query);
-        let url  = compose_url(&self.config, &format!("/indexes/{}/search", self.config.index_uid).to_text());
+        let url  = compose_url(&self.config, &f"/indexes/{self.config.index_uid}/search");
         let raw  = post_json(&self.http, &self.config, &url, &body).await?;
         parse_search_results(&raw)
     }
@@ -106,14 +106,14 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
     async fn upsert_documents(&self, docs: &List<Document>) -> Result<(), SearchError> {
         if docs.is_empty() { return Ok(()); }
         let body_arr = documents_to_json_array(docs);
-        let url = compose_url(&self.config, &format!("/indexes/{}/documents", self.config.index_uid).to_text());
+        let url = compose_url(&self.config, &f"/indexes/{self.config.index_uid}/documents");
         let _ = post_json(&self.http, &self.config, &url, &body_arr).await?;
         Ok(())
     }
 
     async fn delete_document(&self, id: &Text) -> Result<(), SearchError> {
         let url = compose_url(&self.config,
-            &format!("/indexes/{}/documents/{}", self.config.index_uid, id).to_text());
+            &f"/indexes/{self.config.index_uid}/documents/{id}");
         let _ = delete(&self.http, &self.config, &url).await?;
         Ok(())
     }
@@ -122,7 +122,7 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
         let mut body_obj: JsonObject = JsonObject.new();
         body_obj.insert("filter".to_text(), json_string(filter_to_text(filter)));
         let url = compose_url(&self.config,
-            &format!("/indexes/{}/documents/delete", self.config.index_uid).to_text());
+            &f"/indexes/{self.config.index_uid}/documents/delete");
         let resp = post_json(&self.http, &self.config, &url, &json_object(body_obj)).await?;
         // The server returns { "taskUid": <n>, ... } — we surface 0
         // because the actual deleted-count requires polling
@@ -135,7 +135,7 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
     async fn configure(&self, config: &IndexConfig) -> Result<(), SearchError> {
         let body = config_to_json(config);
         let url = compose_url(&self.config,
-            &format!("/indexes/{}/settings", self.config.index_uid).to_text());
+            &f"/indexes/{self.config.index_uid}/settings");
         let _ = patch_json(&self.http, &self.config, &url, &body).await?;
         Ok(())
     }
@@ -168,7 +168,7 @@ fn build_search_body(q: &SearchQuery) -> JsonValue {
                 SortDirection.Asc  => ":asc",
                 SortDirection.Desc => ":desc",
             };
-            arr.push(json_string(format!("{}{}", spec.field, dir).to_text()));
+            arr.push(json_string(f"{spec.field}{dir}"));
             i = i + 1;
         }
         obj.insert("sort".to_text(), json_array(arr));
@@ -205,31 +205,31 @@ fn build_search_body(q: &SearchQuery) -> JsonValue {
 
 fn filter_to_text(f: &SearchFilter) -> Text {
     match f {
-        SearchFilter.Eq { field, value }  => format!("{} = {}", field, json_to_filter_lit(value)).to_text(),
-        SearchFilter.Gt { field, value }  => format!("{} > {}", field, json_to_filter_lit(value)).to_text(),
-        SearchFilter.Gte { field, value } => format!("{} >= {}", field, json_to_filter_lit(value)).to_text(),
-        SearchFilter.Lt { field, value }  => format!("{} < {}", field, json_to_filter_lit(value)).to_text(),
-        SearchFilter.Lte { field, value } => format!("{} <= {}", field, json_to_filter_lit(value)).to_text(),
+        SearchFilter.Eq { field, value }  => f"{field} = {json_to_filter_lit(value)}",
+        SearchFilter.Gt { field, value }  => f"{field} > {json_to_filter_lit(value)}",
+        SearchFilter.Gte { field, value } => f"{field} >= {json_to_filter_lit(value)}",
+        SearchFilter.Lt { field, value }  => f"{field} < {json_to_filter_lit(value)}",
+        SearchFilter.Lte { field, value } => f"{field} <= {json_to_filter_lit(value)}",
         SearchFilter.In { field, values } => {
             let parts: List<Text> = values.iter().map(json_to_filter_lit).collect();
-            format!("{} IN [{}]", field, parts.join(", ")).to_text()
+            f"{field} IN [{parts.join(", ")}]"
         }
         SearchFilter.And(parts) => {
             let rendered: List<Text> = parts.iter().map(filter_to_text).collect();
-            format!("({})", rendered.join(" AND ")).to_text()
+            f"({rendered.join(" AND ")})"
         }
         SearchFilter.Or(parts) => {
             let rendered: List<Text> = parts.iter().map(filter_to_text).collect();
-            format!("({})", rendered.join(" OR ")).to_text()
+            f"({rendered.join(" OR ")})"
         }
-        SearchFilter.Not(inner) => format!("NOT ({})", filter_to_text(inner.as_ref())).to_text(),
+        SearchFilter.Not(inner) => f"NOT ({filter_to_text(inner.as_ref())})",
         SearchFilter.RawFilter(s) => s.clone(),
     }
 }
 
 fn json_to_filter_lit(v: &JsonValue) -> Text {
     match v {
-        JsonValue.String(s) => format!("\"{}\"", escape_quotes(s)).to_text(),
+        JsonValue.String(s) => f"\"{escape_quotes(s)}\"",
         JsonValue.Number(n) => f"{n}",
         JsonValue.Bool(b)   => if *b { "true".to_text() } else { "false".to_text() },
         JsonValue.Null      => "null".to_text(),
@@ -370,17 +370,17 @@ fn parse_search_results(v: &JsonValue) -> Result<SearchResults, SearchError> {
 
 fn compose_url(cfg: &MeiliConfig, path: &Text) -> Text {
     if cfg.base_url.ends_with("/") && path.starts_with("/") {
-        format!("{}{}", cfg.base_url.byte_substring(0, cfg.base_url.len() - 1), path).to_text()
+        f"{cfg.base_url.byte_substring(0, cfg.base_url.len() - 1)}{path}"
     } else if !cfg.base_url.ends_with("/") && !path.starts_with("/") {
-        format!("{}/{}", cfg.base_url, path).to_text()
+        f"{cfg.base_url}/{path}"
     } else {
-        format!("{}{}", cfg.base_url, path).to_text()
+        f"{cfg.base_url}{path}"
     }
 }
 
 fn auth_headers(cfg: &MeiliConfig, content_type: Maybe<&str>) -> Map<Text, Text> {
     let mut h: Map<Text, Text> = Map.new();
-    h.insert("authorization".to_text(), format!("Bearer {}", cfg.api_key).to_text());
+    h.insert("authorization".to_text(), f"Bearer {cfg.api_key}");
     h.insert("user-agent".to_text(), "verum-meilisearch/0.1".to_text());
     h.insert("accept".to_text(), "application/json".to_text());
     if let Some(ct) = content_type {
@@ -399,7 +399,7 @@ async fn get<C: HttpClient>(
         body:    List.new(),
     };
     let resp = http.send(&req).await
-        .map_err(|e| SearchError.Network(format!("{e}").to_text()))?;
+        .map_err(|e| SearchError.Network(f"{e}"))?;
     handle_response(resp).await
 }
 
@@ -413,7 +413,7 @@ async fn delete<C: HttpClient>(
         body:    List.new(),
     };
     let resp = http.send(&req).await
-        .map_err(|e| SearchError.Network(format!("{e}").to_text()))?;
+        .map_err(|e| SearchError.Network(f"{e}"))?;
     handle_response(resp).await
 }
 
@@ -428,7 +428,7 @@ async fn post_json<C: HttpClient>(
         body:    body_bytes,
     };
     let resp = http.send(&req).await
-        .map_err(|e| SearchError.Network(format!("{e}").to_text()))?;
+        .map_err(|e| SearchError.Network(f"{e}"))?;
     handle_response(resp).await
 }
 
@@ -443,7 +443,7 @@ async fn patch_json<C: HttpClient>(
         body:    body_bytes,
     };
     let resp = http.send(&req).await
-        .map_err(|e| SearchError.Network(format!("{e}").to_text()))?;
+        .map_err(|e| SearchError.Network(f"{e}"))?;
     handle_response(resp).await
 }
 
@@ -454,13 +454,13 @@ async fn handle_response(resp: Response) -> Result<JsonValue, SearchError> {
     if !resp.status.is_success() {
         let text = Text.from_utf8(resp.body.as_slice())
             .unwrap_or_else(|_| f"<{resp.body.len()} bytes>");
-        return Err(SearchError.Backend(format!("HTTP {} body={}", resp.status, text).to_text()));
+        return Err(SearchError.Backend(f"HTTP {resp.status} body={text}"));
     }
     if resp.body.is_empty() {
         return Ok(JsonValue.Null);
     }
     json_decode(resp.body.as_slice())
-        .map_err(|e| SearchError.Backend(format!("json: {e}").to_text()))
+        .map_err(|e| SearchError.Backend(f"json: {e}"))
 }
 
 // =============================================================================
@@ -475,7 +475,7 @@ pub async fn wait_for_task<C: HttpClient>(
     task_uid:  Int,
     timeout_s: Int,
 ) -> Result<(), SearchError> {
-    let url = compose_url(&client.config, &format!("/tasks/{}", task_uid).to_text());
+    let url = compose_url(&client.config, &f"/tasks/{task_uid}");
     let mut elapsed: Int = 0;
     while elapsed < timeout_s {
         let v = get(&client.http, &client.config, &url).await?;

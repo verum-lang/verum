@@ -142,8 +142,8 @@ implement TempFile {
         match opts.open(p.as_path()) {
             Ok(file) => Ok(TempFile { path: p, file: Some(file), persisted: false }),
             Err(io)  => Err(ShellError.SpawnFailed {
-                command: f"<temp file in {dir:?}>",
-                reason:  f"failed to create temp file: {io:?}",
+                command: f"<temp file in {dir}>",
+                reason:  f"failed to create temp file: {io}",
             }),
         }
     }
@@ -174,7 +174,7 @@ implement Drop for TempFile {
 
 implement Debug for TempFile {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"TempFile({self.path:?}, persisted={self.persisted})".as_str())
+        f.write_str(f"TempFile({self.path}, persisted={self.persisted})".as_str())
     }
 }
 
@@ -228,8 +228,8 @@ implement FileLock {
         // Open or create the file
         let opts = OpenOptions.new().write(true).create(true).read(true);
         let file = opts.open(path).map_err(|io| ShellError.SpawnFailed {
-            command: f"<flock {path:?}>",
-            reason:  f"failed to open lock file: {io:?}",
+            command: f"<flock {path}>",
+            reason:  f"failed to open lock file: {io}",
         })?;
         let raw_fd = file.as_raw_fd();
         // Apply lock at the platform layer
@@ -240,7 +240,7 @@ implement FileLock {
         let r = __platform_flock(raw_fd, op);
         if r != 0 {
             return Err(ShellError.SpawnFailed {
-                command: f"<flock {path:?}>",
+                command: f"<flock {path}>",
                 reason:  "flock failed".into(),
             });
         }

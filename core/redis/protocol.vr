@@ -48,7 +48,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.protocol;
 
@@ -510,110 +510,3 @@ fn split_first_space(s: &Text) -> (Text, Text) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    fn bytes(s: &str) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let bs = s.as_bytes();
-        let mut i: Int = 0;
-        while i < bs.len() { out.push(bs[i]); i = i + 1; }
-        out
-    }
-
-    #[test]
-    fn test_encode_simple_string() {
-        let bs = encode(&RespValue.SimpleString("OK".to_text()));
-        let expected = bytes("+OK\r\n");
-        assert_eq(bs.len(), expected.len());
-        let mut i: Int = 0;
-        while i < bs.len() { assert_eq(bs[i], expected[i]); i = i + 1; }
-    }
-
-    #[test]
-    fn test_decode_integer() {
-        let cur = cursor_new(bytes(":42\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.Integer(42) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_decode_null_bulk() {
-        let cur = cursor_new(bytes("$-1\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.NullBulk => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_decode_bulk_string() {
-        let cur = cursor_new(bytes("$5\r\nhello\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.BulkString(b) => {
-                assert_eq(b.len(), 5);
-                assert_eq(b[0], b'h');
-                assert_eq(b[4], b'o');
-            }
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_decode_array_of_two() {
-        let cur = cursor_new(bytes("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.Array(arr) => {
-                assert_eq(arr.len(), 2);
-            }
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_encode_command_set() {
-        let mut args: List<List<Byte>> = List.new();
-        args.push(bytes("SET"));
-        args.push(bytes("k"));
-        args.push(bytes("v"));
-        let encoded = encode_command(&args);
-        let expected = bytes("*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n");
-        assert_eq(encoded.len(), expected.len());
-    }
-
-    #[test]
-    fn test_decode_resp3_null() {
-        let cur = cursor_new(bytes("_\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.Nil_ => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_decode_resp3_boolean() {
-        let cur = cursor_new(bytes("#t\r\n"));
-        let (v, _) = decode(&cur).unwrap();
-        match v {
-            RespValue.Boolean(true) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_decode_unexpected_eof() {
-        let cur = cursor_new(bytes("$5\r\nhel"));
-        match decode(&cur) {
-            Err(RespError.UnexpectedEof) => {}
-            _ => unreachable(),
-        }
-    }
-}

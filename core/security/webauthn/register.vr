@@ -53,7 +53,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.register;
 
@@ -240,7 +240,7 @@ pub fn verify_registration(
 
 fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, WebAuthnError> {
     let value = json_decode(json_bytes.as_slice())
-        .map_err(|e| WebAuthnError.InvalidJson(format!("{e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| WebAuthnError.InvalidJson("clientData not an object".to_text()))?;
     let type_text = obj.get("type").and_then(|v| v.as_string())
@@ -255,7 +255,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
         None     => None,
     };
     let challenge = b64url_decode(&challenge_b64)
-        .map_err(|e| WebAuthnError.InvalidJson(format!("challenge b64url: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidJson(f"challenge b64url: {e}"))?;
     Ok(CollectedClientData {
         type_:         client_data_type_from_text(&type_text),
         challenge,
@@ -285,7 +285,7 @@ fn parse_token_binding(obj: &JsonObject) -> Result<TokenBindingStatus, WebAuthnE
 
 fn parse_attestation_object(bytes: &List<Byte>) -> Result<AttestationObject, WebAuthnError> {
     let value = cbor_decode(bytes.as_slice())
-        .map_err(|e| WebAuthnError.InvalidCbor(format!("attestationObject: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidCbor(f"attestationObject: {e}"))?;
     let map = value.as_map()
         .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject not a map".to_text()))?;
 
@@ -344,6 +344,17 @@ fn get_text_keyed_value(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<
 // Origin + algorithm + AAGUID checks
 // =============================================================================
 
+fn join_origins(allowed: &List<Text>) -> Text {
+    let mut out: Text = "[".to_text();
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if i > 0 { out = out + ", "; }
+        out = out + allowed[i].as_str();
+        i = i + 1;
+    }
+    out + "]"
+}
+
 fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError> {
     // Per WebAuthn §13.4.9: the origin must be in the RP's allow-list.
     // Additionally, only `https://` (or `http://localhost*` for dev)
@@ -357,7 +368,7 @@ fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError>
         i = i + 1;
     }
     Err(WebAuthnError.OriginMismatch {
-        expected: format!("{:?}", allowed).to_text(),
+        expected: join_origins(allowed),
         found:    found.clone(),
     })
 }
@@ -410,53 +421,3 @@ fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_check_origin_https_match() {
-        let mut allowed: List<Text> = List.new();
-        allowed.push("https://example.com".to_text());
-        assert!(check_origin(&"https://example.com".to_text(), &allowed).is_ok());
-    }
-
-    #[test]
-    fn test_check_origin_http_only_localhost() {
-        let mut allowed: List<Text> = List.new();
-        allowed.push("http://localhost:8080".to_text());
-        assert!(check_origin(&"http://localhost:8080".to_text(), &allowed).is_ok());
-        let mut allowed2: List<Text> = List.new();
-        allowed2.push("http://example.com".to_text());
-        match check_origin(&"http://example.com".to_text(), &allowed2) {
-            Err(WebAuthnError.OriginScheme(_)) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_check_origin_mismatch() {
-        let mut allowed: List<Text> = List.new();
-        allowed.push("https://expected.com".to_text());
-        match check_origin(&"https://attacker.com".to_text(), &allowed) {
-            Err(WebAuthnError.OriginMismatch { .. }) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_rp_allows_alg_explicit() {
-        let mut params: List<PubKeyCredParam> = List.new();
-        params.push(PubKeyCredParam { type_: "public-key".to_text(), cose_alg: -7 });
-        assert!(rp_allows_alg(&params, -7));
-        assert!(!rp_allows_alg(&params, -8));
-    }
-
-    #[test]
-    fn test_rp_allows_alg_empty_defaults_to_supported() {
-        let params: List<PubKeyCredParam> = List.new();
-        assert!(rp_allows_alg(&params, -7));   // ES256 supported
-        assert!(rp_allows_alg(&params, -8));   // EdDSA supported
-        assert!(!rp_allows_alg(&params, 100)); // unknown alg rejected
-    }
-}

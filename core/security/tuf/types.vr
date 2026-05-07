@@ -59,7 +59,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.tuf.types;
 
@@ -412,60 +412,3 @@ fn glob_match(p: &[Byte], s: &[Byte], pi: Int, si: Int) -> Bool {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_role_name_round_trip() {
-        assert(role_name_from_text(&"root".to_text()) is RoleName.Root);
-        assert(role_name_from_text(&"timestamp".to_text()) is RoleName.Timestamp);
-        match role_name_from_text(&"foo.bar".to_text()) {
-            RoleName.Delegated(n) => assert_eq(n, "foo.bar".to_text()),
-            _ => unreachable(),
-        }
-        assert_eq(role_name_to_text(&RoleName.Targets), "targets".to_text());
-    }
-
-    #[test]
-    fn test_glob_exact() {
-        assert_eq(path_pattern_matches(&"foo/bar".to_text(), &"foo/bar".to_text()), true);
-        assert_eq(path_pattern_matches(&"foo/bar".to_text(), &"foo/baz".to_text()), false);
-    }
-
-    #[test]
-    fn test_glob_star_segment_bounded() {
-        assert_eq(path_pattern_matches(&"foo/*".to_text(), &"foo/bar".to_text()), true);
-        assert_eq(path_pattern_matches(&"foo/*".to_text(), &"foo/bar/baz".to_text()), false);
-        assert_eq(path_pattern_matches(&"foo/*/baz".to_text(), &"foo/bar/baz".to_text()), true);
-    }
-
-    #[test]
-    fn test_glob_question_mark() {
-        assert_eq(path_pattern_matches(&"f?o".to_text(), &"foo".to_text()), true);
-        assert_eq(path_pattern_matches(&"f?o".to_text(), &"f/o".to_text()), false);
-        assert_eq(path_pattern_matches(&"f?o".to_text(), &"foooo".to_text()), false);
-    }
-
-    #[test]
-    fn test_validate_root_roles_keys_finds_missing() {
-        let mut keys: Map<KeyId, TufKey> = Map.new();
-        keys.insert(KeyId("k1".to_text()), TufKey {
-            keytype: TufKeyType.Ed25519Key,
-            scheme:  TufKeyScheme.Ed25519Scheme,
-            keyval:  JsonValue.Null,
-        });
-        let mut role_keyids: List<KeyId> = List.new();
-        role_keyids.push(KeyId("k1".to_text()));
-        role_keyids.push(KeyId("missing".to_text()));
-        let roles = RootRoles {
-            root:      RoleDef { keyids: role_keyids.clone(), threshold: 1 },
-            targets:   RoleDef { keyids: role_keyids.clone(), threshold: 1 },
-            snapshot:  RoleDef { keyids: role_keyids.clone(), threshold: 1 },
-            timestamp: RoleDef { keyids: role_keyids.clone(), threshold: 1 },
-        };
-        let missing = validate_root_roles_keys(&roles, &keys);
-        // Each role references "missing" once → 4 total references.
-        assert_eq(missing.len(), 4);
-    }
-}

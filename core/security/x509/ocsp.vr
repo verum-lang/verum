@@ -78,7 +78,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.x509.ocsp;
 
@@ -229,7 +229,7 @@ implement Display for OcspError {
 implement Debug for OcspError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            OcspError.DerParseError(e)       => f.write_str(f"DerParseError({e:?})".as_str()),
+            OcspError.DerParseError(e)       => f.write_str(f"DerParseError({e})".as_str()),
             OcspError.BadStatus(b)           => f.write_str(f"BadStatus({b})".as_str()),
             OcspError.BadStructure(m)        => f.write_str(f"BadStructure({m})".as_str()),
             OcspError.SignatureNotVerified   => f.write_str("SignatureNotVerified"),

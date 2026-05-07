@@ -31,7 +31,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.architecture.corpus;
 
@@ -91,7 +91,7 @@ public fn corpus_invariant_roster_size_invariant() -> Bool {
 
 /// Structured diagnostic produced when a corpus invariant fails.
 public type CorpusViolation is {
-    invariant: CorpusInvariant,
+    kind: CorpusInvariant,
     summary: Text,
     human_message: Text,
     affected_cogs: List<Text>,

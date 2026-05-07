@@ -67,7 +67,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.encoding.jcs;
 
@@ -96,7 +96,7 @@ implement Display for JcsError {
 implement Debug for JcsError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            JsonParseFailed(e)  => f.write_str(f"JsonParseFailed({e:?})".as_str()),
+            JsonParseFailed(e)  => f.write_str(f"JsonParseFailed({e})".as_str()),
             UnsupportedValue(s) => f.write_str(f"UnsupportedValue({s})".as_str()),
         }
     }

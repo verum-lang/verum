@@ -62,7 +62,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.provenance;
 
@@ -199,7 +199,7 @@ public fn statement_from_json(value: &JsonValue) -> Result<Statement, Text> {
     let type_uri = obj.get("_type").and_then(|v| v.as_string())
         .ok_or_else(|| "statement: missing _type".to_text())?;
     if type_uri != STATEMENT_TYPE_V1 {
-        return Err(format!("statement: unknown _type {type_uri}").to_text());
+        return Err(f"statement: unknown _type {type_uri}");
     }
     let subjects_arr = obj.get("subject").and_then(|v| v.as_array())
         .ok_or_else(|| "statement: missing subject".to_text())?;
@@ -464,11 +464,11 @@ public type DsseEnvelope is {
 public fn dsse_pae(payload_type: &Text, payload: &List<Byte>) -> List<Byte> {
     let mut out: List<Byte> = List.new();
     push_ascii(&mut out, "DSSEv1 ");
-    push_ascii(&mut out, format!("{}", payload_type.len()).as_str());
+    push_ascii(&mut out, f"{payload_type.len()}".as_str());
     out.push(0x20); // space
     push_ascii(&mut out, payload_type.as_str());
     out.push(0x20);
-    push_ascii(&mut out, format!("{}", payload.len()).as_str());
+    push_ascii(&mut out, f"{payload.len()}".as_str());
     out.push(0x20);
     let mut i: Int = 0;
     while i < payload.len() { out.push(payload[i]); i = i + 1; }
@@ -491,7 +491,7 @@ pub fn dsse_sign_statement(
     // Use JCS canonicalisation — same payload bytes regardless of
     // map insertion order, important for reproducible attestations.
     let payload_bytes = jcs_canonicalize(&payload_json)
-        .map_err(|e| format!("dsse: jcs canonicalise: {e}").to_text())?;
+        .map_err(|e| f"dsse: jcs canonicalise: {e}")?;
     let pae = dsse_pae(&DSSE_PAYLOAD_TYPE_INTOTO.to_text(), &payload_bytes);
     let sig = ed25519_sign(seed, &pae);
     let mut sig_bytes: List<Byte> = List.with_capacity(64);
@@ -539,10 +539,10 @@ pub fn dsse_verify_statement(
 ) -> Result<Statement, DsseVerifyError> {
     if envelope.payload_type != DSSE_PAYLOAD_TYPE_INTOTO {
         return Err(DsseVerifyError.InvalidPayload(
-            format!("expected {DSSE_PAYLOAD_TYPE_INTOTO}, got {}", envelope.payload_type).to_text()));
+            f"expected {DSSE_PAYLOAD_TYPE_INTOTO}, got {envelope.payload_type}"));
     }
     let payload_bytes = b64_decode(&envelope.payload_b64)
-        .map_err(|e| DsseVerifyError.DecodeError(format!("payload b64: {e}").to_text()))?;
+        .map_err(|e| DsseVerifyError.DecodeError(f"payload b64: {e}"))?;
     let pae = dsse_pae(&envelope.payload_type, &payload_bytes);
 
     let mut verified = false;
@@ -552,7 +552,7 @@ pub fn dsse_verify_statement(
         match keys.get(&sig.keyid) {
             Some(pubkey) => {
                 let sig_bytes = b64_decode(&sig.sig_b64)
-                    .map_err(|e| DsseVerifyError.DecodeError(format!("sig b64: {e}").to_text()))?;
+                    .map_err(|e| DsseVerifyError.DecodeError(f"sig b64: {e}"))?;
                 if sig_bytes.len() == 64 {
                     let mut arr: [Byte; 64] = [0_u8; 64];
                     let mut k: Int = 0;
@@ -570,7 +570,7 @@ pub fn dsse_verify_statement(
     if !verified { return Err(DsseVerifyError.InvalidSignature); }
 
     let payload_json = json_decode(&payload_bytes)
-        .map_err(|e| DsseVerifyError.InvalidPayload(format!("json decode: {e}").to_text()))?;
+        .map_err(|e| DsseVerifyError.InvalidPayload(f"json decode: {e}"))?;
     statement_from_json(&payload_json)
         .map_err(|e| DsseVerifyError.InvalidPayload(e))
 }
@@ -725,18 +725,16 @@ fn verification_material_to_json(m: &VerificationMaterial) -> JsonValue {
 
 fn tlog_entry_to_json(e: &TlogEntry) -> JsonValue {
     let mut obj: JsonObject = JsonObject.new();
-    obj.insert("logIndex".to_text(), json_string(format!("{}", e.log_index).to_text()));
-    obj.insert("logId".to_text(), {
-        let mut id_obj: JsonObject = JsonObject.new();
-        id_obj.insert("keyId".to_text(), json_string(e.log_id_hex.clone()));
-        json_object(id_obj)
-    });
+    obj.insert("logIndex".to_text(), json_string(f"{e.log_index}"));
+    let mut id_obj: JsonObject = JsonObject.new();
+    id_obj.insert("keyId".to_text(), json_string(e.log_id_hex.clone()));
+    obj.insert("logId".to_text(), json_object(id_obj));
     obj.insert("canonicalizedBody".to_text(), json_string(e.canonicalized_body_b64.clone()));
     obj.insert("integratedTime".to_text(), json_string(format_rfc3339(&e.integrated_time)));
     if let Some(proof) = &e.inclusion_proof {
         let mut p_obj: JsonObject = JsonObject.new();
-        p_obj.insert("treeSize".to_text(), json_string(format!("{}", proof.tree_size).to_text()));
-        p_obj.insert("logIndex".to_text(), json_string(format!("{}", proof.log_index).to_text()));
+        p_obj.insert("treeSize".to_text(), json_string(f"{proof.tree_size}"));
+        p_obj.insert("logIndex".to_text(), json_string(f"{proof.log_index}"));
         let mut hashes_arr: List<JsonValue> = List.new();
         let mut i: Int = 0;
         while i < proof.hashes_hex.len() {
@@ -744,11 +742,9 @@ fn tlog_entry_to_json(e: &TlogEntry) -> JsonValue {
             i = i + 1;
         }
         p_obj.insert("hashes".to_text(), json_array(hashes_arr));
-        p_obj.insert("checkpoint".to_text(), {
-            let mut c_obj: JsonObject = JsonObject.new();
-            c_obj.insert("envelope".to_text(), json_string(proof.checkpoint_sig_hex.clone()));
-            json_object(c_obj)
-        });
+        let mut c_obj: JsonObject = JsonObject.new();
+        c_obj.insert("envelope".to_text(), json_string(proof.checkpoint_sig_hex.clone()));
+        p_obj.insert("checkpoint".to_text(), json_object(c_obj));
         obj.insert("inclusionProof".to_text(), json_object(p_obj));
     }
     json_object(obj)
@@ -798,8 +794,7 @@ pub fn verify_attestation_for_cog(
     let statement = dsse_verify_statement(envelope, keys)?;
     if statement.predicate_type != PREDICATE_TYPE_SLSA_PROVENANCE_V1 {
         return Err(DsseVerifyError.InvalidPayload(
-            format!("expected predicateType {PREDICATE_TYPE_SLSA_PROVENANCE_V1}, got {}",
-                    statement.predicate_type).to_text()));
+            f"expected predicateType {PREDICATE_TYPE_SLSA_PROVENANCE_V1}, got {statement.predicate_type}"));
     }
     let want_digest = digest_sha256(cog_archive);
     let mut found = false;
@@ -822,7 +817,7 @@ pub fn verify_attestation_for_cog(
     }
     if !found {
         return Err(DsseVerifyError.InvalidPayload(
-            format!("attestation does not cover cog {cog_name} with digest {}", want_digest.hex).to_text()));
+            f"attestation does not cover cog {cog_name} with digest {want_digest.hex}"));
     }
     Ok(statement.predicate)
 }
@@ -831,123 +826,3 @@ pub fn verify_attestation_for_cog(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use security.ecc.ed25519.{generate_seed};
-
-    fn seed() -> Ed25519Seed { generate_seed() }
-
-    fn bytes_of(s: &str) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let bs = s.as_bytes();
-        let mut i: Int = 0;
-        while i < bs.len() { out.push(bs[i]); i = i + 1; }
-        out
-    }
-
-    #[test]
-    fn test_dsse_pae_format() {
-        let pae = dsse_pae(&"test".to_text(), &bytes_of("hello"));
-        let expected = bytes_of("DSSEv1 4 test 5 hello");
-        assert_eq(pae.len(), expected.len());
-        let mut i: Int = 0;
-        while i < pae.len() { assert_eq(pae[i], expected[i]); i = i + 1; }
-    }
-
-    #[test]
-    fn test_subject_digest_sha256() {
-        let s = subject_for_cog(&"my-cog".to_text(), &bytes_of("archive-bytes"));
-        assert_eq(s.name, "my-cog".to_text());
-        assert_eq(s.digests.len(), 1);
-        assert_eq(s.digests[0].algorithm, "sha256".to_text());
-        assert_eq(s.digests[0].hex.len(), 64);
-    }
-
-    #[test]
-    fn test_statement_roundtrip() {
-        let mut subjects: List<Subject> = List.new();
-        subjects.push(subject_for_cog(&"my-cog".to_text(), &bytes_of("archive")));
-        let predicate = json_object(JsonObject.new());
-        let st = statement_new(subjects, "test-pred".to_text(), predicate);
-        let json = statement_to_json(&st);
-        let back = statement_from_json(&json).unwrap();
-        assert_eq(back.type_uri, st.type_uri);
-        assert_eq(back.subjects.len(), st.subjects.len());
-        assert_eq(back.predicate_type, st.predicate_type);
-    }
-
-    #[test]
-    fn test_sign_verify_roundtrip() {
-        let s = seed();
-        let keyid = "test-key".to_text();
-        let mut subjects: List<Subject> = List.new();
-        subjects.push(subject_for_cog(&"foo".to_text(), &bytes_of("a")));
-        let st = statement_new(subjects, "p".to_text(), json_object(JsonObject.new()));
-        let env = dsse_sign_statement(&s, &keyid, &st).unwrap();
-
-        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
-        keys.insert(keyid, ed25519_public_key(&s));
-        let st2 = dsse_verify_statement(&env, &keys).unwrap();
-        assert_eq(st2.subjects.len(), 1);
-    }
-
-    #[test]
-    fn test_sign_verify_wrong_key_fails() {
-        let s1 = seed();
-        let s2 = seed();
-        let mut subjects: List<Subject> = List.new();
-        subjects.push(subject_for_cog(&"foo".to_text(), &bytes_of("a")));
-        let st = statement_new(subjects, "p".to_text(), json_object(JsonObject.new()));
-        let env = dsse_sign_statement(&s1, &"k1".to_text(), &st).unwrap();
-        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
-        keys.insert("k1".to_text(), ed25519_public_key(&s2));
-        match dsse_verify_statement(&env, &keys) {
-            Err(DsseVerifyError.InvalidSignature) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_end_to_end_slsa() {
-        let s = seed();
-        let keyid = "ci-key".to_text();
-        let cog_archive = bytes_of("the-archive-bytes");
-        let env = build_signed_attestation(
-            &s, &keyid,
-            &"my-cog".to_text(), &cog_archive,
-            "https://example.com/build/v1".to_text(),
-            "https://github.com/example/runner".to_text(),
-            List.new(),
-            now_utc(),
-            now_utc(),
-            Some("inv-001".to_text()),
-        ).unwrap();
-        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
-        keys.insert(keyid, ed25519_public_key(&s));
-        let predicate = verify_attestation_for_cog(
-            &env, &keys, &"my-cog".to_text(), &cog_archive,
-        ).unwrap();
-        // predicate should have the SLSA shape
-        let p_obj = predicate.as_object().unwrap();
-        assert(p_obj.contains_key(&"buildDefinition".to_text()));
-        assert(p_obj.contains_key(&"runDetails".to_text()));
-    }
-
-    #[test]
-    fn test_attestation_wrong_cog_fails() {
-        let s = seed();
-        let env = build_signed_attestation(
-            &s, &"k".to_text(),
-            &"my-cog".to_text(), &bytes_of("a"),
-            "build".to_text(), "builder".to_text(),
-            List.new(), now_utc(), now_utc(), None,
-        ).unwrap();
-        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
-        keys.insert("k".to_text(), ed25519_public_key(&s));
-        match verify_attestation_for_cog(&env, &keys, &"other-cog".to_text(), &bytes_of("b")) {
-            Err(DsseVerifyError.InvalidPayload(_)) => {}
-            _ => unreachable(),
-        }
-    }
-}

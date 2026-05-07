@@ -53,7 +53,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.weft.rpc;
 
@@ -230,7 +230,7 @@ implement Display for RpcError {
 
 implement Debug for RpcError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"RpcError {{ status: {self.status:?}, message: {self.message}, details_json: {self.details_json:?} }}".as_str())
+        f.write_str(f"RpcError {{ status: {self.status}, message: {self.message}, details_json: {self.details_json} }}".as_str())
     }
 }
 
@@ -267,7 +267,7 @@ fn json_escape(s: &Text) -> Text {
         if b == 0x22 { out.push_str("\\\""); }
         else if b == 0x5C { out.push_str("\\\\"); }
         else if b == 0x0A { out.push_str("\\n"); }
-        else if b == 0x0D { out.push_str("\\r"); }
+        else if b == 0x0D { out.push_str("\\"); }
         else if b == 0x09 { out.push_str("\\t"); }
         else if b < 0x20 { out.push_str(f"\\u{b:04x}"); }
         else { out.push_byte(b); }

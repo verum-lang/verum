@@ -34,7 +34,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.tls13.handshake.resume_verify;
 
@@ -92,11 +92,11 @@ implement Debug for ResumeVerifyError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             NoAcceptableIdentity     => f.write_str("NoAcceptableIdentity"),
-            TicketDecryptFailure(e)  => f.write_str(f"TicketDecryptFailure({e:?})".as_str()),
+            TicketDecryptFailure(e)  => f.write_str(f"TicketDecryptFailure({e})".as_str()),
             TicketExpired            => f.write_str("TicketExpired"),
             AgeOutOfWindow           => f.write_str("AgeOutOfWindow"),
             BinderMismatch           => f.write_str("BinderMismatch"),
-            KdfFailure(e)            => f.write_str(f"KdfFailure({e:?})".as_str()),
+            KdfFailure(e)            => f.write_str(f"KdfFailure({e})".as_str()),
             CipherSuiteMismatch      => f.write_str("CipherSuiteMismatch"),
         }
     }

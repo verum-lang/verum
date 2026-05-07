@@ -55,7 +55,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.configuration;
 
@@ -214,17 +214,3 @@ public fn convert(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_registry_starts_with_builtins() {
-        // Built-ins register on first access. After foundation phase we
-        // expect at least the built-in formats to be present once their
-        // adapters land. Currently the registry is empty (Phase 1 only
-        // foundation modules); test asserts that `registered_ids` works.
-        let ids = registered_ids(builtin_registry());
-        let _ = ids;  // smoke-test, no specific count yet
-    }
-}

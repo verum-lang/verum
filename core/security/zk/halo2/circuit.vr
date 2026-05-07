@@ -292,7 +292,7 @@ implement SynthesizeContext {
     public fn assign(&mut self, cell: Cell, value: &[Byte; 32]) -> Result<(), CircuitError> {
         match @intrinsic(
             "verum.crypto.halo2_synth_assign",
-            self.handle, cell, value,
+            self.handle, cell, value
         ) {
             true  => Ok(()),
             false => Err(CircuitError.AssignmentFailed("synthesize.assign".into())),
@@ -304,7 +304,7 @@ implement SynthesizeContext {
     public fn copy(&mut self, a: Cell, b: Cell) -> Result<(), CircuitError> {
         match @intrinsic(
             "verum.crypto.halo2_synth_copy",
-            self.handle, a, b,
+            self.handle, a, b
         ) {
             true  => Ok(()),
             false => Err(CircuitError.AssignmentFailed("synthesize.copy".into())),
@@ -315,7 +315,7 @@ implement SynthesizeContext {
     public fn enable(&mut self, selector: &Selector, row: Int) -> Result<(), CircuitError> {
         match @intrinsic(
             "verum.crypto.halo2_synth_enable",
-            self.handle, selector, row,
+            self.handle, selector, row
         ) {
             true  => Ok(()),
             false => Err(CircuitError.AssignmentFailed("synthesize.enable".into())),
@@ -343,7 +343,7 @@ public fn range_constraint(
     }
     let table = match @intrinsic(
         "verum.crypto.halo2_canonical_range_table",
-        bits,
+        bits
     ) {
         TableResult.Ok(cols) => cols,
         TableResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
@@ -394,7 +394,7 @@ public fn hash_preimage_constraint(
 ) -> Result<(), CircuitError> {
     let gate = match @intrinsic(
         "verum.crypto.halo2_canonical_hash_gate",
-        name.clone(), selector, inputs, output, hash_name,
+        name.clone(), selector, inputs, output, hash_name
     ) {
         HashGateResult.Ok(g) => g,
         HashGateResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
@@ -419,8 +419,8 @@ implement Display for CircuitError {
         match self {
             InvalidGateShape(why)        => f.write_str(f"halo2.circuit: invalid gate shape ({why})".as_str()),
             DegreeOverflow { gate, degree, max_allowed } =>
-                f.write_str(f"halo2.circuit: gate {gate:?} degree {degree} > max {max_allowed}".as_str()),
-            UnknownColumn(c)             => f.write_str(f"halo2.circuit: unknown column {c:?}".as_str()),
+                f.write_str(f"halo2.circuit: gate {gate} degree {degree} > max {max_allowed}".as_str()),
+            UnknownColumn(c)             => f.write_str(f"halo2.circuit: unknown column {c}".as_str()),
             AssignmentFailed(why)        => f.write_str(f"halo2.circuit: assignment failed ({why})".as_str()),
             DimensionTooSmall { required, provided } =>
                 f.write_str(f"halo2.circuit: 2^{required} required but SRS provides 2^{provided}".as_str()),

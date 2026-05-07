@@ -63,7 +63,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.quic.multipath;
 
@@ -456,10 +456,10 @@ implement Display for MultipathError {
 implement Debug for MultipathError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnknownPathId(p)        => f.write_str(f"UnknownPathId({p:?})".as_str()),
-            DuplicatePathId(p)      => f.write_str(f"DuplicatePathId({p:?})".as_str()),
+            UnknownPathId(p)        => f.write_str(f"UnknownPathId({p})".as_str()),
+            DuplicatePathId(p)      => f.write_str(f"DuplicatePathId({p})".as_str()),
             NotNegotiated           => f.write_str("NotNegotiated"),
-            AmplificationLimited(p) => f.write_str(f"AmplificationLimited({p:?})".as_str()),
+            AmplificationLimited(p) => f.write_str(f"AmplificationLimited({p})".as_str()),
             NoSendablePath          => f.write_str("NoSendablePath"),
         }
     }

@@ -1073,7 +1073,7 @@ implement Eq for LegacyTlsError {
 
 /// Decode a base64-encoded string to bytes.
 fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
-    let cleaned = input.replace("\n", "").replace("\r", "").replace(" ", "");
+    let cleaned = input.replace("\n", "").replace("\\", "").replace(" ", "");
     let mut result = List.new();
     let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

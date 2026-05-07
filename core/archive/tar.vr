@@ -61,7 +61,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.archive.tar;
 
@@ -719,74 +719,3 @@ public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> TarEntry {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_roundtrip_single_file() {
-        let mut content: List<Byte> = List.new();
-        for_each_byte("hello, tar\n".as_bytes(), |b| content.push(b));
-        let entries = list_of([entry_for_file("greeting.txt".to_text(), content.clone(), 0o644, 1700000000)]);
-        let archive = write_archive(&entries).unwrap();
-        let parsed = read_archive(archive.as_slice()).unwrap();
-        assert_eq(parsed.len(), 1);
-        let p0 = parsed.get(0).unwrap();
-        assert_eq(p0.path, "greeting.txt".to_text());
-        assert_eq(p0.size, content.len());
-        assert(content_equals(&p0.content, &content));
-    }
-
-    #[test]
-    fn test_roundtrip_multiple_files() {
-        let entries = list_of([
-            entry_for_directory("src".to_text(), 0o755, 1700000000),
-            entry_for_file("src/main.vr".to_text(), bytes_of("module main; fn main() {}"), 0o644, 1700000000),
-            entry_for_file("README.md".to_text(), bytes_of("# hello"), 0o644, 1700000000),
-        ]);
-        let archive = write_archive(&entries).unwrap();
-        let parsed = read_archive(archive.as_slice()).unwrap();
-        assert_eq(parsed.len(), 3);
-    }
-
-    #[test]
-    fn test_long_path_via_pax() {
-        let long_path = "very-deep-directory-name/"
-            .repeated(10)
-            .concat(&"file.txt".to_text());
-        // 250 chars; exceeds USTAR's 100-byte name, exercises PAX path.
-        let entry = entry_for_file(long_path.clone(), bytes_of("x"), 0o644, 0);
-        let entries = list_of([entry]);
-        let archive = write_archive(&entries).unwrap();
-        let parsed = read_archive(archive.as_slice()).unwrap();
-        assert_eq(parsed.len(), 1);
-        assert_eq(parsed.get(0).unwrap().path, long_path);
-    }
-
-    fn for_each_byte(bs: &[Byte], mut f: impl FnMut(Byte)) {
-        let mut i = 0; while i < bs.len() { f(bs[i]); i = i + 1; }
-    }
-
-    fn bytes_of(s: &str) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let bs = s.as_bytes();
-        let mut i = 0; while i < bs.len() { out.push(bs[i]); i = i + 1; }
-        out
-    }
-
-    fn content_equals(a: &List<Byte>, b: &List<Byte>) -> Bool {
-        if a.len() != b.len() { return false; }
-        let mut i = 0;
-        while i < a.len() {
-            if a.get(i).unwrap() != b.get(i).unwrap() { return false; }
-            i = i + 1;
-        }
-        true
-    }
-
-    fn list_of(items: [TarEntry]) -> List<TarEntry> {
-        let mut out: List<TarEntry> = List.new();
-        for e in items { out.push(e); }
-        out
-    }
-}

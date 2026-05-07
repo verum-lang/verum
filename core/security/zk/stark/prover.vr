@@ -29,7 +29,7 @@
     lifecycle: Lifecycle.Conditional([
         "STARK stdlib parent module conditions hold",
     ]),
-    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Gpu])
 )
 module core.security.zk.stark.prover;
 mount core.*;
@@ -61,9 +61,9 @@ implement Display for ProverError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             TraceShapeMismatch { expected, got } =>
-                f.write_str(f"stark.prover: trace shape expected={expected:?} got={got:?}".as_str()),
+                f.write_str(f"stark.prover: trace shape expected={expected} got={got}".as_str()),
             ConstraintFailedAtRow { name, row } =>
-                f.write_str(f"stark.prover: constraint {name:?} fails at row {row}".as_str()),
+                f.write_str(f"stark.prover: constraint {name} fails at row {row}".as_str()),
             PublicInputArityMismatch { expected, got } =>
                 f.write_str(f"stark.prover: public-input arity expected={expected} got={got}".as_str()),
             FriCommitmentFailed(why) =>
@@ -115,7 +115,7 @@ public fn prove(
     }
     match @intrinsic(
         "verum.crypto.stark_prove",
-        air, trace, public_inputs, params,
+        air, trace, public_inputs, params
     ) {
         ProveResult.Ok(p)                            => Ok(p),
         ProveResult.ConstraintFailed(name, row)      => Err(ConstraintFailedAtRow { name, row }),

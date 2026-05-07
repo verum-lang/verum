@@ -20,7 +20,7 @@
     lifecycle: Lifecycle.Conditional([
         "Halo2 stdlib parent module conditions hold",
     ]),
-    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
 )
 module core.security.zk.halo2.verifier;
 mount core.*;
@@ -81,7 +81,7 @@ public fn verify(
 ) -> Result<(), VerifierError> {
     match @intrinsic(
         "verum.crypto.halo2_verify",
-        vk, public_inputs, proof, srs,
+        vk, public_inputs, proof, srs
     ) {
         VerifyResult.Accepted              => Ok(()),
         VerifyResult.Rejected              => Err(VerificationFailed),
@@ -106,7 +106,7 @@ public fn verify_batch(
     }
     match @intrinsic(
         "verum.crypto.halo2_verify_batch",
-        vk, proofs_with_inputs, srs,
+        vk, proofs_with_inputs, srs
     ) {
         VerifyResult.Accepted              => Ok(()),
         VerifyResult.Rejected              => Err(VerificationFailed),

@@ -15,7 +15,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.intrinsics.runtime.async_ops;
 
@@ -160,7 +160,7 @@ implement Debug for RawRecoveryError {
             MaxRetriesExceeded => f.write_str("MaxRetriesExceeded"),
             CircuitOpen        => f.write_str("CircuitOpen"),
             Timeout            => f.write_str("Timeout"),
-            InnerError(e)      => f.write_str(f"InnerError({e:?})".as_str()),
+            InnerError(e)      => f.write_str(f"InnerError({e})".as_str()),
         }
     }
 }
