@@ -14513,6 +14513,100 @@ impl TypeChecker {
                     }
 
                     // ============================================================
+                    // Arity-Aware Variant Constructor Disambiguation (#11)
+                    // ============================================================
+                    // When two registered types share a variant simple name
+                    // (canonical collision: `Result.Ok(T)` is a 1-arg tuple
+                    // variant, `ExitCode.Ok` is a unit variant — both live
+                    // in the stdlib so neither can claim "user override"
+                    // priority), the bare-name resolver in `synth_path`
+                    // picks the FIRST registered parent.  At call sites
+                    // like `Ok(())` the user's intent is clearly the
+                    // 1-arg ctor, but the resolver may pick the unit
+                    // variant — failing with "not a function: <Variant
+                    // | union>".  Disambiguate at the Call expression
+                    // BEFORE resolving the callee: pick by arity match
+                    // when the variant name resolves to multiple
+                    // candidates.  Only fires when the callee is a
+                    // single-segment Path (bare-name call).  Stdlib-
+                    // agnostic per `crates/verum_types/src/CLAUDE.md`:
+                    // the disambiguation key is the constructor's
+                    // payload count from its own registration, never a
+                    // hardcoded list of variant names.
+                    if let Some(ref name) = callee_name {
+                        // Only when the call is a single-segment Path
+                        // (bare-name `Ok(())`, not qualified
+                        // `ExitCode.Ok(...)`).
+                        let is_bare_path = matches!(
+                            &func.kind,
+                            ExprKind::Path(p) if p.segments.len() == 1
+                        );
+                        if is_bare_path
+                            && let Some(parents) =
+                                self.variant_constructor_parents.get(name)
+                            && parents.len() > 1
+                            && let Some(ctor_ty) = self
+                                .try_resolve_variant_constructor_with_arity(
+                                    name.as_str(),
+                                    Some(args.len()),
+                                )
+                        {
+                            // Re-enter the call type-check with the
+                            // disambiguated function type instead of
+                            // re-running synth_expr (which would loop
+                            // through the arity-blind path).  We
+                            // simulate the rest of the Call inference
+                            // body locally for this fast path.
+                            let func_ty = ctor_ty;
+                            if let Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } = func_ty
+                            {
+                                if params.len() != args.len() {
+                                    return Err(TypeError::Other(
+                                        verum_common::Text::from(format!(
+                                            "{} expects {} argument(s), got {}",
+                                            name.as_str(),
+                                            params.len(),
+                                            args.len()
+                                        )),
+                                    ));
+                                }
+                                let old_call_context = self.in_call_arg_context;
+                                self.in_call_arg_context = true;
+                                for (arg, param_ty) in
+                                    args.iter().zip(params.iter())
+                                {
+                                    let resolved_param =
+                                        self.unifier.apply(param_ty);
+                                    let resolved_param = if Self::contains_type_app(
+                                        &resolved_param,
+                                    ) {
+                                        self.normalize_type(&resolved_param)
+                                    } else {
+                                        resolved_param
+                                    };
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+                                self.in_call_arg_context = old_call_context;
+                                self.consume_affine_call_args(args, &params)?;
+                                let resolved_return =
+                                    self.unifier.apply(&return_type);
+                                let resolved_return = if Self::contains_type_app(
+                                    &resolved_return,
+                                ) {
+                                    self.normalize_type(&resolved_return)
+                                } else {
+                                    resolved_return
+                                };
+                                return Ok(InferResult::new(resolved_return));
+                            }
+                        }
+                    }
+
+                    // ============================================================
                     // Type Constructor Call Handling (Heap, Shared)
                     // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — Heap allocation
                     // ============================================================
@@ -44360,11 +44454,64 @@ impl TypeChecker {
     /// `register_inductive_type` / `register_variant_signature_for_lazy`,
     /// stdlib or user-defined.
     fn try_resolve_variant_constructor(&self, name: &str) -> Option<Type> {
+        self.try_resolve_variant_constructor_with_arity(name, None)
+    }
+
+    /// Arity-aware variant-constructor resolution.  When `expected_arity`
+    /// is `Some(n)`, picks the registered parent whose constructor for
+    /// `name` accepts EXACTLY `n` payload arguments — this is the
+    /// disambiguator when two stdlib types share a simple variant
+    /// name (the canonical collision: `Result.Ok(T)` vs
+    /// `ExitCode.Ok` (unit) — caller-site `Ok(())` provides 1 arg
+    /// → matches `Result.Ok`, not `ExitCode.Ok`).
+    ///
+    /// Falls back to the first-registered-wins discipline when:
+    ///   * `expected_arity` is `None` (no call-site arity context —
+    ///     value-position uses, pattern position, etc.), or
+    ///   * no parent's constructor matches the requested arity, or
+    ///   * exactly one parent is registered (no ambiguity to resolve).
+    ///
+    /// The caller (Call-expression inference) passes the arg count;
+    /// every other call site uses the arity-blind wrapper above.
+    fn try_resolve_variant_constructor_with_arity(
+        &self,
+        name: &str,
+        expected_arity: Option<usize>,
+    ) -> Option<Type> {
         let ctor_text = verum_common::Text::from(name);
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
-        // Pick the first registered parent (first-wins discipline,
-        // mirrors `register_variant_type_name_first_wins`).
-        let parent_name = parents.first()?.clone();
+        // Pick the parent whose constructor for `name` accepts the
+        // expected arity, when arity context is available AND multiple
+        // parents are in the registry.  Otherwise fall through to the
+        // first-registered-wins discipline (mirrors
+        // `register_variant_type_name_first_wins`).
+        let parent_name = if let (Some(arity), true) =
+            (expected_arity, parents.len() > 1)
+        {
+            let mut chosen: Option<Text> = None;
+            for parent in parents.iter() {
+                let ctors = match self.ctx.get_constructors(parent) {
+                    Maybe::Some(c) => c,
+                    Maybe::None => continue,
+                };
+                let ctor = match ctors.iter().find(|c| c.name == ctor_text) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                if ctor.args.len() == arity {
+                    chosen = Some(parent.clone());
+                    break;
+                }
+            }
+            chosen.unwrap_or_else(|| {
+                parents
+                    .first()
+                    .cloned()
+                    .expect("parents non-empty by outer get(?)")
+            })
+        } else {
+            parents.first()?.clone()
+        };
         let constructors = match self.ctx.get_constructors(&parent_name) {
             Maybe::Some(c) => c.clone(),
             Maybe::None => return None,
