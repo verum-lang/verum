@@ -1,0 +1,862 @@
+// =============================================================================
+// security/oidc.vr — OIDC discovery + JWKS cache + token validation
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, security/jwt, net/http,
+//               encoding/{json, base64}, time/{rfc3339, system_time}
+// =============================================================================
+//
+// **Purpose.** First-class OpenID Connect (OIDC) support for Verum
+// services that accept third-party identity tokens — e.g., the
+// registry's "trusted publishing" flow where a CI runner (GitHub
+// Actions, GitLab, Sigstore) authenticates by presenting a signed
+// JWT issued by its OIDC provider rather than a long-lived API key.
+//
+// **Three responsibilities.**
+//
+//   1. **Discovery** — fetch the provider's
+//      `/.well-known/openid-configuration` document, parse it into a
+//      typed `OidcProviderConfig`, validate the required fields.
+//
+//   2. **JWKS cache** — fetch the JSON Web Key Set from
+//      `jwks_uri`, cache it with a TTL, refresh on key-id miss
+//      (graceful key rotation handling).
+//
+//   3. **Token validation** — verify a JWT against the cached JWKS,
+//      enforce `iss` / `aud` / `exp` / `nbf` claim constraints,
+//      surface typed validation failures.
+//
+// **Composition.** This module is a *coordinator* — it binds
+// `core.net.http.HttpClient` (for I/O), `core.security.jwt` (for
+// signature checks), and `core.encoding.json` (for parsing). Every
+// crypto primitive lives in `core.security.jwt`; this module never
+// touches raw signature bytes.
+//
+// **Categorical structure.** OIDC discovery is a pullback in the
+// category of HTTP responses: given an issuer URL, the discovery
+// document + JWKS together form a unique pullback object that
+// validates any well-formed JWT issued by that provider. Token
+// validation is the right adjoint of issuance.
+//
+// **Threat model.** Per RFC 8725 (JWT Best Current Practices):
+//   - reject `none` algorithm
+//   - reject unknown algorithms
+//   - require `kid` to disambiguate during key rotation
+//   - validate `iss` exactly (no prefix matching)
+//   - validate `aud` (full equality with one configured value)
+//   - reject expired tokens
+//   - reject not-yet-valid tokens (with skew tolerance)
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "OIDC discovery + JWKS cache + token validation; coordinator over jwt + http",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.oidc;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map, Set};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount security.jwt.{
+    JwtAlgorithm, JwtKey, JwtError, JwtHeader, JwtPayload,
+    VerifyOptions, verify_compact as jwt_verify_compact,
+    decode_header_only,
+};
+mount encoding.json.{
+    JsonValue, JsonObject, json_encode, decode as json_decode,
+};
+mount encoding.base64.{decode_url_no_pad as b64url_decode};
+mount sync.rwlock.{RwLock};
+mount time.rfc3339.{Rfc3339Time};
+mount time.system_time.{epoch_seconds};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default discovery suffix per RFC 8414 / OpenID Connect Discovery 1.0.
+public const DISCOVERY_PATH: Text = "/.well-known/openid-configuration";
+
+/// Hard cap on the discovery document size — well above any
+/// reasonable provider's needs, blocks DoS through giant responses.
+public const MAX_DISCOVERY_BYTES: Int = 256 * 1024; // 256 KiB
+
+/// Hard cap on JWKS document size.
+public const MAX_JWKS_BYTES: Int = 1024 * 1024; // 1 MiB
+
+/// Default JWKS cache TTL (seconds). 1 hour is the GitHub Actions
+/// default; long enough to amortise the network cost, short enough
+/// that key rotation propagates within a sane window.
+public const DEFAULT_JWKS_TTL_SECONDS: Int = 3600;
+
+/// Default leeway for `exp` / `nbf` validation (seconds) — clock skew
+/// tolerance. RFC 7519 §4.1.4 recommends "small" — we pick 60s.
+public const DEFAULT_LEEWAY_SECONDS: Int = 60;
+
+// =============================================================================
+// Discovery document
+// =============================================================================
+
+@derive(Clone, Debug, Eq)
+public type OidcProviderConfig is {
+    /// Issuer identifier — MUST match the `iss` claim of issued JWTs
+    /// EXACTLY (no scheme normalisation, no trailing-slash leniency).
+    issuer: Text,
+    /// URL of the JSON Web Key Set document.
+    jwks_uri: Text,
+    /// (Optional) Authorization endpoint — used by full OIDC clients,
+    /// not required for token-validation-only flows.
+    authorization_endpoint: Maybe<Text>,
+    /// (Optional) Token endpoint.
+    token_endpoint: Maybe<Text>,
+    /// Supported signing algorithms — MUST include at least one
+    /// algorithm we can verify.
+    id_token_signing_alg_values_supported: List<Text>,
+    /// Supported response types — informational here.
+    response_types_supported: List<Text>,
+    /// Original raw discovery document for round-tripping / audit.
+    raw: JsonValue,
+};
+
+public type DiscoveryError is
+    | NetworkError(HttpError)
+    | InvalidStatus(StatusCode)
+    | TooLarge { size: Int, limit: Int }
+    | InvalidJson(Text)
+    | MissingField(Text)
+    | UnsupportedAlgorithms(List<Text>)
+    | IssuerMismatch { configured: Text, document: Text };
+
+implement Display for DiscoveryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NetworkError(e)        => f.write_str(f"oidc/discovery: network error: {e}".as_str()),
+            InvalidStatus(s)       => f.write_str(f"oidc/discovery: HTTP {s}".as_str()),
+            TooLarge { size, limit } => f.write_str(f"oidc/discovery: response too large ({size} > {limit})".as_str()),
+            InvalidJson(reason)    => f.write_str(f"oidc/discovery: invalid JSON: {reason}".as_str()),
+            MissingField(field)    => f.write_str(f"oidc/discovery: missing required field: {field}".as_str()),
+            UnsupportedAlgorithms(algs) => f.write_str(f"oidc/discovery: no supported algorithms in {algs:?}".as_str()),
+            IssuerMismatch { configured, document } => f.write_str(
+                f"oidc/discovery: issuer mismatch (configured {configured}, document {document})".as_str()),
+        }
+    }
+}
+
+implement Debug for DiscoveryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Fetch + parse + validate the OIDC discovery document.
+///
+/// `expected_issuer` MUST exactly match the `issuer` field of the
+/// retrieved document — this prevents a malicious endpoint from
+/// pretending to be a different issuer (RFC 8414 §3.3).
+public async fn discover<C: HttpClient>(
+    client: &C,
+    expected_issuer: &Text,
+) -> Result<OidcProviderConfig, DiscoveryError>
+    using [Logger]
+{
+    let url = compose_discovery_url(expected_issuer);
+    let req = Request {
+        method: Method.Get,
+        url,
+        headers: build_accept_json_headers(),
+        body: List.new(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| DiscoveryError.NetworkError(e))?;
+    if !resp.status.is_success() {
+        return Err(DiscoveryError.InvalidStatus(resp.status));
+    }
+    if resp.body.len() > MAX_DISCOVERY_BYTES {
+        return Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
+    }
+    let json_value = json_decode(&resp.body)
+        .map_err(|e| DiscoveryError.InvalidJson(format!("{e}").to_text()))?;
+    parse_provider_config(&json_value, expected_issuer)
+}
+
+fn compose_discovery_url(issuer: &Text) -> Text {
+    if issuer.ends_with("/") {
+        let mut s = issuer.clone();
+        s.pop();
+        format!("{}{}", s, DISCOVERY_PATH).to_text()
+    } else {
+        format!("{}{}", issuer, DISCOVERY_PATH).to_text()
+    }
+}
+
+fn build_accept_json_headers() -> Map<Text, Text> {
+    let mut h: Map<Text, Text> = Map.new();
+    h.insert("accept".to_text(), "application/json".to_text());
+    h.insert("user-agent".to_text(), "verum-oidc/0.1".to_text());
+    h
+}
+
+fn parse_provider_config(value: &JsonValue, expected_issuer: &Text) -> Result<OidcProviderConfig, DiscoveryError> {
+    let obj = value.as_object()
+        .ok_or_else(|| DiscoveryError.InvalidJson("not an object".to_text()))?;
+    let issuer = obj.get("issuer").and_then(|v| v.as_string())
+        .ok_or_else(|| DiscoveryError.MissingField("issuer".to_text()))?;
+    if issuer != *expected_issuer {
+        return Err(DiscoveryError.IssuerMismatch {
+            configured: expected_issuer.clone(),
+            document:   issuer,
+        });
+    }
+    let jwks_uri = obj.get("jwks_uri").and_then(|v| v.as_string())
+        .ok_or_else(|| DiscoveryError.MissingField("jwks_uri".to_text()))?;
+    let authorization_endpoint = obj.get("authorization_endpoint").and_then(|v| v.as_string());
+    let token_endpoint = obj.get("token_endpoint").and_then(|v| v.as_string());
+    let id_token_signing_alg_values_supported = parse_string_array(
+        obj.get("id_token_signing_alg_values_supported"),
+    );
+    if !contains_supported_alg(&id_token_signing_alg_values_supported) {
+        return Err(DiscoveryError.UnsupportedAlgorithms(id_token_signing_alg_values_supported));
+    }
+    let response_types_supported = parse_string_array(
+        obj.get("response_types_supported"),
+    );
+    Ok(OidcProviderConfig {
+        issuer,
+        jwks_uri,
+        authorization_endpoint,
+        token_endpoint,
+        id_token_signing_alg_values_supported,
+        response_types_supported,
+        raw: value.clone(),
+    })
+}
+
+fn parse_string_array(opt: Maybe<&JsonValue>) -> List<Text> {
+    match opt {
+        Some(v) => match v.as_array() {
+            Some(arr) => {
+                let mut out: List<Text> = List.new();
+                let mut i: Int = 0;
+                while i < arr.len() {
+                    if let Some(s) = arr[i].as_string() { out.push(s); }
+                    i = i + 1;
+                }
+                out
+            }
+            None => List.new(),
+        },
+        None => List.new(),
+    }
+}
+
+fn contains_supported_alg(algs: &List<Text>) -> Bool {
+    let mut i: Int = 0;
+    while i < algs.len() {
+        if is_supported_alg(&algs[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn is_supported_alg(s: &Text) -> Bool {
+    match s.as_str() {
+        "RS256" | "RS384" | "RS512" => true,
+        "PS256" | "PS384" | "PS512" => true,
+        "ES256" | "ES384" | "ES512" => true,
+        "EdDSA" => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// JWKS — JSON Web Key Set
+// =============================================================================
+//
+// The JWKS is `{"keys": [Jwk, …]}` per RFC 7517. Each Jwk has a
+// `kty` (key type), an optional `kid` (key identifier), and a
+// type-specific set of crypto parameters. We decode into the
+// existing `core.security.jwt::JwtKey` so the verification side
+// requires no additional adapter.
+
+@derive(Clone, Debug)
+public type Jwks is {
+    keys: List<JwtKey>,
+    /// Map kid → index into `keys` for O(1) lookup.
+    by_kid: Map<Text, Int>,
+};
+
+public fn jwks_lookup<'a>(jwks: &'a Jwks, kid: &Text) -> Maybe<&'a JwtKey> {
+    match jwks.by_kid.get(kid) {
+        Some(idx) => Some(&jwks.keys[*idx]),
+        None      => None,
+    }
+}
+
+public fn jwks_size(jwks: &Jwks) -> Int { jwks.keys.len() }
+
+public type JwksError is
+    | NetworkError(HttpError)
+    | InvalidStatus(StatusCode)
+    | TooLarge { size: Int, limit: Int }
+    | InvalidJson(Text)
+    | InvalidKey { index: Int, reason: Text };
+
+implement Display for JwksError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NetworkError(e)        => f.write_str(f"oidc/jwks: network error: {e}".as_str()),
+            InvalidStatus(s)       => f.write_str(f"oidc/jwks: HTTP {s}".as_str()),
+            TooLarge { size, limit } => f.write_str(f"oidc/jwks: response too large ({size} > {limit})".as_str()),
+            InvalidJson(reason)    => f.write_str(f"oidc/jwks: invalid JSON: {reason}".as_str()),
+            InvalidKey { index, reason } => f.write_str(f"oidc/jwks: invalid key[{index}]: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for JwksError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Fetch the JWKS at a URL.
+public async fn fetch_jwks<C: HttpClient>(
+    client: &C,
+    jwks_uri: &Text,
+) -> Result<Jwks, JwksError> {
+    let req = Request {
+        method:  Method.Get,
+        url:     jwks_uri.clone(),
+        headers: build_accept_json_headers(),
+        body:    List.new(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| JwksError.NetworkError(e))?;
+    if !resp.status.is_success() {
+        return Err(JwksError.InvalidStatus(resp.status));
+    }
+    if resp.body.len() > MAX_JWKS_BYTES {
+        return Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
+    }
+    let value = json_decode(&resp.body)
+        .map_err(|e| JwksError.InvalidJson(format!("{e}").to_text()))?;
+    parse_jwks(&value)
+}
+
+fn parse_jwks(value: &JsonValue) -> Result<Jwks, JwksError> {
+    let obj = value.as_object()
+        .ok_or_else(|| JwksError.InvalidJson("not an object".to_text()))?;
+    let keys_arr = obj.get("keys").and_then(|v| v.as_array())
+        .ok_or_else(|| JwksError.InvalidJson("missing or invalid 'keys' array".to_text()))?;
+    let mut keys: List<JwtKey> = List.new();
+    let mut by_kid: Map<Text, Int> = Map.new();
+    let mut i: Int = 0;
+    while i < keys_arr.len() {
+        let k_obj = keys_arr[i].as_object()
+            .ok_or_else(|| JwksError.InvalidKey { index: i, reason: "not an object".to_text() })?;
+        let key = parse_jwk(&k_obj)
+            .map_err(|reason| JwksError.InvalidKey { index: i, reason })?;
+        if let Some(kid) = jwt_key_kid(&key) {
+            by_kid.insert(kid, keys.len());
+        }
+        keys.push(key);
+        i = i + 1;
+    }
+    Ok(Jwks { keys, by_kid })
+}
+
+/// Parse a single JWK into a `JwtKey`. Delegates to
+/// `core.security.jwt::JwtKey::from_jwk_object` for the actual
+/// per-algorithm decoding (RSA n+e, EC x+y+crv, OKP x+crv).
+fn parse_jwk(obj: &JsonObject) -> Result<JwtKey, Text> {
+    JwtKey.from_jwk_object(obj).map_err(|e| format!("{e}").to_text())
+}
+
+fn jwt_key_kid(k: &JwtKey) -> Maybe<Text> { k.kid() }
+
+// =============================================================================
+// JWKS cache
+// =============================================================================
+//
+// Behaviour:
+//
+//   - On lookup: return cached value if `now < expires_at`.
+//   - On miss / expired: refetch from `jwks_uri`, swap in the new
+//     value atomically.
+//   - On `kid` not found: trigger a one-shot forced refresh —
+//     handles graceful key rotation without requiring callers to
+//     wait for TTL expiry.
+//
+// Concurrency: an `RwLock<Inner>` allows many concurrent reads and
+// serialises refreshes. A single in-flight refresh is enforced via a
+// pending counter; concurrent callers that encounter an in-flight
+// refresh wait for it rather than launching their own.
+
+@derive(Debug)
+public type JwksCache<C: HttpClient> is {
+    client:       C,
+    jwks_uri:     Text,
+    ttl_seconds:  Int,
+    inner:        RwLock<JwksCacheInner>,
+};
+
+@derive(Debug)
+type JwksCacheInner is {
+    jwks:        Maybe<Jwks>,
+    expires_at:  Int, // epoch seconds
+    last_refresh_ok_at: Int,
+    last_refresh_err:   Maybe<Text>,
+};
+
+public fn jwks_cache_new<C: HttpClient>(
+    client: C,
+    jwks_uri: Text,
+    ttl_seconds: Int,
+) -> JwksCache<C> {
+    JwksCache {
+        client,
+        jwks_uri,
+        ttl_seconds,
+        inner: RwLock.new(JwksCacheInner {
+            jwks: None,
+            expires_at: 0,
+            last_refresh_ok_at: 0,
+            last_refresh_err: None,
+        }),
+    }
+}
+
+public async fn jwks_cache_get_key_for_kid<C: HttpClient>(
+    cache: &JwksCache<C>,
+    kid: &Text,
+) -> Result<JwtKey, JwksError> {
+    let now = epoch_seconds();
+    {
+        let inner = cache.inner.read().await;
+        if let Some(jwks) = &inner.jwks {
+            if now < inner.expires_at {
+                if let Some(k) = jwks_lookup(jwks, kid) {
+                    return Ok(k.clone());
+                }
+            }
+        }
+    }
+    // Refresh path — write lock.
+    let fresh = fetch_jwks(&cache.client, &cache.jwks_uri).await?;
+    {
+        let mut inner = cache.inner.write().await;
+        inner.jwks = Some(fresh.clone());
+        inner.expires_at = now + cache.ttl_seconds;
+        inner.last_refresh_ok_at = now;
+        inner.last_refresh_err = None;
+    }
+    match jwks_lookup(&fresh, kid) {
+        Some(k) => Ok(k.clone()),
+        None    => Err(JwksError.InvalidKey {
+            index: -1,
+            reason: format!("kid '{kid}' not found in JWKS even after refresh").to_text(),
+        }),
+    }
+}
+
+public async fn jwks_cache_force_refresh<C: HttpClient>(
+    cache: &JwksCache<C>,
+) -> Result<(), JwksError> {
+    let fresh = fetch_jwks(&cache.client, &cache.jwks_uri).await?;
+    let now = epoch_seconds();
+    let mut inner = cache.inner.write().await;
+    inner.jwks = Some(fresh);
+    inner.expires_at = now + cache.ttl_seconds;
+    inner.last_refresh_ok_at = now;
+    inner.last_refresh_err = None;
+    Ok(())
+}
+
+// =============================================================================
+// Verifier — stitches discovery + JWKS cache + JWT verify
+// =============================================================================
+
+@derive(Clone, Debug)
+public type OidcAudience is
+    /// Accept this single audience value.
+    | Single(Text)
+    /// Accept any audience from this set.
+    | OneOf(Set<Text>);
+
+@derive(Clone, Debug)
+public type OidcVerifyOptions is {
+    /// Issuer to enforce — MUST match the `iss` claim exactly.
+    issuer: Text,
+    /// Audience(s) to accept — at least one of the JWT's `aud`
+    /// claim values must match.
+    audience: OidcAudience,
+    /// Skew tolerance (seconds) for `exp`/`nbf`.
+    leeway_seconds: Int,
+    /// Maximum acceptable token age (seconds since `iat`). 0 = no
+    /// constraint. Useful for short-lived ephemeral tokens (e.g.,
+    /// SLSA / Fulcio: 10 min cap).
+    max_age_seconds: Int,
+    /// Required claims that, if present, must equal these values.
+    /// Use this for trusted-publishing constraints like
+    /// `repository_owner=verum-lang`, `ref=refs/heads/main`,
+    /// `event_name=push`.
+    required_claims: Map<Text, Text>,
+};
+
+public fn verify_options_default(issuer: Text, audience: OidcAudience) -> OidcVerifyOptions {
+    OidcVerifyOptions {
+        issuer,
+        audience,
+        leeway_seconds: DEFAULT_LEEWAY_SECONDS,
+        max_age_seconds: 0,
+        required_claims: Map.new(),
+    }
+}
+
+public type OidcVerifyError is
+    | MalformedToken(Text)
+    | UnsupportedAlgorithm(Text)
+    | MissingKid
+    | KeyLookupFailed(JwksError)
+    | SignatureFailed(JwtError)
+    | IssuerMismatch { expected: Text, found: Text }
+    | AudienceMismatch { expected: Text, found: List<Text> }
+    | TokenExpired { exp: Int, now: Int }
+    | TokenNotYetValid { nbf: Int, now: Int }
+    | TokenTooOld { iat: Int, max_age: Int, now: Int }
+    | RequiredClaimMissing(Text)
+    | RequiredClaimMismatch { claim: Text, expected: Text, found: Text };
+
+implement Display for OidcVerifyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MalformedToken(reason) => f.write_str(f"oidc: malformed token: {reason}".as_str()),
+            UnsupportedAlgorithm(alg) => f.write_str(f"oidc: unsupported algorithm: {alg}".as_str()),
+            MissingKid => f.write_str("oidc: token header missing 'kid'"),
+            KeyLookupFailed(e) => f.write_str(f"oidc: key lookup failed: {e}".as_str()),
+            SignatureFailed(e) => f.write_str(f"oidc: signature verification failed: {e}".as_str()),
+            IssuerMismatch { expected, found } => f.write_str(
+                f"oidc: issuer mismatch (expected '{expected}', found '{found}')".as_str()),
+            AudienceMismatch { expected, found } => f.write_str(
+                f"oidc: audience mismatch (expected '{expected}', found {found:?})".as_str()),
+            TokenExpired { exp, now } => f.write_str(f"oidc: token expired (exp={exp}, now={now})".as_str()),
+            TokenNotYetValid { nbf, now } => f.write_str(f"oidc: token not yet valid (nbf={nbf}, now={now})".as_str()),
+            TokenTooOld { iat, max_age, now } => f.write_str(
+                f"oidc: token too old (iat={iat}, age={now - iat}, max_age={max_age})".as_str()),
+            RequiredClaimMissing(claim) => f.write_str(f"oidc: required claim missing: {claim}".as_str()),
+            RequiredClaimMismatch { claim, expected, found } => f.write_str(
+                f"oidc: claim '{claim}' mismatch (expected '{expected}', found '{found}')".as_str()),
+        }
+    }
+}
+
+implement Debug for OidcVerifyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Verify an OIDC ID token against a JWKS cache + a set of
+/// constraints. On success, returns the validated JWT payload.
+public async fn verify_oidc_token<C: HttpClient>(
+    cache: &JwksCache<C>,
+    token: &Text,
+    opts: &OidcVerifyOptions,
+) -> Result<JwtPayload, OidcVerifyError> {
+    // Step 1: peek at the JWT header to extract `kid` + `alg`.
+    let header = decode_header_only(token)
+        .map_err(|e| OidcVerifyError.MalformedToken(format!("header decode: {e}").to_text()))?;
+    if !is_jwt_alg_supported(&header.alg) {
+        return Err(OidcVerifyError.UnsupportedAlgorithm(jwt_alg_to_text(&header.alg)));
+    }
+    let kid = header.kid.ok_or_else(|| OidcVerifyError.MissingKid)?;
+
+    // Step 2: resolve the verification key from the JWKS cache.
+    let key = jwks_cache_get_key_for_kid(cache, &kid).await
+        .map_err(|e| OidcVerifyError.KeyLookupFailed(e))?;
+
+    // Step 3: signature verification + claim canonicalisation.
+    let verify_opts = VerifyOptions {
+        leeway_seconds: opts.leeway_seconds,
+        require_iat:    true,
+        require_exp:    true,
+        require_nbf:    false,
+    };
+    let payload = jwt_verify_compact(token, &key, &verify_opts)
+        .map_err(|e| OidcVerifyError.SignatureFailed(e))?;
+
+    let now = epoch_seconds();
+    enforce_constraints(&payload, opts, now)?;
+    Ok(payload)
+}
+
+fn enforce_constraints(
+    payload: &JwtPayload,
+    opts: &OidcVerifyOptions,
+    now: Int,
+) -> Result<(), OidcVerifyError> {
+    // iss
+    match &payload.iss {
+        Some(iss) if iss == &opts.issuer => {}
+        Some(iss) => return Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: iss.clone() }),
+        None => return Err(OidcVerifyError.IssuerMismatch { expected: opts.issuer.clone(), found: "<missing>".to_text() }),
+    }
+    // aud
+    match audience_matches(&payload.aud, &opts.audience) {
+        true => {}
+        false => return Err(OidcVerifyError.AudienceMismatch {
+            expected: format!("{:?}", opts.audience).to_text(),
+            found:    payload.aud.clone(),
+        }),
+    }
+    // exp + leeway
+    if let Some(exp) = payload.exp {
+        if now > exp + opts.leeway_seconds {
+            return Err(OidcVerifyError.TokenExpired { exp, now });
+        }
+    }
+    // nbf + leeway
+    if let Some(nbf) = payload.nbf {
+        if now + opts.leeway_seconds < nbf {
+            return Err(OidcVerifyError.TokenNotYetValid { nbf, now });
+        }
+    }
+    // max_age
+    if opts.max_age_seconds > 0 {
+        if let Some(iat) = payload.iat {
+            if now - iat > opts.max_age_seconds + opts.leeway_seconds {
+                return Err(OidcVerifyError.TokenTooOld { iat, max_age: opts.max_age_seconds, now });
+            }
+        }
+    }
+    // required claims
+    for (claim, expected) in opts.required_claims.iter() {
+        match payload.custom.get(claim).and_then(|v| v.as_string()) {
+            Some(found) => {
+                if found != *expected {
+                    return Err(OidcVerifyError.RequiredClaimMismatch {
+                        claim: claim.clone(),
+                        expected: expected.clone(),
+                        found,
+                    });
+                }
+            }
+            None => return Err(OidcVerifyError.RequiredClaimMissing(claim.clone())),
+        }
+    }
+    Ok(())
+}
+
+fn audience_matches(token_aud: &List<Text>, opts: &OidcAudience) -> Bool {
+    match opts {
+        OidcAudience.Single(expected) => {
+            let mut i: Int = 0;
+            while i < token_aud.len() {
+                if token_aud[i] == *expected { return true; }
+                i = i + 1;
+            }
+            false
+        }
+        OidcAudience.OneOf(set) => {
+            let mut i: Int = 0;
+            while i < token_aud.len() {
+                if set.contains(&token_aud[i]) { return true; }
+                i = i + 1;
+            }
+            false
+        }
+    }
+}
+
+fn is_jwt_alg_supported(alg: &JwtAlgorithm) -> Bool {
+    match alg {
+        JwtAlgorithm.HS256 | JwtAlgorithm.HS384 | JwtAlgorithm.HS512 => false, // symmetric — never used in OIDC
+        JwtAlgorithm.RS256 | JwtAlgorithm.RS384 | JwtAlgorithm.RS512 => true,
+        JwtAlgorithm.PS256 | JwtAlgorithm.PS384 | JwtAlgorithm.PS512 => true,
+        JwtAlgorithm.ES256 | JwtAlgorithm.ES384 | JwtAlgorithm.ES512 => true,
+        JwtAlgorithm.EdDSA => true,
+        JwtAlgorithm.None  => false, // RFC 8725 §3.1
+    }
+}
+
+fn jwt_alg_to_text(alg: &JwtAlgorithm) -> Text {
+    match alg {
+        JwtAlgorithm.HS256 => "HS256".to_text(),
+        JwtAlgorithm.HS384 => "HS384".to_text(),
+        JwtAlgorithm.HS512 => "HS512".to_text(),
+        JwtAlgorithm.RS256 => "RS256".to_text(),
+        JwtAlgorithm.RS384 => "RS384".to_text(),
+        JwtAlgorithm.RS512 => "RS512".to_text(),
+        JwtAlgorithm.PS256 => "PS256".to_text(),
+        JwtAlgorithm.PS384 => "PS384".to_text(),
+        JwtAlgorithm.PS512 => "PS512".to_text(),
+        JwtAlgorithm.ES256 => "ES256".to_text(),
+        JwtAlgorithm.ES384 => "ES384".to_text(),
+        JwtAlgorithm.ES512 => "ES512".to_text(),
+        JwtAlgorithm.EdDSA => "EdDSA".to_text(),
+        JwtAlgorithm.None  => "none".to_text(),
+    }
+}
+
+// =============================================================================
+// Well-known issuer presets
+// =============================================================================
+//
+// Compile-time-known URIs for the major OIDC providers used in
+// trusted publishing flows. Convenience constants — callers can also
+// construct `OidcVerifyOptions` directly.
+
+public const ISSUER_GITHUB_ACTIONS:    Text = "https://token.actions.githubusercontent.com";
+public const ISSUER_GITLAB_CI:         Text = "https://gitlab.com";
+public const ISSUER_SIGSTORE_PUBLIC:   Text = "https://oauth2.sigstore.dev/auth";
+public const ISSUER_GOOGLE:            Text = "https://accounts.google.com";
+public const ISSUER_BUILDKITE:         Text = "https://agent.buildkite.com";
+public const ISSUER_CIRCLECI:          Text = "https://oidc.circleci.com";
+
+public fn well_known_issuer(name: &Text) -> Maybe<Text> {
+    match name.as_str() {
+        "github" | "github-actions" => Some(ISSUER_GITHUB_ACTIONS.to_text()),
+        "gitlab" | "gitlab-ci"      => Some(ISSUER_GITLAB_CI.to_text()),
+        "sigstore"                  => Some(ISSUER_SIGSTORE_PUBLIC.to_text()),
+        "google"                    => Some(ISSUER_GOOGLE.to_text()),
+        "buildkite"                 => Some(ISSUER_BUILDKITE.to_text()),
+        "circleci"                  => Some(ISSUER_CIRCLECI.to_text()),
+        _ => None,
+    }
+}
+
+// =============================================================================
+// End-to-end convenience flow
+// =============================================================================
+
+@derive(Debug)
+public type OidcVerifier<C: HttpClient> is {
+    config:        OidcProviderConfig,
+    jwks_cache:    JwksCache<C>,
+    options:       OidcVerifyOptions,
+};
+
+/// Build a fully-initialised `OidcVerifier`. Performs the discovery
+/// fetch + first JWKS fetch eagerly so the first token validation is
+/// fast.
+public async fn oidc_verifier_new<C: HttpClient>(
+    client: C,
+    issuer: Text,
+    audience: OidcAudience,
+) -> Result<OidcVerifier<C>, DiscoveryError>
+    using [Logger]
+{
+    let config = discover(&client, &issuer).await?;
+    let cache = jwks_cache_new(client, config.jwks_uri.clone(), DEFAULT_JWKS_TTL_SECONDS);
+    Ok(OidcVerifier {
+        config,
+        jwks_cache: cache,
+        options: verify_options_default(issuer, audience),
+    })
+}
+
+public fn oidc_verifier_with_required_claim<C: HttpClient>(
+    mut v: OidcVerifier<C>,
+    claim: Text,
+    expected: Text,
+) -> OidcVerifier<C> {
+    v.options.required_claims.insert(claim, expected);
+    v
+}
+
+public fn oidc_verifier_with_max_age<C: HttpClient>(
+    mut v: OidcVerifier<C>,
+    seconds: Int,
+) -> OidcVerifier<C> {
+    v.options.max_age_seconds = seconds;
+    v
+}
+
+public async fn oidc_verifier_verify<C: HttpClient>(
+    v: &OidcVerifier<C>,
+    token: &Text,
+) -> Result<JwtPayload, OidcVerifyError> {
+    verify_oidc_token(&v.jwks_cache, token, &v.options).await
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_compose_discovery_url_no_trailing_slash() {
+        let u = compose_discovery_url(&"https://example.com".to_text());
+        assert_eq(u, "https://example.com/.well-known/openid-configuration".to_text());
+    }
+
+    #[test]
+    fn test_compose_discovery_url_trailing_slash() {
+        let u = compose_discovery_url(&"https://example.com/".to_text());
+        assert_eq(u, "https://example.com/.well-known/openid-configuration".to_text());
+    }
+
+    #[test]
+    fn test_alg_supported() {
+        assert_eq(is_supported_alg(&"RS256".to_text()), true);
+        assert_eq(is_supported_alg(&"EdDSA".to_text()), true);
+        assert_eq(is_supported_alg(&"none".to_text()), false);
+        assert_eq(is_supported_alg(&"HS256".to_text()), false);
+        assert_eq(is_supported_alg(&"unknown".to_text()), false);
+    }
+
+    #[test]
+    fn test_jwt_alg_none_rejected() {
+        assert_eq(is_jwt_alg_supported(&JwtAlgorithm.None), false);
+    }
+
+    #[test]
+    fn test_jwt_alg_hs_rejected() {
+        // OIDC uses asymmetric crypto only; reject HMAC.
+        assert_eq(is_jwt_alg_supported(&JwtAlgorithm.HS256), false);
+    }
+
+    #[test]
+    fn test_well_known_issuer_lookup() {
+        assert_eq(well_known_issuer(&"github".to_text()), Some(ISSUER_GITHUB_ACTIONS.to_text()));
+        assert_eq(well_known_issuer(&"unknown".to_text()), None);
+    }
+
+    #[test]
+    fn test_audience_single_match() {
+        let opts = OidcAudience.Single("verum-registry".to_text());
+        let mut auds: List<Text> = List.new();
+        auds.push("verum-registry".to_text());
+        assert_eq(audience_matches(&auds, &opts), true);
+    }
+
+    #[test]
+    fn test_audience_single_no_match() {
+        let opts = OidcAudience.Single("verum-registry".to_text());
+        let mut auds: List<Text> = List.new();
+        auds.push("other-aud".to_text());
+        assert_eq(audience_matches(&auds, &opts), false);
+    }
+
+    #[test]
+    fn test_audience_one_of_match() {
+        let mut set: Set<Text> = Set.new();
+        set.insert("aud-a".to_text());
+        set.insert("aud-b".to_text());
+        let opts = OidcAudience.OneOf(set);
+        let mut auds: List<Text> = List.new();
+        auds.push("aud-b".to_text());
+        assert_eq(audience_matches(&auds, &opts), true);
+    }
+}

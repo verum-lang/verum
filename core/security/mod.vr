@@ -108,6 +108,24 @@ public module password_hash;
 // Binary Merkle tree + inclusion proofs (RFC 6962 §2.1).
 public module merkle;
 
+// Transparency log (RFC 6962 + RFC 9162) — sumdb-style append-only
+// log with Merkle commitment, signed tree heads, tile-addressed
+// proofs, consistency proofs. Composed by the registry's sumdb,
+// Sigstore Rekor adapters, supply-chain provenance auditors.
+public module transparency_log;
+
+// Software supply-chain provenance — SLSA Build L3 attestations
+// wrapped in in-toto Statements, signed via DSSE envelopes,
+// optionally bundled in Sigstore-compatible form. Each layer
+// (DSSE / in-toto / SLSA / Bundle) is independently composable.
+public module provenance;
+
+// OpenID Connect (OIDC) — discovery (.well-known/openid-configuration),
+// JWKS cache with TTL, token validation. For trusted-publishing
+// flows where CI runners (GitHub Actions / GitLab / Sigstore)
+// authenticate via signed JWT instead of long-lived API keys.
+public module oidc;
+
 // =============================================================================
 // AEAD / cipher / ECC / sig sub-umbrellas
 // =============================================================================

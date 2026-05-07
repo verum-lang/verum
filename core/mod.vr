@@ -222,6 +222,39 @@ public module security;
 public module compress;
 
 // =============================================================================
+// Layer 4.9: Archive (Depends on: core, compress, encoding, security)
+// =============================================================================
+
+// Packaging subsystem mirroring core.compress: container formats
+// (tar/USTAR/PAX, zip, ar, cpio) over the existing compression
+// codecs. The Archive protocol + ArchiveAlgorithm enum compose
+// against any underlying codec — `tar.zst`, `tar.gz`, `zip`-deflate,
+// etc., picked at the Archive level.
+public module archive;
+
+// =============================================================================
+// Layer 4.9.5: Configuration (Depends on: core, encoding)
+// =============================================================================
+
+// Universal configuration subsystem: ConfigValue ADT hub +
+// ConfigFormat protocol + open registry. TOML / YAML / INI / JSON-as-
+// config / TOML-Edit. Cross-format conversion with LossPolicy. Used
+// by every cog manifest, every IDE settings file, every
+// observability config.
+public module configuration;
+
+// =============================================================================
+// Layer 4.9.6: Cog tooling (Depends on: core, base, security, archive,
+//                                       configuration, encoding)
+// =============================================================================
+
+// First-class cog manipulation: typed CogManifest, .vbca archive
+// reader, Ed25519 cog-signature envelope, pubgrub-style dependency
+// resolver. Composed by the registry, by `verum publish/install`,
+// and by IDE / LSP tooling.
+public module cog;
+
+// =============================================================================
 // Layer 4.7.5: Protobuf (Depends on: core)
 // =============================================================================
 

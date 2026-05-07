@@ -1,0 +1,953 @@
+// =============================================================================
+// security/provenance.vr — SLSA + in-toto attestations
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, security/{ecc/ed25519, hash/sha256},
+//               encoding/{json, base64, jcs}, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** First-class Verum-side support for software supply
+// chain provenance: SLSA Build L3 attestations wrapped in in-toto
+// Statements, signed via DSSE envelopes, optionally bundled in
+// Sigstore-compatible form. Composes against existing crypto
+// primitives — no new wire formats invented.
+//
+// **Three independent layers.**
+//
+//   ┌─────────────────────────────────────────────────────────┐
+//   │  Sigstore Bundle (optional)                             │
+//   │   ┌───────────────────────────────────────────────────┐ │
+//   │   │  DSSE Envelope (signed)                           │ │
+//   │   │   ┌─────────────────────────────────────────────┐ │ │
+//   │   │   │  in-toto Statement                          │ │ │
+//   │   │   │   subjects: [(name, digest), …]             │ │ │
+//   │   │   │   predicateType: "slsa.dev/v1/provenance"  │ │ │
+//   │   │   │   predicate: { build_definition, run_… }    │ │ │
+//   │   │   └─────────────────────────────────────────────┘ │ │
+//   │   └───────────────────────────────────────────────────┘ │
+//   └─────────────────────────────────────────────────────────┘
+//
+// Each layer is independently composable. Callers can:
+//   - emit a SLSA predicate without wrapping (testing)
+//   - wrap any predicate (SLSA, SPDX, VEX, custom) in a Statement
+//   - sign any Statement via DSSE (with any Ed25519 key)
+//   - bundle any signed envelope for sigstore.dev compatibility
+//
+// **Categorical structure.** Each layer is a faithful functor from
+// the inner category (raw payload) to the outer (envelope-wrapped).
+// Verification is the partial inverse: the outer functor is
+// surjective on signed envelopes; the in-toto layer is monic
+// (subjects are unique up to digest equality); the SLSA predicate is
+// a free functor over the build-graph monoid.
+//
+// **References.**
+//   - SLSA v1.0 spec:           https://slsa.dev/spec/v1.0/
+//   - in-toto Attestation:      https://github.com/in-toto/attestation/
+//   - DSSE spec:                https://github.com/secure-systems-lab/dsse
+//   - Sigstore Bundle v0.3:     https://github.com/sigstore/protobuf-specs
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "SLSA Build L3 provenance + in-toto attestations + DSSE envelope + Sigstore bundle",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.provenance;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount security.ecc.ed25519.{
+    Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
+    sign as ed25519_sign, verify as ed25519_verify,
+    public_key as ed25519_public_key,
+};
+mount security.hash.sha256.{digest as sha256_digest};
+mount encoding.json.{
+    JsonValue, JsonObject, json_object, json_string, json_number,
+    json_array, json_null, json_bool,
+    encode as json_encode, decode as json_decode,
+};
+mount encoding.jcs.{canonicalize as jcs_canonicalize};
+mount encoding.base64.{
+    encode_standard as b64_encode, decode_standard as b64_decode,
+};
+mount encoding.hex.{encode as hex_encode};
+mount time.rfc3339.{Rfc3339Time, now_utc, format_rfc3339, parse_rfc3339};
+
+// =============================================================================
+// Predicate types — registry of well-known in-toto predicateType URIs
+// =============================================================================
+
+public const PREDICATE_TYPE_SLSA_PROVENANCE_V1: Text = "https://slsa.dev/provenance/v1";
+public const PREDICATE_TYPE_SLSA_VERIFICATION_SUMMARY_V1: Text = "https://slsa.dev/verification_summary/v1";
+public const PREDICATE_TYPE_SPDX_V2_3: Text = "https://spdx.dev/Document/v2.3";
+public const PREDICATE_TYPE_CYCLONEDX_V1_5: Text = "https://cyclonedx.org/bom/v1.5";
+public const PREDICATE_TYPE_VEX_V0_2: Text = "https://openvex.dev/ns/v0.2.0";
+
+public const STATEMENT_TYPE_V1: Text = "https://in-toto.io/Statement/v1";
+
+public const DSSE_PAYLOAD_TYPE_INTOTO: Text = "application/vnd.in-toto+json";
+
+// =============================================================================
+// Subject — named digests
+// =============================================================================
+//
+// A "subject" is what the attestation talks about: a file, a cog
+// archive, a container image. Identified by a name + a multi-hash
+// digest set (typically just `sha256`).
+
+@derive(Eq, Clone, Debug)
+public type Digest is {
+    algorithm: Text,
+    /// Hex-encoded digest bytes.
+    hex: Text,
+};
+
+public fn digest_sha256(bytes: &List<Byte>) -> Digest {
+    Digest {
+        algorithm: "sha256".to_text(),
+        hex: hex_encode(&sha256_digest(bytes)),
+    }
+}
+
+@derive(Eq, Clone, Debug)
+public type Subject is {
+    /// Logical name — e.g., a cog name, file path, image tag.
+    name: Text,
+    /// At least one digest required by in-toto spec.
+    digests: List<Digest>,
+};
+
+public fn subject_for_cog(name: &Text, archive_bytes: &List<Byte>) -> Subject {
+    let mut digests: List<Digest> = List.new();
+    digests.push(digest_sha256(archive_bytes));
+    Subject { name: name.clone(), digests }
+}
+
+// =============================================================================
+// Statement — in-toto v1 envelope around a typed predicate
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Statement is {
+    /// Always `STATEMENT_TYPE_V1`.
+    type_uri: Text,
+    /// One or more named digests this statement is about.
+    subjects: List<Subject>,
+    /// The well-known predicate type URI.
+    predicate_type: Text,
+    /// The opaque predicate body (any JSON value).
+    predicate: JsonValue,
+};
+
+public fn statement_new(
+    subjects: List<Subject>,
+    predicate_type: Text,
+    predicate: JsonValue,
+) -> Statement {
+    Statement {
+        type_uri: STATEMENT_TYPE_V1.to_text(),
+        subjects,
+        predicate_type,
+        predicate,
+    }
+}
+
+public fn statement_to_json(s: &Statement) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("_type".to_text(), json_string(s.type_uri.clone()));
+
+    let mut subjects_arr: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < s.subjects.len() {
+        let subj = &s.subjects[i];
+        let mut subj_obj: JsonObject = JsonObject.new();
+        subj_obj.insert("name".to_text(), json_string(subj.name.clone()));
+        let mut digest_obj: JsonObject = JsonObject.new();
+        let mut j: Int = 0;
+        while j < subj.digests.len() {
+            let d = &subj.digests[j];
+            digest_obj.insert(d.algorithm.clone(), json_string(d.hex.clone()));
+            j = j + 1;
+        }
+        subj_obj.insert("digest".to_text(), json_object(digest_obj));
+        subjects_arr.push(json_object(subj_obj));
+        i = i + 1;
+    }
+    obj.insert("subject".to_text(), json_array(subjects_arr));
+
+    obj.insert("predicateType".to_text(), json_string(s.predicate_type.clone()));
+    obj.insert("predicate".to_text(), s.predicate.clone());
+    json_object(obj)
+}
+
+public fn statement_from_json(value: &JsonValue) -> Result<Statement, Text> {
+    let obj = value.as_object().ok_or_else(|| "statement: not an object".to_text())?;
+    let type_uri = obj.get("_type").and_then(|v| v.as_string())
+        .ok_or_else(|| "statement: missing _type".to_text())?;
+    if type_uri != STATEMENT_TYPE_V1 {
+        return Err(format!("statement: unknown _type {type_uri}").to_text());
+    }
+    let subjects_arr = obj.get("subject").and_then(|v| v.as_array())
+        .ok_or_else(|| "statement: missing subject".to_text())?;
+    let mut subjects: List<Subject> = List.new();
+    let mut i: Int = 0;
+    while i < subjects_arr.len() {
+        let s_obj = subjects_arr[i].as_object()
+            .ok_or_else(|| f"statement: subject[{i}] not an object".to_text())?;
+        let name = s_obj.get("name").and_then(|v| v.as_string())
+            .ok_or_else(|| f"statement: subject[{i}] missing name".to_text())?;
+        let digest_obj = s_obj.get("digest").and_then(|v| v.as_object())
+            .ok_or_else(|| f"statement: subject[{i}] missing digest".to_text())?;
+        let mut digests: List<Digest> = List.new();
+        for (alg, hex_v) in digest_obj.iter() {
+            let hex = hex_v.as_string().ok_or_else(|| f"statement: subject[{i}].digest.{alg} not a string".to_text())?;
+            digests.push(Digest { algorithm: alg.clone(), hex });
+        }
+        if digests.is_empty() {
+            return Err(f"statement: subject[{i}] has no digests".to_text());
+        }
+        subjects.push(Subject { name, digests });
+        i = i + 1;
+    }
+    let predicate_type = obj.get("predicateType").and_then(|v| v.as_string())
+        .ok_or_else(|| "statement: missing predicateType".to_text())?;
+    let predicate = obj.get("predicate").cloned()
+        .ok_or_else(|| "statement: missing predicate".to_text())?;
+    Ok(Statement { type_uri, subjects, predicate_type, predicate })
+}
+
+// =============================================================================
+// SLSA Build L3 Provenance v1.0 predicate
+// =============================================================================
+//
+// Per https://slsa.dev/spec/v1.0/provenance: the predicate has two
+// top-level fields, `buildDefinition` and `runDetails`. The build
+// definition is the "what was built" (parameters, dependencies,
+// builder); the run details are "what actually happened" (start/end
+// times, builder identity, internal metadata).
+//
+// All fields are typed; serialization is mechanical via
+// `slsa_provenance_to_json`.
+
+@derive(Eq, Clone, Debug)
+public type ResourceDescriptor is {
+    name:    Maybe<Text>,
+    uri:     Maybe<Text>,
+    digest:  List<Digest>,
+    /// Free-form annotations (rarely used).
+    annotations: Map<Text, JsonValue>,
+};
+
+@derive(Eq, Clone, Debug)
+public type BuildDefinition is {
+    /// Identifier for the build type — declares the schema of
+    /// `external_parameters` + `internal_parameters`.
+    build_type: Text,
+    /// Externally-visible parameters chosen by the user — what they
+    /// asked for. These influence the output.
+    external_parameters: JsonValue,
+    /// Internal parameters chosen by the build platform. May affect
+    /// the output but not user-controlled.
+    internal_parameters: JsonValue,
+    /// Resolved dependencies — exact pinned versions (the lockfile).
+    /// SLSA Build L3 requires these be hash-pinned.
+    resolved_dependencies: List<ResourceDescriptor>,
+};
+
+@derive(Eq, Clone, Debug)
+public type Builder is {
+    /// Stable identifier for the builder service (URI).
+    id: Text,
+    /// Optional builder version + dependencies (SLSA L3 trust anchor).
+    version: Map<Text, Text>,
+    builder_dependencies: List<ResourceDescriptor>,
+};
+
+@derive(Eq, Clone, Debug)
+public type BuildMetadata is {
+    invocation_id: Maybe<Text>,
+    started_on:    Maybe<Rfc3339Time>,
+    finished_on:   Maybe<Rfc3339Time>,
+};
+
+@derive(Eq, Clone, Debug)
+public type RunDetails is {
+    builder:   Builder,
+    metadata:  BuildMetadata,
+    /// Byproducts — additional artefacts the build emits (logs,
+    /// SARIF reports, intermediate caches).
+    byproducts: List<ResourceDescriptor>,
+};
+
+@derive(Eq, Clone, Debug)
+public type SlsaProvenance is {
+    build_definition: BuildDefinition,
+    run_details:      RunDetails,
+};
+
+public fn slsa_provenance_to_json(p: &SlsaProvenance) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("buildDefinition".to_text(), build_definition_to_json(&p.build_definition));
+    obj.insert("runDetails".to_text(), run_details_to_json(&p.run_details));
+    json_object(obj)
+}
+
+fn build_definition_to_json(bd: &BuildDefinition) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("buildType".to_text(), json_string(bd.build_type.clone()));
+    obj.insert("externalParameters".to_text(), bd.external_parameters.clone());
+    obj.insert("internalParameters".to_text(), bd.internal_parameters.clone());
+    let mut deps: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < bd.resolved_dependencies.len() {
+        deps.push(resource_descriptor_to_json(&bd.resolved_dependencies[i]));
+        i = i + 1;
+    }
+    obj.insert("resolvedDependencies".to_text(), json_array(deps));
+    json_object(obj)
+}
+
+fn run_details_to_json(rd: &RunDetails) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("builder".to_text(), builder_to_json(&rd.builder));
+    obj.insert("metadata".to_text(), build_metadata_to_json(&rd.metadata));
+    let mut bps: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < rd.byproducts.len() {
+        bps.push(resource_descriptor_to_json(&rd.byproducts[i]));
+        i = i + 1;
+    }
+    obj.insert("byproducts".to_text(), json_array(bps));
+    json_object(obj)
+}
+
+fn builder_to_json(b: &Builder) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("id".to_text(), json_string(b.id.clone()));
+    let mut version_obj: JsonObject = JsonObject.new();
+    for (k, v) in b.version.iter() {
+        version_obj.insert(k.clone(), json_string(v.clone()));
+    }
+    obj.insert("version".to_text(), json_object(version_obj));
+    let mut deps: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < b.builder_dependencies.len() {
+        deps.push(resource_descriptor_to_json(&b.builder_dependencies[i]));
+        i = i + 1;
+    }
+    obj.insert("builderDependencies".to_text(), json_array(deps));
+    json_object(obj)
+}
+
+fn build_metadata_to_json(m: &BuildMetadata) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    if let Some(id) = &m.invocation_id { obj.insert("invocationId".to_text(), json_string(id.clone())); }
+    if let Some(t)  = &m.started_on    { obj.insert("startedOn".to_text(),    json_string(format_rfc3339(t))); }
+    if let Some(t)  = &m.finished_on   { obj.insert("finishedOn".to_text(),   json_string(format_rfc3339(t))); }
+    json_object(obj)
+}
+
+fn resource_descriptor_to_json(rd: &ResourceDescriptor) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    if let Some(n) = &rd.name { obj.insert("name".to_text(), json_string(n.clone())); }
+    if let Some(u) = &rd.uri  { obj.insert("uri".to_text(),  json_string(u.clone())); }
+    let mut digest_obj: JsonObject = JsonObject.new();
+    let mut i: Int = 0;
+    while i < rd.digest.len() {
+        digest_obj.insert(rd.digest[i].algorithm.clone(), json_string(rd.digest[i].hex.clone()));
+        i = i + 1;
+    }
+    obj.insert("digest".to_text(), json_object(digest_obj));
+    if !rd.annotations.is_empty() {
+        let mut ann_obj: JsonObject = JsonObject.new();
+        for (k, v) in rd.annotations.iter() { ann_obj.insert(k.clone(), v.clone()); }
+        obj.insert("annotations".to_text(), json_object(ann_obj));
+    }
+    json_object(obj)
+}
+
+// ----- SLSA convenience constructors -----
+
+public fn slsa_provenance_for_cog(
+    build_type: Text,
+    builder_id: Text,
+    cog_subject: Subject,
+    resolved_dependencies: List<ResourceDescriptor>,
+    started_on: Rfc3339Time,
+    finished_on: Rfc3339Time,
+    invocation_id: Maybe<Text>,
+) -> Statement {
+    let predicate = SlsaProvenance {
+        build_definition: BuildDefinition {
+            build_type,
+            external_parameters: json_object(JsonObject.new()),
+            internal_parameters: json_object(JsonObject.new()),
+            resolved_dependencies,
+        },
+        run_details: RunDetails {
+            builder: Builder {
+                id: builder_id,
+                version: Map.new(),
+                builder_dependencies: List.new(),
+            },
+            metadata: BuildMetadata {
+                invocation_id,
+                started_on:  Some(started_on),
+                finished_on: Some(finished_on),
+            },
+            byproducts: List.new(),
+        },
+    };
+    let mut subjects: List<Subject> = List.new();
+    subjects.push(cog_subject);
+    statement_new(
+        subjects,
+        PREDICATE_TYPE_SLSA_PROVENANCE_V1.to_text(),
+        slsa_provenance_to_json(&predicate),
+    )
+}
+
+// =============================================================================
+// DSSE — Dead Simple Signing Envelope
+// =============================================================================
+//
+// Per https://github.com/secure-systems-lab/dsse/blob/master/protocol.md:
+//
+//   Pre-Authentication Encoding (PAE):
+//     PAE(type, body) = "DSSEv1 "
+//                       || ASCII(LEN(type))  || " "
+//                       || type
+//                       || " "
+//                       || ASCII(LEN(body))  || " "
+//                       || body
+//
+//   The signer signs PAE(payloadType, payload). The verifier
+//   reconstructs PAE from envelope fields and checks the signature.
+//
+// Signature `keyid` is opaque — typically a Sigstore key fingerprint.
+
+@derive(Clone, Debug)
+public type DsseSignature is {
+    /// Key identifier — opaque to DSSE, may be a Sigstore key
+    /// fingerprint, an X.509 SKI, or a free-form string.
+    keyid: Text,
+    /// Base64-encoded raw signature bytes.
+    sig_b64: Text,
+};
+
+@derive(Clone, Debug)
+public type DsseEnvelope is {
+    /// Base64-encoded payload bytes.
+    payload_b64: Text,
+    /// MIME-style payload type (e.g., `application/vnd.in-toto+json`).
+    payload_type: Text,
+    /// One or more signatures.
+    signatures: List<DsseSignature>,
+};
+
+/// Compute the DSSE PAE (Pre-Authentication Encoding) — what gets
+/// signed. The encoding is byte-exact and ASCII-safe.
+public fn dsse_pae(payload_type: &Text, payload: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    push_ascii(&mut out, "DSSEv1 ");
+    push_ascii(&mut out, format!("{}", payload_type.len()).as_str());
+    out.push(0x20); // space
+    push_ascii(&mut out, payload_type.as_str());
+    out.push(0x20);
+    push_ascii(&mut out, format!("{}", payload.len()).as_str());
+    out.push(0x20);
+    let mut i: Int = 0;
+    while i < payload.len() { out.push(payload[i]); i = i + 1; }
+    out
+}
+
+fn push_ascii(out: &mut List<Byte>, s: &str) {
+    let bytes = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+}
+
+/// Sign an in-toto Statement with Ed25519, producing a DSSE envelope.
+pub fn dsse_sign_statement(
+    seed: &Ed25519Seed,
+    keyid: &Text,
+    statement: &Statement,
+) -> Result<DsseEnvelope, Text> {
+    let payload_json = statement_to_json(statement);
+    // Use JCS canonicalisation — same payload bytes regardless of
+    // map insertion order, important for reproducible attestations.
+    let payload_bytes = jcs_canonicalize(&payload_json)
+        .map_err(|e| format!("dsse: jcs canonicalise: {e}").to_text())?;
+    let pae = dsse_pae(&DSSE_PAYLOAD_TYPE_INTOTO.to_text(), &payload_bytes);
+    let sig = ed25519_sign(seed, &pae);
+    let mut sig_bytes: List<Byte> = List.with_capacity(64);
+    let mut i: Int = 0;
+    while i < 64 { sig_bytes.push(sig[i]); i = i + 1; }
+    Ok(DsseEnvelope {
+        payload_b64: b64_encode(&payload_bytes),
+        payload_type: DSSE_PAYLOAD_TYPE_INTOTO.to_text(),
+        signatures: {
+            let mut sigs: List<DsseSignature> = List.new();
+            sigs.push(DsseSignature {
+                keyid: keyid.clone(),
+                sig_b64: b64_encode(&sig_bytes),
+            });
+            sigs
+        },
+    })
+}
+
+public type DsseVerifyError is
+    | DecodeError(Text)
+    | NoMatchingKey
+    | InvalidSignature
+    | InvalidPayload(Text);
+
+implement Display for DsseVerifyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DecodeError(reason)   => f.write_str(f"dsse: decode error: {reason}".as_str()),
+            NoMatchingKey         => f.write_str("dsse: no matching key for envelope keyid"),
+            InvalidSignature      => f.write_str("dsse: signature verification failed"),
+            InvalidPayload(reason)=> f.write_str(f"dsse: invalid payload: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for DsseVerifyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Verify a DSSE envelope. Returns the decoded Statement on success.
+pub fn dsse_verify_statement(
+    envelope: &DsseEnvelope,
+    keys: &Map<Text, Ed25519PublicKey>,
+) -> Result<Statement, DsseVerifyError> {
+    if envelope.payload_type != DSSE_PAYLOAD_TYPE_INTOTO {
+        return Err(DsseVerifyError.InvalidPayload(
+            format!("expected {DSSE_PAYLOAD_TYPE_INTOTO}, got {}", envelope.payload_type).to_text()));
+    }
+    let payload_bytes = b64_decode(&envelope.payload_b64)
+        .map_err(|e| DsseVerifyError.DecodeError(format!("payload b64: {e}").to_text()))?;
+    let pae = dsse_pae(&envelope.payload_type, &payload_bytes);
+
+    let mut verified = false;
+    let mut i: Int = 0;
+    while i < envelope.signatures.len() {
+        let sig = &envelope.signatures[i];
+        match keys.get(&sig.keyid) {
+            Some(pubkey) => {
+                let sig_bytes = b64_decode(&sig.sig_b64)
+                    .map_err(|e| DsseVerifyError.DecodeError(format!("sig b64: {e}").to_text()))?;
+                if sig_bytes.len() == 64 {
+                    let mut arr: [Byte; 64] = [0_u8; 64];
+                    let mut k: Int = 0;
+                    while k < 64 { arr[k] = sig_bytes[k]; k = k + 1; }
+                    if ed25519_verify(pubkey, &pae, &arr).is_ok() {
+                        verified = true;
+                        break;
+                    }
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+    if !verified { return Err(DsseVerifyError.InvalidSignature); }
+
+    let payload_json = json_decode(&payload_bytes)
+        .map_err(|e| DsseVerifyError.InvalidPayload(format!("json decode: {e}").to_text()))?;
+    statement_from_json(&payload_json)
+        .map_err(|e| DsseVerifyError.InvalidPayload(e))
+}
+
+public fn dsse_envelope_to_json(env: &DsseEnvelope) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("payload".to_text(), json_string(env.payload_b64.clone()));
+    obj.insert("payloadType".to_text(), json_string(env.payload_type.clone()));
+    let mut sigs: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < env.signatures.len() {
+        let s = &env.signatures[i];
+        let mut so: JsonObject = JsonObject.new();
+        so.insert("keyid".to_text(), json_string(s.keyid.clone()));
+        so.insert("sig".to_text(), json_string(s.sig_b64.clone()));
+        sigs.push(json_object(so));
+        i = i + 1;
+    }
+    obj.insert("signatures".to_text(), json_array(sigs));
+    json_object(obj)
+}
+
+public fn dsse_envelope_from_json(value: &JsonValue) -> Result<DsseEnvelope, Text> {
+    let obj = value.as_object().ok_or_else(|| "dsse: not an object".to_text())?;
+    let payload_b64 = obj.get("payload").and_then(|v| v.as_string())
+        .ok_or_else(|| "dsse: missing payload".to_text())?;
+    let payload_type = obj.get("payloadType").and_then(|v| v.as_string())
+        .ok_or_else(|| "dsse: missing payloadType".to_text())?;
+    let sigs_arr = obj.get("signatures").and_then(|v| v.as_array())
+        .ok_or_else(|| "dsse: missing signatures".to_text())?;
+    let mut signatures: List<DsseSignature> = List.new();
+    let mut i: Int = 0;
+    while i < sigs_arr.len() {
+        let s_obj = sigs_arr[i].as_object()
+            .ok_or_else(|| f"dsse: signatures[{i}] not an object".to_text())?;
+        let keyid = s_obj.get("keyid").and_then(|v| v.as_string())
+            .ok_or_else(|| f"dsse: signatures[{i}] missing keyid".to_text())?;
+        let sig_b64 = s_obj.get("sig").and_then(|v| v.as_string())
+            .ok_or_else(|| f"dsse: signatures[{i}] missing sig".to_text())?;
+        signatures.push(DsseSignature { keyid, sig_b64 });
+        i = i + 1;
+    }
+    Ok(DsseEnvelope { payload_b64, payload_type, signatures })
+}
+
+// =============================================================================
+// Sigstore Bundle — wrapping convention used by registries
+// =============================================================================
+//
+// Per https://github.com/sigstore/protobuf-specs: a Sigstore bundle
+// wraps a DSSE envelope with key material (X.509 cert chain, public
+// key) + transparency log inclusion proofs. The full schema is
+// extensive; we expose a Verum-friendly typed surface and serialise
+// to the canonical JSON form.
+
+@derive(Eq, Clone, Debug)
+public type VerificationMaterial is
+    /// A raw Ed25519 public key — the simplest form, used for
+    /// key-pinned verification (no Sigstore PKI).
+    | RawPublicKey { hint: Text, key_b64: Text }
+    /// An X.509 certificate chain (DER, base64-encoded) — Sigstore
+    /// Fulcio-issued ephemeral cert.
+    | X509CertChain { certs_b64: List<Text> };
+
+@derive(Eq, Clone, Debug)
+public type TlogEntry is {
+    log_index: Int,
+    log_id_hex: Text,
+    /// Rekor-style canonicalised body (base64-encoded).
+    canonicalized_body_b64: Text,
+    integrated_time: Rfc3339Time,
+    /// Inclusion proof: tree size + index + audit hashes.
+    inclusion_proof: Maybe<InclusionProof>,
+};
+
+@derive(Eq, Clone, Debug)
+public type InclusionProof is {
+    tree_size: Int,
+    log_index: Int,
+    /// Audit hashes (hex-encoded, root → leaf order).
+    hashes_hex: List<Text>,
+    /// Hex-encoded checkpoint signature.
+    checkpoint_sig_hex: Text,
+};
+
+@derive(Clone, Debug)
+public type SigstoreBundle is {
+    /// Bundle media type — always `application/vnd.dev.sigstore.bundle+json;version=0.3`.
+    media_type: Text,
+    verification_material: VerificationMaterial,
+    /// The signed DSSE envelope.
+    envelope: DsseEnvelope,
+    /// Transparency log entries — at least one for SLSA Build L3.
+    tlog_entries: List<TlogEntry>,
+};
+
+public const SIGSTORE_BUNDLE_MEDIA_TYPE_V03: Text = "application/vnd.dev.sigstore.bundle+json;version=0.3";
+
+public fn sigstore_bundle_new(
+    verification_material: VerificationMaterial,
+    envelope: DsseEnvelope,
+    tlog_entries: List<TlogEntry>,
+) -> SigstoreBundle {
+    SigstoreBundle {
+        media_type: SIGSTORE_BUNDLE_MEDIA_TYPE_V03.to_text(),
+        verification_material,
+        envelope,
+        tlog_entries,
+    }
+}
+
+public fn sigstore_bundle_to_json(b: &SigstoreBundle) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("mediaType".to_text(), json_string(b.media_type.clone()));
+    obj.insert("verificationMaterial".to_text(), verification_material_to_json(&b.verification_material));
+    obj.insert("dsseEnvelope".to_text(), dsse_envelope_to_json(&b.envelope));
+    let mut tlog: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < b.tlog_entries.len() {
+        tlog.push(tlog_entry_to_json(&b.tlog_entries[i]));
+        i = i + 1;
+    }
+    obj.insert("tlogEntries".to_text(), json_array(tlog));
+    json_object(obj)
+}
+
+fn verification_material_to_json(m: &VerificationMaterial) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    match m {
+        VerificationMaterial.RawPublicKey { hint, key_b64 } => {
+            let mut pk_obj: JsonObject = JsonObject.new();
+            pk_obj.insert("hint".to_text(), json_string(hint.clone()));
+            pk_obj.insert("rawBytes".to_text(), json_string(key_b64.clone()));
+            obj.insert("publicKey".to_text(), json_object(pk_obj));
+        }
+        VerificationMaterial.X509CertChain { certs_b64 } => {
+            let mut chain_arr: List<JsonValue> = List.new();
+            let mut i: Int = 0;
+            while i < certs_b64.len() {
+                let mut c_obj: JsonObject = JsonObject.new();
+                c_obj.insert("rawBytes".to_text(), json_string(certs_b64[i].clone()));
+                chain_arr.push(json_object(c_obj));
+                i = i + 1;
+            }
+            let mut chain_obj: JsonObject = JsonObject.new();
+            chain_obj.insert("certificates".to_text(), json_array(chain_arr));
+            obj.insert("x509CertificateChain".to_text(), json_object(chain_obj));
+        }
+    }
+    json_object(obj)
+}
+
+fn tlog_entry_to_json(e: &TlogEntry) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("logIndex".to_text(), json_string(format!("{}", e.log_index).to_text()));
+    obj.insert("logId".to_text(), {
+        let mut id_obj: JsonObject = JsonObject.new();
+        id_obj.insert("keyId".to_text(), json_string(e.log_id_hex.clone()));
+        json_object(id_obj)
+    });
+    obj.insert("canonicalizedBody".to_text(), json_string(e.canonicalized_body_b64.clone()));
+    obj.insert("integratedTime".to_text(), json_string(format_rfc3339(&e.integrated_time)));
+    if let Some(proof) = &e.inclusion_proof {
+        let mut p_obj: JsonObject = JsonObject.new();
+        p_obj.insert("treeSize".to_text(), json_string(format!("{}", proof.tree_size).to_text()));
+        p_obj.insert("logIndex".to_text(), json_string(format!("{}", proof.log_index).to_text()));
+        let mut hashes_arr: List<JsonValue> = List.new();
+        let mut i: Int = 0;
+        while i < proof.hashes_hex.len() {
+            hashes_arr.push(json_string(proof.hashes_hex[i].clone()));
+            i = i + 1;
+        }
+        p_obj.insert("hashes".to_text(), json_array(hashes_arr));
+        p_obj.insert("checkpoint".to_text(), {
+            let mut c_obj: JsonObject = JsonObject.new();
+            c_obj.insert("envelope".to_text(), json_string(proof.checkpoint_sig_hex.clone()));
+            json_object(c_obj)
+        });
+        obj.insert("inclusionProof".to_text(), json_object(p_obj));
+    }
+    json_object(obj)
+}
+
+// =============================================================================
+// End-to-end convenience flows
+// =============================================================================
+
+/// Build a fully-signed SLSA Build L3 attestation for a cog archive,
+/// in a single call. Composes:
+///
+///   1. `subject_for_cog`     → digest the archive
+///   2. `slsa_provenance_for_cog` → wrap in Statement
+///   3. `dsse_sign_statement` → sign with Ed25519
+///
+/// The caller wraps in a `SigstoreBundle` if log inclusion is needed.
+pub fn build_signed_attestation(
+    seed: &Ed25519Seed,
+    keyid: &Text,
+    cog_name: &Text,
+    cog_archive: &List<Byte>,
+    build_type: Text,
+    builder_id: Text,
+    resolved_dependencies: List<ResourceDescriptor>,
+    started_on: Rfc3339Time,
+    finished_on: Rfc3339Time,
+    invocation_id: Maybe<Text>,
+) -> Result<DsseEnvelope, Text> {
+    let subject = subject_for_cog(cog_name, cog_archive);
+    let statement = slsa_provenance_for_cog(
+        build_type, builder_id, subject,
+        resolved_dependencies, started_on, finished_on, invocation_id,
+    );
+    dsse_sign_statement(seed, keyid, &statement)
+}
+
+/// Verify an attestation end-to-end and check that it actually
+/// covers the given cog archive. Returns the validated SLSA
+/// provenance predicate on success.
+pub fn verify_attestation_for_cog(
+    envelope: &DsseEnvelope,
+    keys: &Map<Text, Ed25519PublicKey>,
+    cog_name: &Text,
+    cog_archive: &List<Byte>,
+) -> Result<JsonValue, DsseVerifyError> {
+    let statement = dsse_verify_statement(envelope, keys)?;
+    if statement.predicate_type != PREDICATE_TYPE_SLSA_PROVENANCE_V1 {
+        return Err(DsseVerifyError.InvalidPayload(
+            format!("expected predicateType {PREDICATE_TYPE_SLSA_PROVENANCE_V1}, got {}",
+                    statement.predicate_type).to_text()));
+    }
+    let want_digest = digest_sha256(cog_archive);
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < statement.subjects.len() {
+        let s = &statement.subjects[i];
+        if s.name == *cog_name {
+            let mut j: Int = 0;
+            while j < s.digests.len() {
+                let d = &s.digests[j];
+                if d.algorithm == "sha256" && d.hex == want_digest.hex {
+                    found = true;
+                    break;
+                }
+                j = j + 1;
+            }
+        }
+        if found { break; }
+        i = i + 1;
+    }
+    if !found {
+        return Err(DsseVerifyError.InvalidPayload(
+            format!("attestation does not cover cog {cog_name} with digest {}", want_digest.hex).to_text()));
+    }
+    Ok(statement.predicate)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use security.ecc.ed25519.{generate_seed};
+
+    fn seed() -> Ed25519Seed { generate_seed() }
+
+    fn bytes_of(s: &str) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let bs = s.as_bytes();
+        let mut i: Int = 0;
+        while i < bs.len() { out.push(bs[i]); i = i + 1; }
+        out
+    }
+
+    #[test]
+    fn test_dsse_pae_format() {
+        let pae = dsse_pae(&"test".to_text(), &bytes_of("hello"));
+        let expected = bytes_of("DSSEv1 4 test 5 hello");
+        assert_eq(pae.len(), expected.len());
+        let mut i: Int = 0;
+        while i < pae.len() { assert_eq(pae[i], expected[i]); i = i + 1; }
+    }
+
+    #[test]
+    fn test_subject_digest_sha256() {
+        let s = subject_for_cog(&"my-cog".to_text(), &bytes_of("archive-bytes"));
+        assert_eq(s.name, "my-cog".to_text());
+        assert_eq(s.digests.len(), 1);
+        assert_eq(s.digests[0].algorithm, "sha256".to_text());
+        assert_eq(s.digests[0].hex.len(), 64);
+    }
+
+    #[test]
+    fn test_statement_roundtrip() {
+        let mut subjects: List<Subject> = List.new();
+        subjects.push(subject_for_cog(&"my-cog".to_text(), &bytes_of("archive")));
+        let predicate = json_object(JsonObject.new());
+        let st = statement_new(subjects, "test-pred".to_text(), predicate);
+        let json = statement_to_json(&st);
+        let back = statement_from_json(&json).unwrap();
+        assert_eq(back.type_uri, st.type_uri);
+        assert_eq(back.subjects.len(), st.subjects.len());
+        assert_eq(back.predicate_type, st.predicate_type);
+    }
+
+    #[test]
+    fn test_sign_verify_roundtrip() {
+        let s = seed();
+        let keyid = "test-key".to_text();
+        let mut subjects: List<Subject> = List.new();
+        subjects.push(subject_for_cog(&"foo".to_text(), &bytes_of("a")));
+        let st = statement_new(subjects, "p".to_text(), json_object(JsonObject.new()));
+        let env = dsse_sign_statement(&s, &keyid, &st).unwrap();
+
+        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
+        keys.insert(keyid, ed25519_public_key(&s));
+        let st2 = dsse_verify_statement(&env, &keys).unwrap();
+        assert_eq(st2.subjects.len(), 1);
+    }
+
+    #[test]
+    fn test_sign_verify_wrong_key_fails() {
+        let s1 = seed();
+        let s2 = seed();
+        let mut subjects: List<Subject> = List.new();
+        subjects.push(subject_for_cog(&"foo".to_text(), &bytes_of("a")));
+        let st = statement_new(subjects, "p".to_text(), json_object(JsonObject.new()));
+        let env = dsse_sign_statement(&s1, &"k1".to_text(), &st).unwrap();
+        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
+        keys.insert("k1".to_text(), ed25519_public_key(&s2));
+        match dsse_verify_statement(&env, &keys) {
+            Err(DsseVerifyError.InvalidSignature) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_end_to_end_slsa() {
+        let s = seed();
+        let keyid = "ci-key".to_text();
+        let cog_archive = bytes_of("the-archive-bytes");
+        let env = build_signed_attestation(
+            &s, &keyid,
+            &"my-cog".to_text(), &cog_archive,
+            "https://example.com/build/v1".to_text(),
+            "https://github.com/example/runner".to_text(),
+            List.new(),
+            now_utc(),
+            now_utc(),
+            Some("inv-001".to_text()),
+        ).unwrap();
+        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
+        keys.insert(keyid, ed25519_public_key(&s));
+        let predicate = verify_attestation_for_cog(
+            &env, &keys, &"my-cog".to_text(), &cog_archive,
+        ).unwrap();
+        // predicate should have the SLSA shape
+        let p_obj = predicate.as_object().unwrap();
+        assert(p_obj.contains_key(&"buildDefinition".to_text()));
+        assert(p_obj.contains_key(&"runDetails".to_text()));
+    }
+
+    #[test]
+    fn test_attestation_wrong_cog_fails() {
+        let s = seed();
+        let env = build_signed_attestation(
+            &s, &"k".to_text(),
+            &"my-cog".to_text(), &bytes_of("a"),
+            "build".to_text(), "builder".to_text(),
+            List.new(), now_utc(), now_utc(), None,
+        ).unwrap();
+        let mut keys: Map<Text, Ed25519PublicKey> = Map.new();
+        keys.insert("k".to_text(), ed25519_public_key(&s));
+        match verify_attestation_for_cog(&env, &keys, &"other-cog".to_text(), &bytes_of("b")) {
+            Err(DsseVerifyError.InvalidPayload(_)) => {}
+            _ => unreachable(),
+        }
+    }
+}
