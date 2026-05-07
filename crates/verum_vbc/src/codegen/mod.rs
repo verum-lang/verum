@@ -11374,6 +11374,33 @@ impl VbcCodegen {
         // that has an intercept.  Methods without an intercept will surface
         // as a more debuggable "function returned Unit, expected T"
         // downstream rather than the opaque "method not found".
+        // **Cold-start optimisation**: pre-build a simple-name index
+        // over ctx.functions ONCE before the per-method loop.  The
+        // CallM pass needs to find every qualified ctx.functions
+        // entry whose trailing dotted segment equals `<method_name>`
+        // (e.g. `PathBuf.as_path` for method `as_path`).  The original
+        // loop walked all ~28K ctx.functions entries for each unique
+        // CallM method name — O(M × N) on cold start, several tens of
+        // ms on hello-world.  By bucketing once on `last_segment`,
+        // each method-name lookup becomes O(1) average.
+        // Owned suffix_index — references would tangle with the
+        // `&mut self.ctx.intern_string_raw` calls inside the per-method
+        // loop below.  Cloning each FunctionInfo once is cheaper than
+        // cloning per-method × per-candidate as the unindexed walk did.
+        let suffix_index: HashMap<String, Vec<(String, FunctionInfo)>> = {
+            let mut idx: HashMap<String, Vec<(String, FunctionInfo)>> = HashMap::new();
+            for (name, info) in self.ctx.functions.iter() {
+                if info.id.0 >= SENTINEL_THRESHOLD {
+                    continue;
+                }
+                let last_seg = match name.rfind('.') {
+                    Some(p) => name[p + 1..].to_string(),
+                    None => name.clone(),
+                };
+                idx.entry(last_seg).or_default().push((name.clone(), info.clone()));
+            }
+            idx
+        };
         for method_id in method_names {
             let method_name = match self
                 .ctx
@@ -11390,19 +11417,14 @@ impl VbcCodegen {
             if method_name.contains('.') {
                 continue;
             }
-            let suffix = format!(".{}", method_name);
-            // Walk ctx.functions and collect candidates: any qualified
-            // name ending with `.<method>` (skipping sentinel ids).
-            let candidates: Vec<(String, FunctionInfo)> = self
-                .ctx
-                .functions
-                .iter()
-                .filter(|(name, info)| {
-                    info.id.0 < SENTINEL_THRESHOLD
-                        && (name.ends_with(&suffix) || name.as_str() == method_name)
-                })
-                .map(|(n, i)| (n.clone(), i.clone()))
-                .collect();
+            // O(1) lookup via the suffix index — buckets every
+            // ctx.functions entry whose trailing dotted segment
+            // matches `method_name`.  Empty bucket → no candidates,
+            // skip without allocating.
+            let candidates: Vec<(String, FunctionInfo)> = suffix_index
+                .get(method_name.as_str())
+                .cloned()
+                .unwrap_or_default();
             for (qualified_name, info) in candidates {
                 if emitted.contains(&info.id.0) {
                     continue;

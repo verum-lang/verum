@@ -8,6 +8,7 @@
 //! - [`Constant`]: Constant pool entries
 //! - [`SpecializationEntry`]: Pre-computed specializations
 
+use std::collections::HashMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -761,6 +762,13 @@ pub struct StringTable {
     index: IndexMap<String, StringId>,
     /// Next available offset.
     next_offset: u32,
+    /// Reverse-lookup cache: `StringId → IndexMap position`. Lazily
+    /// populated on first `get` call and invalidated on `intern`.
+    /// Skipped from serialise to keep the wire format unchanged.
+    /// Uses `OnceLock` (not `OnceCell`) so `Arc<VbcModule>` stays
+    /// `Send + Sync` for the cross-thread async runtime path.
+    #[serde(skip, default)]
+    id_to_idx: std::sync::OnceLock<HashMap<StringId, usize>>,
 }
 
 impl StringTable {
@@ -769,6 +777,7 @@ impl StringTable {
         Self {
             index: IndexMap::new(),
             next_offset: 0,
+            id_to_idx: std::sync::OnceLock::new(),
         }
     }
 
@@ -785,16 +794,45 @@ impl StringTable {
         // Offset includes 4-byte length prefix + string bytes
         self.next_offset += 4 + s.len() as u32;
         self.index.insert(s.to_string(), id);
+        let new_idx = self.index.len() - 1;
+        // Incremental cache update.  `IndexMap::insert` for a fresh
+        // key APPENDS without shifting existing positions, so the
+        // cached `(id → idx)` entries remain correct — we only need
+        // to record the freshly-inserted (id, new_idx) pair.  Cold
+        // start was paying for full rebuild on every intern (28K+
+        // strings during finalize_module) before this fix.
+        if let Some(idx) = self.id_to_idx.get_mut() {
+            idx.insert(id, new_idx);
+        }
         id
     }
 
-    /// Gets a string by ID.
+    /// Gets a string by ID — O(1) amortised after first call.
+    ///
+    /// Pre-fix this was an O(N) linear scan of the IndexMap entries
+    /// (the table is keyed by string, not by id). The cost compounded
+    /// across the codegen + runtime hot paths (every variant-name
+    /// resolution, every method-dispatch retry, every parameter-name
+    /// extraction) and inflated cold-start by hundreds of milliseconds
+    /// on archive loads. The reverse index is lazily populated and
+    /// invalidated whenever `intern` shifts the IndexMap.
     pub fn get(&self, id: StringId) -> Option<&str> {
-        // Find the string with matching ID
-        self.index
-            .iter()
-            .find(|&(_, sid)| *sid == id)
-            .map(|(s, _)| s.as_str())
+        let idx = *self.ensure_reverse_index().get(&id)?;
+        self.index.get_index(idx).map(|(s, _)| s.as_str())
+    }
+
+    /// Lazy populator for the `StringId → IndexMap-position` reverse
+    /// cache.  Built on first reverse lookup and kept fresh by
+    /// `intern` (which clears the cache because IndexMap insertion
+    /// shifts existing positions).
+    fn ensure_reverse_index(&self) -> &HashMap<StringId, usize> {
+        self.id_to_idx.get_or_init(|| {
+            self.index
+                .iter()
+                .enumerate()
+                .map(|(i, (_, &sid))| (sid, i))
+                .collect()
+        })
     }
 
     /// Returns an iterator over all strings in order.

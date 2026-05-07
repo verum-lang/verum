@@ -396,6 +396,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // User module: protocols + declarations + bodies.  Stdlib
         // walking is gone entirely.
+        let trace_path = std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok();
+        let t_user = std::time::Instant::now();
         codegen.collect_protocol_definitions(module);
         codegen
             .collect_non_protocol_declarations(module)
@@ -413,9 +415,22 @@ impl<'s> CompilationPipeline<'s> {
         codegen
             .compile_module_items(module)
             .map_err(|e| anyhow::anyhow!("VBC codegen error (user bodies): {}", e))?;
+        if trace_path {
+            eprintln!(
+                "[compile_ast_to_vbc] user codegen: {:.2}ms",
+                t_user.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let t_fin = std::time::Instant::now();
         let mut vbc_module = codegen
             .finalize_module()
             .map_err(|e| anyhow::anyhow!("VBC codegen error (finalize): {}", e))?;
+        if trace_path {
+            eprintln!(
+                "[compile_ast_to_vbc] finalize_module: {:.2}ms",
+                t_fin.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         // Set source directory for FFI library path resolution
         // Use the parent directory of the input file, or current directory if none
