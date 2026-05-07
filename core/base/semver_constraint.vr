@@ -1,0 +1,773 @@
+// =============================================================================
+// base/semver_constraint.vr — SemVer 2.0 version constraint parser+matcher
+// =============================================================================
+// Layer: 1 (Foundation)
+// Dependencies: core, base/semver, collections, text
+// =============================================================================
+//
+// SemVer 2.0 (semver.org) version-requirement language. Combines two
+// established conventions:
+//
+//   * **Cargo-flavoured operators** — `=`, `^`, `~`, `>`, `>=`, `<`, `<=`,
+//     `*` (wildcard), x-ranges (`1.x`, `1.2.x`).
+//   * **npm-compound** — comma-separated AND (`>=1.0, <2.0`) and `||`
+//     alternation (OR) for cross-major requirements.
+//
+// **Categorical structure.** Constraints form a Boolean algebra over
+// version sets:
+//   * `Any` is the maximum element (matches every version).
+//   * `Empty` is the minimum element (matches none).
+//   * `And(c1, c2)` is intersection.
+//   * `Or(c1, c2)` is union.
+//   * Comparison constraints (`Eq`, `Gt`, `Lt`, `Range(lo, hi)`) are atoms.
+//
+// `simplify(c)` normalises any constraint into disjunctive normal form
+// — a disjunction of intervals — for efficient matching.
+//
+// **Caret (`^`) semantics.** Per Cargo: `^X.Y.Z` matches `>=X.Y.Z` and
+// `<` (next-incompatible-major). For pre-1.0 versions, `^0.Y.Z` matches
+// `>=0.Y.Z, <0.(Y+1).0`. For pre-0.1, `^0.0.Z` matches exactly `=0.0.Z`.
+//
+// **Tilde (`~`) semantics.** `~X.Y.Z` matches `>=X.Y.Z, <X.(Y+1).0`.
+// `~X.Y` matches `>=X.Y.0, <X.(Y+1).0`. `~X` matches `>=X.0.0, <(X+1).0.0`.
+//
+// **X-ranges.** `1.x` and `1.*` are equivalent to `>=1.0.0, <2.0.0`.
+// `1.2.x` is equivalent to `>=1.2.0, <1.3.0`.
+//
+// **Pre-release ordering.** Per SemVer §11: pre-release versions sort
+// before release versions of the same triple. By default, a constraint
+// with a non-pre-release operand does NOT match pre-release versions
+// (matching Cargo's behaviour). Pass `MatchOptions.allow_prerelease`
+// to enable cross-stability matching.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "SemVer 2.0 version constraint parser and matcher",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.base.semver_constraint;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.semver.{SemVer, SemVerError, parse as parse_version, cmp as cmp_versions, format_semver};
+
+// =============================================================================
+// SemVerConstraint — algebraic constraint tree
+// =============================================================================
+//
+// A constraint is a Boolean expression over comparison atoms.
+// Constructors:
+//   * `Any`     — matches every version
+//   * `Empty`   — matches no version
+//   * `Eq(v)`   — matches exactly `v`
+//   * `Gt(v)`   — matches versions strictly greater than `v`
+//   * `Gte(v)`  — matches versions greater-or-equal to `v`
+//   * `Lt(v)`   — matches versions strictly less than `v`
+//   * `Lte(v)`  — matches versions less-or-equal to `v`
+//   * `And(a,b)` — both `a` and `b` must match
+//   * `Or(a,b)`  — either `a` or `b` must match
+//
+// Convenience constructors `caret(v)`, `tilde(v)`, `x_range_major(M)`,
+// `x_range_minor(M, N)` desugar to canonical compound constraints.
+public type SemVerConstraint is
+      Any
+    | Empty
+    | Eq(SemVer)
+    | Gt(SemVer)
+    | Gte(SemVer)
+    | Lt(SemVer)
+    | Lte(SemVer)
+    | And(Heap<SemVerConstraint>, Heap<SemVerConstraint>)
+    | Or(Heap<SemVerConstraint>, Heap<SemVerConstraint>);
+
+public type SemVerConstraintError is
+      InvalidConstraint(Text)
+    | InvalidVersion(SemVerError);
+
+implement Display for SemVerConstraintError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidConstraint(reason) => f.write_str(f"semver-constraint: invalid ({reason})".as_str()),
+            InvalidVersion(e)         => Display.fmt(e, f),
+        }
+    }
+}
+
+implement Debug for SemVerConstraintError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+implement Eq for SemVerConstraintError {
+    fn eq(&self, other: &Self) -> Bool {
+        match (self, other) {
+            (InvalidConstraint(a), InvalidConstraint(b)) => a == b,
+            (InvalidVersion(a),    InvalidVersion(b))    => a.eq(b),
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// MatchOptions
+// =============================================================================
+
+public type MatchOptions is {
+    /// When true, pre-release versions are eligible for matching even
+    /// when constraint operands are non-pre-release. Default is false
+    /// (Cargo / npm semantics).
+    allow_prerelease: Bool,
+};
+
+public fn match_options_default() -> MatchOptions {
+    MatchOptions { allow_prerelease: false }
+}
+
+public fn match_options_allow_prerelease() -> MatchOptions {
+    MatchOptions { allow_prerelease: true }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Parse a constraint expression. Accepts:
+///   * Single-clause: `1.0.0`, `=1.0.0`, `^1.0.0`, `~1.2.3`, `>=1.0.0`,
+///                    `1.x`, `*`
+///   * Compound (AND): `>=1.0, <2.0`
+///   * Alternation (OR): `>=1 || >=2 <3`
+public fn parse(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    parse_or(s)
+}
+
+/// Test whether `version` satisfies `constraint` under `options`.
+public fn matches(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
+    matches_impl(c, v, opts)
+}
+
+/// Test with default options (pre-release-strict).
+public fn matches_default(c: &SemVerConstraint, v: &SemVer) -> Bool {
+    matches_impl(c, v, &match_options_default())
+}
+
+/// Render a constraint back to canonical text form.
+public fn format_constraint(c: &SemVerConstraint) -> Text {
+    format_impl(c)
+}
+
+// =============================================================================
+// Convenience constructors — desugar shorthand operators
+// =============================================================================
+
+/// `=v` — exact match.
+public fn exact(v: SemVer) -> SemVerConstraint {
+    SemVerConstraint.Eq(v)
+}
+
+/// `^X.Y.Z` per Cargo semantics:
+///   * X >= 1: matches `>=X.Y.Z, <(X+1).0.0`
+///   * X = 0, Y >= 1: matches `>=0.Y.Z, <0.(Y+1).0`
+///   * X = 0, Y = 0: matches `=0.0.Z`
+public fn caret(v: SemVer) -> SemVerConstraint {
+    if v.major != 0 {
+        let upper = SemVer { major: v.major + 1, minor: 0, patch: 0,
+                             pre_release: List.new(), build_meta: List.new() };
+        and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
+    } else if v.minor != 0 {
+        let upper = SemVer { major: 0, minor: v.minor + 1, patch: 0,
+                             pre_release: List.new(), build_meta: List.new() };
+        and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
+    } else {
+        SemVerConstraint.Eq(v)
+    }
+}
+
+/// `~X.Y.Z`: matches `>=X.Y.Z, <X.(Y+1).0`.
+public fn tilde(v: SemVer) -> SemVerConstraint {
+    let upper = SemVer { major: v.major, minor: v.minor + 1, patch: 0,
+                         pre_release: List.new(), build_meta: List.new() };
+    and(SemVerConstraint.Gte(v), SemVerConstraint.Lt(upper))
+}
+
+/// `~X.Y`: matches `>=X.Y.0, <X.(Y+1).0`.
+public fn tilde_minor(major: UInt64, minor: UInt64) -> SemVerConstraint {
+    let lower = SemVer { major: major, minor: minor, patch: 0,
+                         pre_release: List.new(), build_meta: List.new() };
+    let upper = SemVer { major: major, minor: minor + 1, patch: 0,
+                         pre_release: List.new(), build_meta: List.new() };
+    and(SemVerConstraint.Gte(lower), SemVerConstraint.Lt(upper))
+}
+
+/// `~X`: matches `>=X.0.0, <(X+1).0.0`.
+public fn tilde_major(major: UInt64) -> SemVerConstraint {
+    let lower = SemVer { major: major, minor: 0, patch: 0,
+                         pre_release: List.new(), build_meta: List.new() };
+    let upper = SemVer { major: major + 1, minor: 0, patch: 0,
+                         pre_release: List.new(), build_meta: List.new() };
+    and(SemVerConstraint.Gte(lower), SemVerConstraint.Lt(upper))
+}
+
+/// `X.x` / `X.*`: matches `>=X.0.0, <(X+1).0.0`.
+public fn x_range_major(major: UInt64) -> SemVerConstraint { tilde_major(major) }
+
+/// `X.Y.x` / `X.Y.*`: matches `>=X.Y.0, <X.(Y+1).0`.
+public fn x_range_minor(major: UInt64, minor: UInt64) -> SemVerConstraint { tilde_minor(major, minor) }
+
+/// AND helper that flattens `Any` and absorbs `Empty`.
+public fn and(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
+    match (&a, &b) {
+        (SemVerConstraint.Any, _)   => b,
+        (_, SemVerConstraint.Any)   => a,
+        (SemVerConstraint.Empty, _) => SemVerConstraint.Empty,
+        (_, SemVerConstraint.Empty) => SemVerConstraint.Empty,
+        _ => SemVerConstraint.And(Heap.new(a), Heap.new(b)),
+    }
+}
+
+/// OR helper that flattens `Empty` and absorbs `Any`.
+public fn or(a: SemVerConstraint, b: SemVerConstraint) -> SemVerConstraint {
+    match (&a, &b) {
+        (SemVerConstraint.Any, _)   => SemVerConstraint.Any,
+        (_, SemVerConstraint.Any)   => SemVerConstraint.Any,
+        (SemVerConstraint.Empty, _) => b,
+        (_, SemVerConstraint.Empty) => a,
+        _ => SemVerConstraint.Or(Heap.new(a), Heap.new(b)),
+    }
+}
+
+// =============================================================================
+// Matching engine
+// =============================================================================
+
+fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
+    match c {
+        SemVerConstraint.Any   => allow_prerelease_check(v, opts, &None),
+        SemVerConstraint.Empty => false,
+        SemVerConstraint.Eq(target) => {
+            // Eq with a pre-release operand always allows pre-release input
+            // for that exact tuple. Otherwise: the input version must
+            // structurally equal the operand (build_meta ignored per §10).
+            cmp_versions(v, target) == 0
+        }
+        SemVerConstraint.Gt(target) => {
+            cmp_versions(v, target) > 0
+                && allow_prerelease_check(v, opts, &Some(target.clone()))
+        }
+        SemVerConstraint.Gte(target) => {
+            cmp_versions(v, target) >= 0
+                && allow_prerelease_check(v, opts, &Some(target.clone()))
+        }
+        SemVerConstraint.Lt(target) => {
+            cmp_versions(v, target) < 0
+                && allow_prerelease_check(v, opts, &Some(target.clone()))
+        }
+        SemVerConstraint.Lte(target) => {
+            cmp_versions(v, target) <= 0
+                && allow_prerelease_check(v, opts, &Some(target.clone()))
+        }
+        SemVerConstraint.And(a, b) => {
+            matches_impl(&**a, v, opts) && matches_impl(&**b, v, opts)
+        }
+        SemVerConstraint.Or(a, b) => {
+            matches_impl(&**a, v, opts) || matches_impl(&**b, v, opts)
+        }
+    }
+}
+
+// Pre-release admissibility check: per Cargo/npm semantics, a constraint
+// without explicit pre-release-tagged operands does NOT match pre-release
+// versions. Override via MatchOptions.allow_prerelease.
+fn allow_prerelease_check(
+    v: &SemVer,
+    opts: &MatchOptions,
+    operand: &Maybe<SemVer>,
+) -> Bool {
+    if v.pre_release.is_empty() { return true; }
+    if opts.allow_prerelease { return true; }
+    match operand {
+        Some(op) => {
+            // The input is a pre-release; allow only when the operand
+            // itself is a pre-release of the same (major, minor, patch)
+            // triple.
+            !op.pre_release.is_empty()
+                && op.major == v.major
+                && op.minor == v.minor
+                && op.patch == v.patch
+        }
+        None => false,
+    }
+}
+
+// =============================================================================
+// Parser — tokenises by whitespace, then recursive-descent on operators
+// =============================================================================
+//
+// Grammar:
+//   constraint  := or_clause ('||' or_clause)*
+//   or_clause   := and_clause (',' and_clause)*
+//   and_clause  := atom (' ' atom)*    // implicit AND on whitespace
+//   atom        := op partial_version | partial_version | '*'
+//   op          := '=' | '^' | '~' | '>=' | '<=' | '>' | '<'
+//   partial_version := X[.Y[.Z[-pre[+build]]]] | 'X' | 'X.Y' | 'X.Y.Z'
+//
+// Whitespace inside compound constraints separates AND-clauses.
+// `||` separates OR-clauses (with optional surrounding whitespace).
+
+fn parse_or(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let parts = split_by_or(s);
+    if parts.is_empty() {
+        return Err(SemVerConstraintError.InvalidConstraint("empty constraint".to_text()));
+    }
+    let mut acc = parse_and(parts.get(0).unwrap())?;
+    let mut i = 1;
+    while i < parts.len() {
+        acc = or(acc, parse_and(parts.get(i).unwrap())?);
+        i = i + 1;
+    }
+    Ok(acc)
+}
+
+fn split_by_or(s: &Text) -> List<Text> {
+    let bs = s.as_bytes();
+    let mut parts: List<Text> = List.new();
+    let mut start = 0;
+    let mut i = 0;
+    while i + 1 < bs.len() {
+        if bs[i] == 0x7C_u8 && bs[i + 1] == 0x7C_u8 {
+            parts.push(slice_text(bs, start, i));
+            i = i + 2;
+            start = i;
+        } else {
+            i = i + 1;
+        }
+    }
+    parts.push(slice_text(bs, start, bs.len()));
+    parts
+}
+
+fn parse_and(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    // Split on commas + whitespace; both delimit AND-clauses.
+    let atoms = tokenise_atoms(s);
+    if atoms.is_empty() {
+        return Err(SemVerConstraintError.InvalidConstraint("empty AND-clause".to_text()));
+    }
+    let mut acc = parse_atom(atoms.get(0).unwrap())?;
+    let mut i = 1;
+    while i < atoms.len() {
+        acc = and(acc, parse_atom(atoms.get(i).unwrap())?);
+        i = i + 1;
+    }
+    Ok(acc)
+}
+
+fn tokenise_atoms(s: &Text) -> List<Text> {
+    let bs = s.as_bytes();
+    let mut atoms: List<Text> = List.new();
+    let mut cur = Text.new();
+    let mut i = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == 0x20_u8 || b == 0x09_u8 || b == 0x2C_u8 {
+            if !cur.is_empty() { atoms.push(cur.clone()); cur = Text.new(); }
+        } else {
+            cur.push_byte(b);
+        }
+        i = i + 1;
+    }
+    if !cur.is_empty() { atoms.push(cur); }
+    atoms
+}
+
+fn parse_atom(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    let trimmed = trim_text(s);
+    if trimmed.is_empty() {
+        return Err(SemVerConstraintError.InvalidConstraint("empty atom".to_text()));
+    }
+    let bs = trimmed.as_bytes();
+    // '*' is the wildcard.
+    if bs.len() == 1 && bs[0] == 0x2A_u8 {
+        return Ok(SemVerConstraint.Any);
+    }
+    // Determine operator prefix.
+    let (op, rest_off) = if bs.len() >= 2 && bs[0] == 0x3E_u8 && bs[1] == 0x3D_u8 {
+        ("gte", 2)
+    } else if bs.len() >= 2 && bs[0] == 0x3C_u8 && bs[1] == 0x3D_u8 {
+        ("lte", 2)
+    } else if bs[0] == 0x3E_u8 {
+        ("gt", 1)
+    } else if bs[0] == 0x3C_u8 {
+        ("lt", 1)
+    } else if bs[0] == 0x3D_u8 {
+        ("eq", 1)
+    } else if bs[0] == 0x5E_u8 {
+        ("caret", 1)
+    } else if bs[0] == 0x7E_u8 {
+        ("tilde", 1)
+    } else {
+        // Bare partial version — equivalent to `^v` when version is full,
+        // or x-range when contains 'x' / '*'.
+        ("default", 0)
+    };
+    let rest = slice_text(bs, rest_off, bs.len());
+    parse_atom_with_op(op, &rest)
+}
+
+fn parse_atom_with_op(op: &str, rest: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+    // Detect x-range: the version contains 'x', 'X', or '*' as a component.
+    let x_ranged = is_x_ranged(rest);
+    if x_ranged {
+        let pv = parse_partial_version(rest)?;
+        return Ok(partial_to_x_range(&pv));
+    }
+    let pv = parse_partial_version(rest)?;
+    let v = partial_to_semver(&pv);
+    if      op == "eq"     { Ok(SemVerConstraint.Eq(v)) }
+    else if op == "gt"     { Ok(SemVerConstraint.Gt(v)) }
+    else if op == "gte"    { Ok(SemVerConstraint.Gte(v)) }
+    else if op == "lt"     { Ok(SemVerConstraint.Lt(v)) }
+    else if op == "lte"    { Ok(SemVerConstraint.Lte(v)) }
+    else if op == "caret"  { Ok(caret(v)) }
+    else if op == "tilde"  {
+        match (pv.minor_present, pv.patch_present) {
+            (true, true)  => Ok(tilde(v)),
+            (true, false) => Ok(tilde_minor(v.major, v.minor)),
+            _             => Ok(tilde_major(v.major)),
+        }
+    }
+    else { // default
+        // Cargo: bare version = caret. npm: bare version = exact. We follow
+        // Cargo (since this is a Verum cog registry, Cargo-aligned).
+        Ok(caret(v))
+    }
+}
+
+// Partial version: `X[.Y[.Z[-pre[+build]]]]`, allowing `x`/`X`/`*` for
+// any wildcard component (the rest becoming implicit-zero).
+type PartialVersion is {
+    major:          UInt64,
+    minor:          UInt64,
+    patch:          UInt64,
+    minor_present:  Bool,
+    patch_present:  Bool,
+    pre_release:    List<Text>,
+    build_meta:     List<Text>,
+    minor_x:        Bool,
+    patch_x:        Bool,
+};
+
+fn is_x_ranged(s: &Text) -> Bool {
+    let bs = s.as_bytes();
+    let mut i = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == 0x78_u8 || b == 0x58_u8 || b == 0x2A_u8 {
+            // Must be at component boundary: prev char is '.' or start
+            let prev_ok = i == 0 || bs[i - 1] == 0x2E_u8;
+            let next_ok = i + 1 == bs.len() || bs[i + 1] == 0x2E_u8 || bs[i + 1] == 0x2D_u8;
+            if prev_ok && next_ok { return true; }
+        }
+        i = i + 1;
+    }
+    false
+}
+
+fn parse_partial_version(s: &Text) -> Result<PartialVersion, SemVerConstraintError> {
+    let trimmed = trim_text(s);
+    if trimmed.is_empty() {
+        return Err(SemVerConstraintError.InvalidConstraint("missing version".to_text()));
+    }
+    // Split out `+build` first.
+    let (pre_part, build_part) = split_at_byte(&trimmed, 0x2B_u8);
+    // Then split `-pre`.
+    let (core_part, pre_part2) = split_at_byte(&pre_part, 0x2D_u8);
+    let core_bytes = core_part.as_bytes();
+    let dots = collect_dots(core_bytes);
+    let major_text = slice_text(core_bytes, 0, if dots.len() >= 1 { dots.get(0).unwrap() } else { core_bytes.len() });
+    let minor_text = if dots.len() >= 1 {
+        let m_start = dots.get(0).unwrap() + 1;
+        let m_end = if dots.len() >= 2 { dots.get(1).unwrap() } else { core_bytes.len() };
+        Some(slice_text(core_bytes, m_start, m_end))
+    } else { None };
+    let patch_text = if dots.len() >= 2 {
+        let p_start = dots.get(1).unwrap() + 1;
+        Some(slice_text(core_bytes, p_start, core_bytes.len()))
+    } else { None };
+
+    let (major, _major_x) = parse_uint_or_x(&major_text)?;
+    let (minor, minor_x) = match &minor_text {
+        Some(t) => parse_uint_or_x(t)?,
+        None    => (0_u64, false),
+    };
+    let (patch, patch_x) = match &patch_text {
+        Some(t) => parse_uint_or_x(t)?,
+        None    => (0_u64, false),
+    };
+    let pre_release = match pre_part2.is_empty() {
+        true  => List.new(),
+        false => split_dot(&pre_part2),
+    };
+    let build_meta = match build_part.is_empty() {
+        true  => List.new(),
+        false => split_dot(&build_part),
+    };
+    Ok(PartialVersion {
+        major: major, minor: minor, patch: patch,
+        minor_present: minor_text.is_some(),
+        patch_present: patch_text.is_some(),
+        pre_release: pre_release,
+        build_meta: build_meta,
+        minor_x: minor_x,
+        patch_x: patch_x,
+    })
+}
+
+fn parse_uint_or_x(s: &Text) -> Result<(UInt64, Bool), SemVerConstraintError> {
+    if s.is_empty() {
+        return Err(SemVerConstraintError.InvalidConstraint("empty version component".to_text()));
+    }
+    let bs = s.as_bytes();
+    if bs.len() == 1 && (bs[0] == 0x78_u8 || bs[0] == 0x58_u8 || bs[0] == 0x2A_u8) {
+        return Ok((0_u64, true));
+    }
+    let mut acc: UInt64 = 0;
+    let mut i = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b < 0x30_u8 || b > 0x39_u8 {
+            return Err(SemVerConstraintError.InvalidConstraint(
+                "non-digit in version component: ".to_text().concat(s)
+            ));
+        }
+        acc = acc * 10 + ((b - 0x30_u8) as UInt64);
+        i = i + 1;
+    }
+    Ok((acc, false))
+}
+
+fn partial_to_semver(p: &PartialVersion) -> SemVer {
+    SemVer {
+        major: p.major, minor: p.minor, patch: p.patch,
+        pre_release: p.pre_release.clone(),
+        build_meta:  p.build_meta.clone(),
+    }
+}
+
+// X-range desugaring per the table in npm's documentation:
+//   "1.x"      = ">=1.0.0, <2.0.0"
+//   "1.2.x"    = ">=1.2.0, <1.3.0"
+//   "*"        = ">=0.0.0"  (Any)
+//   omitted    = treated as wildcard (tilde-major / tilde-minor)
+fn partial_to_x_range(p: &PartialVersion) -> SemVerConstraint {
+    if !p.minor_present || p.minor_x {
+        // X.x / *
+        x_range_major(p.major)
+    } else if !p.patch_present || p.patch_x {
+        // X.Y.x
+        x_range_minor(p.major, p.minor)
+    } else {
+        // Should not reach: partial_to_x_range called only when x_ranged
+        partial_to_semver(p) |> exact
+    }
+}
+
+// =============================================================================
+// Formatter — render constraint back to canonical text
+// =============================================================================
+
+fn format_impl(c: &SemVerConstraint) -> Text {
+    match c {
+        SemVerConstraint.Any        => "*".to_text(),
+        SemVerConstraint.Empty      => "<0.0.0".to_text(),
+        SemVerConstraint.Eq(v)      => "=".to_text().concat(&format_semver(v)),
+        SemVerConstraint.Gt(v)      => ">".to_text().concat(&format_semver(v)),
+        SemVerConstraint.Gte(v)     => ">=".to_text().concat(&format_semver(v)),
+        SemVerConstraint.Lt(v)      => "<".to_text().concat(&format_semver(v)),
+        SemVerConstraint.Lte(v)     => "<=".to_text().concat(&format_semver(v)),
+        SemVerConstraint.And(a, b)  => format_impl(&**a).concat(&", ".to_text()).concat(&format_impl(&**b)),
+        SemVerConstraint.Or(a, b)   => format_impl(&**a).concat(&" || ".to_text()).concat(&format_impl(&**b)),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
+    let mut buf: List<Byte> = List.new();
+    let mut i = start;
+    while i < end { buf.push(bytes[i]); i = i + 1; }
+    Text.from_bytes(&buf).unwrap_or(Text.new())
+}
+
+fn trim_text(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut start = 0;
+    while start < bs.len() && (bs[start] == 0x20_u8 || bs[start] == 0x09_u8) { start = start + 1; }
+    let mut end = bs.len();
+    while end > start && (bs[end - 1] == 0x20_u8 || bs[end - 1] == 0x09_u8) { end = end - 1; }
+    slice_text(bs, start, end)
+}
+
+fn split_at_byte(s: &Text, b: Byte) -> (Text, Text) {
+    let bs = s.as_bytes();
+    let mut i = 0;
+    while i < bs.len() {
+        if bs[i] == b {
+            return (slice_text(bs, 0, i), slice_text(bs, i + 1, bs.len()));
+        }
+        i = i + 1;
+    }
+    (s.clone(), Text.new())
+}
+
+fn split_dot(s: &Text) -> List<Text> {
+    let bs = s.as_bytes();
+    let mut parts: List<Text> = List.new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bs.len() {
+        if bs[i] == 0x2E_u8 {
+            parts.push(slice_text(bs, start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    parts.push(slice_text(bs, start, bs.len()));
+    parts
+}
+
+fn collect_dots(bytes: &[Byte]) -> List<Int> {
+    let mut dots: List<Int> = List.new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x2E_u8 { dots.push(i); }
+        i = i + 1;
+    }
+    dots
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use base.semver.{parse as parse_v};
+
+    fn v(s: &str) -> SemVer { parse_v(&s.to_text()).unwrap() }
+
+    #[test]
+    fn test_parse_exact() {
+        let c = parse(&"=1.2.3".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.2.3")));
+        assert(!matches_default(&c, &v("1.2.4")));
+    }
+
+    #[test]
+    fn test_parse_caret() {
+        let c = parse(&"^1.2.3".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.2.3")));
+        assert(matches_default(&c, &v("1.5.0")));
+        assert(matches_default(&c, &v("1.99.99")));
+        assert(!matches_default(&c, &v("2.0.0")));
+        assert(!matches_default(&c, &v("1.2.2")));
+    }
+
+    #[test]
+    fn test_parse_caret_zero_x() {
+        // ^0.5.3 → >=0.5.3, <0.6.0
+        let c = parse(&"^0.5.3".to_text()).unwrap();
+        assert(matches_default(&c, &v("0.5.3")));
+        assert(matches_default(&c, &v("0.5.99")));
+        assert(!matches_default(&c, &v("0.6.0")));
+        assert(!matches_default(&c, &v("0.5.2")));
+    }
+
+    #[test]
+    fn test_parse_caret_zero_zero_z() {
+        // ^0.0.3 → =0.0.3
+        let c = parse(&"^0.0.3".to_text()).unwrap();
+        assert(matches_default(&c, &v("0.0.3")));
+        assert(!matches_default(&c, &v("0.0.4")));
+    }
+
+    #[test]
+    fn test_parse_tilde() {
+        // ~1.2.3 → >=1.2.3, <1.3.0
+        let c = parse(&"~1.2.3".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.2.3")));
+        assert(matches_default(&c, &v("1.2.99")));
+        assert(!matches_default(&c, &v("1.3.0")));
+    }
+
+    #[test]
+    fn test_parse_x_range() {
+        let c = parse(&"1.x".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.0.0")));
+        assert(matches_default(&c, &v("1.99.99")));
+        assert(!matches_default(&c, &v("2.0.0")));
+    }
+
+    #[test]
+    fn test_parse_compound() {
+        let c = parse(&">=1.0.0, <2.0.0".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.5.0")));
+        assert(!matches_default(&c, &v("0.9.0")));
+        assert(!matches_default(&c, &v("2.0.0")));
+    }
+
+    #[test]
+    fn test_parse_or() {
+        let c = parse(&">=1.0.0 <2.0.0 || >=3.0.0".to_text()).unwrap();
+        assert(matches_default(&c, &v("1.5.0")));
+        assert(matches_default(&c, &v("3.5.0")));
+        assert(!matches_default(&c, &v("2.5.0")));
+    }
+
+    #[test]
+    fn test_wildcard() {
+        let c = parse(&"*".to_text()).unwrap();
+        assert(matches_default(&c, &v("0.0.1")));
+        assert(matches_default(&c, &v("99.99.99")));
+    }
+
+    #[test]
+    fn test_prerelease_strict() {
+        let c = parse(&"^1.0.0".to_text()).unwrap();
+        // 1.0.0 matches; 1.0.0-alpha does not (Cargo strict).
+        assert(matches_default(&c, &v("1.0.0")));
+        assert(!matches_default(&c, &v("1.0.0-alpha")));
+        // With allow_prerelease, both match.
+        assert(matches(&c, &v("1.0.0-alpha"), &match_options_allow_prerelease()));
+    }
+
+    #[test]
+    fn test_format_roundtrip() {
+        let c = parse(&">=1.0.0".to_text()).unwrap();
+        let rendered = format_constraint(&c);
+        let reparsed = parse(&rendered).unwrap();
+        // Round-trip equivalence by matching identical version sets:
+        assert_eq(matches_default(&c, &v("1.0.0")), matches_default(&reparsed, &v("1.0.0")));
+        assert_eq(matches_default(&c, &v("0.9.9")), matches_default(&reparsed, &v("0.9.9")));
+    }
+
+    #[test]
+    fn test_invalid_constraint_rejected() {
+        assert(parse(&"".to_text()).is_err());
+        assert(parse(&"abc".to_text()).is_err());
+    }
+}

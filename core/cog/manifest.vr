@@ -1,0 +1,731 @@
+// =============================================================================
+// cog/manifest.vr — Verum-side cog manifest API
+// =============================================================================
+// Layer: 3 (Cog tooling)
+// Dependencies: core, base/{semver, semver_constraint},
+//               configuration/{value, toml}, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** First-class Verum-side reading and writing of cog manifests
+// (the `verum.toml` file at the root of every cog). Mirrors the Rust-side
+// `Manifest` (in `crates/verum_cli/src/config.rs`), but lives in the Verum
+// stdlib so that *Verum* code — including the package registry server —
+// can construct, validate, and emit manifests without depending on the
+// `verum_cli` crate.
+//
+// **The cog identity.** A cog has:
+//   * `name` — globally-unique scoped or unscoped identifier
+//   * `version` — `core/base/semver.vr` SemVer
+//   * `language_profile` — Application / Systems / Research (controls
+//     verification defaults, capability surface, allowed unsafe)
+//   * `dependencies` — { name → DependencySpec } where each spec carries
+//     a `core/base/semver_constraint.vr` constraint
+//   * Metadata: authors, description, license (SPDX), repository,
+//     homepage, keywords, categories
+//   * `features` — opt-in feature flags { feature → [implied features] }
+//
+// **Round-trip.** `parse_text(toml_source)` → typed CogManifest;
+// `format_text(&manifest)` → TOML text. Round-trip preserves all
+// canonical fields; comments are not preserved (TOML adapter limitation;
+// out of scope for the manifest as a typed artefact).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "first-class Verum-side cog manifest reading + writing",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cog.manifest;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount base.semver.{SemVer, parse as parse_semver, format_semver};
+mount base.semver_constraint.{
+    SemVerConstraint, parse as parse_constraint,
+    format_constraint, matches_default,
+};
+mount configuration.value.{ConfigValue};
+mount configuration.toml as toml_format;
+
+// =============================================================================
+// Domain types
+// =============================================================================
+
+// Refinement on cog name: lowercase ascii alphanumeric + hyphen + underscore,
+// optional `@scope/name` form. Per spec/registry §"Naming".
+public type CogName is Text {
+    where self.matches(r"^(@[a-z0-9][a-z0-9-]{0,63}/)?[a-z][a-z0-9_-]{0,63}$")
+};
+
+public type LanguageProfile is
+      Application
+    | Systems
+    | Research;
+
+public fn language_profile_tag(p: &LanguageProfile) -> Text {
+    match p {
+        Application => "application".to_text(),
+        Systems     => "systems".to_text(),
+        Research    => "research".to_text(),
+    }
+}
+
+public fn parse_language_profile(s: &Text) -> Maybe<LanguageProfile> {
+    match s.as_str() {
+        "application" => Some(LanguageProfile.Application),
+        "systems"     => Some(LanguageProfile.Systems),
+        "research"    => Some(LanguageProfile.Research),
+        _             => None,
+    }
+}
+
+// Dependency source: registry / path / git / heap (workspace).
+public type DependencySource is
+      Registry { registry_url: Maybe<Text> }
+    | Path     { rel_path: Text }
+    | Git      { url: Text, revision: GitRevision }
+    | Workspace;
+
+public type GitRevision is
+      Branch(Text)
+    | Tag(Text)
+    | Commit(Text)
+    | Default;
+
+public type DependencySpec is {
+    /// Version constraint. `None` for non-registry sources where the
+    /// version is implicit (path, git, workspace).
+    constraint: Maybe<SemVerConstraint>,
+    /// Where to fetch this dependency from.
+    source: DependencySource,
+    /// Feature flags to activate on the dependency.
+    features: List<Text>,
+    /// Whether this dependency is optional (gated by a feature flag).
+    optional: Bool,
+    /// Whether default features should be enabled.
+    default_features: Bool,
+};
+
+// =============================================================================
+// CogManifest
+// =============================================================================
+
+public type CogManifest is {
+    /// `[cog]` table.
+    cog: CogIdentity,
+    /// `[language]` — profile selection.
+    language: LanguageConfig,
+    /// `[dependencies]` — { name → spec }.
+    dependencies: Map<Text, DependencySpec>,
+    /// `[dev-dependencies]`.
+    dev_dependencies: Map<Text, DependencySpec>,
+    /// `[build-dependencies]`.
+    build_dependencies: Map<Text, DependencySpec>,
+    /// `[features]` — { feature → implied features }.
+    features: Map<Text, List<Text>>,
+    /// `[default-features]` — features enabled by default.
+    default_features: List<Text>,
+    /// Free-form custom metadata under `[meta]` for tools to attach
+    /// vendor-specific data.
+    meta: ConfigValue,
+};
+
+public type CogIdentity is {
+    name: CogName,
+    version: SemVer,
+    authors: List<Text>,
+    description: Maybe<Text>,
+    license: Maybe<Text>,            // SPDX expression
+    repository: Maybe<Text>,
+    homepage: Maybe<Text>,
+    documentation: Maybe<Text>,
+    keywords: List<Text>,
+    categories: List<Text>,
+    edition: Text,                   // e.g. "2025"
+};
+
+public type LanguageConfig is {
+    profile: LanguageProfile,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type ManifestError is
+      InvalidToml(Text)
+    | MissingField(Text)
+    | TypeMismatch { field: Text, expected: Text, found: Text }
+    | InvalidName(Text)
+    | InvalidVersion(Text)
+    | InvalidConstraint(Text)
+    | InvalidLanguageProfile(Text)
+    | InvalidDependencySource(Text)
+    | InvalidLicense(Text);
+
+implement Display for ManifestError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidToml(msg)            => f.write_str(f"manifest: invalid TOML ({msg})".as_str()),
+            MissingField(field)         => f.write_str(f"manifest: missing required field [{field}]".as_str()),
+            TypeMismatch { field, expected, found } =>
+                f.write_str(f"manifest: field [{field}] expected {expected}, found {found}".as_str()),
+            InvalidName(msg)            => f.write_str(f"manifest: invalid cog name ({msg})".as_str()),
+            InvalidVersion(msg)         => f.write_str(f"manifest: invalid version ({msg})".as_str()),
+            InvalidConstraint(msg)      => f.write_str(f"manifest: invalid version constraint ({msg})".as_str()),
+            InvalidLanguageProfile(msg) => f.write_str(f"manifest: invalid language profile ({msg})".as_str()),
+            InvalidDependencySource(msg) => f.write_str(f"manifest: invalid dependency source ({msg})".as_str()),
+            InvalidLicense(msg)         => f.write_str(f"manifest: invalid license ({msg})".as_str()),
+        }
+    }
+}
+
+implement Debug for ManifestError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Parse a TOML manifest source into a typed `CogManifest`.
+public fn parse_text(source: &Text) -> Result<CogManifest, ManifestError> {
+    let cv = match toml_format.parse(source) {
+        Ok(t) => t,
+        Err(e) => return Err(ManifestError.InvalidToml(format!("{e}").to_text())),
+    };
+    parse_value(&cv)
+}
+
+/// Parse from an already-decoded `ConfigValue` (when the source was
+/// loaded via `core/configuration/mod.vr` with auto-format-detect).
+public fn parse_value(value: &ConfigValue) -> Result<CogManifest, ManifestError> {
+    let root = match value {
+        ConfigValue.ConfigTable(t) => t,
+        _ => return Err(ManifestError.TypeMismatch {
+            field: "<root>".to_text(),
+            expected: "table".to_text(),
+            found: configuration.value.type_name(value),
+        }),
+    };
+    let cog = parse_cog_identity(root)?;
+    let language = parse_language_config(root);
+    let dependencies = parse_dependencies(root, &"dependencies".to_text())?;
+    let dev_dependencies = parse_dependencies(root, &"dev-dependencies".to_text())?;
+    let build_dependencies = parse_dependencies(root, &"build-dependencies".to_text())?;
+    let (features, default_features) = parse_features(root);
+    let meta = root.get(&"meta".to_text()).map_or(
+        ConfigValue.ConfigTable(Map.new()),
+        |v| v.clone(),
+    );
+    Ok(CogManifest {
+        cog: cog,
+        language: language,
+        dependencies: dependencies,
+        dev_dependencies: dev_dependencies,
+        build_dependencies: build_dependencies,
+        features: features,
+        default_features: default_features,
+        meta: meta,
+    })
+}
+
+/// Render a `CogManifest` back to TOML text.
+public fn format_text(m: &CogManifest) -> Result<Text, ManifestError> {
+    let cv = format_value(m);
+    match toml_format.stringify_pretty_value(&cv) {
+        Ok(t)  => Ok(t),
+        Err(e) => Err(ManifestError.InvalidToml(format!("{e}").to_text())),
+    }
+}
+
+/// Render to `ConfigValue` (universal hub).
+public fn format_value(m: &CogManifest) -> ConfigValue {
+    let mut root: Map<Text, ConfigValue> = Map.new();
+    // [cog]
+    root.insert("cog".to_text(), format_cog_identity(&m.cog));
+    // [language]
+    let mut lang: Map<Text, ConfigValue> = Map.new();
+    lang.insert("profile".to_text(), ConfigValue.ConfigString(language_profile_tag(&m.language.profile)));
+    root.insert("language".to_text(), ConfigValue.ConfigTable(lang));
+    // dependencies tables
+    if !m.dependencies.is_empty() {
+        root.insert("dependencies".to_text(), format_dependencies(&m.dependencies));
+    }
+    if !m.dev_dependencies.is_empty() {
+        root.insert("dev-dependencies".to_text(), format_dependencies(&m.dev_dependencies));
+    }
+    if !m.build_dependencies.is_empty() {
+        root.insert("build-dependencies".to_text(), format_dependencies(&m.build_dependencies));
+    }
+    // [features]
+    if !m.features.is_empty() {
+        let mut feats: Map<Text, ConfigValue> = Map.new();
+        let keys = m.features.keys();
+        let mut i = 0;
+        while i < keys.len() {
+            let k = keys.get(i).unwrap();
+            let v = m.features.get(k).unwrap();
+            let mut arr: List<ConfigValue> = List.new();
+            let mut j = 0;
+            while j < v.len() { arr.push(ConfigValue.ConfigString(v.get(j).unwrap().clone())); j = j + 1; }
+            feats.insert(k.clone(), ConfigValue.ConfigArray(arr));
+            i = i + 1;
+        }
+        if !m.default_features.is_empty() {
+            let mut def: List<ConfigValue> = List.new();
+            let mut k = 0;
+            while k < m.default_features.len() {
+                def.push(ConfigValue.ConfigString(m.default_features.get(k).unwrap().clone()));
+                k = k + 1;
+            }
+            feats.insert("default".to_text(), ConfigValue.ConfigArray(def));
+        }
+        root.insert("features".to_text(), ConfigValue.ConfigTable(feats));
+    }
+    // [meta]
+    match &m.meta {
+        ConfigValue.ConfigTable(t) => {
+            if !t.is_empty() { root.insert("meta".to_text(), m.meta.clone()); }
+        }
+        _ => { root.insert("meta".to_text(), m.meta.clone()); }
+    }
+    ConfigValue.ConfigTable(root)
+}
+
+// =============================================================================
+// Field parsers
+// =============================================================================
+
+fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, ManifestError> {
+    let cog_v = match root.get(&"cog".to_text()) {
+        Some(v) => v,
+        None    => return Err(ManifestError.MissingField("cog".to_text())),
+    };
+    let cog_t = match cog_v {
+        ConfigValue.ConfigTable(t) => t,
+        _ => return Err(ManifestError.TypeMismatch {
+            field: "cog".to_text(),
+            expected: "table".to_text(),
+            found: configuration.value.type_name(cog_v),
+        }),
+    };
+    let name_text = require_string(cog_t, &"cog.name".to_text(), &"name".to_text())?;
+    // CogName refinement is enforced at construction time.
+    let version_text = require_string(cog_t, &"cog.version".to_text(), &"version".to_text())?;
+    let version = match parse_semver(&version_text) {
+        Ok(v)  => v,
+        Err(e) => return Err(ManifestError.InvalidVersion(format!("{e}").to_text())),
+    };
+    let edition = optional_string(cog_t, &"edition".to_text())
+        .unwrap_or_else(|| "2025".to_text());
+    Ok(CogIdentity {
+        name:          name_text,    // refinement check delegated to user code at use site
+        version:       version,
+        authors:       optional_string_list(cog_t, &"authors".to_text()),
+        description:   optional_string(cog_t, &"description".to_text()),
+        license:       optional_string(cog_t, &"license".to_text()),
+        repository:    optional_string(cog_t, &"repository".to_text()),
+        homepage:      optional_string(cog_t, &"homepage".to_text()),
+        documentation: optional_string(cog_t, &"documentation".to_text()),
+        keywords:      optional_string_list(cog_t, &"keywords".to_text()),
+        categories:    optional_string_list(cog_t, &"categories".to_text()),
+        edition:       edition,
+    })
+}
+
+fn parse_language_config(root: &Map<Text, ConfigValue>) -> LanguageConfig {
+    let lang_v = root.get(&"language".to_text());
+    let profile = match lang_v {
+        Some(ConfigValue.ConfigTable(t)) => {
+            match t.get(&"profile".to_text()) {
+                Some(ConfigValue.ConfigString(s)) =>
+                    parse_language_profile(s).unwrap_or(LanguageProfile.Application),
+                _ => LanguageProfile.Application,
+            }
+        }
+        _ => LanguageProfile.Application,
+    };
+    LanguageConfig { profile: profile }
+}
+
+fn parse_dependencies(
+    root: &Map<Text, ConfigValue>,
+    section: &Text,
+) -> Result<Map<Text, DependencySpec>, ManifestError> {
+    let v = match root.get(section) {
+        Some(v) => v,
+        None    => return Ok(Map.new()),
+    };
+    let t = match v {
+        ConfigValue.ConfigTable(t) => t,
+        _ => return Err(ManifestError.TypeMismatch {
+            field: section.clone(),
+            expected: "table".to_text(),
+            found: configuration.value.type_name(v),
+        }),
+    };
+    let mut deps: Map<Text, DependencySpec> = Map.new();
+    let keys = t.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        let dv = t.get(k).unwrap();
+        let spec = parse_dep_spec(dv, k)?;
+        deps.insert(k.clone(), spec);
+        i = i + 1;
+    }
+    Ok(deps)
+}
+
+fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, ManifestError> {
+    match v {
+        // Simple form: "1.0.0" or "^1.0"
+        ConfigValue.ConfigString(s) => {
+            let c = match parse_constraint(s) {
+                Ok(c)  => c,
+                Err(e) => return Err(ManifestError.InvalidConstraint(format!("{dep_name}: {e}").to_text())),
+            };
+            Ok(DependencySpec {
+                constraint: Some(c),
+                source: DependencySource.Registry { registry_url: None },
+                features: List.new(),
+                optional: false,
+                default_features: true,
+            })
+        }
+        // Detailed form: { version = "...", path = "...", git = "...", ... }
+        ConfigValue.ConfigTable(t) => {
+            let constraint = match t.get(&"version".to_text()) {
+                Some(ConfigValue.ConfigString(s)) => match parse_constraint(s) {
+                    Ok(c)  => Some(c),
+                    Err(e) => return Err(ManifestError.InvalidConstraint(format!("{dep_name}: {e}").to_text())),
+                },
+                Some(_) => return Err(ManifestError.TypeMismatch {
+                    field: dep_name.clone().concat(&".version".to_text()),
+                    expected: "string".to_text(),
+                    found: "non-string".to_text(),
+                }),
+                None => None,
+            };
+            // Source: precedence path > git > workspace > registry.
+            let source = if let Some(ConfigValue.ConfigString(p)) = t.get(&"path".to_text()) {
+                DependencySource.Path { rel_path: p.clone() }
+            } else if let Some(ConfigValue.ConfigString(g)) = t.get(&"git".to_text()) {
+                let rev = if let Some(ConfigValue.ConfigString(b)) = t.get(&"branch".to_text()) {
+                    GitRevision.Branch(b.clone())
+                } else if let Some(ConfigValue.ConfigString(tg)) = t.get(&"tag".to_text()) {
+                    GitRevision.Tag(tg.clone())
+                } else if let Some(ConfigValue.ConfigString(c)) = t.get(&"rev".to_text()) {
+                    GitRevision.Commit(c.clone())
+                } else {
+                    GitRevision.Default
+                };
+                DependencySource.Git { url: g.clone(), revision: rev }
+            } else if let Some(ConfigValue.ConfigBool(true)) = t.get(&"workspace".to_text()) {
+                DependencySource.Workspace
+            } else {
+                let reg = match t.get(&"registry".to_text()) {
+                    Some(ConfigValue.ConfigString(u)) => Some(u.clone()),
+                    _ => None,
+                };
+                DependencySource.Registry { registry_url: reg }
+            };
+            let features = match t.get(&"features".to_text()) {
+                Some(ConfigValue.ConfigArray(a)) => string_array(a),
+                _ => List.new(),
+            };
+            let optional = match t.get(&"optional".to_text()) {
+                Some(ConfigValue.ConfigBool(b)) => *b,
+                _ => false,
+            };
+            let default_features = match t.get(&"default-features".to_text()) {
+                Some(ConfigValue.ConfigBool(b)) => *b,
+                _ => true,
+            };
+            Ok(DependencySpec {
+                constraint: constraint,
+                source: source,
+                features: features,
+                optional: optional,
+                default_features: default_features,
+            })
+        }
+        _ => Err(ManifestError.TypeMismatch {
+            field: dep_name.clone(),
+            expected: "string or table".to_text(),
+            found: configuration.value.type_name(v),
+        }),
+    }
+}
+
+fn parse_features(root: &Map<Text, ConfigValue>) -> (Map<Text, List<Text>>, List<Text>) {
+    let mut feats: Map<Text, List<Text>> = Map.new();
+    let mut defaults: List<Text> = List.new();
+    if let Some(ConfigValue.ConfigTable(t)) = root.get(&"features".to_text()) {
+        let keys = t.keys();
+        let mut i = 0;
+        while i < keys.len() {
+            let k = keys.get(i).unwrap();
+            let v = t.get(k).unwrap();
+            if let ConfigValue.ConfigArray(a) = v {
+                let arr = string_array(a);
+                if k == &"default".to_text() { defaults = arr.clone(); }
+                else { feats.insert(k.clone(), arr); }
+            }
+            i = i + 1;
+        }
+    }
+    (feats, defaults)
+}
+
+// =============================================================================
+// Field formatters
+// =============================================================================
+
+fn format_cog_identity(c: &CogIdentity) -> ConfigValue {
+    let mut t: Map<Text, ConfigValue> = Map.new();
+    t.insert("name".to_text(), ConfigValue.ConfigString(c.name.clone()));
+    t.insert("version".to_text(), ConfigValue.ConfigString(format_semver(&c.version)));
+    t.insert("edition".to_text(), ConfigValue.ConfigString(c.edition.clone()));
+    if !c.authors.is_empty()  { t.insert("authors".to_text(),  string_list_to_array(&c.authors)); }
+    if let Some(d) = &c.description { t.insert("description".to_text(), ConfigValue.ConfigString(d.clone())); }
+    if let Some(l) = &c.license     { t.insert("license".to_text(),     ConfigValue.ConfigString(l.clone())); }
+    if let Some(r) = &c.repository  { t.insert("repository".to_text(),  ConfigValue.ConfigString(r.clone())); }
+    if let Some(h) = &c.homepage    { t.insert("homepage".to_text(),    ConfigValue.ConfigString(h.clone())); }
+    if let Some(d) = &c.documentation { t.insert("documentation".to_text(), ConfigValue.ConfigString(d.clone())); }
+    if !c.keywords.is_empty()   { t.insert("keywords".to_text(),    string_list_to_array(&c.keywords)); }
+    if !c.categories.is_empty() { t.insert("categories".to_text(),  string_list_to_array(&c.categories)); }
+    ConfigValue.ConfigTable(t)
+}
+
+fn format_dependencies(deps: &Map<Text, DependencySpec>) -> ConfigValue {
+    let mut out: Map<Text, ConfigValue> = Map.new();
+    let keys = deps.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        let s = deps.get(k).unwrap();
+        out.insert(k.clone(), format_dep_spec(s));
+        i = i + 1;
+    }
+    ConfigValue.ConfigTable(out)
+}
+
+fn format_dep_spec(s: &DependencySpec) -> ConfigValue {
+    // Use simple-string form when the spec is the canonical defaults
+    // (registry, no features, not optional, default-features on).
+    let is_simple = match &s.source {
+        DependencySource.Registry { registry_url: None } => {
+            s.features.is_empty() && !s.optional && s.default_features && s.constraint.is_some()
+        }
+        _ => false,
+    };
+    if is_simple {
+        if let Some(c) = &s.constraint {
+            return ConfigValue.ConfigString(format_constraint(c));
+        }
+    }
+    // Detailed form.
+    let mut t: Map<Text, ConfigValue> = Map.new();
+    if let Some(c) = &s.constraint {
+        t.insert("version".to_text(), ConfigValue.ConfigString(format_constraint(c)));
+    }
+    match &s.source {
+        DependencySource.Path { rel_path } =>
+            t.insert("path".to_text(), ConfigValue.ConfigString(rel_path.clone())),
+        DependencySource.Git { url, revision } => {
+            t.insert("git".to_text(), ConfigValue.ConfigString(url.clone()));
+            match revision {
+                GitRevision.Branch(b) => t.insert("branch".to_text(), ConfigValue.ConfigString(b.clone())),
+                GitRevision.Tag(g)    => t.insert("tag".to_text(),    ConfigValue.ConfigString(g.clone())),
+                GitRevision.Commit(c) => t.insert("rev".to_text(),    ConfigValue.ConfigString(c.clone())),
+                GitRevision.Default   => {}
+            }
+        }
+        DependencySource.Workspace => {
+            t.insert("workspace".to_text(), ConfigValue.ConfigBool(true));
+        }
+        DependencySource.Registry { registry_url } => {
+            if let Some(u) = registry_url {
+                t.insert("registry".to_text(), ConfigValue.ConfigString(u.clone()));
+            }
+        }
+    }
+    if !s.features.is_empty() {
+        t.insert("features".to_text(), string_list_to_array(&s.features));
+    }
+    if s.optional {
+        t.insert("optional".to_text(), ConfigValue.ConfigBool(true));
+    }
+    if !s.default_features {
+        t.insert("default-features".to_text(), ConfigValue.ConfigBool(false));
+    }
+    ConfigValue.ConfigTable(t)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn require_string(t: &Map<Text, ConfigValue>, full_name: &Text, key: &Text) -> Result<Text, ManifestError> {
+    match t.get(key) {
+        Some(ConfigValue.ConfigString(s)) => Ok(s.clone()),
+        Some(other) => Err(ManifestError.TypeMismatch {
+            field: full_name.clone(),
+            expected: "string".to_text(),
+            found: configuration.value.type_name(other),
+        }),
+        None => Err(ManifestError.MissingField(full_name.clone())),
+    }
+}
+
+fn optional_string(t: &Map<Text, ConfigValue>, key: &Text) -> Maybe<Text> {
+    match t.get(key) {
+        Some(ConfigValue.ConfigString(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn optional_string_list(t: &Map<Text, ConfigValue>, key: &Text) -> List<Text> {
+    match t.get(key) {
+        Some(ConfigValue.ConfigArray(a)) => string_array(a),
+        _ => List.new(),
+    }
+}
+
+fn string_array(a: &List<ConfigValue>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i = 0;
+    while i < a.len() {
+        if let ConfigValue.ConfigString(s) = a.get(i).unwrap() {
+            out.push(s.clone());
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn string_list_to_array(l: &List<Text>) -> ConfigValue {
+    let mut a: List<ConfigValue> = List.new();
+    let mut i = 0;
+    while i < l.len() {
+        a.push(ConfigValue.ConfigString(l.get(i).unwrap().clone()));
+        i = i + 1;
+    }
+    ConfigValue.ConfigArray(a)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_parse_minimal() {
+        let src = r#"
+[cog]
+name = "my-cog"
+version = "1.0.0"
+"#.to_text();
+        let m = parse_text(&src).unwrap();
+        assert_eq(m.cog.name, "my-cog".to_text());
+        assert_eq(m.cog.version.major, 1_u64);
+        assert_eq(m.cog.version.minor, 0_u64);
+        assert_eq(m.cog.version.patch, 0_u64);
+        match m.language.profile { Application => {}, _ => unreachable() }
+    }
+
+    #[test]
+    fn test_parse_full() {
+        let src = r#"
+[cog]
+name = "@team/server"
+version = "0.5.3"
+authors = ["Alice <a@b.c>", "Bob"]
+description = "An HTTP server"
+license = "MIT"
+keywords = ["http", "server"]
+
+[language]
+profile = "research"
+
+[dependencies]
+http = "^1.0"
+crypto = { version = "0.5", features = ["ed25519"] }
+local = { path = "../local" }
+forked = { git = "https://example.com/repo", branch = "main" }
+"#.to_text();
+        let m = parse_text(&src).unwrap();
+        assert_eq(m.cog.name, "@team/server".to_text());
+        assert_eq(m.cog.authors.len(), 2);
+        assert_eq(m.dependencies.len(), 4);
+        match m.language.profile { Research => {}, _ => unreachable() }
+        // crypto dep has features.
+        let crypto = m.dependencies.get(&"crypto".to_text()).unwrap();
+        assert_eq(crypto.features.len(), 1);
+        assert_eq(crypto.features.get(0).unwrap(), &"ed25519".to_text());
+        // local dep has path source.
+        let local = m.dependencies.get(&"local".to_text()).unwrap();
+        match &local.source {
+            DependencySource.Path { rel_path } => assert_eq(rel_path, &"../local".to_text()),
+            _ => unreachable(),
+        }
+        // forked dep has git source.
+        let forked = m.dependencies.get(&"forked".to_text()).unwrap();
+        match &forked.source {
+            DependencySource.Git { url, revision } => {
+                assert_eq(url, &"https://example.com/repo".to_text());
+                match revision { GitRevision.Branch(b) => assert_eq(b, &"main".to_text()), _ => unreachable() }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_format_roundtrip() {
+        let src = r#"
+[cog]
+name = "x"
+version = "1.0.0"
+
+[dependencies]
+http = "^1.0"
+"#.to_text();
+        let m = parse_text(&src).unwrap();
+        let rendered = format_text(&m).unwrap();
+        let m2 = parse_text(&rendered).unwrap();
+        assert_eq(m.cog.name, m2.cog.name);
+        assert_eq(m.dependencies.len(), m2.dependencies.len());
+    }
+
+    #[test]
+    fn test_missing_cog_section() {
+        let src = "version = \"1.0.0\"\n".to_text();
+        let r = parse_text(&src);
+        assert(r.is_err());
+    }
+
+    #[test]
+    fn test_invalid_version() {
+        let src = "[cog]\nname = \"x\"\nversion = \"not-a-version\"\n".to_text();
+        let r = parse_text(&src);
+        assert(r.is_err());
+    }
+}
