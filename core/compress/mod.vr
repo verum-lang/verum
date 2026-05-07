@@ -60,7 +60,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.compress;
 
@@ -197,10 +197,10 @@ implement Display for CompressError {
 implement Debug for CompressError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnsupportedAlgorithm(a)        => f.write_str(f"UnsupportedAlgorithm({a:?})".as_str()),
+            UnsupportedAlgorithm(a)        => f.write_str(f"UnsupportedAlgorithm({a})".as_str()),
             CorruptInput(reason)           => f.write_str(f"CorruptInput({reason})".as_str()),
             BufferTooSmall { need, have }  => f.write_str(f"BufferTooSmall {{ need: {need}, have: {have} }}".as_str()),
-            InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo:?}, level: {level} }}".as_str()),
+            InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo}, level: {level} }}".as_str()),
             DictionaryMismatch             => f.write_str("DictionaryMismatch"),
             OutputTooLarge { limit }       => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
             IoError(reason)                => f.write_str(f"IoError({reason})".as_str()),

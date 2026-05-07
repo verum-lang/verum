@@ -48,7 +48,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.quic.transport.pump;
 
@@ -129,11 +129,11 @@ implement Display for PumpError {
 implement Debug for PumpError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            PumpError.Transport(e)         => f.write_str(f"Transport({e:?})".as_str()),
+            PumpError.Transport(e)         => f.write_str(f"Transport({e})".as_str()),
             PumpError.Crypto(reason)       => f.write_str(f"Crypto({reason})".as_str()),
             PumpError.Handshake(reason)    => f.write_str(f"Handshake({reason})".as_str()),
             PumpError.Frame(reason)        => f.write_str(f"Frame({reason})".as_str()),
-            PumpError.Quic(e)              => f.write_str(f"Quic({e:?})".as_str()),
+            PumpError.Quic(e)              => f.write_str(f"Quic({e})".as_str()),
             PumpError.Cancelled            => f.write_str("Cancelled"),
         }
     }

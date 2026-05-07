@@ -5,7 +5,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.http2.error;
 
@@ -115,9 +115,9 @@ implement Debug for Http2Error {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Http2Error.ConnectionError { code, reason } =>
-                f.write_str(f"ConnectionError {{ code: {code:?}, reason: {reason} }}".as_str()),
+                f.write_str(f"ConnectionError {{ code: {code}, reason: {reason} }}".as_str()),
             Http2Error.StreamError { stream_id, code, reason } =>
-                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code:?}, reason: {reason} }}".as_str()),
+                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code}, reason: {reason} }}".as_str()),
             Http2Error.NeedMore =>
                 f.write_str("NeedMore"),
             Http2Error.BadClientPreface =>

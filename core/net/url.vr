@@ -32,7 +32,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.url;
 
@@ -111,7 +111,7 @@ implement Display for UrlError {
 
 implement Debug for UrlError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"UrlError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+        f.write_str(f"UrlError {{ kind: {self.kind}, position: {self.position}, message: {self.message} }}".as_str())
     }
 }
 

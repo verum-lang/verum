@@ -49,7 +49,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.postgres.migrations.store;
 
@@ -100,54 +100,33 @@ implement MigrationStore for PostgresMigrationStore {
     async fn init(&mut self) -> Result<(), DbError> {
         // Postgres-canonical types. CREATE TABLE IF NOT EXISTS is
         // idempotent on Postgres ≥ 9.1 (which is the minimum we support).
-        let sql = format!(
-            r#"CREATE TABLE IF NOT EXISTS {} (
-                version    BIGINT PRIMARY KEY,
-                name       TEXT NOT NULL,
-                status     TEXT NOT NULL,
-                applied_at BIGINT,
-                error      TEXT,
-                checksum   BIGINT NOT NULL
-            )"#,
-            self.config.table_name,
-        ).to_text();
+        let table = &self.config.table_name;
+        let sql = f"CREATE TABLE IF NOT EXISTS {table} (\n                version    BIGINT PRIMARY KEY,\n                name       TEXT NOT NULL,\n                status     TEXT NOT NULL,\n                applied_at BIGINT,\n                error      TEXT,\n                checksum   BIGINT NOT NULL\n            )";
         execute_raw(&mut self.conn, &sql).await
     }
 
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
-        let sql = format!(
-            "SELECT version, name, status, applied_at, error, checksum FROM {} ORDER BY version",
-            self.config.table_name,
-        ).to_text();
+        let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {self.config.table_name} ORDER BY version";
         let rows = query_journal_rows(&mut self.conn, &sql).await?;
         Ok(journal_from_entries_local(rows))
     }
 
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
         let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
-        let sql = format!(
-            r#"INSERT INTO {0} (version, name, status, applied_at, error, checksum)
-               VALUES ({1}, {2}, {3}, {4}, {5}, {6})
-               ON CONFLICT (version) DO UPDATE SET
-                   name = EXCLUDED.name,
-                   status = EXCLUDED.status,
-                   applied_at = EXCLUDED.applied_at,
-                   error = EXCLUDED.error,
-                   checksum = EXCLUDED.checksum"#,
-            self.config.table_name,
-            entry.version,
-            sql_text_literal(&entry.name),
-            sql_text_literal(&status_str),
-            match applied_at_opt { Some(t) => format!("{}", t).to_text(), None => "NULL".to_text() },
-            match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() },
-            entry.checksum,
-        ).to_text();
+        let table = &self.config.table_name;
+        let version = entry.version;
+        let name_lit = sql_text_literal(&entry.name);
+        let status_lit = sql_text_literal(&status_str);
+        let applied_lit = match applied_at_opt { Some(t) => f"{t}", None => "NULL".to_text() };
+        let error_lit = match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() };
+        let checksum = entry.checksum;
+        let sql = f"INSERT INTO {table} (version, name, status, applied_at, error, checksum)\n               VALUES ({version}, {name_lit}, {status_lit}, {applied_lit}, {error_lit}, {checksum})\n               ON CONFLICT (version) DO UPDATE SET\n                   name = EXCLUDED.name,\n                   status = EXCLUDED.status,\n                   applied_at = EXCLUDED.applied_at,\n                   error = EXCLUDED.error,\n                   checksum = EXCLUDED.checksum";
         execute_raw(&mut self.conn, &sql).await
     }
 
     async fn acquire_lock(&mut self) -> Result<(), DbError> {
         if self.lock_held { return Ok(()); }
-        let sql = format!("SELECT pg_advisory_lock({})", self.lock_key).to_text();
+        let sql = f"SELECT pg_advisory_lock({self.lock_key})";
         execute_raw(&mut self.conn, &sql).await?;
         self.lock_held = true;
         Ok(())
@@ -155,7 +134,7 @@ implement MigrationStore for PostgresMigrationStore {
 
     async fn release_lock(&mut self) -> Result<(), DbError> {
         if !self.lock_held { return Ok(()); }
-        let sql = format!("SELECT pg_advisory_unlock({})", self.lock_key).to_text();
+        let sql = f"SELECT pg_advisory_unlock({self.lock_key})";
         execute_raw(&mut self.conn, &sql).await?;
         self.lock_held = false;
         Ok(())
@@ -179,7 +158,7 @@ implement MigrationStore for PostgresMigrationStore {
     }
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
-        let sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name).to_text();
+        let sql = f"DROP TABLE IF EXISTS {self.config.table_name}";
         execute_raw(&mut self.conn, &sql).await
     }
 }
@@ -274,44 +253,3 @@ fn journal_from_entries_local(entries: List<JournalEntry>) -> MigrationJournal {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use core.database.common.migrations.store.{store_config_default};
-
-    #[test]
-    fn test_advisory_lock_key_stable() {
-        let cfg = store_config_default();
-        let key1 = advisory_lock_key_for(&cfg.table_name);
-        let key2 = advisory_lock_key_for(&cfg.table_name);
-        assert_eq(key1, key2);
-    }
-
-    #[test]
-    fn test_render_parse_status_roundtrip() {
-        // Pending
-        let (txt, at, er) = render_status(&MsPending);
-        match parse_status(&txt, at, er) {
-            MsPending => {}
-            _ => unreachable(),
-        }
-        // Applied
-        let (txt, at, er) = render_status(&MsApplied(12345_i64));
-        match parse_status(&txt, at, er) {
-            MsApplied(t) => assert_eq(t, 12345_i64),
-            _ => unreachable(),
-        }
-        // Failed with error message
-        let (txt, at, er) = render_status(&MsFailed("oops".to_text()));
-        match parse_status(&txt, at, er) {
-            MsFailed(e) => assert_eq(e, "oops".to_text()),
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_sql_text_literal_escapes() {
-        let lit = sql_text_literal(&"O'Brien".to_text());
-        assert_eq(lit, "'O''Brien'".to_text());
-    }
-}

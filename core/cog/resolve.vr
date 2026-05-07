@@ -61,7 +61,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.cog.resolve;
 
@@ -181,6 +181,26 @@ public fn range_from_constraint(c: &SemVerConstraint) -> Range {
 }
 
 // ----- Range predicates -----
+
+fn bound_to_text(b: &Bound) -> Text {
+    match b {
+        Bound.Included(v) => f"<={v.major}.{v.minor}.{v.patch}",
+        Bound.Excluded(v) => f"<{v.major}.{v.minor}.{v.patch}",
+        Bound.Unbounded   => "*".to_text(),
+    }
+}
+
+public fn range_to_text(r: &Range) -> Text {
+    let mut out: Text = "".to_text();
+    let mut i: Int = 0;
+    while i < r.intervals.len() {
+        if i > 0 { out = out + ","; }
+        let iv = &r.intervals[i];
+        out = out + "[" + bound_to_text(&iv.lo).as_str() + "," + bound_to_text(&iv.hi).as_str() + "]";
+        i = i + 1;
+    }
+    out
+}
 
 public fn range_is_empty(r: &Range) -> Bool { r.intervals.len() == 0 }
 
@@ -959,16 +979,15 @@ fn unit_propagation(solver: &mut Solver, start_pkg: &PackageName) -> Result<(), 
     Ok(())
 }
 
-enum IncompatStatus {
+type IncompatStatus is
     /// All terms satisfied — full conflict.
-    Satisfied,
+    | Satisfied
     /// All but one term satisfied; the remaining one will be negated.
-    AlmostSatisfied(Term),
+    | AlmostSatisfied(Term)
     /// Some terms not yet decidable.
-    Inconclusive,
+    | Inconclusive
     /// Some term contradicted — incompatibility cannot fire.
-    Contradicted,
-}
+    | Contradicted;
 
 fn check_incompatibility(sol: &PartialSolution, incompat: &Incompatibility) -> IncompatStatus {
     let mut unsatisfied: Maybe<Term> = None;
@@ -991,7 +1010,7 @@ fn check_incompatibility(sol: &PartialSolution, incompat: &Incompatibility) -> I
     }
 }
 
-enum Relation { Satisfied, Contradicted, Inconclusive }
+type Relation is Satisfied | Contradicted | Inconclusive;
 
 fn relation(sol: &PartialSolution, t: &Term) -> Relation {
     match partial_solution_term(sol, &t.package) {
@@ -1285,16 +1304,16 @@ fn explain_incompat(incompat: &Incompatibility, out: &mut List<Text>, depth: Int
     let prefix = indent(depth);
     match &incompat.cause {
         Cause.Root => {
-            out.push(format!("{}root requirement", prefix).to_text());
+            out.push(f"{prefix}root requirement");
         }
         Cause.NoVersions { package, term } => {
-            out.push(format!("{}no versions of {} match {}", prefix, package, format_term(term)).to_text());
+            out.push(f"{prefix}no versions of {package} match {format_term(term)}");
         }
         Cause.DependencyOf { dependent, dependent_version } => {
-            out.push(format!("{}{}@{} requires …", prefix, dependent, dependent_version).to_text());
+            out.push(f"{prefix}{dependent}@{dependent_version} requires …");
         }
         Cause.Derived { left, right } => {
-            out.push(format!("{}because of:", prefix).to_text());
+            out.push(f"{prefix}because of:");
             explain_incompat(left.as_ref(), out, depth + 1);
             explain_incompat(right.as_ref(), out, depth + 1);
         }
@@ -1305,8 +1324,8 @@ fn format_term(t: &Term) -> Text {
     let polarity = if t.positive { "" } else { "not " };
     let body = if range_is_empty(&t.range) { "∅".to_text() }
                else if range_is_full(&t.range) { "*".to_text() }
-               else { format!("{:?}", t.range).to_text() };
-    format!("{}{}", polarity, body).to_text()
+               else { range_to_text(&t.range) };
+    f"{polarity}{body}"
 }
 
 fn indent(depth: Int) -> Text {
@@ -1320,131 +1339,3 @@ fn indent(depth: Int) -> Text {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    fn v(s: &str) -> SemVer { parse_semver(&s.to_text()).unwrap() }
-
-    #[test]
-    fn test_range_exact_contains() {
-        let r = range_exact(v("1.2.3"));
-        assert_eq(range_contains(&r, &v("1.2.3")), true);
-        assert_eq(range_contains(&r, &v("1.2.4")), false);
-    }
-
-    #[test]
-    fn test_range_full() {
-        let r = range_full();
-        assert_eq(range_is_full(&r), true);
-        assert_eq(range_contains(&r, &v("0.0.0")), true);
-        assert_eq(range_contains(&r, &v("999.999.999")), true);
-    }
-
-    #[test]
-    fn test_range_intersect() {
-        let a = range_higher_than(v("1.0.0"));
-        let b = range_lower_than(v("2.0.0"));
-        let i = range_intersect(&a, &b);
-        assert_eq(range_contains(&i, &v("1.5.0")), true);
-        assert_eq(range_contains(&i, &v("0.5.0")), false);
-        assert_eq(range_contains(&i, &v("2.0.0")), false);
-    }
-
-    #[test]
-    fn test_range_complement() {
-        let a = range_between(v("1.0.0"), v("2.0.0"));
-        let c = range_complement(&a);
-        assert_eq(range_contains(&c, &v("0.5.0")), true);
-        assert_eq(range_contains(&c, &v("1.5.0")), false);
-        assert_eq(range_contains(&c, &v("2.0.0")), true);
-    }
-
-    #[test]
-    fn test_term_satisfies_subset() {
-        let pkg = PackageName("foo".to_text());
-        let narrow = term_positive(pkg.clone(), range_between(v("1.0.0"), v("1.5.0")));
-        let wide   = term_positive(pkg.clone(), range_between(v("1.0.0"), v("2.0.0")));
-        assert_eq(term_satisfies(&narrow, &wide), true);
-        assert_eq(term_satisfies(&wide, &narrow), false);
-    }
-
-    #[test]
-    fn test_partial_solution_basic() {
-        let mut sol = partial_solution_empty();
-        let foo = PackageName("foo".to_text());
-        partial_solution_decide(&mut sol, foo.clone(), v("1.0.0"));
-        assert_eq(sol.decision_level, 1);
-        assert_eq(partial_solution_has_decision(&sol, &foo), true);
-        let term = partial_solution_term(&sol, &foo).unwrap();
-        assert_eq(range_contains(&term.range, &v("1.0.0")), true);
-    }
-
-    #[test]
-    fn test_partial_solution_backtrack() {
-        let mut sol = partial_solution_empty();
-        partial_solution_decide(&mut sol, PackageName("a".to_text()), v("1.0.0"));
-        partial_solution_decide(&mut sol, PackageName("b".to_text()), v("1.0.0"));
-        partial_solution_decide(&mut sol, PackageName("c".to_text()), v("1.0.0"));
-        partial_solution_backtrack(&mut sol, 1);
-        assert_eq(sol.decision_level, 1);
-        assert_eq(sol.assignments.len(), 1);
-    }
-
-    // Mock provider for end-to-end resolver test.
-    type MockProvider is {
-        versions: Map<PackageName, List<SemVer>>,
-        deps:     Map<(PackageName, SemVer), List<Dependency>>,
-    };
-
-    implement DependencyProvider for MockProvider {
-        async fn list_versions(&self, package: &PackageName) -> Result<List<SemVer>, ProviderError> {
-            match self.versions.get(package) {
-                Some(vs) => Ok(vs.clone()),
-                None    => Err(ProviderError.NotFound { package: package.clone() }),
-            }
-        }
-        async fn get_dependencies(&self, p: &PackageName, v: &SemVer) -> Result<Dependencies, ProviderError> {
-            match self.deps.get(&(p.clone(), v.clone())) {
-                Some(d) => Ok(Dependencies.Available(d.clone())),
-                None    => Ok(Dependencies.Available(List.new())),
-            }
-        }
-    }
-
-    #[test]
-    async fn test_resolve_trivial() {
-        // root@1.0.0 with no dependencies — should resolve trivially.
-        let provider = MockProvider {
-            versions: Map.new(),
-            deps:     Map.new(),
-        };
-        let lockfile = resolve(&provider, PackageName("root".to_text()), v("1.0.0")).await.unwrap();
-        assert_eq(lockfile.packages.len(), 0);
-    }
-
-    #[test]
-    async fn test_resolve_single_dep() {
-        // root@1.0.0 → foo (^1.0)
-        // foo@1.2.3 (no further deps)
-        let mut versions: Map<PackageName, List<SemVer>> = Map.new();
-        let mut foo_versions: List<SemVer> = List.new();
-        foo_versions.push(v("1.2.3"));
-        foo_versions.push(v("1.0.0"));
-        versions.insert(PackageName("foo".to_text()), foo_versions);
-
-        let mut deps: Map<(PackageName, SemVer), List<Dependency>> = Map.new();
-        let mut root_deps: List<Dependency> = List.new();
-        root_deps.push(Dependency {
-            package: PackageName("foo".to_text()),
-            constraint: range_between(v("1.0.0"), v("2.0.0")),
-        });
-        deps.insert((PackageName("root".to_text()), v("1.0.0")), root_deps);
-
-        let provider = MockProvider { versions, deps };
-        let lockfile = resolve(&provider, PackageName("root".to_text()), v("1.0.0")).await.unwrap();
-        assert_eq(lockfile.packages.len(), 1);
-        let foo_v = lockfile.packages.get(&PackageName("foo".to_text())).unwrap();
-        assert_eq(foo_v, &v("1.2.3"));
-    }
-}

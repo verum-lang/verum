@@ -24,7 +24,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.spiffe.workload_api;
 
@@ -78,11 +78,11 @@ implement Debug for WorkloadApiError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             NoEndpointConfigured            => f.write_str("NoEndpointConfigured"),
-            ConnectFailed(e)                => f.write_str(f"ConnectFailed({e:?})".as_str()),
+            ConnectFailed(e)                => f.write_str(f"ConnectFailed({e})".as_str()),
             HandshakeFailed(reason)         => f.write_str(f"HandshakeFailed({reason})".as_str()),
             RpcError { code, message }      => f.write_str(f"RpcError {{ code: {code}, message: {message} }}".as_str()),
             ResponseMalformed(reason)       => f.write_str(f"ResponseMalformed({reason})".as_str()),
-            SvidParseError(e)               => f.write_str(f"SvidParseError({e:?})".as_str()),
+            SvidParseError(e)               => f.write_str(f"SvidParseError({e})".as_str()),
             NoIdentityAvailable             => f.write_str("NoIdentityAvailable"),
             Cancelled                       => f.write_str("Cancelled"),
             Closed                          => f.write_str("Closed"),

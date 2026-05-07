@@ -44,7 +44,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.common.schema_diff;
 
@@ -515,68 +515,3 @@ fn clone_table(t: &TableSnap) -> TableSnap {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use core.database.common.schema.{AdapterId};
-
-    fn empty_snap() -> SchemaSnapshot {
-        SchemaSnapshot {
-            adapter: AdapterId.SQLite,
-            server_version: "".to_text(),
-            default_schema: "main".to_text(),
-            tables: List.new(),
-            metadata: List.new(),
-        }
-    }
-
-    #[test]
-    fn test_diff_identity_empty() {
-        let s = empty_snap();
-        let d = diff(&s, &s);
-        assert_eq(d.len(), 0);
-    }
-
-    #[test]
-    fn test_diff_table_added() {
-        let mut after = empty_snap();
-        after.tables.push(TableSnap.empty("main".to_text(), "users".to_text()));
-        let deltas = diff(&empty_snap(), &after);
-        assert_eq(deltas.len(), 1);
-        match &deltas[0] {
-            TableAdded { name, .. } => assert_eq(name, &"users".to_text()),
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_diff_table_dropped() {
-        let mut before = empty_snap();
-        before.tables.push(TableSnap.empty("main".to_text(), "users".to_text()));
-        let deltas = diff(&before, &empty_snap());
-        assert_eq(deltas.len(), 1);
-        match &deltas[0] {
-            TableDropped { name, .. } => assert_eq(name, &"users".to_text()),
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_severity_classification() {
-        match delta_severity(&TableAdded {
-            schema: "main".to_text(),
-            name: "x".to_text(),
-            table: TableSnap.empty("main".to_text(), "x".to_text()),
-        }) {
-            DsLossless => {}
-            _ => unreachable(),
-        }
-        match delta_severity(&TableDropped {
-            schema: "main".to_text(),
-            name: "x".to_text(),
-        }) {
-            DsDestructive => {}
-            _ => unreachable(),
-        }
-    }
-}

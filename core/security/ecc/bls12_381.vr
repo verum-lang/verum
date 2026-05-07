@@ -116,7 +116,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.security.ecc.bls12_381;
 mount core.*;
@@ -691,7 +691,7 @@ public fn aggregate_verify(
     }
     match @intrinsic(
         "verum.crypto.bls12_381_aggregate_verify",
-        public_keys, messages, signature,
+        public_keys, messages, signature
     ) {
         true  => Ok(()),
         false => Err(VerificationFailed),
@@ -718,7 +718,7 @@ public fn fast_aggregate_verify(
     }
     match @intrinsic(
         "verum.crypto.bls12_381_fast_aggregate_verify",
-        public_keys, message, signature,
+        public_keys, message, signature
     ) {
         true  => Ok(()),
         false => Err(VerificationFailed),
@@ -753,7 +753,7 @@ implement ThresholdShare {
     ) -> ThresholdShare {
         let bytes = @intrinsic(
             "verum.crypto.bls12_381_threshold_sign",
-            secret_share, suite, id, message,
+            secret_share, suite, id, message
         );
         ThresholdShare { suite, id, bytes }
     }
@@ -778,7 +778,7 @@ public fn threshold_combine(
     }
     let bytes = @intrinsic(
         "verum.crypto.bls12_381_threshold_combine",
-        shares, threshold,
+        shares, threshold
     );
     Ok(BlsSignature { suite, bytes })
 }

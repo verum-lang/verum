@@ -53,7 +53,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.l1_pager.pager;
 
@@ -206,7 +206,7 @@ implement Display for PagerError {
 
 implement Debug for PagerError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"PagerError {{ kind: {self.kind:?}, message: {self.message} }}".as_str())
+        f.write_str(f"PagerError {{ kind: {self.kind}, message: {self.message} }}".as_str())
     }
 }
 

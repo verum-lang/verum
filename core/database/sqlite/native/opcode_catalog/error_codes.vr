@@ -16,7 +16,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.opcode_catalog.error_codes;
 
@@ -446,11 +446,11 @@ implement Debug for OpcodeDbError {
             DbeOutOfMemory              => f.write_str("DbeOutOfMemory"),
             DbeReadOnly                 => f.write_str("DbeReadOnly"),
             DbeInterrupted              => f.write_str("DbeInterrupted"),
-            DbeIo(k, m)                 => f.write_str(f"DbeIo({k:?}, {m})".as_str()),
-            DbeCorrupt(k, m)            => f.write_str(f"DbeCorrupt({k:?}, {m})".as_str()),
+            DbeIo(k, m)                 => f.write_str(f"DbeIo({k}, {m})".as_str()),
+            DbeCorrupt(k, m)            => f.write_str(f"DbeCorrupt({k}, {m})".as_str()),
             DbeFull                     => f.write_str("DbeFull"),
             DbeCannotOpen(m)            => f.write_str(f"DbeCannotOpen({m})".as_str()),
-            DbeConstraint(k, m)         => f.write_str(f"DbeConstraint({k:?}, {m})".as_str()),
+            DbeConstraint(k, m)         => f.write_str(f"DbeConstraint({k}, {m})".as_str()),
             DbeDataTypeMismatch         => f.write_str("DbeDataTypeMismatch"),
             DbeMisuse                   => f.write_str("DbeMisuse"),
             DbeAuthDenied               => f.write_str("DbeAuthDenied"),

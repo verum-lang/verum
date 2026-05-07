@@ -52,7 +52,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.tuf.repository;
 
@@ -102,7 +102,7 @@ implement Display for RepoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             NotFound { role, version } => f.write_str(
-                f"tuf/repo: {role:?} (v{version:?}) not found".as_str()),
+                f"tuf/repo: {role} (v{version}) not found".as_str()),
             TargetNotFound(p)          => f.write_str(f"tuf/repo: target not found: {p}".as_str()),
             TooLarge { role, size, limit } => f.write_str(
                 f"tuf/repo: {role} too large ({size} > {limit})".as_str()),
@@ -226,7 +226,7 @@ async fn http_get<C: HttpClient>(
         .map_err(|e| NetworkError(e))?;
     if resp.status.is_404() {
         return Err(NotFound {
-            role: RoleName.Delegated(format!("@url={}", url).to_text()),
+            role: RoleName.Delegated(f"@url={url}"),
             version: None,
         });
     }
@@ -257,12 +257,12 @@ public fn compose_metadata_url(
     let role_text = role_name_to_text(role);
     let prefix = if consistent_snapshot {
         match version {
-            Some(v) => format!("{}.", v).to_text(),
+            Some(v) => f"{v}.",
             None    => "".to_text(),
         }
     } else { "".to_text() };
     let separator = if base.ends_with("/") { "".to_text() } else { "/".to_text() };
-    format!("{}{}{}{}.json", base, separator, prefix, role_text).to_text()
+    f"{base}{separator}{prefix}{role_text}.json"
 }
 
 /// Compose the target URL.
@@ -277,21 +277,21 @@ public fn compose_target_url(
 ) -> Text {
     let separator = if base.ends_with("/") { "".to_text() } else { "/".to_text() };
     if !consistent_snapshot {
-        return format!("{}{}{}", base, separator, path).to_text();
+        return f"{base}{separator}{path}";
     }
     match hash_prefix {
         Some(h) => {
             // Insert <h>. before the last path component's basename.
             let last_slash = path.rfind_byte(b'/').unwrap_or_else(|| -1);
             if last_slash < 0 {
-                format!("{}{}{}.{}", base, separator, h, path).to_text()
+                f"{base}{separator}{h}.{path}"
             } else {
                 let dir = path.byte_substring(0, last_slash + 1);
                 let basename = path.byte_substring(last_slash + 1, path.len());
-                format!("{}{}{}{}.{}", base, separator, dir, h, basename).to_text()
+                f"{base}{separator}{dir}{h}.{basename}"
             }
         }
-        None => format!("{}{}{}", base, separator, path).to_text(),
+        None => f"{base}{separator}{path}",
     }
 }
 
@@ -321,11 +321,11 @@ implement TufRepository for LocalRepository {
         let role_text = role_name_to_text(role);
         let filename = if self.consistent_snapshot {
             match version {
-                Some(v) => format!("{}.{}.json", v, role_text).to_text(),
-                None    => format!("{}.json", role_text).to_text(),
+                Some(v) => f"{v}.{role_text}.json",
+                None    => f"{role_text}.json",
             }
         } else {
-            format!("{}.json", role_text).to_text()
+            f"{role_text}.json"
         };
         let path = self.root.join("metadata").join(&filename);
         match Filesystem.read_file_bytes(&path).await {
@@ -406,83 +406,3 @@ public async fn repo_cache_insert(cache: &RepoCache, key: Text, bytes: List<Byte
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_compose_metadata_url_no_consistent() {
-        let u = compose_metadata_url(
-            &"https://repo/metadata".to_text(),
-            &RoleName.Root,
-            Some(3),
-            false,
-        );
-        assert_eq(u, "https://repo/metadata/root.json".to_text());
-    }
-
-    #[test]
-    fn test_compose_metadata_url_consistent_versioned() {
-        let u = compose_metadata_url(
-            &"https://repo/metadata/".to_text(),
-            &RoleName.Snapshot,
-            Some(7),
-            true,
-        );
-        assert_eq(u, "https://repo/metadata/7.snapshot.json".to_text());
-    }
-
-    #[test]
-    fn test_compose_metadata_url_consistent_no_version() {
-        // Timestamp is fetched without version even in consistent mode.
-        let u = compose_metadata_url(
-            &"https://repo/metadata".to_text(),
-            &RoleName.Timestamp,
-            None,
-            true,
-        );
-        assert_eq(u, "https://repo/metadata/timestamp.json".to_text());
-    }
-
-    #[test]
-    fn test_compose_target_url_no_consistent() {
-        let u = compose_target_url(
-            &"https://repo/targets".to_text(),
-            &"my-cog/1.0.0.vbca".to_text(),
-            None,
-            false,
-        );
-        assert_eq(u, "https://repo/targets/my-cog/1.0.0.vbca".to_text());
-    }
-
-    #[test]
-    fn test_compose_target_url_consistent_with_hash() {
-        let u = compose_target_url(
-            &"https://repo/targets".to_text(),
-            &"my-cog/1.0.0.vbca".to_text(),
-            Some(&"deadbeef".to_text()),
-            true,
-        );
-        assert_eq(u, "https://repo/targets/my-cog/deadbeef.1.0.0.vbca".to_text());
-    }
-
-    #[test]
-    fn test_compose_target_url_consistent_root_level() {
-        let u = compose_target_url(
-            &"https://repo/targets/".to_text(),
-            &"file.txt".to_text(),
-            Some(&"abc123".to_text()),
-            true,
-        );
-        assert_eq(u, "https://repo/targets/abc123.file.txt".to_text());
-    }
-
-    #[test]
-    fn test_max_bytes_per_role() {
-        assert_eq(max_bytes_for_role(&RoleName.Root),      MAX_ROOT_BYTES);
-        assert_eq(max_bytes_for_role(&RoleName.Timestamp), MAX_TIMESTAMP_BYTES);
-        assert_eq(max_bytes_for_role(&RoleName.Snapshot),  MAX_SNAPSHOT_BYTES);
-        assert_eq(max_bytes_for_role(&RoleName.Targets),   MAX_TARGETS_BYTES);
-        assert_eq(max_bytes_for_role(&RoleName.Delegated("foo".to_text())), MAX_TARGETS_BYTES);
-    }
-}

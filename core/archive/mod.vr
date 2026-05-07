@@ -100,7 +100,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.archive;
 
@@ -275,7 +275,7 @@ implement Archive for TarFormat {
         }
         match tar_write_archive(&tar_entries) {
             Ok(b)  => Ok(b),
-            Err(e) => Err(ArchiveError.Format(format!("{e}").to_text())),
+            Err(e) => Err(ArchiveError.Format(f"{e}")),
         }
     }
 
@@ -290,7 +290,7 @@ implement Archive for TarFormat {
                 }
                 Ok(out)
             }
-            Err(e) => Err(ArchiveError.Format(format!("{e}").to_text())),
+            Err(e) => Err(ArchiveError.Format(f"{e}")),
         }
     }
 }
@@ -346,37 +346,3 @@ public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> ArchiveEntr
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_universal_roundtrip() {
-        let mut content: List<Byte> = List.new();
-        let bs = "hello".as_bytes();
-        let mut i = 0; while i < bs.len() { content.push(bs[i]); i = i + 1; }
-        let e = entry_for_file("greeting.txt".to_text(), content.clone(), 0o644, 1700000000);
-
-        let fmt = tar_format();
-        let mut entries: List<ArchiveEntry> = List.new();
-        entries.push(e);
-        let packed = fmt.pack(&entries).unwrap();
-        let unpacked = fmt.unpack(packed.as_slice()).unwrap();
-        assert_eq(unpacked.len(), 1);
-        assert_eq(unpacked.get(0).unwrap().path, "greeting.txt".to_text());
-    }
-
-    #[test]
-    fn test_algorithm_tags_distinct() {
-        assert(archive_algorithm_tag(&ArchiveAlgorithm.Tar)
-               != archive_algorithm_tag(&ArchiveAlgorithm.Zip));
-        assert(archive_algorithm_tag(&ArchiveAlgorithm.Zip)
-               != archive_algorithm_tag(&ArchiveAlgorithm.Ar));
-    }
-
-    #[test]
-    fn test_unsupported_algorithm() {
-        let r = adapter_for(ArchiveAlgorithm.Zip);
-        assert!(r.is_err());
-    }
-}

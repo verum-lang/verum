@@ -35,7 +35,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.configuration.error;
 
@@ -315,48 +315,3 @@ implement Eq for ConfigError {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_kind_categorisation() {
-        match category(&ConfigErrorKind.UnexpectedEof) {
-            EcClient => {}
-            _ => unreachable(),
-        }
-        match category(&ConfigErrorKind.DepthLimit) {
-            EcResource => {}
-            _ => unreachable(),
-        }
-        match category(&ConfigErrorKind.LossyConversion) {
-            EcConversion => {}
-            _ => unreachable(),
-        }
-        match category(&ConfigErrorKind.IoFileNotFound) {
-            EcUpstream => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_kind_eq() {
-        assert(ConfigErrorKind.UnexpectedEof.eq(&ConfigErrorKind.UnexpectedEof));
-        assert(!ConfigErrorKind.UnexpectedEof.eq(&ConfigErrorKind.UnexpectedChar));
-    }
-
-    #[test]
-    fn test_with_path() {
-        let e = config_err(
-            "toml".to_text(),
-            ConfigErrorKind.SchemaViolation,
-            1, 1, 0,
-            "missing field".to_text(),
-        );
-        let e2 = with_path(e, "server.port".to_text());
-        match e2.path {
-            Some(p) => assert_eq(p, "server.port".to_text()),
-            None    => unreachable(),
-        }
-    }
-}

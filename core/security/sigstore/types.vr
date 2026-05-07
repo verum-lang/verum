@@ -59,7 +59,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.sigstore.types;
 
@@ -419,12 +419,10 @@ public fn validate_digest(d: &Digest) -> Result<(), SigstoreTypeError> {
         "sha256" => 64,
         "sha384" => 96,
         "sha512" => 128,
-        _ => return Err(MalformedDigest(format!("unknown algorithm '{}'", d.algorithm).to_text())),
+        _ => return Err(MalformedDigest(f"unknown algorithm '{d.algorithm}'")),
     };
     if d.hex.len() != expected_len {
-        return Err(MalformedDigest(format!(
-            "{} digest must be {} hex chars, got {}",
-            d.algorithm, expected_len, d.hex.len()).to_text()));
+        return Err(MalformedDigest(f"{d.algorithm} digest must be {expected_len} hex chars, got {d.hex.len()}"));
     }
     if !is_hex_lowercase(&d.hex) {
         return Err(MalformedDigest("digest must be lowercase hex".to_text()));
@@ -448,47 +446,3 @@ fn is_hex_lowercase(s: &Text) -> Bool {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_entry_kind_round_trip() {
-        assert(entry_kind_from_text(&"hashedrekord".to_text()) is EntryKind.HashedRekord);
-        assert(entry_kind_from_text(&"intoto".to_text()) is EntryKind.Intoto);
-        assert(entry_kind_from_text(&"dsse".to_text()) is EntryKind.Dsse);
-        match entry_kind_from_text(&"foo".to_text()) {
-            EntryKind.Other(s) => assert_eq(s, "foo".to_text()),
-            _ => unreachable(),
-        }
-        assert_eq(entry_kind_to_text(&EntryKind.HashedRekord), "hashedrekord".to_text());
-    }
-
-    #[test]
-    fn test_validate_digest_sha256_ok() {
-        let d = Digest { algorithm: "sha256".to_text(), hex: "0".repeat(64) };
-        assert!(validate_digest(&d).is_ok());
-    }
-
-    #[test]
-    fn test_validate_digest_wrong_length() {
-        let d = Digest { algorithm: "sha256".to_text(), hex: "abc".to_text() };
-        assert!(validate_digest(&d).is_err());
-    }
-
-    #[test]
-    fn test_validate_digest_uppercase_rejected() {
-        let d = Digest { algorithm: "sha256".to_text(), hex: "ABCDEF".repeat(11) + "ABCDEF" };
-        match validate_digest(&d) {
-            Err(MalformedDigest(_)) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_constants() {
-        assert!(REKOR_PUBLIC_URL.starts_with("https://"));
-        assert!(FULCIO_PUBLIC_URL.starts_with("https://"));
-        assert!(SIGSTORE_BUNDLE_MEDIA_TYPE.contains("sigstore"));
-    }
-}

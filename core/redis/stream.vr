@@ -32,7 +32,7 @@
         anchoring: Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:   Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.stream;
 
@@ -81,7 +81,7 @@ pub async fn xadd(
             .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
         RespValue.SimpleString(s) => Ok(s),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"XADD unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"XADD unexpected: {other}")),
     }
 }
 
@@ -141,7 +141,7 @@ pub async fn xread(
             Ok(out)
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"XREAD unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"XREAD unexpected: {other}")),
     }
 }
 
@@ -163,7 +163,7 @@ pub async fn xgroup_create(
     match exec(client, a.as_slice()).await? {
         RespValue.SimpleString(_) => Ok(()),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"XGROUP CREATE unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"XGROUP CREATE unexpected: {other}")),
     }
 }
 
@@ -203,7 +203,7 @@ pub async fn xreadgroup(
             Ok(out)
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"XREADGROUP unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"XREADGROUP unexpected: {other}")),
     }
 }
 
@@ -221,7 +221,7 @@ pub async fn xack(
     match exec(client, a.as_slice()).await? {
         RespValue.Integer(n) => Ok(n),
         RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"XACK unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"XACK unexpected: {other}")),
     }
 }
 
@@ -248,7 +248,7 @@ fn parse_entry_array(v: RespValue) -> Result<List<StreamEntry>, RedisError> {
             Ok(out)
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"unexpected stream array: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"unexpected stream array: {other}")),
     }
 }
 

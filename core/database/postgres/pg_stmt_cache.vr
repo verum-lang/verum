@@ -29,7 +29,7 @@
     requires: [],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.postgres.pg_stmt_cache;
 

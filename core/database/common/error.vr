@@ -24,7 +24,7 @@
     requires: [],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.common.error;
 
@@ -659,7 +659,7 @@ implement Display for AdapterSpecific {
 
 implement Debug for AdapterSpecific {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"AdapterSpecific {{ adapter: {self.adapter:?}, code: {self.code}, message: {self.message}, retryable: {self.retryable} }}".as_str())
+        f.write_str(f"AdapterSpecific {{ adapter: {self.adapter}, code: {self.code}, message: {self.message}, retryable: {self.retryable} }}".as_str())
     }
 }
 
@@ -724,24 +724,24 @@ implement Debug for DbError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             ConnectionFailed { source, adapter } =>
-                f.write_str(f"ConnectionFailed {{ source: {source:?}, adapter: {adapter:?} }}".as_str()),
+                f.write_str(f"ConnectionFailed {{ source: {source}, adapter: {adapter} }}".as_str()),
             QueryFailed { sql_state, message, position } =>
-                f.write_str(f"QueryFailed {{ sql_state: {sql_state:?}, message: {message}, position: {position:?} }}".as_str()),
+                f.write_str(f"QueryFailed {{ sql_state: {sql_state}, message: {message}, position: {position} }}".as_str()),
             DecodeFailed { fault } =>
-                f.write_str(f"DecodeFailed {{ fault: {fault:?} }}".as_str()),
+                f.write_str(f"DecodeFailed {{ fault: {fault} }}".as_str()),
             EncodeFailed { fault } =>
-                f.write_str(f"EncodeFailed {{ fault: {fault:?} }}".as_str()),
+                f.write_str(f"EncodeFailed {{ fault: {fault} }}".as_str()),
             TimedOut { phase } =>
-                f.write_str(f"TimedOut {{ phase: {phase:?} }}".as_str()),
+                f.write_str(f"TimedOut {{ phase: {phase} }}".as_str()),
             Cancelled => f.write_str("Cancelled"),
             RefinementViolated { column, predicate } =>
                 f.write_str(f"RefinementViolated {{ column: {column}, predicate: {predicate} }}".as_str()),
             PoolFailure { kind } =>
-                f.write_str(f"PoolFailure {{ kind: {kind:?} }}".as_str()),
+                f.write_str(f"PoolFailure {{ kind: {kind} }}".as_str()),
             AuthFailed { kind } =>
-                f.write_str(f"AuthFailed {{ kind: {kind:?} }}".as_str()),
+                f.write_str(f"AuthFailed {{ kind: {kind} }}".as_str()),
             Adapter(spec) =>
-                f.write_str(f"Adapter({spec:?})".as_str()),
+                f.write_str(f"Adapter({spec})".as_str()),
         }
     }
 }

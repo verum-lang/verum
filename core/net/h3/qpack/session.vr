@@ -42,7 +42,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.h3.qpack.session;
 
@@ -89,10 +89,10 @@ implement Display for QpackSessionError {
 implement Debug for QpackSessionError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            EncoderInstrError(e)   => f.write_str(f"EncoderInstrError({e:?})".as_str()),
-            DecoderInstrError(e)   => f.write_str(f"DecoderInstrError({e:?})".as_str()),
-            DynamicTable(e)        => f.write_str(f"DynamicTable({e:?})".as_str()),
-            FieldDecode(e)         => f.write_str(f"FieldDecode({e:?})".as_str()),
+            EncoderInstrError(e)   => f.write_str(f"EncoderInstrError({e})".as_str()),
+            DecoderInstrError(e)   => f.write_str(f"DecoderInstrError({e})".as_str()),
+            DynamicTable(e)        => f.write_str(f"DynamicTable({e})".as_str()),
+            FieldDecode(e)         => f.write_str(f"FieldDecode({e})".as_str()),
             IntegerError           => f.write_str("IntegerError"),
             HuffmanError           => f.write_str("HuffmanError"),
             InvalidState           => f.write_str("InvalidState"),

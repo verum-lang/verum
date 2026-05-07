@@ -22,7 +22,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.encoding.hex;
 
@@ -78,7 +78,7 @@ implement Display for HexError {
 
 implement Debug for HexError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"HexError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+        f.write_str(f"HexError {{ kind: {self.kind}, position: {self.position}, message: {self.message} }}".as_str())
     }
 }
 

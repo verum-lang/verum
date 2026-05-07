@@ -5,7 +5,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.h3.error;
 
@@ -121,9 +121,9 @@ implement Debug for H3Error {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             ConnectionError { code, reason } =>
-                f.write_str(f"ConnectionError {{ code: {code:?}, reason: {reason} }}".as_str()),
+                f.write_str(f"ConnectionError {{ code: {code}, reason: {reason} }}".as_str()),
             StreamError { stream_id, code } =>
-                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code:?} }}".as_str()),
+                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code} }}".as_str()),
             FrameDecode(msg) =>
                 f.write_str(f"FrameDecode({msg})".as_str()),
             StreamTypeDecode =>

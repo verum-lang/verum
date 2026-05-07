@@ -64,7 +64,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.encoding.varint;
 
@@ -124,7 +124,7 @@ implement Display for VarintError {
 
 implement Debug for VarintError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"VarintError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+        f.write_str(f"VarintError {{ kind: {self.kind}, position: {self.position}, message: {self.message} }}".as_str())
     }
 }
 

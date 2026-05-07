@@ -160,7 +160,7 @@ implement Display for ShellResult {
 
 implement Debug for ShellResult {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"ShellResult(cmd={self.command:?}, status={self.status}, stdout={self.stdout_bytes.len()}B, stderr={self.stderr_bytes.len()}B)".as_str())
+        f.write_str(f"ShellResult(cmd={self.command}, status={self.status}, stdout={self.stdout_bytes.len()}B, stderr={self.stderr_bytes.len()}B)".as_str())
     }
 }
 
@@ -265,17 +265,17 @@ implement Debug for ShellError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             NonZeroExit      { command, status, stderr } =>
-                f.write_str(f"NonZeroExit {{ command: {command:?}, status: {status:?}, stderr: {stderr:?} }}".as_str()),
+                f.write_str(f"NonZeroExit {{ command: {command}, status: {status}, stderr: {stderr} }}".as_str()),
             SpawnFailed      { command, reason } =>
-                f.write_str(f"SpawnFailed {{ command: {command:?}, reason: {reason:?} }}".as_str()),
+                f.write_str(f"SpawnFailed {{ command: {command}, reason: {reason} }}".as_str()),
             Timeout          { command, after_ms } =>
-                f.write_str(f"Timeout {{ command: {command:?}, after_ms: {after_ms} }}".as_str()),
+                f.write_str(f"Timeout {{ command: {command}, after_ms: {after_ms} }}".as_str()),
             PermissionDenied { command, kind } =>
-                f.write_str(f"PermissionDenied {{ command: {command:?}, kind: {kind:?} }}".as_str()),
+                f.write_str(f"PermissionDenied {{ command: {command}, kind: {kind} }}".as_str()),
             ParseError       { command, format, cause } =>
-                f.write_str(f"ParseError {{ command: {command:?}, format: {format:?}, cause: {cause:?} }}".as_str()),
+                f.write_str(f"ParseError {{ command: {command}, format: {format}, cause: {cause} }}".as_str()),
             Cancelled        { command, reason } =>
-                f.write_str(f"Cancelled {{ command: {command:?}, reason: {reason:?} }}".as_str()),
+                f.write_str(f"Cancelled {{ command: {command}, reason: {reason} }}".as_str()),
         }
     }
 }

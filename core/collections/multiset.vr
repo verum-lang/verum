@@ -76,7 +76,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.collections.multiset;
 mount core.*;
@@ -526,7 +526,7 @@ implement<T: Hash + Eq + Debug> Debug for Multiset<T> {
         while let Some((k, v)) = iter.next() {
             if !first { f.write_str(", ")?; }
             first = false;
-            f.write_str(&f"{k:?}×{v}")?;
+            f.write_str(&f"{k}×{v}")?;
         }
         f.write_str("}")
     }

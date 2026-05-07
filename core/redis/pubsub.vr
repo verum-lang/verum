@@ -35,7 +35,7 @@
         anchoring: Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:   Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.pubsub;
 
@@ -80,7 +80,7 @@ pub async fn publish(
     match core.redis.client.exec_bytes(client, &a).await? {
         RespValue.Integer(n) => Ok(n),
         RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"PUBLISH unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"PUBLISH unexpected: {other}")),
     }
 }
 

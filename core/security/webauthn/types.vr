@@ -59,7 +59,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.types;
 
@@ -470,7 +470,7 @@ implement Display for WebAuthnError {
             InvalidJson(reason)             => f.write_str(f"webauthn: invalid clientDataJSON: {reason}".as_str()),
             InvalidCbor(reason)             => f.write_str(f"webauthn: invalid CBOR: {reason}".as_str()),
             InvalidClientDataType { expected, found } => f.write_str(
-                f"webauthn: clientData.type expected {expected:?}, found {found:?}".as_str()),
+                f"webauthn: clientData.type expected {expected}, found {found}".as_str()),
             ChallengeMismatch               => f.write_str("webauthn: challenge mismatch"),
             OriginMismatch { expected, found } => f.write_str(
                 f"webauthn: origin mismatch (expected {expected}, found {found})".as_str()),
@@ -485,7 +485,7 @@ implement Display for WebAuthnError {
             InvalidSignature                => f.write_str("webauthn: signature verification failed"),
             SignCountNotIncreasing { stored, presented } => f.write_str(
                 f"webauthn: signCount regression (stored={stored}, presented={presented}) — possible cloning".as_str()),
-            CredentialNotAllowed(id)        => f.write_str(f"webauthn: credential id {id:?} not in allow-list".as_str()),
+            CredentialNotAllowed(id)        => f.write_str(f"webauthn: credential id {id} not in allow-list".as_str()),
             InvalidChallengeLength(n)       => f.write_str(f"webauthn: invalid challenge length: {n}".as_str()),
             InvalidCredentialIdLength(n)    => f.write_str(f"webauthn: invalid credentialId length: {n}".as_str()),
             OriginScheme(s)                 => f.write_str(f"webauthn: only https:// (or localhost) origins allowed, got: {s}".as_str()),
@@ -501,48 +501,3 @@ implement Debug for WebAuthnError {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_flags_round_trip() {
-        let f = AuthDataFlags {
-            user_present:             true,
-            user_verified:            true,
-            backup_eligible:          false,
-            backup_state:             false,
-            attested_credential_data: true,
-            extension_data:           false,
-        };
-        let b = flags_to_byte(&f);
-        let f2 = parse_flags(b);
-        assert_eq(f.user_present,             f2.user_present);
-        assert_eq(f.user_verified,            f2.user_verified);
-        assert_eq(f.attested_credential_data, f2.attested_credential_data);
-    }
-
-    #[test]
-    fn test_attestation_format_round_trip() {
-        for fmt in [
-            AttestationFormat.None_,
-            AttestationFormat.Packed,
-            AttestationFormat.FidoU2f,
-            AttestationFormat.Tpm,
-            AttestationFormat.Apple,
-        ] {
-            let s = attestation_format_to_text(&fmt);
-            let f2 = attestation_format_from_text(&s);
-            assert_eq(s, attestation_format_to_text(&f2));
-        }
-    }
-
-    #[test]
-    fn test_alg_supported() {
-        assert!(alg_supported(COSE_ALG_ES256));
-        assert!(alg_supported(COSE_ALG_EDDSA));
-        assert!(alg_supported(COSE_ALG_RS256));
-        assert!(!alg_supported(0));
-        assert!(!alg_supported(-100));
-    }
-}

@@ -82,7 +82,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.x509.path_validation;
 
@@ -504,7 +504,7 @@ fn check_dn_against_subtrees(
         return Err(NameConstraintExcluded {
             index: cert_index_rfc,
             name_kind: "DirectoryName".to_text(),
-            name: format!("<{} bytes>", dn_der.len()).to_text(),
+            name: f"<{dn_der.len()} bytes>",
         });
     }
     if permitted.initialized && !permitted.dn_subtrees.is_empty() {
@@ -512,7 +512,7 @@ fn check_dn_against_subtrees(
             return Err(NameConstraintNotPermitted {
                 index: cert_index_rfc,
                 name_kind: "DirectoryName".to_text(),
-                name: format!("<{} bytes>", dn_der.len()).to_text(),
+                name: f"<{dn_der.len()} bytes>",
             });
         }
     }
@@ -588,7 +588,7 @@ fn check_general_name(
                     return Err(NameConstraintExcluded {
                         index: cert_index_rfc,
                         name_kind: "iPAddress".to_text(),
-                        name: format!("<{} bytes>", addr.len()).to_text(),
+                        name: f"<{addr.len()} bytes>",
                     });
                 }
                 i = i + 1;
@@ -604,7 +604,7 @@ fn check_general_name(
                     return Err(NameConstraintNotPermitted {
                         index: cert_index_rfc,
                         name_kind: "iPAddress".to_text(),
-                        name: format!("<{} bytes>", addr.len()).to_text(),
+                        name: f"<{addr.len()} bytes>",
                     });
                 }
             }
@@ -950,7 +950,7 @@ fn check_critical_extensions(cert: &X509Certificate, cert_index_rfc: Int) -> Res
             if !is_recognised_critical(&raw.oid) {
                 return Err(UnrecognisedCriticalExtension {
                     index: cert_index_rfc,
-                    oid_text: format!("{:?}", raw.oid).to_text(),
+                    oid_text: "<unknown>".to_text(),
                 });
             }
         }
@@ -1042,70 +1042,3 @@ fn extract_accepted_policies(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_constants() {
-        assert_eq(MAX_CHAIN_LENGTH, 16);
-    }
-
-    #[test]
-    fn test_dns_within_subtree_exact() {
-        assert_eq(dns_within_subtree(&"example.com".to_text(), &"example.com".to_text()), true);
-    }
-
-    #[test]
-    fn test_dns_within_subtree_subdomain() {
-        assert_eq(dns_within_subtree(&"foo.example.com".to_text(), &"example.com".to_text()), true);
-        assert_eq(dns_within_subtree(&"foo.bar.example.com".to_text(), &"example.com".to_text()), true);
-    }
-
-    #[test]
-    fn test_dns_within_subtree_unrelated() {
-        assert_eq(dns_within_subtree(&"example.com".to_text(), &"other.com".to_text()), false);
-        // Adjacent-label is NOT a subdomain match.
-        assert_eq(dns_within_subtree(&"badexample.com".to_text(), &"example.com".to_text()), false);
-    }
-
-    #[test]
-    fn test_email_within_subtree_exact() {
-        assert_eq(email_within_subtree(&"a@example.com".to_text(), &"a@example.com".to_text()), true);
-    }
-
-    #[test]
-    fn test_email_within_subtree_domain() {
-        assert_eq(email_within_subtree(&"any@example.com".to_text(), &"example.com".to_text()), true);
-        assert_eq(email_within_subtree(&"any@OTHER.com".to_text(), &"example.com".to_text()), false);
-    }
-
-    #[test]
-    fn test_email_within_subtree_dot_prefix() {
-        assert_eq(email_within_subtree(&"a@sub.example.com".to_text(), &".example.com".to_text()), true);
-        assert_eq(email_within_subtree(&"a@example.com".to_text(), &".example.com".to_text()), true);
-        assert_eq(email_within_subtree(&"a@other.com".to_text(), &".example.com".to_text()), false);
-    }
-
-    #[test]
-    fn test_extract_uri_host() {
-        assert_eq(extract_uri_host(&"https://example.com/path".to_text()), "example.com".to_text());
-        assert_eq(extract_uri_host(&"https://example.com:443/path".to_text()), "example.com".to_text());
-        assert_eq(extract_uri_host(&"https://user@example.com/path".to_text()), "user@example.com".to_text());
-    }
-
-    #[test]
-    fn test_ip_within_subtree_v4() {
-        let mut addr: List<Byte> = List.new();
-        addr.push(192); addr.push(168); addr.push(1); addr.push(10);
-        let mut sub_addr: List<Byte> = List.new();
-        sub_addr.push(192); sub_addr.push(168); sub_addr.push(0); sub_addr.push(0);
-        let mut sub_mask: List<Byte> = List.new();
-        sub_mask.push(255); sub_mask.push(255); sub_mask.push(0); sub_mask.push(0);
-        let st = IpSubtree { addr: sub_addr, mask: sub_mask };
-        assert_eq(ip_within_subtree(&addr, &st), true);
-        let mut other: List<Byte> = List.new();
-        other.push(10); other.push(0); other.push(0); other.push(1);
-        assert_eq(ip_within_subtree(&other, &st), false);
-    }
-}

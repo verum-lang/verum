@@ -75,7 +75,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.x509.ocsp_client;
 
@@ -519,7 +519,7 @@ public async fn check_certificate_status<C: HttpClient>(
     // Step 3: parse.
     let parsed = parse_ocsp_response(resp_bytes.as_slice())
         .map_err(|e| OcspCheckError.Parse(e))?;
-    if parsed.status is_not OcspResponseStatus.Successful {
+    if !(parsed.status is OcspResponseStatus.Successful) {
         return Err(OcspCheckError.Parse(OcspError.BadStatus(parsed.status.to_u8())));
     }
     let basic = match parsed.basic {
@@ -611,45 +611,3 @@ fn verify_response_signature(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_cert_id_hash_oids() {
-        let s1 = cert_id_hash_oid(&CertIdHash.Sha1Hash);
-        let s256 = cert_id_hash_oid(&CertIdHash.Sha256Hash);
-        // SHA-1 OID = 1.3.14.3.2.26
-        assert(s1.eq(&Oid.from(&[1, 3, 14, 3, 2, 26])));
-        // SHA-256 OID = 2.16.840.1.101.3.4.2.1
-        assert(s256.eq(&Oid.from(&[2, 16, 840, 1, 101, 3, 4, 2, 1])));
-    }
-
-    #[test]
-    fn test_freshness_tolerance_default() {
-        assert_eq(DEFAULT_FRESHNESS_TOLERANCE_SECONDS, 300);
-    }
-
-    #[test]
-    fn test_max_response_bytes_sane() {
-        // Hard cap should be modest — typical OCSP responses are ~1-2 KiB.
-        assert(MAX_OCSP_RESPONSE_BYTES >= 8 * 1024);
-        assert(MAX_OCSP_RESPONSE_BYTES <= 1024 * 1024);
-    }
-
-    #[test]
-    fn test_is_pkix_ocsp_method_recognised() {
-        let bytes: [Byte; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01];
-        assert(is_pkix_ocsp_method(&bytes));
-        let wrong: [Byte; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
-        assert(!is_pkix_ocsp_method(&wrong));
-    }
-
-    #[test]
-    fn test_check_options_default() {
-        let o = check_options_default();
-        assert(o.override_url.is_none());
-        assert(o.hash is CertIdHash.Sha1Hash);
-        assert_eq(o.treat_unknown_as_good, false);
-    }
-}

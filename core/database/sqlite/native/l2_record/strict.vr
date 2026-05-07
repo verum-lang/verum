@@ -1,7 +1,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.l2_record.strict;
 
@@ -91,7 +91,7 @@ implement Debug for StrictConstraintError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             DatatypeMismatch(column, expected) =>
-                f.write_str(f"DatatypeMismatch({column}, {expected:?})".as_str()),
+                f.write_str(f"DatatypeMismatch({column}, {expected})".as_str()),
             UnknownType(declared) =>
                 f.write_str(f"UnknownType({declared})".as_str()),
         }

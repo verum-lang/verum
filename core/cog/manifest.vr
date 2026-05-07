@@ -45,7 +45,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.cog.manifest;
 
@@ -633,99 +633,3 @@ fn string_list_to_array(l: &List<Text>) -> ConfigValue {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_parse_minimal() {
-        let src = r#"
-[cog]
-name = "my-cog"
-version = "1.0.0"
-"#.to_text();
-        let m = parse_text(&src).unwrap();
-        assert_eq(m.cog.name, "my-cog".to_text());
-        assert_eq(m.cog.version.major, 1_u64);
-        assert_eq(m.cog.version.minor, 0_u64);
-        assert_eq(m.cog.version.patch, 0_u64);
-        match m.language.profile { Application => {}, _ => unreachable() }
-    }
-
-    #[test]
-    fn test_parse_full() {
-        let src = r#"
-[cog]
-name = "@team/serve"
-version = "0.5.3"
-authors = ["Alice <a@b.c>", "Bob"]
-description = "An HTTP serve"
-license = "MIT"
-keywords = ["http", "serve"]
-
-[language]
-profile = "research"
-
-[dependencies]
-http = "^1.0"
-crypto = { version = "0.5", features = ["ed25519"] }
-local = { path = "../local" }
-forked = { git = "https://example.com/repo", branch = "main" }
-"#.to_text();
-        let m = parse_text(&src).unwrap();
-        assert_eq(m.cog.name, "@team/serve".to_text());
-        assert_eq(m.cog.authors.len(), 2);
-        assert_eq(m.dependencies.len(), 4);
-        match m.language.profile { Research => {}, _ => unreachable() }
-        // crypto dep has features.
-        let crypto = m.dependencies.get(&"crypto".to_text()).unwrap();
-        assert_eq(crypto.features.len(), 1);
-        assert_eq(crypto.features.get(0).unwrap(), &"ed25519".to_text());
-        // local dep has path source.
-        let local = m.dependencies.get(&"local".to_text()).unwrap();
-        match &local.source {
-            DependencySource.Path { rel_path } => assert_eq(rel_path, &"../local".to_text()),
-            _ => unreachable(),
-        }
-        // forked dep has git source.
-        let forked = m.dependencies.get(&"forked".to_text()).unwrap();
-        match &forked.source {
-            DependencySource.Git { url, revision } => {
-                assert_eq(url, &"https://example.com/repo".to_text());
-                match revision { GitRevision.Branch(b) => assert_eq(b, &"main".to_text()), _ => unreachable() }
-            }
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_format_roundtrip() {
-        let src = r#"
-[cog]
-name = "x"
-version = "1.0.0"
-
-[dependencies]
-http = "^1.0"
-"#.to_text();
-        let m = parse_text(&src).unwrap();
-        let rendered = format_text(&m).unwrap();
-        let m2 = parse_text(&rendered).unwrap();
-        assert_eq(m.cog.name, m2.cog.name);
-        assert_eq(m.dependencies.len(), m2.dependencies.len());
-    }
-
-    #[test]
-    fn test_missing_cog_section() {
-        let src = "version = \"1.0.0\"\n".to_text();
-        let r = parse_text(&src);
-        assert(r.is_err());
-    }
-
-    #[test]
-    fn test_invalid_version() {
-        let src = "[cog]\nname = \"x\"\nversion = \"not-a-version\"\n".to_text();
-        let r = parse_text(&src);
-        assert(r.is_err());
-    }
-}

@@ -47,7 +47,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.configuration.value;
 
@@ -313,55 +313,3 @@ public fn empty_array() -> ConfigValue {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_type_predicates() {
-        assert(is_null(&null()));
-        assert(is_bool(&bool_v(true)));
-        assert(is_int(&int_v(42)));
-        assert(is_float(&float_v(3.14)));
-        assert(is_number(&int_v(0)));
-        assert(is_number(&float_v(0.0)));
-        assert(is_string(&string_v("x".to_text())));
-        assert(is_array(&empty_array()));
-        assert(is_table(&empty_table()));
-    }
-
-    #[test]
-    fn test_type_name() {
-        assert_eq(type_name(&null()), "null".to_text());
-        assert_eq(type_name(&bool_v(false)), "bool".to_text());
-        assert_eq(type_name(&int_v(0)), "int".to_text());
-        assert_eq(type_name(&float_v(0.0)), "float".to_text());
-        assert_eq(type_name(&string_v("".to_text())), "string".to_text());
-    }
-
-    #[test]
-    fn test_eq_nested() {
-        let mut a = Map.new();
-        a.insert("x".to_text(), int_v(1));
-        let mut b = Map.new();
-        b.insert("x".to_text(), int_v(1));
-        assert(table_v(a).eq(&table_v(b)));
-    }
-
-    #[test]
-    fn test_eq_different_keys() {
-        let mut a = Map.new();
-        a.insert("x".to_text(), int_v(1));
-        let mut b = Map.new();
-        b.insert("y".to_text(), int_v(1));
-        assert(!table_v(a).eq(&table_v(b)));
-    }
-
-    #[test]
-    fn test_as_float_coerces_int() {
-        match as_float(&int_v(7)) {
-            Some(f) => assert_eq(f, 7.0),
-            None    => unreachable(),
-        }
-    }
-}

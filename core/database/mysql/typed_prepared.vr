@@ -36,7 +36,7 @@
 // MysqlTypedRow (existing) lifts each List<RowValue> into a
 // typed Verum value (Int / Text / tuple / Maybe<T>) — same shape
 // as PG's TypedRow. So end-to-end: prepare → execute_prepared →
-// typed_prepared_rows → rows_typed_my::<R>.
+// typed_prepared_rows → rows_typed_my<R>.
 //
 // OUT of V0:
 //   * Typed PARAMS via TypedValue (current uses raw StmtParam —
@@ -53,7 +53,7 @@
     requires: [],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.mysql.typed_prepared;
 

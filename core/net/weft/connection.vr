@@ -8,7 +8,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.weft.connection;
 
@@ -237,12 +237,12 @@ implement Debug for ConnError {
         match self {
             ClientClosed                       => f.write_str("ClientClosed"),
             Cancelled                          => f.write_str("Cancelled"),
-            Io(e)                              => f.write_str(f"Io({e:?})".as_str()),
-            Parse(e)                           => f.write_str(f"Parse({e:?})".as_str()),
+            Io(e)                              => f.write_str(f"Io({e})".as_str()),
+            Parse(e)                           => f.write_str(f"Parse({e})".as_str()),
             TooLarge                           => f.write_str("TooLarge"),
             UnsupportedTransferEncoding(t)     => f.write_str(f"UnsupportedTransferEncoding({t})".as_str()),
             ReadTimeout                        => f.write_str("ReadTimeout"),
-            HandlerError(e)                    => f.write_str(f"HandlerError({e:?})".as_str()),
+            HandlerError(e)                    => f.write_str(f"HandlerError({e})".as_str()),
         }
     }
 }

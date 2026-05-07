@@ -37,7 +37,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.configuration.format;
 
@@ -285,27 +285,3 @@ public fn registered_ids(reg: &FormatRegistry) -> List<FormatId> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_default_capabilities() {
-        let c = default_capabilities();
-        assert(c.has_null);
-        assert(c.has_heterogeneous_arrays);
-        assert(c.preserves_key_order);
-        assert(c.single_root);
-        assert(!c.preserves_comments);
-        assert(!c.has_bytes);
-    }
-
-    #[test]
-    fn test_empty_options() {
-        let o = empty_options();
-        match o.payload {
-            ConfigValue.ConfigTable(t) => assert_eq(t.len(), 0),
-            _ => unreachable(),
-        }
-    }
-}

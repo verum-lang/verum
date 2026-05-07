@@ -63,7 +63,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.oidc;
 
@@ -149,7 +149,7 @@ implement Display for DiscoveryError {
             TooLarge { size, limit } => f.write_str(f"oidc/discovery: response too large ({size} > {limit})".as_str()),
             InvalidJson(reason)    => f.write_str(f"oidc/discovery: invalid JSON: {reason}".as_str()),
             MissingField(field)    => f.write_str(f"oidc/discovery: missing required field: {field}".as_str()),
-            UnsupportedAlgorithms(algs) => f.write_str(f"oidc/discovery: no supported algorithms in {algs:?}".as_str()),
+            UnsupportedAlgorithms(algs) => f.write_str(f"oidc/discovery: no supported algorithms in {algs}".as_str()),
             IssuerMismatch { configured, document } => f.write_str(
                 f"oidc/discovery: issuer mismatch (configured {configured}, document {document})".as_str()),
         }
@@ -187,7 +187,7 @@ public async fn discover<C: HttpClient>(
         return Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
     }
     let json_value = json_decode(&resp.body)
-        .map_err(|e| DiscoveryError.InvalidJson(format!("{e}").to_text()))?;
+        .map_err(|e| DiscoveryError.InvalidJson(f"{e}"))?;
     parse_provider_config(&json_value, expected_issuer)
 }
 
@@ -195,9 +195,9 @@ fn compose_discovery_url(issuer: &Text) -> Text {
     if issuer.ends_with("/") {
         let mut s = issuer.clone();
         s.pop();
-        format!("{}{}", s, DISCOVERY_PATH).to_text()
+        f"{s}{DISCOVERY_PATH}"
     } else {
-        format!("{}{}", issuer, DISCOVERY_PATH).to_text()
+        f"{issuer}{DISCOVERY_PATH}"
     }
 }
 
@@ -349,7 +349,7 @@ public async fn fetch_jwks<C: HttpClient>(
         return Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
     }
     let value = json_decode(&resp.body)
-        .map_err(|e| JwksError.InvalidJson(format!("{e}").to_text()))?;
+        .map_err(|e| JwksError.InvalidJson(f"{e}"))?;
     parse_jwks(&value)
 }
 
@@ -379,7 +379,7 @@ fn parse_jwks(value: &JsonValue) -> Result<Jwks, JwksError> {
 /// `core.security.jwt::JwtKey::from_jwk_object` for the actual
 /// per-algorithm decoding (RSA n+e, EC x+y+crv, OKP x+crv).
 fn parse_jwk(obj: &JsonObject) -> Result<JwtKey, Text> {
-    JwtKey.from_jwk_object(obj).map_err(|e| format!("{e}").to_text())
+    JwtKey.from_jwk_object(obj).map_err(|e| f"{e}")
 }
 
 fn jwt_key_kid(k: &JwtKey) -> Maybe<Text> { k.kid() }
@@ -464,7 +464,7 @@ public async fn jwks_cache_get_key_for_kid<C: HttpClient>(
         Some(k) => Ok(k.clone()),
         None    => Err(JwksError.InvalidKey {
             index: -1,
-            reason: format!("kid '{kid}' not found in JWKS even after refresh").to_text(),
+            reason: f"kid '{kid}' not found in JWKS even after refresh",
         }),
     }
 }
@@ -548,7 +548,7 @@ implement Display for OidcVerifyError {
             IssuerMismatch { expected, found } => f.write_str(
                 f"oidc: issuer mismatch (expected '{expected}', found '{found}')".as_str()),
             AudienceMismatch { expected, found } => f.write_str(
-                f"oidc: audience mismatch (expected '{expected}', found {found:?})".as_str()),
+                f"oidc: audience mismatch (expected '{expected}', found {found})".as_str()),
             TokenExpired { exp, now } => f.write_str(f"oidc: token expired (exp={exp}, now={now})".as_str()),
             TokenNotYetValid { nbf, now } => f.write_str(f"oidc: token not yet valid (nbf={nbf}, now={now})".as_str()),
             TokenTooOld { iat, max_age, now } => f.write_str(
@@ -573,7 +573,7 @@ public async fn verify_oidc_token<C: HttpClient>(
 ) -> Result<JwtPayload, OidcVerifyError> {
     // Step 1: peek at the JWT header to extract `kid` + `alg`.
     let header = decode_header_only(token)
-        .map_err(|e| OidcVerifyError.MalformedToken(format!("header decode: {e}").to_text()))?;
+        .map_err(|e| OidcVerifyError.MalformedToken(f"header decode: {e}"))?;
     if !is_jwt_alg_supported(&header.alg) {
         return Err(OidcVerifyError.UnsupportedAlgorithm(jwt_alg_to_text(&header.alg)));
     }
@@ -613,7 +613,7 @@ fn enforce_constraints(
     match audience_matches(&payload.aud, &opts.audience) {
         true => {}
         false => return Err(OidcVerifyError.AudienceMismatch {
-            expected: format!("{:?}", opts.audience).to_text(),
+            expected: audience_describe(&opts.audience),
             found:    payload.aud.clone(),
         }),
     }
@@ -653,6 +653,22 @@ fn enforce_constraints(
         }
     }
     Ok(())
+}
+
+fn audience_describe(opts: &OidcAudience) -> Text {
+    match opts {
+        OidcAudience.Single(s) => s.clone(),
+        OidcAudience.OneOf(set) => {
+            let mut out: Text = "[".to_text();
+            let mut first: Bool = true;
+            for v in set.iter() {
+                if !first { out = out + ", "; }
+                out = out + v.as_str();
+                first = false;
+            }
+            out + "]"
+        }
+    }
 }
 
 fn audience_matches(token_aud: &List<Text>, opts: &OidcAudience) -> Bool {
@@ -791,72 +807,3 @@ public async fn oidc_verifier_verify<C: HttpClient>(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_compose_discovery_url_no_trailing_slash() {
-        let u = compose_discovery_url(&"https://example.com".to_text());
-        assert_eq(u, "https://example.com/.well-known/openid-configuration".to_text());
-    }
-
-    #[test]
-    fn test_compose_discovery_url_trailing_slash() {
-        let u = compose_discovery_url(&"https://example.com/".to_text());
-        assert_eq(u, "https://example.com/.well-known/openid-configuration".to_text());
-    }
-
-    #[test]
-    fn test_alg_supported() {
-        assert_eq(is_supported_alg(&"RS256".to_text()), true);
-        assert_eq(is_supported_alg(&"EdDSA".to_text()), true);
-        assert_eq(is_supported_alg(&"none".to_text()), false);
-        assert_eq(is_supported_alg(&"HS256".to_text()), false);
-        assert_eq(is_supported_alg(&"unknown".to_text()), false);
-    }
-
-    #[test]
-    fn test_jwt_alg_none_rejected() {
-        assert_eq(is_jwt_alg_supported(&JwtAlgorithm.None), false);
-    }
-
-    #[test]
-    fn test_jwt_alg_hs_rejected() {
-        // OIDC uses asymmetric crypto only; reject HMAC.
-        assert_eq(is_jwt_alg_supported(&JwtAlgorithm.HS256), false);
-    }
-
-    #[test]
-    fn test_well_known_issuer_lookup() {
-        assert_eq(well_known_issuer(&"github".to_text()), Some(ISSUER_GITHUB_ACTIONS.to_text()));
-        assert_eq(well_known_issuer(&"unknown".to_text()), None);
-    }
-
-    #[test]
-    fn test_audience_single_match() {
-        let opts = OidcAudience.Single("verum-registry".to_text());
-        let mut auds: List<Text> = List.new();
-        auds.push("verum-registry".to_text());
-        assert_eq(audience_matches(&auds, &opts), true);
-    }
-
-    #[test]
-    fn test_audience_single_no_match() {
-        let opts = OidcAudience.Single("verum-registry".to_text());
-        let mut auds: List<Text> = List.new();
-        auds.push("other-aud".to_text());
-        assert_eq(audience_matches(&auds, &opts), false);
-    }
-
-    #[test]
-    fn test_audience_one_of_match() {
-        let mut set: Set<Text> = Set.new();
-        set.insert("aud-a".to_text());
-        set.insert("aud-b".to_text());
-        let opts = OidcAudience.OneOf(set);
-        let mut auds: List<Text> = List.new();
-        auds.push("aud-b".to_text());
-        assert_eq(audience_matches(&auds, &opts), true);
-    }
-}

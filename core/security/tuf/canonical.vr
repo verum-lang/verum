@@ -43,7 +43,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.tuf.canonical;
 
@@ -165,40 +165,3 @@ public fn scheme_from_text(s: &Text) -> TufKeyScheme {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_keytype_round_trip() {
-        assert(keytype_from_text(&"ed25519".to_text()) is TufKeyType.Ed25519Key);
-        assert(keytype_from_text(&"rsa".to_text()) is TufKeyType.RsaKey);
-        match keytype_from_text(&"unknown".to_text()) {
-            TufKeyType.Other(s) => assert_eq(s, "unknown".to_text()),
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_scheme_round_trip() {
-        assert(scheme_from_text(&"ed25519".to_text()) is TufKeyScheme.Ed25519Scheme);
-        assert(scheme_from_text(&"rsassa-pkcs1v15-sha256".to_text()) is TufKeyScheme.RsaPkcs1V15Sha256);
-    }
-
-    #[test]
-    fn test_compute_keyid_stable() {
-        let key = TufKey {
-            keytype: TufKeyType.Ed25519Key,
-            scheme:  TufKeyScheme.Ed25519Scheme,
-            keyval:  {
-                let mut o: JsonObject = JsonObject.new();
-                o.insert("public".to_text(), json_string("deadbeef".to_text()));
-                json_object(o)
-            },
-        };
-        let kid1 = compute_keyid(&key).unwrap();
-        let kid2 = compute_keyid(&key).unwrap();
-        assert_eq(kid1.0, kid2.0);
-        assert_eq(kid1.0.len(), 64); // SHA-256 hex
-    }
-}

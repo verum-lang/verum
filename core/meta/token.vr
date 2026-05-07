@@ -379,7 +379,7 @@ implement Debug for TokenStream {
         f.write_str("TokenStream(")?;
         for (i, tree) in self.tokens.iter().enumerate() {
             if i > 0 { f.write_str(" ")?; }
-            f.write_str(f"{tree:?}")?;
+            f.write_str(f"{tree}")?;
         }
         f.write_str(")")
     }
@@ -782,7 +782,7 @@ public type StringKind is
     | Normal
     /// Format string: `f"..."`
     | Format
-    /// Raw string: `r"..."`
+    /// Raw string: `"..."`
     | Raw
     /// Raw format string: `rf"..."`
     | RawFormat;
@@ -808,13 +808,13 @@ implement LexError {
 
 implement Display for LexError {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        f.write_str(f"{self.message} at {self.span:?}")
+        f.write_str(f"{self.message} at {self.span}")
     }
 }
 
 implement Debug for LexError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"LexError {{ message: {self.message}, span: {self.span:?} }}".as_str())
+        f.write_str(f"LexError {{ message: {self.message}, span: {self.span} }}".as_str())
     }
 }
 

@@ -28,7 +28,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.quic.api.server;
 
@@ -118,7 +118,7 @@ implement Debug for QuicServerError {
             QuicServerError.Bind(reason)       => f.write_str(f"Bind({reason})".as_str()),
             QuicServerError.Handshake(reason)  => f.write_str(f"Handshake({reason})".as_str()),
             QuicServerError.Closed             => f.write_str("Closed"),
-            QuicServerError.StreamError(e)     => f.write_str(f"StreamError({e:?})".as_str()),
+            QuicServerError.StreamError(e)     => f.write_str(f"StreamError({e})".as_str()),
         }
     }
 }

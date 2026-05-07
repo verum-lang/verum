@@ -45,7 +45,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.redis.commands;
 
@@ -67,7 +67,7 @@ pub async fn get(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>>, 
         RespValue.BulkString(b) => Ok(Some(b)),
         RespValue.SimpleString(s) => Ok(Some(s.as_bytes().to_list())),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"GET unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"GET unexpected: {other}")),
     }
 }
 
@@ -126,7 +126,7 @@ pub async fn set_nx(
         RespValue.SimpleString(_) => Ok(true),
         RespValue.NullBulk | RespValue.Nil_ => Ok(false),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SET NX unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SET NX unexpected: {other}")),
     }
 }
 
@@ -198,7 +198,7 @@ pub async fn mget(client: &RedisClient, keys: &[Text]) -> Result<List<Maybe<List
             Ok(out)
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"MGET unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"MGET unexpected: {other}")),
     }
 }
 
@@ -221,7 +221,7 @@ pub async fn getdel(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>
         RespValue.NullBulk | RespValue.Nil_ => Ok(None),
         RespValue.BulkString(b) => Ok(Some(b)),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"GETDEL unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"GETDEL unexpected: {other}")),
     }
 }
 
@@ -261,7 +261,7 @@ pub async fn type_of(client: &RedisClient, key: &Text) -> Result<Text, RedisErro
     match exec(client, a.as_slice()).await? {
         RespValue.SimpleString(s) => Ok(s),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"TYPE unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"TYPE unexpected: {other}")),
     }
 }
 
@@ -307,7 +307,7 @@ pub async fn scan(
             Ok((next_cursor, keys))
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SCAN unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SCAN unexpected: {other}")),
     }
 }
 
@@ -352,7 +352,7 @@ pub async fn lrange(
     match exec(client, a.as_slice()).await? {
         RespValue.Array(arr) => bulk_array_to_byte_list(&arr),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"LRANGE unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"LRANGE unexpected: {other}")),
     }
 }
 
@@ -416,7 +416,7 @@ pub async fn hgetall(client: &RedisClient, key: &Text) -> Result<Map<Text, List<
             Ok(out)
         }
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"HGETALL unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"HGETALL unexpected: {other}")),
     }
 }
 
@@ -455,7 +455,7 @@ pub async fn smembers(client: &RedisClient, key: &Text) -> Result<List<List<Byte
     match exec(client, a.as_slice()).await? {
         RespValue.Array(arr) | RespValue.SetValue(arr) => bulk_array_to_byte_list(&arr),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"SMEMBERS unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"SMEMBERS unexpected: {other}")),
     }
 }
 
@@ -491,7 +491,7 @@ pub async fn zrange(
     match exec(client, a.as_slice()).await? {
         RespValue.Array(arr) => bulk_array_to_byte_list(&arr),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"ZRANGE unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"ZRANGE unexpected: {other}")),
     }
 }
 
@@ -511,7 +511,7 @@ pub async fn zscore(
         }
         RespValue.Double(d) => Ok(Some(d)),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"ZSCORE unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"ZSCORE unexpected: {other}")),
     }
 }
 
@@ -547,7 +547,7 @@ fn expect_simple_ok(v: RespValue, cmd: &str) -> Result<(), RedisError> {
         RespValue.SimpleString(_) => Ok(()),
         RespValue.NullBulk | RespValue.Nil_ => Ok(()),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other}")),
     }
 }
 
@@ -555,7 +555,7 @@ fn expect_int(v: RespValue, cmd: &str) -> Result<Int, RedisError> {
     match v {
         RespValue.Integer(n) => Ok(n),
         RespValue.Error_(m)  => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other}")),
     }
 }
 
@@ -569,7 +569,7 @@ fn expect_optional_bulk(v: RespValue, cmd: &str) -> Result<Maybe<List<Byte>>, Re
         RespValue.BulkString(b) => Ok(Some(b)),
         RespValue.SimpleString(s) => Ok(Some(s.as_bytes().to_list())),
         RespValue.Error_(m) => Err(RedisError.Backend(m)),
-        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other}")),
     }
 }
 
@@ -591,7 +591,7 @@ fn bulk_to_bytes(v: &RespValue) -> Result<List<Byte>, RedisError> {
         RespValue.BulkString(b) => Ok(b.clone()),
         RespValue.SimpleString(s) => Ok(s.as_bytes().to_list()),
         RespValue.NullBulk | RespValue.Nil_ => Ok(List.new()),
-        _ => Err(RedisError.InvalidReply(f"expected bulk, got: {v:?}")),
+        _ => Err(RedisError.InvalidReply(f"expected bulk, got: {v}")),
     }
 }
 

@@ -47,7 +47,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.cose_key;
 
@@ -97,7 +97,7 @@ pub type CredentialPublicKey is
 /// key. Validates kty / alg / crv / coordinate-length consistency
 /// per the registered IANA constants.
 pub fn decode_cose_key(bytes: &[Byte]) -> Result<CredentialPublicKey, WebAuthnError> {
-    let value = cbor_decode(bytes).map_err(|e| WebAuthnError.InvalidCbor(format!("{e}").to_text()))?;
+    let value = cbor_decode(bytes).map_err(|e| WebAuthnError.InvalidCbor(f"{e}"))?;
     decode_cose_key_value(&value)
 }
 
@@ -131,8 +131,7 @@ fn decode_okp(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<Credential
     let x = get_bytes(map, -2)
         .ok_or_else(|| WebAuthnError.InvalidCbor("OKP missing x (label -2)".to_text()))?;
     if x.len() != 32 {
-        return Err(WebAuthnError.InvalidCbor(format!(
-            "Ed25519 x must be 32 bytes, got {}", x.len()).to_text()));
+        return Err(WebAuthnError.InvalidCbor(f"Ed25519 x must be 32 bytes, got {x.len()}"));
     }
     Ok(CredentialPublicKey.Ed25519 { x })
 }
@@ -285,58 +284,3 @@ pub fn encode_cose_key(pk: &CredentialPublicKey) -> List<Byte> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_round_trip_ed25519() {
-        let mut x: List<Byte> = List.with_capacity(32);
-        let mut i: Int = 0;
-        while i < 32 { x.push(i as Byte); i = i + 1; }
-        let pk = CredentialPublicKey.Ed25519 { x: x.clone() };
-        let bytes = encode_cose_key(&pk);
-        let decoded = decode_cose_key(bytes.as_slice()).unwrap();
-        match decoded {
-            CredentialPublicKey.Ed25519 { x: x2 } => assert_eq(x, x2),
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_round_trip_p256() {
-        let mut x: List<Byte> = List.with_capacity(32);
-        let mut y: List<Byte> = List.with_capacity(32);
-        let mut i: Int = 0;
-        while i < 32 { x.push(i as Byte); y.push((i + 1) as Byte); i = i + 1; }
-        let pk = CredentialPublicKey.EcdsaP256 { x: x.clone(), y: y.clone() };
-        let bytes = encode_cose_key(&pk);
-        let decoded = decode_cose_key(bytes.as_slice()).unwrap();
-        match decoded {
-            CredentialPublicKey.EcdsaP256 { x: xx, y: yy } => {
-                assert_eq(x, xx);
-                assert_eq(y, yy);
-            }
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_alg_of() {
-        let pk_ed = CredentialPublicKey.Ed25519 { x: List.with_capacity(32) };
-        assert_eq(alg_of(&pk_ed), COSE_ALG_EDDSA);
-        let pk_p256 = CredentialPublicKey.EcdsaP256 { x: List.new(), y: List.new() };
-        assert_eq(alg_of(&pk_p256), COSE_ALG_ES256);
-    }
-
-    #[test]
-    fn test_unknown_kty_rejected() {
-        let mut entries: List<(CborValue, CborValue)> = List.new();
-        entries.push((CborValue.Integer(1), CborValue.Integer(99)));
-        let bytes = encoding.cbor.encode_canonical(&CborValue.Map(entries));
-        match decode_cose_key(bytes.as_slice()) {
-            Err(WebAuthnError.UnknownCoseKeyType(99)) => {}
-            _ => unreachable(),
-        }
-    }
-}

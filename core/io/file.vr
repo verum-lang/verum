@@ -29,7 +29,7 @@
     requires: [Capability.Exec(ExecTarget.Syscall(0))],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.io.file;
 mount core.*;

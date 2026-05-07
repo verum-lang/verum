@@ -94,7 +94,7 @@ fn check_path(
                 if path_matches(pat_str, &canonical) { return Ok(()); }
             }
             Err(ShellError.PermissionDenied {
-                command: f"{kind}({path:?})",
+                command: f"{kind}({path})",
                 kind:    kind.into(),
             })
         }
@@ -109,7 +109,7 @@ fn canonicalise(path: &Path) -> Text {
         return p;
     }
     match fs_current_dir() {
-        Ok(cwd) => f"{cwd:?}/{p}",
+        Ok(cwd) => f"{cwd}/{p}",
         Err(_)  => p,
     }
 }

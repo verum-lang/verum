@@ -40,7 +40,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.storage.s3.client;
 
@@ -135,7 +135,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             headers.insert("if-match".to_text(), et.clone());
         }
         for (k, v) in options.user_metadata.iter() {
-            headers.insert(format!("x-amz-meta-{}", k.to_lower()).to_text(), v.clone());
+            headers.insert(f"x-amz-meta-{k.to_lower()}", v.clone());
         }
 
         let signed = sign_request(
@@ -158,7 +158,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    data.clone(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_409() {
             return Err(StorageError.Conflict(extract_error_message(&resp)));
         }
@@ -166,7 +166,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             return Err(StorageError.AccessDenied(extract_error_message(&resp)));
         }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("PUT HTTP {} {}", resp.status, extract_error_message(&resp)).to_text()));
+            return Err(StorageError.Backend(f"PUT HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         let etag = resp.headers.get(&"etag".to_text())
             .map(|v| strip_quotes(v))
@@ -194,7 +194,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         let mut headers: Map<Text, Text> = Map.new();
         headers.insert("host".to_text(), host.clone());
         if let Some((start, end)) = options.range {
-            headers.insert("range".to_text(), format!("bytes={}-{}", start, end).to_text());
+            headers.insert("range".to_text(), f"bytes={start}-{end}");
         }
         if let Some(etag) = &options.if_none_match {
             headers.insert("if-none-match".to_text(), etag.clone());
@@ -221,12 +221,12 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    List.new(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_404() {
             return Err(StorageError.NotFound(key.clone()));
         }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("GET HTTP {} {}", resp.status, extract_error_message(&resp)).to_text()));
+            return Err(StorageError.Backend(f"GET HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         let meta = parse_metadata_from_headers(key, &resp.headers, resp.body.len());
         Ok((meta, resp.body))
@@ -261,10 +261,10 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    List.new(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_404() { return Err(StorageError.NotFound(key.clone())); }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("HEAD HTTP {}", resp.status).to_text()));
+            return Err(StorageError.Backend(f"HEAD HTTP {resp.status}"));
         }
         let cl = resp.headers.get(&"content-length".to_text())
             .and_then(|v| Int.parse(v).ok()).unwrap_or(0);
@@ -300,10 +300,10 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    List.new(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         // S3 delete is idempotent — 204 even on missing keys.
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("DELETE HTTP {}", resp.status).to_text()));
+            return Err(StorageError.Backend(f"DELETE HTTP {resp.status}"));
         }
         Ok(())
     }
@@ -323,7 +323,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         q.push(("max-keys".to_text(), f"{options.max_keys}"));
 
         let path = compose_bucket_path(&self.config);
-        let url  = format!("{}?{}", compose_bucket_url(&self.config), encode_query(&q)).to_text();
+        let url  = f"{compose_bucket_url(&self.config)}?{encode_query(&q)}";
         let host = extract_host(&self.config.endpoint);
         let now  = current_iso8601_basic();
 
@@ -350,9 +350,9 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    List.new(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("LIST HTTP {} {}", resp.status, extract_error_message(&resp)).to_text()));
+            return Err(StorageError.Backend(f"LIST HTTP {resp.status} {extract_error_message(&resp)}"));
         }
         parse_list_v2_response(&resp.body)
     }
@@ -383,10 +383,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             options.expires_seconds,
         ).map_err(|e| StorageError.Backend(e))?;
 
-        let url = format!("{}?{}",
-            compose_object_url(&self.config, key),
-            encode_query(&signed_q),
-        ).to_text();
+        let url = f"{compose_object_url(&self.config, key)}?{encode_query(&signed_q)}";
         Ok(url)
     }
 
@@ -419,11 +416,11 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
             body:    List.new(),
         };
         let resp = self.http.send(&req).await
-            .map_err(|e| StorageError.Network(format!("{e}").to_text()))?;
+            .map_err(|e| StorageError.Network(f"{e}"))?;
         if resp.status.is_404() { return Err(StorageError.NotFound(self.config.bucket.clone())); }
         if resp.status.is_403() { return Err(StorageError.AccessDenied("HEAD bucket".to_text())); }
         if !resp.status.is_success() {
-            return Err(StorageError.Backend(format!("HEAD bucket HTTP {}", resp.status).to_text()));
+            return Err(StorageError.Backend(f"HEAD bucket HTTP {resp.status}"));
         }
         Ok(())
     }
@@ -435,11 +432,7 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
 
 fn compose_object_url(cfg: &S3Config, key: &Text) -> Text {
     if cfg.path_style {
-        format!("{}/{}/{}",
-            trim_trailing_slash(&cfg.endpoint),
-            cfg.bucket,
-            key,
-        ).to_text()
+        f"{trim_trailing_slash(&cfg.endpoint)}/{cfg.bucket}/{key}"
     } else {
         let mut endpoint = cfg.endpoint.clone();
         // Insert bucket as a hostname prefix.
@@ -449,18 +442,13 @@ fn compose_object_url(cfg: &S3Config, key: &Text) -> Text {
         };
         let scheme = endpoint.byte_substring(0, after_scheme);
         let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
-        format!("{}{}.{}/{}",
-            scheme, cfg.bucket, trim_trailing_slash(&rest), key,
-        ).to_text()
+        f"{scheme}{cfg.bucket}.{trim_trailing_slash(&rest)}/{key}"
     }
 }
 
 fn compose_bucket_url(cfg: &S3Config) -> Text {
     if cfg.path_style {
-        format!("{}/{}",
-            trim_trailing_slash(&cfg.endpoint),
-            cfg.bucket,
-        ).to_text()
+        f"{trim_trailing_slash(&cfg.endpoint)}/{cfg.bucket}"
     } else {
         let endpoint = &cfg.endpoint;
         let after_scheme = match endpoint.find_str("://") {
@@ -469,22 +457,20 @@ fn compose_bucket_url(cfg: &S3Config) -> Text {
         };
         let scheme = endpoint.byte_substring(0, after_scheme);
         let rest   = endpoint.byte_substring(after_scheme, endpoint.len());
-        format!("{}{}.{}",
-            scheme, cfg.bucket, trim_trailing_slash(&rest),
-        ).to_text()
+        f"{scheme}{cfg.bucket}.{trim_trailing_slash(&rest)}"
     }
 }
 
 fn compose_object_path(cfg: &S3Config, key: &Text) -> Text {
     if cfg.path_style {
-        format!("/{}/{}", cfg.bucket, key).to_text()
+        f"/{cfg.bucket}/{key}"
     } else {
-        format!("/{}", key).to_text()
+        f"/{key}"
     }
 }
 
 fn compose_bucket_path(cfg: &S3Config) -> Text {
-    if cfg.path_style { format!("/{}", cfg.bucket).to_text() }
+    if cfg.path_style { f"/{cfg.bucket}" }
     else { "/".to_text() }
 }
 
@@ -585,7 +571,7 @@ fn extract_error_message(resp: &Response) -> Text {
 
 fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
     let xml = Text.from_utf8(body.as_slice())
-        .map_err(|e| StorageError.Backend(format!("xml utf8: {e}").to_text()))?;
+        .map_err(|e| StorageError.Backend(f"xml utf8: {e}"))?;
     let mut objects: List<ObjectMetadata> = List.new();
     let mut common: List<Text> = List.new();
 
@@ -646,8 +632,8 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
 }
 
 fn extract_xml_text(xml: &Text, tag: &str) -> Maybe<Text> {
-    let open = format!("<{}>", tag);
-    let close = format!("</{}>", tag);
+    let open = f"<{tag}>";
+    let close = f"</{tag}>";
     let s = xml.find_str(&open)?;
     let e = xml.find_str_after(&close, s + open.len())?;
     Some(xml.byte_substring(s + open.len(), e))

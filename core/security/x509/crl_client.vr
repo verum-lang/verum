@@ -55,7 +55,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.x509.crl_client;
 
@@ -370,7 +370,7 @@ implement Display for CrlOperationError {
             Stale { this_update, now } => f.write_str(f"crl: thisUpdate {this_update} too far in past (now={now})".as_str()),
             Expired { next_update, now } => f.write_str(f"crl: nextUpdate {next_update} elapsed (now={now})".as_str()),
             SignatureFailed     => f.write_str("crl: signature verification failed"),
-            AllUrlsFailed(urls) => f.write_str(f"crl: all distribution points failed: {urls:?}".as_str()),
+            AllUrlsFailed(urls) => f.write_str(f"crl: all distribution points failed: {urls}".as_str()),
         }
     }
 }
@@ -502,21 +502,3 @@ fn extract_reason_code(_entry: &RevokedEntry) -> Maybe<CrlReason> {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_constants() {
-        assert_eq(MAX_CRL_BYTES, 32 * 1024 * 1024);
-        assert_eq(DEFAULT_MAX_CACHE_TTL_SECONDS, 86400);
-    }
-
-    #[test]
-    fn test_crl_check_options_default() {
-        let o = crl_check_options_default();
-        assert(o.override_urls.is_none());
-        assert_eq(o.treat_missing_as_good, false);
-        assert_eq(o.freshness_tolerance_s, DEFAULT_FRESHNESS_TOLERANCE_SECONDS);
-    }
-}

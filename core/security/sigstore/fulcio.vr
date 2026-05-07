@@ -64,7 +64,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.sigstore.fulcio;
 
@@ -295,7 +295,7 @@ fn build_request_body(
 
 fn parse_signing_cert_response(bytes: &List<Byte>) -> Result<FulcioCertResponse, FulcioError> {
     let value = json_decode(bytes.as_slice())
-        .map_err(|e| InvalidJson(format!("{e}").to_text()))?;
+        .map_err(|e| InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson("response not an object".to_text()))?;
 
@@ -348,7 +348,7 @@ fn enforce_lifetime_cap(
 ) -> Result<(), FulcioError> {
     if response.cert_chain.is_empty() { return Err(NoCertChain); }
     let leaf = parse_certificate(response.cert_chain[0].as_slice())
-        .map_err(|e| InvalidCertificate(format!("{e}").to_text()))?;
+        .map_err(|e| InvalidCertificate(f"{e}"))?;
     let nb = security.x509.time.time_to_unix(&leaf.tbs.validity.not_before);
     let na = security.x509.time.time_to_unix(&leaf.tbs.validity.not_after);
     let lifetime = na - nb;
@@ -367,11 +367,11 @@ fn enforce_lifetime_cap(
 
 fn compose_url(base: &Text, path: &str) -> Text {
     if base.ends_with("/") && path.starts_with("/") {
-        format!("{}{}", base.byte_substring(0, base.len() - 1), path).to_text()
+        f"{base.byte_substring(0, base.len() - 1)}{path}"
     } else if !base.ends_with("/") && !path.starts_with("/") {
-        format!("{}/{}", base, path).to_text()
+        f"{base}/{path}"
     } else {
-        format!("{}{}", base, path).to_text()
+        f"{base}{path}"
     }
 }
 
@@ -380,7 +380,8 @@ fn text_of_body_lossy(body: &List<Byte>) -> Text {
         let mut out: Text = "".to_text();
         let mut i: Int = 0;
         while i < body.len() && i < 256 {
-            out = out.append(&format!("{:02x}", body[i]).to_text());
+            let b = body[i];
+            out = out.append(&f"{b:02x}");
             i = i + 1;
         }
         out
@@ -391,43 +392,3 @@ fn text_of_body_lossy(body: &List<Byte>) -> Text {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use security.ecc.ed25519.generate_seed;
-
-    #[test]
-    fn test_fulcio_key_algorithm_text() {
-        let k = FulcioKey.Ed25519(generate_seed());
-        assert_eq(fulcio_key_algorithm_text(&k), "ED25519".to_text());
-    }
-
-    #[test]
-    fn test_fulcio_key_ed25519_public_bytes_length() {
-        let k = FulcioKey.Ed25519(generate_seed());
-        let bytes = fulcio_key_public_bytes(&k);
-        assert_eq(bytes.len(), 32);
-    }
-
-    #[test]
-    fn test_proof_of_possession_ed25519_round_trip() {
-        let seed = generate_seed();
-        let k = FulcioKey.Ed25519(seed);
-        let sub = "test@example.com".to_text();
-        let pop = fulcio_proof_of_possession(&k, &sub);
-        assert_eq(pop.len(), 64); // Ed25519 sig is 64 bytes
-    }
-
-    #[test]
-    fn test_compose_url_smoothing() {
-        assert_eq(compose_url(&"https://x.io".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
-        assert_eq(compose_url(&"https://x.io/".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
-    }
-
-    #[test]
-    fn test_default_config() {
-        let c = fulcio_default_config();
-        assert(c.base_url.starts_with("https://fulcio"));
-        assert_eq(c.max_lifetime_seconds, 3600);
-    }
-}

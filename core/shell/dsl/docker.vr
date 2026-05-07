@@ -87,8 +87,8 @@ implement VolumeMount {
         VolumeMount { host, container, readonly: true }
     }
     public fn render(&self) -> Text {
-        if self.readonly { f"{self.host:?}:{self.container:?}:ro" }
-        else             { f"{self.host:?}:{self.container:?}" }
+        if self.readonly { f"{self.host}:{self.container}:ro" }
+        else             { f"{self.host}:{self.container}" }
     }
 }
 

@@ -48,7 +48,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.net.ipv6_canonical;
 
@@ -70,7 +70,7 @@ implement Display for Ipv6CanonicalError {
 implement Debug for Ipv6CanonicalError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            ParseFailed(e) => f.write_str(f"ParseFailed({e:?})".as_str()),
+            ParseFailed(e) => f.write_str(f"ParseFailed({e})".as_str()),
         }
     }
 }

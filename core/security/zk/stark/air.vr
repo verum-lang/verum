@@ -233,7 +233,7 @@ public type ProofParams is {
     grinding_factor: Int,
 }
 
-impl ProofParams {
+implement ProofParams {
     /// 100-bit soundness, fast-prover preset. Suitable for testnet,
     /// dev environments, low-stakes proofs.
     public fn fast() -> ProofParams {

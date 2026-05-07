@@ -408,7 +408,7 @@ implement Clone for ShellContext {
 
 implement Debug for ShellContext {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"ShellContext(cwd={self.cwd:?}, env={self.env_overrides.len()}, flavour={self.flavour:?}, mock={self.mock.is_some()})".as_str())
+        f.write_str(f"ShellContext(cwd={self.cwd}, env={self.env_overrides.len()}, flavour={self.flavour}, mock={self.mock.is_some()})".as_str())
     }
 }
 

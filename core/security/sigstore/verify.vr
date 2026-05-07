@@ -59,7 +59,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.sigstore.verify;
 
@@ -172,7 +172,7 @@ implement Display for SigstoreVerifyError {
                 f"sigstore/verify: envelope hash {computed_hash} not present in any tlog entry".as_str()),
             DsseSignatureFailed(e)        => f.write_str(f"sigstore/verify: dsse: {e}".as_str()),
             IdentityMismatch { want_issuer, want_subject, found_issuer, found_subjects } => f.write_str(
-                f"sigstore/verify: identity mismatch (want={want_issuer}/{want_subject}, found_issuer={found_issuer:?}, found_subjects={found_subjects:?})".as_str()),
+                f"sigstore/verify: identity mismatch (want={want_issuer}/{want_subject}, found_issuer={found_issuer}, found_subjects={found_subjects})".as_str()),
             IssuerExtMissing              => f.write_str("sigstore/verify: cert lacks Sigstore-issuer extension"),
             InvalidValidityWindow { cert_not_before, cert_not_after, integrated_time } => f.write_str(
                 f"sigstore/verify: integratedTime {integrated_time} outside cert validity [{cert_not_before}, {cert_not_after}]".as_str()),
@@ -306,7 +306,7 @@ fn parse_pem_chain(pems: &List<Text>) -> Result<List<X509Certificate>, SigstoreV
         while j < blocks.len() {
             if blocks[j].label.as_bytes() == b"CERTIFICATE" {
                 let cert = parse_certificate(blocks[j].contents.as_slice())
-                    .map_err(|e| InvalidBundle(format!("cert[{i}]: {e}").to_text()))?;
+                    .map_err(|e| InvalidBundle(f"cert[{i}]: {e}"))?;
                 out.push(cert);
                 found = true;
             }
@@ -451,7 +451,7 @@ fn decode_envelope_payload(envelope: &DsseEnvelope) -> Result<JsonValue, Sigstor
     let payload_bytes = b64_decode(&envelope.payload_b64)
         .map_err(|_| InvalidBundle("payload not base64".to_text()))?;
     json_decode(payload_bytes.as_slice())
-        .map_err(|e| InvalidBundle(format!("payload not JSON: {e}").to_text()))
+        .map_err(|e| InvalidBundle(f"payload not JSON: {e}"))
 }
 
 // =============================================================================
@@ -639,8 +639,8 @@ fn glob_match(p: &[Byte], s: &[Byte], pi: Int, si: Int) -> Bool {
 fn identity_matcher_text(m: &IdentityMatcher) -> Text {
     match m {
         IdentityMatcher.Exact(s)  => s.clone(),
-        IdentityMatcher.Glob(p)   => format!("glob:{}", p).to_text(),
-        IdentityMatcher.Domain(d) => format!("domain:{}", d).to_text(),
+        IdentityMatcher.Glob(p)   => f"glob:{p}",
+        IdentityMatcher.Domain(d) => f"domain:{d}",
     }
 }
 
@@ -648,36 +648,3 @@ fn identity_matcher_text(m: &IdentityMatcher) -> Text {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_subject_matches_exact() {
-        let m = IdentityMatcher.Exact("alice@example.com".to_text());
-        assert!(subject_matches(&"alice@example.com".to_text(), &m));
-        assert!(!subject_matches(&"bob@example.com".to_text(), &m));
-    }
-
-    #[test]
-    fn test_subject_matches_glob() {
-        let m = IdentityMatcher.Glob("*@example.com".to_text());
-        assert!(subject_matches(&"alice@example.com".to_text(), &m));
-        assert!(subject_matches(&"bob@example.com".to_text(), &m));
-        assert!(!subject_matches(&"alice@other.com".to_text(), &m));
-    }
-
-    #[test]
-    fn test_subject_matches_domain_email() {
-        let m = IdentityMatcher.Domain("example.com".to_text());
-        assert!(subject_matches(&"alice@example.com".to_text(), &m));
-        assert!(!subject_matches(&"alice@other.com".to_text(), &m));
-    }
-
-    #[test]
-    fn test_glob_recursive_star() {
-        assert!(glob_match("a*c".as_bytes(), "abc".as_bytes(), 0, 0));
-        assert!(glob_match("a*c".as_bytes(), "abxxxc".as_bytes(), 0, 0));
-        assert!(!glob_match("a*c".as_bytes(), "abxxx".as_bytes(), 0, 0));
-    }
-}

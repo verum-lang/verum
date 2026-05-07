@@ -89,8 +89,8 @@ implement Display for LockError {
 implement Debug for LockError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Conflict(owner_pid) => f.write_str(f"Conflict(owner_pid: {owner_pid:?})".as_str()),
-            IoError(err)        => f.write_str(f"IoError(err: {err:?})".as_str()),
+            Conflict(owner_pid) => f.write_str(f"Conflict(owner_pid: {owner_pid})".as_str()),
+            IoError(err)        => f.write_str(f"IoError(err: {err})".as_str()),
         }
     }
 }

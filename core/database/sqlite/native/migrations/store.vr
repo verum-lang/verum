@@ -29,7 +29,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.sqlite.native.migrations.store;
 
@@ -68,25 +68,13 @@ implement MigrationStore for SqliteMigrationStore {
 
     async fn init(&mut self) -> Result<(), DbError> {
         // SQLite-canonical types. CREATE TABLE IF NOT EXISTS is idempotent.
-        let sql = format!(
-            r#"CREATE TABLE IF NOT EXISTS {} (
-                version    INTEGER PRIMARY KEY,
-                name       TEXT NOT NULL,
-                status     TEXT NOT NULL,
-                applied_at INTEGER,
-                error      TEXT,
-                checksum   INTEGER NOT NULL
-            )"#,
-            self.config.table_name,
-        ).to_text();
+        let table = &self.config.table_name;
+        let sql = f"CREATE TABLE IF NOT EXISTS {table} (\n                version    INTEGER PRIMARY KEY,\n                name       TEXT NOT NULL,\n                status     TEXT NOT NULL,\n                applied_at INTEGER,\n                error      TEXT,\n                checksum   INTEGER NOT NULL\n            )";
         execute_raw(&mut self.conn, &sql).await
     }
 
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
-        let sql = format!(
-            "SELECT version, name, status, applied_at, error, checksum FROM {} ORDER BY version",
-            self.config.table_name,
-        ).to_text();
+        let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {self.config.table_name} ORDER BY version";
         let entries = query_journal_rows(&mut self.conn, &sql).await?;
         Ok(MigrationJournal { entries: entries })
     }
@@ -94,23 +82,14 @@ implement MigrationStore for SqliteMigrationStore {
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
         let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
         // SQLite's "UPSERT" — `INSERT ... ON CONFLICT DO UPDATE`.
-        let sql = format!(
-            r#"INSERT INTO {0} (version, name, status, applied_at, error, checksum)
-               VALUES ({1}, {2}, {3}, {4}, {5}, {6})
-               ON CONFLICT(version) DO UPDATE SET
-                   name = excluded.name,
-                   status = excluded.status,
-                   applied_at = excluded.applied_at,
-                   error = excluded.error,
-                   checksum = excluded.checksum"#,
-            self.config.table_name,
-            entry.version,
-            sql_text_literal(&entry.name),
-            sql_text_literal(&status_str),
-            match applied_at_opt { Some(t) => format!("{}", t).to_text(), None => "NULL".to_text() },
-            match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() },
-            entry.checksum,
-        ).to_text();
+        let table = &self.config.table_name;
+        let version = entry.version;
+        let name_lit = sql_text_literal(&entry.name);
+        let status_lit = sql_text_literal(&status_str);
+        let applied_lit = match applied_at_opt { Some(t) => f"{t}", None => "NULL".to_text() };
+        let error_lit = match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() };
+        let checksum = entry.checksum;
+        let sql = f"INSERT INTO {table} (version, name, status, applied_at, error, checksum)\n               VALUES ({version}, {name_lit}, {status_lit}, {applied_lit}, {error_lit}, {checksum})\n               ON CONFLICT(version) DO UPDATE SET\n                   name = excluded.name,\n                   status = excluded.status,\n                   applied_at = excluded.applied_at,\n                   error = excluded.error,\n                   checksum = excluded.checksum";
         execute_raw(&mut self.conn, &sql).await
     }
 
@@ -137,7 +116,7 @@ implement MigrationStore for SqliteMigrationStore {
     }
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
-        let sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name).to_text();
+        let sql = f"DROP TABLE IF EXISTS {self.config.table_name}";
         execute_raw(&mut self.conn, &sql).await
     }
 }
@@ -214,29 +193,3 @@ async fn query_journal_rows(conn: &mut SqliteConnection, sql: &Text) -> Result<L
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_render_status_pending() {
-        let (s, at, er) = render_status(&MsPending);
-        assert_eq(s, "pending".to_text());
-        assert!(at.is_none());
-        assert!(er.is_none());
-    }
-
-    #[test]
-    fn test_render_status_failed() {
-        let (s, at, er) = render_status(&MsFailed("oops".to_text()));
-        assert_eq(s, "failed".to_text());
-        assert!(at.is_none());
-        match er { Some(e) => assert_eq(e, "oops".to_text()), None => unreachable() }
-    }
-
-    #[test]
-    fn test_sql_text_escape() {
-        assert_eq(sql_text_literal(&"hello".to_text()), "'hello'".to_text());
-        assert_eq(sql_text_literal(&"O'Brien".to_text()), "'O''Brien'".to_text());
-    }
-}

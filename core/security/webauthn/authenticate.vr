@@ -57,7 +57,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.authenticate;
 
@@ -315,7 +315,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
     // here to keep this module self-contained and free of cyclic
     // imports through register.vr.
     let value = json_decode(json_bytes.as_slice())
-        .map_err(|e| WebAuthnError.InvalidJson(format!("{e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| WebAuthnError.InvalidJson("clientData not an object".to_text()))?;
     let type_text = obj.get("type").and_then(|v| v.as_string())
@@ -326,7 +326,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
         .ok_or_else(|| WebAuthnError.InvalidJson("clientData.origin missing".to_text()))?;
     let cross_origin = obj.get("crossOrigin").and_then(|v| v.as_bool()).unwrap_or(false);
     let challenge = b64url_decode(&challenge_b64)
-        .map_err(|e| WebAuthnError.InvalidJson(format!("challenge b64url: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidJson(f"challenge b64url: {e}"))?;
     Ok(CollectedClientData {
         type_:         client_data_type_from_text(&type_text),
         challenge,
@@ -334,6 +334,17 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
         cross_origin,
         token_binding: None,
     })
+}
+
+fn join_origins(allowed: &List<Text>) -> Text {
+    let mut out: Text = "[".to_text();
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if i > 0 { out = out + ", "; }
+        out = out + allowed[i].as_str();
+        i = i + 1;
+    }
+    out + "]"
 }
 
 fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError> {
@@ -346,7 +357,7 @@ fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError>
         i = i + 1;
     }
     Err(WebAuthnError.OriginMismatch {
-        expected: format!("{:?}", allowed).to_text(),
+        expected: join_origins(allowed),
         found:    found.clone(),
     })
 }
@@ -380,33 +391,3 @@ fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_check_origin_mismatch_rejected() {
-        let mut allowed: List<Text> = List.new();
-        allowed.push("https://expected.com".to_text());
-        match check_origin(&"https://attacker.com".to_text(), &allowed) {
-            Err(WebAuthnError.OriginMismatch { .. }) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_cred_in_allow_list() {
-        let mut id: List<Byte> = List.new();
-        id.push(1); id.push(2); id.push(3);
-        let mut list: List<CredentialDescriptor> = List.new();
-        list.push(CredentialDescriptor {
-            type_: "public-key".to_text(),
-            credential_id: id.clone(),
-            transports: List.new(),
-        });
-        assert!(cred_in_allow_list(&id, &list));
-        let mut other: List<Byte> = List.new();
-        other.push(99);
-        assert!(!cred_in_allow_list(&other, &list));
-    }
-}

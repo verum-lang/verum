@@ -58,7 +58,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module context.standard;
 
@@ -602,7 +602,7 @@ public context FileSystem {
 
 implement Debug for ContextLogRecord {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"ContextLogRecord {{ level: {self.level:?}, message: \"{self.message}\", target: \"{self.target}\" }}")
+        f.write_str(f"ContextLogRecord {{ level: {self.level}, message: \"{self.message}\", target: \"{self.target}\" }}")
     }
 }
 
@@ -614,7 +614,7 @@ implement Display for ContextLogRecord {
 
 implement Debug for Row {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"Row {{ columns: {self.columns:?}, values: {self.values:?} }}")
+        f.write_str(f"Row {{ columns: {self.columns}, values: {self.values} }}")
     }
 }
 
@@ -648,7 +648,7 @@ implement Display for QueryResult {
 
 implement Debug for AuthUser {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"AuthUser {{ id: \"{self.id}\", name: \"{self.name}\", roles: {self.roles:?} }}")
+        f.write_str(f"AuthUser {{ id: \"{self.id}\", name: \"{self.name}\", roles: {self.roles} }}")
     }
 }
 

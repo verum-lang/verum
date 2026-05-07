@@ -2174,7 +2174,7 @@ implement Display for SchemaError {
 
 implement Debug for SchemaError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"SchemaError {{ message: {self.message}, severity: {self.severity:?}, suggestion: {self.suggestion:?} }}".as_str())
+        f.write_str(f"SchemaError {{ message: {self.message}, severity: {self.severity}, suggestion: {self.suggestion} }}".as_str())
     }
 }
 

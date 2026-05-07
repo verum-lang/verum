@@ -122,7 +122,7 @@ public fn setup_with_entropy(
     }
     let result = @intrinsic(
         "verum.crypto.halo2_srs_setup_mpc",
-        params, contributions,
+        params, contributions
     );
     match result {
         SrsSetupResult.Ok(srs)   => Ok(srs),

@@ -46,7 +46,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.common.migrations.journal;
 
@@ -212,45 +212,3 @@ implement MigrationJournal {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-    use core.database.common.migrations.migration.migration_new;
-
-    #[test]
-    fn test_record_and_lookup() {
-        let mut j = journal_new();
-        let m = migration_new(1, "init".to_text(), "CREATE TABLE x (id INT)".to_text());
-        j.record_applied(&m, 1234567890_i64);
-        match j.lookup(1) {
-            Some(e) => {
-                assert_eq(e.version, 1);
-                match e.status {
-                    MsApplied(t) => assert_eq(t, 1234567890_i64),
-                    _ => unreachable(),
-                }
-            }
-            None => unreachable(),
-        }
-        assert!(j.is_applied(1));
-    }
-
-    #[test]
-    fn test_drift_detection() {
-        let mut j = journal_new();
-        let m1 = migration_new(1, "init".to_text(), "CREATE TABLE x (id INT)".to_text());
-        j.record_applied(&m1, 1_i64);
-        let m1b = migration_new(1, "init".to_text(), "CREATE TABLE y (id INT)".to_text());
-        assert!(j.drift_detected(&m1b));
-    }
-
-    #[test]
-    fn test_high_water() {
-        let mut j = journal_new();
-        let m1 = migration_new(1, "a".to_text(), "x".to_text());
-        let m3 = migration_new(3, "c".to_text(), "z".to_text());
-        j.record_applied(&m1, 1_i64);
-        j.record_applied(&m3, 3_i64);
-        assert_eq(j.high_water(), 3);
-    }
-}

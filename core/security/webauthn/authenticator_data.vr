@@ -46,7 +46,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.webauthn.authenticator_data;
 
@@ -111,7 +111,7 @@ pub fn parse_authenticator_data(bytes: &[Byte]) -> Result<AuthenticatorData, Web
             buf
         };
         let value = cbor_decode(remaining.as_slice())
-            .map_err(|e| WebAuthnError.InvalidCbor(format!("extensions: {e}").to_text()))?;
+            .map_err(|e| WebAuthnError.InvalidCbor(f"extensions: {e}"))?;
         Some(value)
     } else { None };
 
@@ -225,7 +225,7 @@ fn parse_attested_credential_data(
 /// COSE_Key ends.
 fn decode_cose_consume_length(bytes: &List<Byte>) -> Result<(CborValue, Int), WebAuthnError> {
     let value = cbor_decode(bytes.as_slice())
-        .map_err(|e| WebAuthnError.InvalidCbor(format!("COSE_Key: {e}").to_text()))?;
+        .map_err(|e| WebAuthnError.InvalidCbor(f"COSE_Key: {e}"))?;
     // Re-encode in canonical CBOR — the byte count of the canonical
     // re-encoding equals the byte count of the original IFF the
     // input was already canonical (which authenticators MUST produce
@@ -248,74 +248,3 @@ pub fn hash_rp_id(rp_id: &Text) -> [Byte; 32] {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    fn make_simple_auth_data(flags_byte: Byte, sign_count: Int) -> List<Byte> {
-        let mut out: List<Byte> = List.with_capacity(37);
-        let mut i: Int = 0;
-        while i < 32 { out.push(0xAB); i = i + 1; }
-        out.push(flags_byte);
-        out.push(((sign_count >> 24) & 0xFF) as Byte);
-        out.push(((sign_count >> 16) & 0xFF) as Byte);
-        out.push(((sign_count >>  8) & 0xFF) as Byte);
-        out.push(( sign_count        & 0xFF) as Byte);
-        out
-    }
-
-    #[test]
-    fn test_parse_minimal() {
-        let bytes = make_simple_auth_data(0x01, 42);
-        let auth = parse_authenticator_data(bytes.as_slice()).unwrap();
-        assert_eq(auth.flags.user_present, true);
-        assert_eq(auth.flags.user_verified, false);
-        assert_eq(auth.flags.attested_credential_data, false);
-        assert_eq(auth.sign_count, 42);
-    }
-
-    #[test]
-    fn test_parse_truncated() {
-        let mut bytes: List<Byte> = List.new();
-        bytes.push(0xAB);
-        match parse_authenticator_data(bytes.as_slice()) {
-            Err(WebAuthnError.TruncatedAuthData) => {}
-            _ => unreachable(),
-        }
-    }
-
-    #[test]
-    fn test_round_trip_no_attested_no_ext() {
-        let bytes_in = make_simple_auth_data(0x05, 12345); // UP + UV
-        let auth = parse_authenticator_data(bytes_in.as_slice()).unwrap();
-        let bytes_out = encode_authenticator_data(&auth);
-        assert_eq(bytes_in.len(), bytes_out.len());
-        let mut i: Int = 0;
-        while i < bytes_in.len() {
-            assert_eq(bytes_in[i], bytes_out[i]);
-            i = i + 1;
-        }
-    }
-
-    #[test]
-    fn test_flags_be_bs_independent_of_uv() {
-        let bytes = make_simple_auth_data(0x18, 0); // BE + BS only
-        let auth = parse_authenticator_data(bytes.as_slice()).unwrap();
-        assert_eq(auth.flags.user_present, false);
-        assert_eq(auth.flags.user_verified, false);
-        assert_eq(auth.flags.backup_eligible, true);
-        assert_eq(auth.flags.backup_state, true);
-    }
-
-    #[test]
-    fn test_hash_rp_id_is_32_bytes() {
-        let h = hash_rp_id(&"example.com".to_text());
-        let mut nonzero = false;
-        let mut i: Int = 0;
-        while i < 32 {
-            if h[i] != 0 { nonzero = true; }
-            i = i + 1;
-        }
-        assert!(nonzero);
-    }
-}

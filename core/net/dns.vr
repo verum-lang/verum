@@ -59,7 +59,7 @@
     requires: [Capability.Exec(ExecTarget.Syscall(0)), Capability.Network(NetProtocol.Udp, NetDirection.Bidirectional)],
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LCls,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module dns;
 

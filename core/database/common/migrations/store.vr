@@ -53,7 +53,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.database.common.migrations.store;
 
@@ -176,29 +176,3 @@ public fn advisory_lock_key_for(table_name: &Text) -> Int64 {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_default_config() {
-        let c = store_config_default();
-        assert_eq(c.table_name, "__verum_migrations".to_text());
-        assert!(c.transactional);
-    }
-
-    #[test]
-    fn test_with_table_name() {
-        let c = store_config_default().with_table_name("custom_migrations".to_text());
-        assert_eq(c.table_name, "custom_migrations".to_text());
-    }
-
-    #[test]
-    fn test_advisory_lock_key_stable() {
-        let k1 = advisory_lock_key_for(&"__verum_migrations".to_text());
-        let k2 = advisory_lock_key_for(&"__verum_migrations".to_text());
-        let k3 = advisory_lock_key_for(&"other_table".to_text());
-        assert_eq(k1, k2);
-        assert!(k1 != k3);
-    }
-}

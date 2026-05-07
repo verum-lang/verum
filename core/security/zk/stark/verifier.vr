@@ -25,7 +25,7 @@
     lifecycle: Lifecycle.Conditional([
         "STARK stdlib parent module conditions hold",
     ]),
-    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp]),
+    at_tier: Tier.MultiTier([Tier.Aot, Tier.Interp])
 )
 module core.security.zk.stark.verifier;
 mount core.*;
@@ -99,7 +99,7 @@ public fn verify(
     }
     match @intrinsic(
         "verum.crypto.stark_verify",
-        vk, proof, public_inputs, params,
+        vk, proof, public_inputs, params
     ) {
         VerifyResult.Accepted        => Ok(()),
         VerifyResult.Rejected        => Err(VerificationFailed),
@@ -122,7 +122,7 @@ public fn verify_batch(
     }
     match @intrinsic(
         "verum.crypto.stark_verify_batch",
-        vk, proofs_with_inputs, params,
+        vk, proofs_with_inputs, params
     ) {
         VerifyResult.Accepted        => Ok(()),
         VerifyResult.Rejected        => Err(VerificationFailed),

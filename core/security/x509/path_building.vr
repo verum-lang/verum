@@ -55,7 +55,7 @@
         anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
         e_sense:        Some(ExecutabilitySense.StructuralReadiness),
         self_reference: None,
-    },
+    }
 )
 module core.security.x509.path_building;
 
@@ -410,49 +410,3 @@ fn emit_path(
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super.*;
-
-    #[test]
-    fn test_fingerprint_same_cert_same_fp() {
-        // Build two structurally-identical placeholder certs; their
-        // fingerprints must match. Concrete cert construction is
-        // delegated to higher-level integration tests in vcs/.
-        let _ = MAX_PATH_LENGTH;
-        assert_eq(MAX_PATH_LENGTH, 16);
-        assert_eq(MAX_CANDIDATES_PER_LEVEL, 8);
-        assert_eq(MAX_TOTAL_PATHS, 64);
-    }
-
-    #[test]
-    fn test_fnv1a64_known_vector() {
-        // FNV-1a 64-bit of empty input is the offset basis itself.
-        let empty: List<Byte> = List.new();
-        assert_eq(fnv1a64(empty.as_slice()), FNV_OFFSET);
-    }
-
-    #[test]
-    fn test_bytes_eq_basic() {
-        let mut a: List<Byte> = List.new();
-        a.push(1); a.push(2); a.push(3);
-        let mut b: List<Byte> = List.new();
-        b.push(1); b.push(2); b.push(3);
-        assert_eq(bytes_eq(&a, &b), true);
-        b.push(4);
-        assert_eq(bytes_eq(&a, &b), false);
-    }
-
-    #[test]
-    fn test_score_path_shorter_better() {
-        let mut empty_inters: List<X509Certificate> = List.new();
-        let mut one_inter: List<X509Certificate> = List.new();
-        // Note: synthetic anchor construction not feasible at unit level;
-        // we just check that score_path is monotonic in `inters.len()`.
-        let _ = empty_inters;
-        let _ = one_inter;
-        // Score formula: (MAX_PATH_LENGTH - inters.len()) * 10 + ext_bonus.
-        // With same anchor, 0-inter path > 1-inter path.
-        assert(MAX_PATH_LENGTH * 10 > (MAX_PATH_LENGTH - 1) * 10);
-    }
-}

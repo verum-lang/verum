@@ -23,7 +23,7 @@
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
-    lifecycle: Lifecycle.Theorem("v0.1"),
+    lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.database.sqlite.native.encryption.kdf;
 
@@ -173,7 +173,7 @@ implement KeyDerivation for Pbkdf2Sha256 {
             params.key_len,
         ) {
             Ok(bytes) => Ok(bytes),
-            Err(e) => Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e:?}".into())),
+            Err(e) => Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e}".into())),
         }
     }
 }
