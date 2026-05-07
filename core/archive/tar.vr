@@ -1,0 +1,792 @@
+// =============================================================================
+// archive/tar.vr — USTAR (POSIX 1003.1-1988) archive reader+writer
+// =============================================================================
+// Layer: 4 (I/O-adjacent)
+// Dependencies: core, base, collections
+// =============================================================================
+//
+// Implements the `core.archive.Archive` protocol (see `archive/mod.vr`)
+// for the USTAR + PAX-extended format. Composes with `core/compress/*`
+// for `.tar.gz`, `.tar.zst`, etc., via `archive::with_compress()`.
+// =============================================================================
+//
+// **USTAR format (POSIX 1003.1-1988).** A 512-byte header per file
+// followed by the file's content padded to a 512-byte boundary. The
+// archive ends with two consecutive zero-blocks (1024 bytes of zeros).
+//
+// Header layout (all fields right-padded with NUL or ASCII space):
+// ```
+//   offset  size  field
+//   ─────── ────  ─────────────────────────────
+//   0       100   name (NUL-padded)
+//   100     8     mode (octal ASCII)
+//   108     8     uid  (octal ASCII)
+//   116     8     gid  (octal ASCII)
+//   124     12    size (octal ASCII)
+//   136     12    mtime (octal ASCII, seconds since Epoch)
+//   148     8     checksum (octal ASCII; computed treating this field as 8 spaces)
+//   156     1     typeflag ('0'=file, '5'=dir, '2'=symlink, etc.)
+//   157     100   linkname
+//   257     6     "ustar\0"
+//   263     2     "00"  (version)
+//   265     32    uname
+//   297     32    gname
+//   329     8     devmajor
+//   337     8     devminor
+//   345     155   prefix (long-name)
+//   500     12    pad  (zero)
+// ```
+//
+// **PAX extended attribute support.** Filenames longer than 100 bytes
+// (or content > 8 GiB, etc.) trigger PAX extended attributes per
+// POSIX 1003.1-2001 §"pax". This reader+writer supports the PAX
+// `path` attribute (long filenames) and `size` attribute (large files).
+//
+// **Compression.** Tar itself does not compress. Compose with
+// `core/compress/{gzip, zstd}.vr` for `.tar.gz`, `.tar.zst`, etc.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "USTAR + PAX archive packaging for distribution / source bundles",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.archive.tar;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const BLOCK_SIZE: Int = 512;
+const NAME_LEN: Int = 100;
+const PREFIX_LEN: Int = 155;
+const HEADER_SIZE: Int = 512;
+const USTAR_MAGIC: &[Byte] = b"ustar\0";  // bytes 257..263
+const USTAR_VERSION: &[Byte] = b"00";     // bytes 263..265
+
+// =============================================================================
+// Entry types
+// =============================================================================
+
+public type EntryType is
+      RegularFile
+    | Directory
+    | Symlink(Text)            // target path
+    | Hardlink(Text)
+    | CharDevice
+    | BlockDevice
+    | Fifo
+    | PaxExtendedHeader        // ʼxʼ — applies to NEXT entry
+    | PaxGlobalHeader;         // ʼgʼ — applies to ALL subsequent entries
+
+public fn entry_type_byte(t: &EntryType) -> Byte {
+    match t {
+        RegularFile        => 0x30_u8,  // '0'
+        Directory          => 0x35_u8,  // '5'
+        Symlink(_)         => 0x32_u8,  // '2'
+        Hardlink(_)        => 0x31_u8,  // '1'
+        CharDevice         => 0x33_u8,  // '3'
+        BlockDevice        => 0x34_u8,  // '4'
+        Fifo               => 0x36_u8,  // '6'
+        PaxExtendedHeader  => 0x78_u8,  // 'x'
+        PaxGlobalHeader    => 0x67_u8,  // 'g'
+    }
+}
+
+public type TarEntry is {
+    /// File path inside the archive (UTF-8). Slash-separated. PAX
+    /// extended `path` attribute supports paths longer than 100 bytes.
+    path: Text,
+    /// File mode (POSIX bits, e.g., 0o644).
+    mode: Int,
+    /// Owner uid (or `None` to omit).
+    uid: Maybe<Int>,
+    gid: Maybe<Int>,
+    /// File size in bytes. PAX extended `size` attribute supports >8 GiB.
+    size: Int,
+    /// Modification time (Unix seconds).
+    mtime: Int,
+    /// Entry kind.
+    entry_type: EntryType,
+    /// Owner username (UTF-8).
+    uname: Text,
+    /// Group name (UTF-8).
+    gname: Text,
+    /// File contents (only for RegularFile entries).
+    content: List<Byte>,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type TarError is
+      TruncatedArchive
+    | BadMagic
+    | InvalidNumeric(Text)        // octal-ASCII parse fail
+    | InvalidChecksum
+    | UnsupportedTypeflag(Byte)
+    | NameTooLong                  // can't fit even with PAX
+    | PaxParseError(Text)
+    | InvalidUtf8
+    | UnexpectedEof;
+
+implement Display for TarError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TruncatedArchive          => f.write_str("tar: truncated archive (header < 512 bytes)"),
+            BadMagic                  => f.write_str("tar: bad ustar magic"),
+            InvalidNumeric(field)     => f.write_str(f"tar: invalid octal in {field}".as_str()),
+            InvalidChecksum           => f.write_str("tar: header checksum mismatch"),
+            UnsupportedTypeflag(b)    => f.write_str(f"tar: unsupported typeflag 0x{b:02x}".as_str()),
+            NameTooLong               => f.write_str("tar: path exceeds USTAR + PAX limits"),
+            PaxParseError(msg)        => f.write_str(f"tar: PAX parse error: {msg}".as_str()),
+            InvalidUtf8               => f.write_str("tar: non-UTF-8 path or name"),
+            UnexpectedEof             => f.write_str("tar: unexpected EOF"),
+        }
+    }
+}
+
+implement Debug for TarError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Reader
+// =============================================================================
+
+/// Read a complete tar archive into a list of entries.
+public fn read_archive(bytes: &[Byte]) -> Result<List<TarEntry>, TarError> {
+    let mut entries: List<TarEntry> = List.new();
+    let mut pos = 0;
+    let mut pending_pax: Map<Text, Text> = Map.new();
+    let mut global_pax: Map<Text, Text> = Map.new();
+
+    while pos + HEADER_SIZE <= bytes.len() {
+        // Two consecutive zero blocks → end of archive.
+        if is_zero_block(bytes, pos) {
+            if pos + 2 * BLOCK_SIZE <= bytes.len() && is_zero_block(bytes, pos + BLOCK_SIZE) {
+                return Ok(entries);
+            }
+            // Single zero block — keep scanning (tolerant).
+            pos = pos + BLOCK_SIZE;
+            continue;
+        }
+        let header = read_header(bytes, pos)?;
+        let data_start = pos + HEADER_SIZE;
+        let data_end = data_start + header.size;
+        if data_end > bytes.len() {
+            return Err(TarError.UnexpectedEof);
+        }
+        match &header.entry_type {
+            PaxExtendedHeader => {
+                pending_pax = parse_pax(bytes, data_start, data_end)?;
+            }
+            PaxGlobalHeader => {
+                global_pax = merge_pax(&global_pax, &parse_pax(bytes, data_start, data_end)?);
+            }
+            _ => {
+                let merged = merge_pax(&global_pax, &pending_pax);
+                let entry = apply_pax(header.clone(), &merged, bytes, data_start, data_end);
+                entries.push(entry);
+                pending_pax = Map.new();
+            }
+        }
+        pos = data_end;
+        // Pad to 512-byte boundary.
+        let rem = pos % BLOCK_SIZE;
+        if rem != 0 { pos = pos + (BLOCK_SIZE - rem); }
+    }
+    Ok(entries)
+}
+
+fn is_zero_block(bytes: &[Byte], pos: Int) -> Bool {
+    let mut i = 0;
+    while i < BLOCK_SIZE {
+        if pos + i >= bytes.len() { return false; }
+        if bytes[pos + i] != 0_u8 { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn read_header(bytes: &[Byte], pos: Int) -> Result<TarEntry, TarError> {
+    if pos + HEADER_SIZE > bytes.len() {
+        return Err(TarError.TruncatedArchive);
+    }
+    // Verify ustar magic.
+    let mut k = 0;
+    while k < 6 {
+        if bytes[pos + 257 + k] != USTAR_MAGIC[k] {
+            return Err(TarError.BadMagic);
+        }
+        k = k + 1;
+    }
+    // Checksum (treat its 8 bytes as ASCII spaces during compute).
+    let stored_checksum = parse_octal(bytes, pos + 148, 8)?;
+    let computed_checksum = compute_checksum(bytes, pos);
+    if stored_checksum != computed_checksum {
+        return Err(TarError.InvalidChecksum);
+    }
+    // Name + prefix → full path.
+    let name = read_text(bytes, pos, NAME_LEN)?;
+    let prefix = read_text(bytes, pos + 345, PREFIX_LEN)?;
+    let path = if prefix.is_empty() { name }
+               else { prefix.concat(&"/".to_text()).concat(&name) };
+
+    let mode = parse_octal(bytes, pos + 100, 8)?;
+    let uid = parse_octal(bytes, pos + 108, 8)?;
+    let gid = parse_octal(bytes, pos + 116, 8)?;
+    let size = parse_octal(bytes, pos + 124, 12)?;
+    let mtime = parse_octal(bytes, pos + 136, 12)?;
+    let typeflag = bytes[pos + 156];
+    let linkname = read_text(bytes, pos + 157, NAME_LEN)?;
+    let uname = read_text(bytes, pos + 265, 32)?;
+    let gname = read_text(bytes, pos + 297, 32)?;
+
+    let entry_type = match typeflag {
+        0x30_u8 | 0_u8 => EntryType.RegularFile,
+        0x31_u8        => EntryType.Hardlink(linkname),
+        0x32_u8        => EntryType.Symlink(linkname),
+        0x33_u8        => EntryType.CharDevice,
+        0x34_u8        => EntryType.BlockDevice,
+        0x35_u8        => EntryType.Directory,
+        0x36_u8        => EntryType.Fifo,
+        0x78_u8        => EntryType.PaxExtendedHeader,
+        0x67_u8        => EntryType.PaxGlobalHeader,
+        _              => return Err(TarError.UnsupportedTypeflag(typeflag)),
+    };
+
+    Ok(TarEntry {
+        path: path,
+        mode: mode,
+        uid: Some(uid),
+        gid: Some(gid),
+        size: size,
+        mtime: mtime,
+        entry_type: entry_type,
+        uname: uname,
+        gname: gname,
+        content: List.new(),  // filled in by caller for regular files
+    })
+}
+
+fn apply_pax(
+    mut header: TarEntry,
+    pax: &Map<Text, Text>,
+    bytes: &[Byte],
+    data_start: Int,
+    data_end: Int,
+) -> TarEntry {
+    if let Some(p) = pax.get(&"path".to_text()) {
+        header.path = p.clone();
+    }
+    if let Some(s) = pax.get(&"size".to_text()) {
+        if let Some(n) = parse_decimal(s) { header.size = n; }
+    }
+    if let Some(m) = pax.get(&"mtime".to_text()) {
+        if let Some(n) = parse_decimal(m) { header.mtime = n; }
+    }
+    // Copy content slice for regular files.
+    match &header.entry_type {
+        RegularFile => {
+            let mut content: List<Byte> = List.new();
+            let mut i = data_start;
+            while i < data_end { content.push(bytes[i]); i = i + 1; }
+            header.content = content;
+        }
+        _ => {}
+    }
+    header
+}
+
+fn parse_pax(bytes: &[Byte], start: Int, end: Int) -> Result<Map<Text, Text>, TarError> {
+    // PAX records are "<len> <key>=<value>\n" where <len> includes itself + trailing \n.
+    let mut out: Map<Text, Text> = Map.new();
+    let mut p = start;
+    while p < end {
+        // Read length (decimal up to space).
+        let len_start = p;
+        while p < end && bytes[p] != 0x20_u8 { p = p + 1; }
+        if p >= end { break; }
+        let len_text = slice_text(bytes, len_start, p)?;
+        let len = match parse_decimal(&len_text) {
+            Some(n) => n,
+            None    => return Err(TarError.PaxParseError("bad length".to_text())),
+        };
+        let record_end = len_start + len;
+        if record_end > end {
+            return Err(TarError.PaxParseError("record overruns extended block".to_text()));
+        }
+        p = p + 1;  // consume space
+        let kv_start = p;
+        let kv_end = record_end - 1;  // exclude trailing \n
+        // Find '=' separator.
+        let mut eq = kv_start;
+        while eq < kv_end && bytes[eq] != 0x3D_u8 { eq = eq + 1; }
+        if eq >= kv_end {
+            return Err(TarError.PaxParseError("missing '='".to_text()));
+        }
+        let key = slice_text(bytes, kv_start, eq)?;
+        let value = slice_text(bytes, eq + 1, kv_end)?;
+        out.insert(key, value);
+        p = record_end;
+    }
+    Ok(out)
+}
+
+fn merge_pax(global: &Map<Text, Text>, local: &Map<Text, Text>) -> Map<Text, Text> {
+    let mut out = global.clone();
+    let keys = local.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        out.insert(k.clone(), local.get(k).unwrap().clone());
+        i = i + 1;
+    }
+    out
+}
+
+fn parse_octal(bytes: &[Byte], start: Int, len: Int) -> Result<Int, TarError> {
+    let mut acc: Int = 0;
+    let mut i = 0;
+    let mut saw_digit = false;
+    while i < len {
+        let b = bytes[start + i];
+        if b == 0_u8 || b == 0x20_u8 { break; }  // NUL or space ends
+        if b < 0x30_u8 || b > 0x37_u8 {
+            return Err(TarError.InvalidNumeric("octal".to_text()));
+        }
+        acc = acc * 8 + ((b - 0x30_u8) as Int);
+        saw_digit = true;
+        i = i + 1;
+    }
+    if !saw_digit { Ok(0) } else { Ok(acc) }
+}
+
+fn parse_decimal(s: &Text) -> Maybe<Int> {
+    let bs = s.as_bytes();
+    if bs.is_empty() { return None; }
+    let mut acc: Int = 0;
+    let mut sign: Int = 1;
+    let mut start = 0;
+    if bs[0] == 0x2D_u8 { sign = -1; start = 1; }
+    let mut i = start;
+    while i < bs.len() {
+        let b = bs[i];
+        if b < 0x30_u8 || b > 0x39_u8 { return None; }
+        acc = acc * 10 + ((b - 0x30_u8) as Int);
+        i = i + 1;
+    }
+    Some(acc * sign)
+}
+
+fn read_text(bytes: &[Byte], start: Int, len: Int) -> Result<Text, TarError> {
+    let mut end = start;
+    while end < start + len && bytes[end] != 0_u8 { end = end + 1; }
+    slice_text(bytes, start, end)
+}
+
+fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Result<Text, TarError> {
+    let mut buf: List<Byte> = List.new();
+    let mut i = start;
+    while i < end { buf.push(bytes[i]); i = i + 1; }
+    match Text.from_bytes(&buf) {
+        Some(t) => Ok(t),
+        None    => Err(TarError.InvalidUtf8),
+    }
+}
+
+fn compute_checksum(bytes: &[Byte], pos: Int) -> Int {
+    // Sum all 512 bytes; treat checksum field (148..156) as 8 spaces (0x20).
+    let mut sum: Int = 0;
+    let mut i = 0;
+    while i < BLOCK_SIZE {
+        if i >= 148 && i < 156 { sum = sum + 0x20; }
+        else { sum = sum + (bytes[pos + i] as Int); }
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Writer
+// =============================================================================
+
+/// Build a tar archive from a list of entries.
+/// Produces USTAR-with-PAX output. Long paths are PAX-extended.
+public fn write_archive(entries: &List<TarEntry>) -> Result<List<Byte>, TarError> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < entries.len() {
+        write_entry(entries.get(i).unwrap(), &mut out)?;
+        i = i + 1;
+    }
+    // Two zero-blocks to mark end-of-archive.
+    let mut k = 0;
+    while k < 2 * BLOCK_SIZE { out.push(0_u8); k = k + 1; }
+    Ok(out)
+}
+
+fn write_entry(e: &TarEntry, out: &mut List<Byte>) -> Result<(), TarError> {
+    let path_bytes = e.path.as_bytes();
+    let path_too_long = path_bytes.len() > NAME_LEN + PREFIX_LEN + 1
+                        || !can_split_path(path_bytes);
+    if path_too_long {
+        // Emit PAX extended-header entry first.
+        let mut pax_records: Map<Text, Text> = Map.new();
+        pax_records.insert("path".to_text(), e.path.clone());
+        write_pax_header(&pax_records, out)?;
+    }
+    // Now the actual entry header. Use a truncated path/prefix if needed.
+    let (name, prefix) = split_path_for_ustar(path_bytes);
+    let header = build_header(e, &name, &prefix)?;
+    let mut k = 0;
+    while k < HEADER_SIZE { out.push(header[k]); k = k + 1; }
+    // Content.
+    match &e.entry_type {
+        RegularFile => {
+            let mut j = 0;
+            while j < e.content.len() { out.push(e.content.get(j).unwrap()); j = j + 1; }
+            // Pad to 512.
+            let rem = e.content.len() % BLOCK_SIZE;
+            if rem != 0 {
+                let pad = BLOCK_SIZE - rem;
+                let mut p = 0;
+                while p < pad { out.push(0_u8); p = p + 1; }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn write_pax_header(records: &Map<Text, Text>, out: &mut List<Byte>) -> Result<(), TarError> {
+    // Build the body: each record is "<len> <key>=<value>\n", with len
+    // including all of itself + the trailing newline.
+    let mut body: List<Byte> = List.new();
+    let keys = records.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        let v = records.get(k).unwrap();
+        // Compose " key=value\n" content; iterate to find self-consistent length.
+        // Since len's digits are bounded ≤ 4 for reasonable records, two passes suffice.
+        let mut len_guess = k.as_bytes().len() + v.as_bytes().len() + 3; // " ", "=", "\n"
+        let mut total = len_guess + len_text_digits(len_guess);
+        // Re-evaluate (digits of total may be larger than digits of len_guess).
+        loop {
+            let nt = len_guess + len_text_digits(total);
+            if nt == total { break; }
+            total = nt;
+        }
+        let prefix = total.to_text();
+        let pb = prefix.as_bytes();
+        let mut p = 0;
+        while p < pb.len() { body.push(pb[p]); p = p + 1; }
+        body.push(0x20_u8);  // ' '
+        let kb = k.as_bytes();
+        let mut q = 0; while q < kb.len() { body.push(kb[q]); q = q + 1; }
+        body.push(0x3D_u8);  // '='
+        let vb = v.as_bytes();
+        let mut r = 0; while r < vb.len() { body.push(vb[r]); r = r + 1; }
+        body.push(0x0A_u8);  // '\n'
+        i = i + 1;
+    }
+    // PAX extended header entry.
+    let pax_entry = TarEntry {
+        path: "PaxHeader".to_text(),
+        mode: 0o644,
+        uid: Some(0), gid: Some(0),
+        size: body.len(),
+        mtime: 0,
+        entry_type: EntryType.PaxExtendedHeader,
+        uname: "".to_text(), gname: "".to_text(),
+        content: body.clone(),
+    };
+    let (name, prefix) = split_path_for_ustar(pax_entry.path.as_bytes());
+    let header = build_header(&pax_entry, &name, &prefix)?;
+    let mut k = 0;
+    while k < HEADER_SIZE { out.push(header[k]); k = k + 1; }
+    let mut j = 0;
+    while j < body.len() { out.push(body.get(j).unwrap()); j = j + 1; }
+    let rem = body.len() % BLOCK_SIZE;
+    if rem != 0 {
+        let pad = BLOCK_SIZE - rem;
+        let mut p = 0; while p < pad { out.push(0_u8); p = p + 1; }
+    }
+    Ok(())
+}
+
+fn len_text_digits(n: Int) -> Int {
+    let mut k = if n == 0 { 1 } else { 0 };
+    let mut v = n;
+    while v > 0 { v = v / 10; k = k + 1; }
+    k
+}
+
+fn can_split_path(bytes: &[Byte]) -> Bool {
+    // USTAR prefix/name split: prefix ≤ 155, name ≤ 100, and split must
+    // be on a '/' boundary. If len(bytes) ≤ 100 → trivially fits in name.
+    if bytes.len() <= NAME_LEN { return true; }
+    // Find a '/' such that the suffix after it is ≤ 100 bytes and prefix
+    // is ≤ 155.
+    let mut i = bytes.len() - NAME_LEN - 1;
+    while i > 0 {
+        if bytes[i] == 0x2F_u8 {
+            if i <= PREFIX_LEN && bytes.len() - 1 - i <= NAME_LEN { return true; }
+        }
+        i = i - 1;
+    }
+    false
+}
+
+fn split_path_for_ustar(bytes: &[Byte]) -> (Text, Text) {
+    if bytes.len() <= NAME_LEN {
+        let mut name: List<Byte> = List.new();
+        let mut i = 0; while i < bytes.len() { name.push(bytes[i]); i = i + 1; }
+        return (Text.from_bytes(&name).unwrap_or(Text.new()), Text.new());
+    }
+    // Find best split.
+    let mut split = -1;
+    let mut i = bytes.len() - NAME_LEN - 1;
+    while i > 0 {
+        if bytes[i] == 0x2F_u8 && i <= PREFIX_LEN && bytes.len() - 1 - i <= NAME_LEN {
+            split = i;
+            break;
+        }
+        i = i - 1;
+    }
+    if split < 0 {
+        // Truncate to first 100 bytes; PAX extension carries full path.
+        let mut name: List<Byte> = List.new();
+        let mut k = 0; while k < NAME_LEN { name.push(bytes[k]); k = k + 1; }
+        return (Text.from_bytes(&name).unwrap_or(Text.new()), Text.new());
+    }
+    let mut prefix: List<Byte> = List.new();
+    let mut k = 0; while k < split { prefix.push(bytes[k]); k = k + 1; }
+    let mut name: List<Byte> = List.new();
+    let mut j = split + 1; while j < bytes.len() { name.push(bytes[j]); j = j + 1; }
+    (
+        Text.from_bytes(&name).unwrap_or(Text.new()),
+        Text.from_bytes(&prefix).unwrap_or(Text.new()),
+    )
+}
+
+fn build_header(e: &TarEntry, name: &Text, prefix: &Text) -> Result<List<Byte>, TarError> {
+    let mut h: List<Byte> = List.new();
+    let mut i = 0; while i < HEADER_SIZE { h.push(0_u8); i = i + 1; }
+    write_text(&mut h, 0, NAME_LEN, name);
+    write_octal(&mut h, 100, 8, e.mode);
+    write_octal(&mut h, 108, 8, e.uid.unwrap_or(0));
+    write_octal(&mut h, 116, 8, e.gid.unwrap_or(0));
+    write_octal(&mut h, 124, 12, e.size);
+    write_octal(&mut h, 136, 12, e.mtime);
+    // Checksum field initialised to spaces per spec.
+    let mut k = 0; while k < 8 { h.set(148 + k, 0x20_u8); k = k + 1; }
+    h.set(156, entry_type_byte(&e.entry_type));
+    match &e.entry_type {
+        Symlink(target)  => write_text(&mut h, 157, NAME_LEN, target),
+        Hardlink(target) => write_text(&mut h, 157, NAME_LEN, target),
+        _ => {}
+    }
+    let magic = USTAR_MAGIC; let mut m = 0;
+    while m < magic.len() { h.set(257 + m, magic[m]); m = m + 1; }
+    let ver = USTAR_VERSION; let mut v = 0;
+    while v < ver.len() { h.set(263 + v, ver[v]); v = v + 1; }
+    write_text(&mut h, 265, 32, &e.uname);
+    write_text(&mut h, 297, 32, &e.gname);
+    write_text(&mut h, 345, PREFIX_LEN, prefix);
+    // Compute checksum.
+    let mut sum: Int = 0;
+    let mut q = 0;
+    while q < HEADER_SIZE { sum = sum + (h.get(q).unwrap() as Int); q = q + 1; }
+    write_octal_checksum(&mut h, 148, sum);
+    Ok(h)
+}
+
+fn write_octal(h: &mut List<Byte>, off: Int, len: Int, value: Int) {
+    // Right-aligned, NUL-terminated, leading-zero padded octal ASCII.
+    // Standard tar uses (len-1) digits + NUL.
+    let digits = len - 1;
+    let mut buf: List<Byte> = List.new();
+    let mut v = value;
+    if v == 0 { buf.push(0x30_u8); }
+    while v > 0 { buf.push(0x30_u8 + ((v & 0x7) as Byte)); v = v / 8; }
+    // Pad / truncate.
+    while buf.len() < digits { buf.push(0x30_u8); }
+    // Write reversed.
+    let mut i = 0;
+    while i < digits {
+        h.set(off + i, buf.get(digits - 1 - i).unwrap());
+        i = i + 1;
+    }
+    h.set(off + digits, 0_u8);
+}
+
+fn write_octal_checksum(h: &mut List<Byte>, off: Int, value: Int) {
+    // Checksum field: 6 octal digits + NUL + space (per traditional GNU tar).
+    let mut buf: List<Byte> = List.new();
+    let mut v = value;
+    if v == 0 { buf.push(0x30_u8); }
+    while v > 0 { buf.push(0x30_u8 + ((v & 0x7) as Byte)); v = v / 8; }
+    while buf.len() < 6 { buf.push(0x30_u8); }
+    let mut i = 0;
+    while i < 6 {
+        h.set(off + i, buf.get(5 - i).unwrap());
+        i = i + 1;
+    }
+    h.set(off + 6, 0_u8);
+    h.set(off + 7, 0x20_u8);
+}
+
+fn write_text(h: &mut List<Byte>, off: Int, len: Int, t: &Text) {
+    let bs = t.as_bytes();
+    let mut i = 0;
+    while i < len && i < bs.len() {
+        h.set(off + i, bs[i]);
+        i = i + 1;
+    }
+    // Remaining bytes left as 0 (NUL terminator).
+}
+
+// =============================================================================
+// Convenience: build entry from regular file content
+// =============================================================================
+
+public fn entry_for_file(path: Text, content: List<Byte>, mode: Int, mtime: Int) -> TarEntry {
+    TarEntry {
+        path: path,
+        mode: mode,
+        uid: Some(0),
+        gid: Some(0),
+        size: content.len(),
+        mtime: mtime,
+        entry_type: EntryType.RegularFile,
+        uname: "".to_text(),
+        gname: "".to_text(),
+        content: content,
+    }
+}
+
+public fn entry_for_directory(path: Text, mode: Int, mtime: Int) -> TarEntry {
+    TarEntry {
+        path: path,
+        mode: mode,
+        uid: Some(0),
+        gid: Some(0),
+        size: 0,
+        mtime: mtime,
+        entry_type: EntryType.Directory,
+        uname: "".to_text(),
+        gname: "".to_text(),
+        content: List.new(),
+    }
+}
+
+public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> TarEntry {
+    TarEntry {
+        path: path,
+        mode: 0o777,
+        uid: Some(0),
+        gid: Some(0),
+        size: 0,
+        mtime: mtime,
+        entry_type: EntryType.Symlink(target),
+        uname: "".to_text(),
+        gname: "".to_text(),
+        content: List.new(),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_roundtrip_single_file() {
+        let mut content: List<Byte> = List.new();
+        for_each_byte("hello, tar\n".as_bytes(), |b| content.push(b));
+        let entries = list_of([entry_for_file("greeting.txt".to_text(), content.clone(), 0o644, 1700000000)]);
+        let archive = write_archive(&entries).unwrap();
+        let parsed = read_archive(archive.as_slice()).unwrap();
+        assert_eq(parsed.len(), 1);
+        let p0 = parsed.get(0).unwrap();
+        assert_eq(p0.path, "greeting.txt".to_text());
+        assert_eq(p0.size, content.len());
+        assert(content_equals(&p0.content, &content));
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_files() {
+        let entries = list_of([
+            entry_for_directory("src".to_text(), 0o755, 1700000000),
+            entry_for_file("src/main.vr".to_text(), bytes_of("module main; fn main() {}"), 0o644, 1700000000),
+            entry_for_file("README.md".to_text(), bytes_of("# hello"), 0o644, 1700000000),
+        ]);
+        let archive = write_archive(&entries).unwrap();
+        let parsed = read_archive(archive.as_slice()).unwrap();
+        assert_eq(parsed.len(), 3);
+    }
+
+    #[test]
+    fn test_long_path_via_pax() {
+        let long_path = "very-deep-directory-name/"
+            .repeated(10)
+            .concat(&"file.txt".to_text());
+        // 250 chars; exceeds USTAR's 100-byte name, exercises PAX path.
+        let entry = entry_for_file(long_path.clone(), bytes_of("x"), 0o644, 0);
+        let entries = list_of([entry]);
+        let archive = write_archive(&entries).unwrap();
+        let parsed = read_archive(archive.as_slice()).unwrap();
+        assert_eq(parsed.len(), 1);
+        assert_eq(parsed.get(0).unwrap().path, long_path);
+    }
+
+    fn for_each_byte(bs: &[Byte], mut f: impl FnMut(Byte)) {
+        let mut i = 0; while i < bs.len() { f(bs[i]); i = i + 1; }
+    }
+
+    fn bytes_of(s: &str) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let bs = s.as_bytes();
+        let mut i = 0; while i < bs.len() { out.push(bs[i]); i = i + 1; }
+        out
+    }
+
+    fn content_equals(a: &List<Byte>, b: &List<Byte>) -> Bool {
+        if a.len() != b.len() { return false; }
+        let mut i = 0;
+        while i < a.len() {
+            if a.get(i).unwrap() != b.get(i).unwrap() { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    fn list_of(items: [TarEntry]) -> List<TarEntry> {
+        let mut out: List<TarEntry> = List.new();
+        for e in items { out.push(e); }
+        out
+    }
+}

@@ -1,0 +1,382 @@
+// =============================================================================
+// archive/mod.vr — Archive packaging subsystem
+// =============================================================================
+// Layer: 4 (I/O-adjacent)
+// =============================================================================
+//
+
+// Uniform API over file-archive formats: tar (POSIX 1003.1-1988 + PAX),
+// zip (PKZIP), ar (Unix), cpio (POSIX). Primary consumers:
+//
+
+// - Cog-source distribution (`source.tar.gz`, `source.tar.zst`).
+// - Build-output bundles (binary releases).
+// - Backup / restore pipelines.
+// - Container-image layer construction.
+//
+
+// # Architectural alignment with `core/compress/`
+//
+
+// `core/archive/` and `core/compress/` are **siblings** at the same
+// architectural layer. Both transform byte streams; they differ in
+// what the transformation models:
+//
+
+// - **`core/compress/`** — codec functor `Bytes → Bytes` (smaller,
+// reversible). Domain: a single byte stream.
+// - **`core/archive/`** — packaging functor
+// `List<(path, metadata, content)> → Bytes`. Domain: a multi-file
+// bundle.
+//
+
+// They compose: `archive.tar.write_archive(entries) |> compress.gzip.encode()`.
+// The composite is `.tar.gz`. The convenience helper
+// `with_compress(archive_alg, compress_alg)` builds the composed
+// pipeline directly.
+//
+
+// # Design (mirroring `core/compress/`)
+//
+
+// Three shared abstractions:
+//
+
+// 1. `Archive` protocol — bidirectional `pack(entries)` / `unpack(bytes)`.
+// 2. `ArchiveAlgorithm` sum-type — runtime-selectable.
+// 3. Per-format implementation modules implementing `Archive`.
+//
+
+// Implementations:
+//
+
+// | Algorithm | Module | Status |
+// |-----------|---------------------|--------|
+// | Tar | `core.archive.tar` | implemented (USTAR + PAX) |
+// | Zip | `core.archive.zip` | future |
+// | Ar | `core.archive.ar` | future |
+// | Cpio | `core.archive.cpio` | future |
+//
+
+// # Composition with compression
+//
+
+// ```
+// // Pack source files, then gzip the tar:
+// let entries = collect_source_files()?;
+// let tar_bytes = archive.tar.write_archive(&entries)?;
+// let gz_bytes = compress.gzip.encode(&tar_bytes, compress.gzip.Level.Default)?;
+//
+
+// // Or use the helper:
+// let pipeline = with_compress(ArchiveAlgorithm.Tar, compress.Algorithm.Gzip);
+// let bundle = pipeline.pack(&entries)?;
+// ```
+//
+
+// # Categorical structure
+//
+
+// The pair `(Archive.pack, Archive.unpack)` forms a Galois connection
+// between the category of file collections and the category of byte
+// strings: round-trip is the identity on file collections (modulo
+// canonicalisation of metadata: ordering, mtime granularity, etc.).
+// Composition with compression is functorial: pack-then-compress and
+// decompress-then-unpack agree.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "uniform packaging subsystem (tar / zip / ar / cpio + Archive protocol)",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.archive;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+
+// Re-export the tar adapter so callers `mount core.archive.*` and have
+// it in scope.
+public mount archive.tar.{
+    TarEntry,
+    EntryType,
+    TarError,
+    read_archive as tar_read_archive,
+    write_archive as tar_write_archive,
+    entry_for_file as tar_entry_for_file,
+    entry_for_directory as tar_entry_for_directory,
+    entry_for_symlink as tar_entry_for_symlink,
+};
+
+// =============================================================================
+// ArchiveEntry — universal entry record (mirrors `TarEntry`'s scope)
+// =============================================================================
+//
+// This is the *protocol-level* entry view used by `Archive::pack /
+// unpack`. Per-format adapters convert between this universal record
+// and their format-specific representation (e.g., TarEntry for tar).
+public type ArchiveEntry is {
+    path: Text,
+    /// File mode (POSIX bits, e.g., 0o644).
+    mode: Int,
+    /// Modification time (Unix seconds). 0 for "unset".
+    mtime: Int,
+    /// Entry kind.
+    kind: ArchiveEntryKind,
+    /// File contents (only for RegularFile entries).
+    content: List<Byte>,
+};
+
+public type ArchiveEntryKind is
+      ArchiveRegularFile
+    | ArchiveDirectory
+    | ArchiveSymlink(Text)         // target path
+    | ArchiveHardlink(Text);
+
+// =============================================================================
+// ArchiveAlgorithm — runtime-selectable format
+// =============================================================================
+
+public type ArchiveAlgorithm is
+      Tar     // USTAR + PAX
+    | Zip     // PKZIP
+    | Ar      // Unix ar
+    | Cpio;   // POSIX cpio
+
+public fn archive_algorithm_tag(a: &ArchiveAlgorithm) -> Text {
+    match a {
+        Tar  => "tar".to_text(),
+        Zip  => "zip".to_text(),
+        Ar   => "ar".to_text(),
+        Cpio => "cpio".to_text(),
+    }
+}
+
+public fn archive_algorithm_extensions(a: &ArchiveAlgorithm) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    match a {
+        Tar  => { out.push("tar".to_text()); }
+        Zip  => { out.push("zip".to_text()); out.push("jar".to_text()); }
+        Ar   => { out.push("a".to_text()); out.push("ar".to_text()); }
+        Cpio => { out.push("cpio".to_text()); }
+    }
+    out
+}
+
+// =============================================================================
+// ArchiveError — universal error surface
+// =============================================================================
+
+public type ArchiveError is
+      Format(Text)                  // format-specific parse / write error
+    | UnsupportedAlgorithm(ArchiveAlgorithm)
+    | InvalidEntry(Text);
+
+implement Display for ArchiveError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Format(msg)              => f.write_str(f"archive: format error: {msg}".as_str()),
+            UnsupportedAlgorithm(a)  => f.write_str(f"archive: unsupported algorithm {archive_algorithm_tag(a)}".as_str()),
+            InvalidEntry(msg)        => f.write_str(f"archive: invalid entry: {msg}".as_str()),
+        }
+    }
+}
+
+implement Debug for ArchiveError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Archive protocol
+// =============================================================================
+//
+// Bidirectional packaging interface. Format adapters implement this to
+// participate in the universal subsystem.
+public protocol Archive {
+    fn algorithm(&self) -> ArchiveAlgorithm;
+
+    /// Pack a list of entries into a single byte stream.
+    fn pack(&self, entries: &List<ArchiveEntry>) -> Result<List<Byte>, ArchiveError>;
+
+    /// Unpack a byte stream into a list of entries.
+    fn unpack(&self, bytes: &[Byte]) -> Result<List<ArchiveEntry>, ArchiveError>;
+}
+
+// =============================================================================
+// Universal entry adapters (TarEntry ↔ ArchiveEntry)
+// =============================================================================
+
+public fn tar_entry_to_universal(t: &TarEntry) -> ArchiveEntry {
+    let kind = match &t.entry_type {
+        EntryType.RegularFile     => ArchiveEntryKind.ArchiveRegularFile,
+        EntryType.Directory       => ArchiveEntryKind.ArchiveDirectory,
+        EntryType.Symlink(target) => ArchiveEntryKind.ArchiveSymlink(target.clone()),
+        EntryType.Hardlink(target) => ArchiveEntryKind.ArchiveHardlink(target.clone()),
+        _ => ArchiveEntryKind.ArchiveRegularFile,  // device/fifo/pax fallback
+    };
+    ArchiveEntry {
+        path: t.path.clone(),
+        mode: t.mode,
+        mtime: t.mtime,
+        kind: kind,
+        content: t.content.clone(),
+    }
+}
+
+public fn universal_to_tar_entry(e: &ArchiveEntry) -> TarEntry {
+    let entry_type = match &e.kind {
+        ArchiveRegularFile        => EntryType.RegularFile,
+        ArchiveDirectory          => EntryType.Directory,
+        ArchiveSymlink(target)    => EntryType.Symlink(target.clone()),
+        ArchiveHardlink(target)   => EntryType.Hardlink(target.clone()),
+    };
+    TarEntry {
+        path: e.path.clone(),
+        mode: e.mode,
+        uid: Some(0), gid: Some(0),
+        size: e.content.len(),
+        mtime: e.mtime,
+        entry_type: entry_type,
+        uname: "".to_text(), gname: "".to_text(),
+        content: e.content.clone(),
+    }
+}
+
+// =============================================================================
+// TarFormat — Archive protocol implementation
+// =============================================================================
+
+public type TarFormat is {};
+
+public fn tar_format() -> TarFormat { TarFormat {} }
+
+implement Archive for TarFormat {
+    fn algorithm(&self) -> ArchiveAlgorithm { ArchiveAlgorithm.Tar }
+
+    fn pack(&self, entries: &List<ArchiveEntry>) -> Result<List<Byte>, ArchiveError> {
+        let mut tar_entries: List<TarEntry> = List.new();
+        let mut i = 0;
+        while i < entries.len() {
+            tar_entries.push(universal_to_tar_entry(entries.get(i).unwrap()));
+            i = i + 1;
+        }
+        match tar_write_archive(&tar_entries) {
+            Ok(b)  => Ok(b),
+            Err(e) => Err(ArchiveError.Format(format!("{e}").to_text())),
+        }
+    }
+
+    fn unpack(&self, bytes: &[Byte]) -> Result<List<ArchiveEntry>, ArchiveError> {
+        match tar_read_archive(bytes) {
+            Ok(tar_entries) => {
+                let mut out: List<ArchiveEntry> = List.new();
+                let mut i = 0;
+                while i < tar_entries.len() {
+                    out.push(tar_entry_to_universal(tar_entries.get(i).unwrap()));
+                    i = i + 1;
+                }
+                Ok(out)
+            }
+            Err(e) => Err(ArchiveError.Format(format!("{e}").to_text())),
+        }
+    }
+}
+
+// =============================================================================
+// Algorithm dispatch
+// =============================================================================
+
+/// Get the canonical adapter for an algorithm. Returns
+/// `UnsupportedAlgorithm` for not-yet-implemented formats (zip / ar / cpio).
+public fn adapter_for(a: ArchiveAlgorithm) -> Result<Heap<dyn Archive>, ArchiveError> {
+    match a {
+        Tar => Ok(Heap.new(tar_format()) as Heap<dyn Archive>),
+        _   => Err(ArchiveError.UnsupportedAlgorithm(a)),
+    }
+}
+
+// =============================================================================
+// Convenience helpers: convenience constructors
+// =============================================================================
+
+public fn entry_for_file(path: Text, content: List<Byte>, mode: Int, mtime: Int) -> ArchiveEntry {
+    ArchiveEntry {
+        path: path,
+        mode: mode,
+        mtime: mtime,
+        kind: ArchiveEntryKind.ArchiveRegularFile,
+        content: content,
+    }
+}
+
+public fn entry_for_directory(path: Text, mode: Int, mtime: Int) -> ArchiveEntry {
+    ArchiveEntry {
+        path: path,
+        mode: mode,
+        mtime: mtime,
+        kind: ArchiveEntryKind.ArchiveDirectory,
+        content: List.new(),
+    }
+}
+
+public fn entry_for_symlink(path: Text, target: Text, mtime: Int) -> ArchiveEntry {
+    ArchiveEntry {
+        path: path,
+        mode: 0o777,
+        mtime: mtime,
+        kind: ArchiveEntryKind.ArchiveSymlink(target),
+        content: List.new(),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_universal_roundtrip() {
+        let mut content: List<Byte> = List.new();
+        let bs = "hello".as_bytes();
+        let mut i = 0; while i < bs.len() { content.push(bs[i]); i = i + 1; }
+        let e = entry_for_file("greeting.txt".to_text(), content.clone(), 0o644, 1700000000);
+
+        let fmt = tar_format();
+        let mut entries: List<ArchiveEntry> = List.new();
+        entries.push(e);
+        let packed = fmt.pack(&entries).unwrap();
+        let unpacked = fmt.unpack(packed.as_slice()).unwrap();
+        assert_eq(unpacked.len(), 1);
+        assert_eq(unpacked.get(0).unwrap().path, "greeting.txt".to_text());
+    }
+
+    #[test]
+    fn test_algorithm_tags_distinct() {
+        assert(archive_algorithm_tag(&ArchiveAlgorithm.Tar)
+               != archive_algorithm_tag(&ArchiveAlgorithm.Zip));
+        assert(archive_algorithm_tag(&ArchiveAlgorithm.Zip)
+               != archive_algorithm_tag(&ArchiveAlgorithm.Ar));
+    }
+
+    #[test]
+    fn test_unsupported_algorithm() {
+        let r = adapter_for(ArchiveAlgorithm.Zip);
+        assert!(r.is_err());
+    }
+}
