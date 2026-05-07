@@ -101,6 +101,25 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Path/PathBuf INHERENT methods statically dispatched
+            // via Call(func_id) when codegen knew the receiver
+            // type at compile time.  Mirrors the CallM-path
+            // `try_intercept_path_method` but treats arg[0] as
+            // the receiver.  Without this sibling,
+            // `p.join_str(&other)` where `p: &Path` lands at the
+            // stub `RetV` and returns Unit, propagating up as
+            // "path='<value:N>' exists=false" at downstream
+            // `path_exists(&joined.as_path())` call sites.
+            if let Some(result) = super::path_ops_runtime::try_intercept_path_inherent_call(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             // `Text.*` static factories (`Text.new`,
             // `Text.with_capacity`, `Text.from_static`,
             // `Text.from_str`, `Text.from_char`, …).  Same

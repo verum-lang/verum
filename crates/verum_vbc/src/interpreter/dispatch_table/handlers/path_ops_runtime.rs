@@ -188,13 +188,36 @@ pub(in super::super) fn try_intercept_path_method(
     }
 }
 
+/// Unwrap any of the three reference encodings that the interpreter
+/// uses when passing `&T` arguments across a function boundary:
+///
+///   * CBGR-ref (negative inline-int with generation>=1) — register
+///     handle into the caller's absolute register file.  Used for
+///     refs to in-scope locals.
+///   * ThinRef (TAG_POINTER + bits 47, 45 set) — heap-side pointer
+///     to a stored Value cell.  Used when the referent lives in a
+///     different stack frame than the caller.
+///   * Plain Value — already unwrapped.
+///
+/// Pre-fix this only handled CBGR-ref → user code like
+/// `paper_dir.join_str(&"paper.tex")` where the `&Text` argument
+/// arrived as a ThinRef silently fell out of the intercept (string
+/// extraction failed → join_str returned `None` → method dispatch
+/// fell through to the `RetV` stub which returns `()`), and
+/// downstream `path_exists(&path.as_path())` saw a corrupted small-
+/// string-like value rendered as `<value:N>`.
 fn deref_cbgr(state: &InterpreterState, v: Value) -> Value {
     if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
+        return state.registers.get_absolute(abs_index);
     }
+    if v.is_thin_ref() {
+        let tr = v.as_thin_ref();
+        if !tr.ptr.is_null() {
+            return unsafe { *(tr.ptr as *const Value) };
+        }
+    }
+    v
 }
 
 fn read_field0(receiver: &Value) -> Option<Value> {
@@ -338,6 +361,77 @@ pub(in super::super) fn try_intercept_path_constructor(
             Ok(None)
         }
     }
+}
+
+/// Intercept `Call { func_id }` for inherent-method names of the
+/// form `Path.<method>` / `PathBuf.<method>` (mostly emitted when
+/// codegen statically resolved the method-call to a concrete
+/// FunctionId because the receiver type was known at compile time
+/// — bypassing the `CallM` path that `try_intercept_path_method`
+/// covers).  Without this sibling, `p.join_str(&other)` where `p`
+/// has static type `&Path` lands at the stub `RetV` body and
+/// returns Unit; downstream `joined.as_path()` then operates on
+/// Unit and crashes the file-runtime intercept ("path='<value:N>'
+/// exists=false").
+///
+/// Treats `args[0]` as the receiver (mirroring the standard
+/// `(self, …)` convention for inherent methods) and forwards to
+/// the same per-method bodies as `try_intercept_path_method`.
+pub(in super::super) fn try_intercept_path_inherent_call(
+    state: &mut InterpreterState,
+    func_name: &str,
+    args_start_reg: u16,
+    arg_count: u8,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    // Quick gate: must end with one of the known inherent-method
+    // names.  Anything else (free constructors, sibling-type
+    // methods, etc.) is dispatched elsewhere — fast-path miss.
+    let bare = func_name.rsplit('.').next().unwrap_or(func_name);
+    let is_path_inherent = matches!(
+        bare,
+        "as_path"
+            | "to_path_buf"
+            | "join"
+            | "join_str"
+            | "as_str"
+            | "to_str"
+            | "parent"
+            | "to_path"
+    );
+    if !is_path_inherent {
+        return Ok(None);
+    }
+    // Receiver type prefix MUST be Path or PathBuf — the bare-name
+    // gate above is shared with non-Path types (e.g. List.join).
+    // Confirm via the qualified prefix.  Accept both fully-qualified
+    // (`core.io.path.Path.join_str`) and short (`Path.join_str`).
+    let qualified = func_name.rsplit_terminator('.').take(2).collect::<Vec<_>>();
+    if qualified.len() != 2 {
+        return Ok(None);
+    }
+    let type_name = qualified[1];
+    if type_name != "Path" && type_name != "PathBuf" {
+        return Ok(None);
+    }
+    if arg_count == 0 {
+        return Ok(None);
+    }
+    // Receiver lives at args_start_reg; rebase the inner intercept
+    // to args_start_reg+1 with arg_count-1 so it sees the same shape
+    // as the CallM pathway.
+    let recv_raw = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
+    let receiver = deref_cbgr(state, recv_raw);
+    try_intercept_path_method(
+        state,
+        bare,
+        receiver,
+        args_start_reg + 1,
+        arg_count - 1,
+        caller_base,
+    )
 }
 
 fn read_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Option<String> {
