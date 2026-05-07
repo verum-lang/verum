@@ -7,3 +7,4 @@
 -- undefined references, or shape drift would fail elaboration and
 -- hence `lake build`.
 import VerumExternalReplay.KernelSoundness
+import VerumExternalReplay.ReferenceChecker
