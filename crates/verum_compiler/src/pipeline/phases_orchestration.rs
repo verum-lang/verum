@@ -323,11 +323,35 @@ impl<'s> CompilationPipeline<'s> {
         // Pre-register stdlib context declarations from CoreMetadata.
         // This enables `using [ComputeDevice]` etc. to resolve even
         // in single-file compilation where the declaring module
-        // (gpu.vr) isn't explicitly loaded. The context names were
-        // extracted during stdlib bootstrap and cached in the
-        // embedded stdlib archive.
+        // (gpu.vr) isn't explicitly loaded.
+        //
+        // **Cold-start fast-path**: when the metadata sidecar embeds
+        // full `ContextDecl` AST nodes (newer precompile output),
+        // register them via `register_stdlib_context_full` so method
+        // signatures land at typecheck-ready depth — equivalent to
+        // the legacy fallback's full-parse loop, but without re-
+        // parsing 568 stdlib `.vr` files at runtime.  Sidecars built
+        // by older precompile runs only have the names list; the
+        // legacy fallback below still fires in that case.
         if let Some(metadata) = self.stdlib_metadata.get() {
+            for (ctx_name, ctx_decl) in metadata.context_decl_nodes.iter() {
+                if !self.collected_contexts.contains(ctx_name) {
+                    checker.register_protocol_as_context(ctx_name.clone());
+                }
+                checker.register_stdlib_context_full(
+                    ctx_name.clone(),
+                    ctx_decl.clone(),
+                );
+            }
+            // Fall back to name-only registration for any context
+            // that's listed in `context_declarations` but didn't make
+            // it into `context_decl_nodes` (e.g. a parse error during
+            // precompile dropped the AST while the line-scan still
+            // caught the name).
             for ctx_name in &metadata.context_declarations {
+                if metadata.context_decl_nodes.contains_key(ctx_name) {
+                    continue;
+                }
                 if !self.collected_contexts.contains(ctx_name) {
                     checker.register_protocol_as_context(ctx_name.clone());
                 }

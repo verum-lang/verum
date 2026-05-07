@@ -63,6 +63,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
         version: 1,
         content_hash: [0u8; 32],
         context_declarations: List::new(),
+        context_decl_nodes: OrderedMap::new(),
     };
 
     for entry in &archive.index {

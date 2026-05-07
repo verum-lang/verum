@@ -74,6 +74,23 @@ pub struct CoreMetadata {
     /// from `context Name { ... }` and `context protocol Name { ... }`
     /// declarations.
     pub context_declarations: List<Text>,
+
+    /// Full `ContextDecl` AST nodes for every public stdlib
+    /// context, indexed by context name.  When the runtime
+    /// fast-path (`phases_orchestration.rs::phase_type_check`)
+    /// finds a non-empty entry here, it skips the legacy fallback
+    /// that re-parses every stdlib `.vr` file with the full parser
+    /// (~250 ms cold-start regression on hello-world).  The fallback
+    /// remains as a defensive last-resort when this map is empty
+    /// (older sidecar versions or unusual builds).
+    ///
+    /// Spans inside the embedded decls are normalised at precompile
+    /// time so the bincode-serialised payload is reproducible across
+    /// machines — the AST nodes are only consumed by the typechecker
+    /// for method-signature registration, never re-rendered with
+    /// source spans.
+    #[serde(default)]
+    pub context_decl_nodes: OrderedMap<Text, verum_ast::decl::ContextDecl>,
 }
 
 /// Descriptor for a type definition in stdlib
