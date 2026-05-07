@@ -1,0 +1,471 @@
+// =============================================================================
+// security/tuf/types.vr — TUF metadata data model (spec §4)
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/json, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** Type-precise data model for TUF (The Update Framework)
+// metadata as specified by tuf.io spec v1.0+. TUF is a compromise-
+// resilient framework for software distribution used by PyPI, Docker
+// Notary, Sigstore root, and now the Verum registry.
+//
+// **Four roles.**
+//
+//   - **root**       — names + verifies all other roles' keys
+//                      (the trust anchor). Long-lived, offline keys.
+//                      `consistent_snapshot` flag controls version-
+//                      prefixed file naming on the repo side.
+//   - **timestamp**  — short-lived (hours-days), online key.
+//                      Refers to snapshot by version + hash.
+//                      Detects freeze attacks (stale snapshot).
+//   - **snapshot**   — refers to all current Targets metadata
+//                      versions. Detects mix-and-match attacks.
+//   - **targets**    — actual lookup of `path → TargetFile`.
+//                      May delegate paths to other Targets metadata.
+//
+// **Threshold + delegation.** Each role has a list of trusted keys
+// + a threshold (k-of-n). Targets can delegate paths to other
+// Targets-style metadata files for fine-grained authority partition.
+// Delegations form a DAG; cycles are forbidden. The framework
+// detects: rollback, freeze, mix-and-match, fast-forward, endless-
+// data, slow-retrieval (the last two via repository.vr).
+//
+// **Signed envelope.**
+//
+//   { signed: <metadata>, signatures: [{keyid, sig}, ...] }
+//
+// where `<metadata>` is one of the four role types. Signing is over
+// the JCS-canonicalised `signed` payload — see canonical.vr.
+//
+// **Categorical structure.** TUF metadata forms a slice category
+// over the Root: every other role's metadata is signed by keys
+// declared in Root. Trust flows along arrows: Root → Timestamp,
+// Root → Snapshot, Root → Targets, Targets → DelegatedTargets.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF spec §4 metadata data model — Root/Timestamp/Snapshot/Targets + delegations",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map, Set};
+mount encoding.json.{JsonValue};
+mount time.rfc3339.{Rfc3339Time};
+
+// =============================================================================
+// Role names
+// =============================================================================
+
+@derive(Eq, Hash, Clone, Debug)
+public type RoleName is
+    | Root
+    | Targets
+    | Snapshot
+    | Timestamp
+    /// Delegated role identified by its name (typically dot-separated
+    /// path-like, e.g. `"namespace/foo"`).
+    | Delegated(Text);
+
+public fn role_name_to_text(r: &RoleName) -> Text {
+    match r {
+        RoleName.Root      => "root".to_text(),
+        RoleName.Targets   => "targets".to_text(),
+        RoleName.Snapshot  => "snapshot".to_text(),
+        RoleName.Timestamp => "timestamp".to_text(),
+        RoleName.Delegated(name) => name.clone(),
+    }
+}
+
+public fn role_name_from_text(s: &Text) -> RoleName {
+    match s.as_str() {
+        "root"      => RoleName.Root,
+        "targets"   => RoleName.Targets,
+        "snapshot"  => RoleName.Snapshot,
+        "timestamp" => RoleName.Timestamp,
+        _           => RoleName.Delegated(s.clone()),
+    }
+}
+
+// =============================================================================
+// Keys
+// =============================================================================
+
+/// TUF key types per spec §4.2. Schemes per spec §4.2.1.
+@derive(Eq, Clone, Debug)
+public type TufKeyType is
+    | Ed25519Key
+    | EcdsaP256Key
+    | RsaKey
+    | Other(Text);
+
+@derive(Eq, Clone, Debug)
+public type TufKeyScheme is
+    /// Canonical Ed25519 — pure, no hash prepended.
+    | Ed25519Scheme
+    /// ECDSA over NIST P-256 with SHA-256.
+    | EcdsaSha2NistP256
+    /// RSA PKCS#1 v1.5 with SHA-256 padding.
+    | RsaPkcs1V15Sha256
+    /// RSASSA-PSS with SHA-256 (sigstore TUF root uses this).
+    | RsassaPssSha256
+    | Other(Text);
+
+@derive(Eq, Clone, Debug)
+public type TufKey is {
+    /// Key type identifier as it appears on the wire.
+    keytype:     TufKeyType,
+    /// Signature scheme.
+    scheme:      TufKeyScheme,
+    /// Algorithm-specific key material — typically a single field
+    /// `public` holding the hex-encoded key bytes (Ed25519/ECDSA) or
+    /// PEM (RSA). Stored as a JsonObject so unknown algorithms still
+    /// round-trip on the wire.
+    keyval:      JsonValue,
+};
+
+/// `keyid` per TUF spec §4.2.2: SHA-256 of the canonical-JSON
+/// encoding of the key. Computed by canonical.vr; stored here as
+/// the canonical hex form.
+@derive(Eq, Hash, Clone, Debug)
+public type KeyId is (Text);
+
+public fn key_id_to_text(k: &KeyId) -> &Text { &k.0 }
+
+// =============================================================================
+// Signatures
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type Signature is {
+    keyid: KeyId,
+    /// Hex-encoded signature bytes.
+    sig:   Text,
+};
+
+// =============================================================================
+// Signed envelope
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Signed<T> is {
+    signed:     T,
+    signatures: List<Signature>,
+};
+
+// =============================================================================
+// Role definitions (the role's trust spec, embedded in Root)
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type RoleDef is {
+    keyids:    List<KeyId>,
+    threshold: Int { >= 1 },
+};
+
+// =============================================================================
+// Root metadata
+// =============================================================================
+
+@derive(Clone, Debug)
+public type RootMetadata is {
+    /// Always "root" per spec.
+    type_:               Text,
+    /// Spec version (e.g., "1.0.31"). Informational.
+    spec_version:        Text,
+    /// If true, repository serves version-prefixed metadata + hash-
+    /// prefixed targets (e.g., `1.root.json`, `<hash>.target`).
+    consistent_snapshot: Bool,
+    /// Monotonically increasing on every Root rotation.
+    version:             Int { >= 1 },
+    /// Expiration timestamp.
+    expires:             Rfc3339Time,
+    /// Map keyid → key.
+    keys:                Map<KeyId, TufKey>,
+    /// Role definitions for the four canonical roles.
+    roles:               RootRoles,
+};
+
+@derive(Clone, Debug)
+public type RootRoles is {
+    root:       RoleDef,
+    targets:    RoleDef,
+    snapshot:   RoleDef,
+    timestamp:  RoleDef,
+};
+
+// =============================================================================
+// Timestamp metadata
+// =============================================================================
+
+@derive(Clone, Debug)
+public type TimestampMetadata is {
+    type_:        Text,
+    spec_version: Text,
+    version:      Int { >= 1 },
+    expires:      Rfc3339Time,
+    /// Single-entry map { "snapshot.json": MetafileSpec }.
+    /// Spec §4.6 mandates exactly one entry, but the on-wire format
+    /// uses an object so we store as Map for round-trip.
+    meta:         Map<Text, MetafileSpec>,
+};
+
+// =============================================================================
+// Snapshot metadata
+// =============================================================================
+
+@derive(Clone, Debug)
+public type SnapshotMetadata is {
+    type_:        Text,
+    spec_version: Text,
+    version:      Int { >= 1 },
+    expires:      Rfc3339Time,
+    /// Map filename ("targets.json", "<delegation>.json") →
+    /// version + hashes spec.
+    meta:         Map<Text, MetafileSpec>,
+};
+
+// =============================================================================
+// Metafile spec — used by Timestamp and Snapshot
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type MetafileSpec is {
+    /// File length in bytes (optional in some TUF profiles, required
+    /// in sigstore profile).
+    length:  Maybe<Int>,
+    /// Map of hash-algorithm → hex digest.
+    hashes:  Map<Text, Text>,
+    /// Metadata version this spec refers to.
+    version: Int { >= 1 },
+};
+
+// =============================================================================
+// Targets metadata
+// =============================================================================
+
+@derive(Clone, Debug)
+public type TargetsMetadata is {
+    type_:        Text,
+    spec_version: Text,
+    version:      Int { >= 1 },
+    expires:      Rfc3339Time,
+    /// Map target-path → TargetFile.
+    targets:      Map<Text, TargetFile>,
+    /// Optional delegation specs (absent for unrelated leaf targets).
+    delegations:  Maybe<Delegations>,
+};
+
+@derive(Clone, Debug)
+public type TargetFile is {
+    /// File length in bytes.
+    length: Int { >= 0 },
+    /// Map hash-alg → hex.
+    hashes: Map<Text, Text>,
+    /// Free-form custom metadata (registry uses this for SBOM hash,
+    /// SLSA attestation reference, etc.).
+    custom: Maybe<JsonValue>,
+};
+
+// =============================================================================
+// Delegations
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Delegations is {
+    /// Map keyid → key. Delegation keys are scoped to delegations;
+    /// they do NOT appear in Root's `keys` map.
+    keys:  Map<KeyId, TufKey>,
+    /// Ordered list of delegated roles. Order matters: first role
+    /// whose path patterns match wins.
+    roles: List<DelegatedRole>,
+};
+
+@derive(Clone, Debug)
+public type DelegatedRole is {
+    name:       Text,
+    keyids:     List<KeyId>,
+    threshold:  Int { >= 1 },
+    /// If true, paths NOT matching this role's patterns are NOT
+    /// passed on to subsequent delegated roles. Stops the search.
+    terminating: Bool,
+    /// Path patterns (glob-style with `*` and `?`). Mutually
+    /// exclusive with `path_hash_prefixes`.
+    paths:               Maybe<List<Text>>,
+    /// Hex-prefix matching on SHA-256 of the path. Used by
+    /// hashed-bin delegations for evenly-distributed authority.
+    path_hash_prefixes:  Maybe<List<Text>>,
+};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Validate a `RootRoles` block: every keyid referenced by every role
+/// MUST appear in the root's `keys` map. Returns the missing keyids
+/// for diagnostics.
+public fn validate_root_roles_keys(
+    roles: &RootRoles,
+    keys:  &Map<KeyId, TufKey>,
+) -> List<KeyId> {
+    let mut missing: List<KeyId> = List.new();
+    collect_missing_keys(&roles.root.keyids,      keys, &mut missing);
+    collect_missing_keys(&roles.targets.keyids,   keys, &mut missing);
+    collect_missing_keys(&roles.snapshot.keyids,  keys, &mut missing);
+    collect_missing_keys(&roles.timestamp.keyids, keys, &mut missing);
+    missing
+}
+
+fn collect_missing_keys(
+    keyids: &List<KeyId>,
+    keys:   &Map<KeyId, TufKey>,
+    out:    &mut List<KeyId>,
+) {
+    let mut i: Int = 0;
+    while i < keyids.len() {
+        if !keys.contains_key(&keyids[i]) { out.push(keyids[i].clone()); }
+        i = i + 1;
+    }
+}
+
+/// Test whether a target path matches a delegation's path patterns.
+/// `paths` takes precedence over `path_hash_prefixes`; if both
+/// fields are absent, the delegation matches nothing (per spec).
+public fn delegation_matches(d: &DelegatedRole, path: &Text) -> Bool {
+    if let Some(patterns) = &d.paths {
+        let mut i: Int = 0;
+        while i < patterns.len() {
+            if path_pattern_matches(&patterns[i], path) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+    if let Some(prefixes) = &d.path_hash_prefixes {
+        // SHA-256 of the path; check hex prefix match. The hashing
+        // is the responsibility of the caller (delegations.vr) — we
+        // surface the structural check here.
+        let _ = prefixes;
+        return false;
+    }
+    false
+}
+
+/// Match a glob pattern against a path. Supports `*` (any single
+/// segment) and `?` (any single character). Strict matching — no
+/// implicit anchoring tweaks beyond the spec.
+public fn path_pattern_matches(pattern: &Text, path: &Text) -> Bool {
+    glob_match(pattern.as_bytes(), path.as_bytes(), 0, 0)
+}
+
+fn glob_match(p: &[Byte], s: &[Byte], pi: Int, si: Int) -> Bool {
+    if pi == p.len() && si == s.len() { return true; }
+    if pi == p.len() { return false; }
+    let pc = p[pi];
+    if pc == b'*' {
+        // `*` matches zero-or-more characters that are NOT '/'
+        // (TUF spec §5.3 path-segment-bounded glob).
+        if pi + 1 == p.len() {
+            // trailing `*` — match any rest that has no `/`
+            let mut k = si;
+            while k < s.len() {
+                if s[k] == b'/' { return false; }
+                k = k + 1;
+            }
+            return true;
+        }
+        // Try every possible split for `*`
+        let mut k = si;
+        loop {
+            if glob_match(p, s, pi + 1, k) { return true; }
+            if k == s.len() { return false; }
+            if s[k] == b'/' { return false; }
+            k = k + 1;
+        }
+    }
+    if pc == b'?' {
+        if si == s.len() { return false; }
+        if s[si] == b'/' { return false; }
+        return glob_match(p, s, pi + 1, si + 1);
+    }
+    if si == s.len() { return false; }
+    if pc != s[si] { return false; }
+    glob_match(p, s, pi + 1, si + 1)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_role_name_round_trip() {
+        assert(role_name_from_text(&"root".to_text()) is RoleName.Root);
+        assert(role_name_from_text(&"timestamp".to_text()) is RoleName.Timestamp);
+        match role_name_from_text(&"foo.bar".to_text()) {
+            RoleName.Delegated(n) => assert_eq(n, "foo.bar".to_text()),
+            _ => unreachable(),
+        }
+        assert_eq(role_name_to_text(&RoleName.Targets), "targets".to_text());
+    }
+
+    #[test]
+    fn test_glob_exact() {
+        assert_eq(path_pattern_matches(&"foo/bar".to_text(), &"foo/bar".to_text()), true);
+        assert_eq(path_pattern_matches(&"foo/bar".to_text(), &"foo/baz".to_text()), false);
+    }
+
+    #[test]
+    fn test_glob_star_segment_bounded() {
+        assert_eq(path_pattern_matches(&"foo/*".to_text(), &"foo/bar".to_text()), true);
+        assert_eq(path_pattern_matches(&"foo/*".to_text(), &"foo/bar/baz".to_text()), false);
+        assert_eq(path_pattern_matches(&"foo/*/baz".to_text(), &"foo/bar/baz".to_text()), true);
+    }
+
+    #[test]
+    fn test_glob_question_mark() {
+        assert_eq(path_pattern_matches(&"f?o".to_text(), &"foo".to_text()), true);
+        assert_eq(path_pattern_matches(&"f?o".to_text(), &"f/o".to_text()), false);
+        assert_eq(path_pattern_matches(&"f?o".to_text(), &"foooo".to_text()), false);
+    }
+
+    #[test]
+    fn test_validate_root_roles_keys_finds_missing() {
+        let mut keys: Map<KeyId, TufKey> = Map.new();
+        keys.insert(KeyId("k1".to_text()), TufKey {
+            keytype: TufKeyType.Ed25519Key,
+            scheme:  TufKeyScheme.Ed25519Scheme,
+            keyval:  JsonValue.Null,
+        });
+        let mut role_keyids: List<KeyId> = List.new();
+        role_keyids.push(KeyId("k1".to_text()));
+        role_keyids.push(KeyId("missing".to_text()));
+        let roles = RootRoles {
+            root:      RoleDef { keyids: role_keyids.clone(), threshold: 1 },
+            targets:   RoleDef { keyids: role_keyids.clone(), threshold: 1 },
+            snapshot:  RoleDef { keyids: role_keyids.clone(), threshold: 1 },
+            timestamp: RoleDef { keyids: role_keyids.clone(), threshold: 1 },
+        };
+        let missing = validate_root_roles_keys(&roles, &keys);
+        // Each role references "missing" once → 4 total references.
+        assert_eq(missing.len(), 4);
+    }
+}
