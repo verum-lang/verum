@@ -1,0 +1,494 @@
+// =============================================================================
+// security/sigstore/types.vr — Rekor entries + Fulcio + Bundle types
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/json, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** Type-precise data model for Sigstore — the
+// open-source supply-chain integrity infrastructure (rekor.sigstore.
+// dev for transparency log, fulcio.sigstore.dev for keyless
+// ephemeral certificates). Composes against:
+//
+//   - `core.security.transparency_log` — RFC 6962 / 9162 Merkle
+//     primitives that Rekor uses internally.
+//   - `core.security.provenance`       — DSSE envelopes + in-toto +
+//     SLSA + Sigstore Bundle v0.3 wrapping.
+//   - `core.security.tuf`              — trust-root distribution
+//     for Rekor's public key + Fulcio CA chain.
+//   - `core.security.x509`             — Fulcio-issued ephemeral
+//     cert chain validation.
+//   - `core.security.oidc`             — OIDC token used for Fulcio
+//     keyless signing.
+//
+// **Entry types (Rekor v2 supported).**
+//
+//   - `HashedRekord v0.0.1` — for plain detached signatures over a
+//     hash. Body carries: signature, public key, hashed payload.
+//   - `Intoto v0.0.2`       — for in-toto Statements (SLSA, SBOM
+//     attestations). Body carries: payload type + hash, payload
+//     hash, public key, envelope hash.
+//   - `DSSE v0.0.1`         — for raw DSSE envelopes signed via
+//     Sigstore. Body carries: envelope hash, signatures.
+//
+// **SET — Signed Entry Timestamp.** Rekor's promise that the entry
+// has been integrated into the log. The SET is an ECDSA-P-256
+// signature over the canonical-JSON representation of the entry
+// body + integration time + log id + log index. Verifying the SET
+// is sufficient evidence of inclusion without fetching an inclusion
+// proof.
+//
+// **Categorical structure.** Entries form a sheaf over the Rekor
+// log: each entry has a unique (log_index, body_sha256) coordinate;
+// the integrated_time + SET form the gluing data that lets verifiers
+// reconstruct integration order without re-fetching the log.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Sigstore data model — Rekor entry types + Fulcio response + Sigstore Bundle",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.sigstore.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.json.{JsonValue};
+mount time.rfc3339.{Rfc3339Time};
+
+// =============================================================================
+// Constants — Sigstore well-known issuers + endpoints
+// =============================================================================
+
+/// Public Sigstore Rekor instance.
+public const REKOR_PUBLIC_URL: Text = "https://rekor.sigstore.dev";
+
+/// Public Sigstore Fulcio instance.
+public const FULCIO_PUBLIC_URL: Text = "https://fulcio.sigstore.dev";
+
+/// Public Sigstore OIDC issuer (OAuth-Dex) for browser-flow tokens.
+public const SIGSTORE_PUBLIC_OIDC_ISSUER: Text = "https://oauth2.sigstore.dev/auth";
+
+/// Production Sigstore Rekor public key — id-pkix Ed25519/ECDSA.
+/// Real key material lives in TUF metadata; this constant is the
+/// canonical KeyID for documentation / diagnostics.
+public const REKOR_PRODUCTION_KEY_ID: Text = "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d";
+
+// =============================================================================
+// Entry kinds + API versions
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type EntryKind is
+    | HashedRekord
+    | Intoto
+    | Dsse
+    | Other(Text);
+
+public fn entry_kind_to_text(k: &EntryKind) -> Text {
+    match k {
+        EntryKind.HashedRekord => "hashedrekord".to_text(),
+        EntryKind.Intoto       => "intoto".to_text(),
+        EntryKind.Dsse         => "dsse".to_text(),
+        EntryKind.Other(s)     => s.clone(),
+    }
+}
+
+public fn entry_kind_from_text(s: &Text) -> EntryKind {
+    match s.as_str() {
+        "hashedrekord" => EntryKind.HashedRekord,
+        "intoto"       => EntryKind.Intoto,
+        "dsse"         => EntryKind.Dsse,
+        other          => EntryKind.Other(other.to_text()),
+    }
+}
+
+@derive(Eq, Clone, Debug)
+public type ApiVersion is (Text);
+
+// =============================================================================
+// HashedRekord (v0.0.1) — detached signature over a hash
+// =============================================================================
+//
+// JSON wire form (Rekor v2):
+//
+//   {
+//     "kind":      "hashedrekord",
+//     "apiVersion":"0.0.1",
+//     "spec": {
+//       "data": {
+//         "hash": { "algorithm": "sha256", "value": "<hex>" }
+//       },
+//       "signature": {
+//         "content":  "<base64 signature bytes>",
+//         "publicKey": { "content": "<base64 PEM-encoded public key>" }
+//       }
+//     }
+//   }
+
+@derive(Eq, Clone, Debug)
+public type HashedRekordBody is {
+    /// Hash of the detached payload.
+    payload_hash:      Digest,
+    /// Base64-encoded signature bytes.
+    signature_b64:     Text,
+    /// Base64-encoded PEM public key (or raw key per algorithm).
+    public_key_pem_b64: Text,
+};
+
+// =============================================================================
+// Intoto (v0.0.2) — in-toto Statement attestation
+// =============================================================================
+//
+// JSON wire form (Rekor v2):
+//
+//   {
+//     "kind":       "intoto",
+//     "apiVersion": "0.0.2",
+//     "spec": {
+//       "content": {
+//         "envelope": {
+//           "payload":     "<base64>",
+//           "payloadType": "application/vnd.in-toto+json",
+//           "signatures":  [{"sig": "<base64>", "publicKey": "<base64 PEM>"}]
+//         },
+//         "hash":           { "algorithm": "sha256", "value": "<hex>" },
+//         "payloadHash":    { "algorithm": "sha256", "value": "<hex>" }
+//       },
+//       "publicKey": "<base64 PEM>"
+//     }
+//   }
+
+@derive(Eq, Clone, Debug)
+public type IntotoEnvelopeRef is {
+    payload_b64:       Text,
+    payload_type:      Text,
+    signatures:        List<EnvelopeSignature>,
+};
+
+@derive(Eq, Clone, Debug)
+public type EnvelopeSignature is {
+    sig_b64:           Text,
+    /// Per-signer public key (base64-encoded PEM).
+    public_key_pem_b64: Text,
+};
+
+@derive(Eq, Clone, Debug)
+public type IntotoBody is {
+    envelope:        IntotoEnvelopeRef,
+    /// SHA-256 over the entire serialized envelope.
+    envelope_hash:   Digest,
+    /// SHA-256 over the decoded payload.
+    payload_hash:    Digest,
+    /// Verification material — typically the same as the envelope's
+    /// signer public key, deduplicated for fast lookup.
+    public_key_pem_b64: Text,
+};
+
+// =============================================================================
+// DSSE (v0.0.1) — raw DSSE envelope
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type DsseBody is {
+    /// SHA-256 of the canonical envelope body.
+    envelope_hash:    Digest,
+    /// Per-signature record (signer + base64 sig).
+    signatures:       List<EnvelopeSignature>,
+    /// SHA-256 of the underlying payload.
+    payload_hash:     Digest,
+    payload_type:     Text,
+};
+
+// =============================================================================
+// Common
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type Digest is {
+    algorithm: Text,
+    /// Hex-encoded digest.
+    hex:       Text,
+};
+
+@derive(Eq, Clone, Debug)
+public type EntryBody is
+    | HashedRekord_(HashedRekordBody)
+    | Intoto_(IntotoBody)
+    | Dsse_(DsseBody)
+    | Raw(JsonValue);
+
+// =============================================================================
+// Signed Entry Timestamp (SET)
+// =============================================================================
+//
+// Rekor's promise that the entry has been integrated into the log
+// at a particular position and time. The SET is an ECDSA-P-256
+// signature over a canonical JSON representation of:
+//
+//   {
+//     "body":           "<base64 entry body>",
+//     "integratedTime": <unix seconds>,
+//     "logIndex":       <integer>,
+//     "logID":          "<hex of SHA-256 of Rekor public key>",
+//   }
+
+@derive(Eq, Clone, Debug)
+public type SignedEntryTimestamp is {
+    /// Base64-encoded ECDSA-P-256 signature.
+    signature_b64: Text,
+};
+
+// =============================================================================
+// LogEntry — full Rekor v2 entry envelope
+// =============================================================================
+//
+// JSON wire form (one map entry, key = entry UUID, value = body):
+//
+//   {
+//     "<uuid>": {
+//       "body":            "<base64 of canonicalized entry kind/spec>",
+//       "integratedTime":  1700000000,
+//       "logID":           "<hex>",
+//       "logIndex":        1234567,
+//       "verification": {
+//         "signedEntryTimestamp": "<base64 ECDSA-P-256 sig>",
+//         "inclusionProof": {  // optional, only when explicitly fetched
+//           "logIndex":   1234567,
+//           "treeSize":   8675309,
+//           "rootHash":   "<hex>",
+//           "hashes":     ["<hex>", "<hex>", ...],
+//           "checkpoint": "<base64-encoded checkpoint>"
+//         }
+//       },
+//     }
+//   }
+
+@derive(Clone, Debug)
+public type LogEntry is {
+    /// Entry UUID — `tree_id || hash`, as the Rekor v2 docs call it.
+    uuid:            Text,
+    /// Base64-encoded canonical entry body (the bytes the SET
+    /// signs over).
+    body_b64:        Text,
+    /// Decoded body (the JSON content of `body_b64` after base64
+    /// + JSON decode).
+    body:            EntryBody,
+    /// Unix-epoch seconds at which the entry was integrated.
+    integrated_time: Int,
+    /// Hex-encoded SHA-256 of Rekor's public key — disambiguates
+    /// log instances.
+    log_id_hex:      Text,
+    /// Sequence number within the log.
+    log_index:       Int,
+    /// Always present for entries returned by Rekor v2.
+    set:             SignedEntryTimestamp,
+    /// Optional Merkle inclusion proof — present when explicitly
+    /// requested via `?verification=inclusion`.
+    inclusion_proof: Maybe<InclusionProof>,
+};
+
+@derive(Clone, Debug)
+public type InclusionProof is {
+    log_index:    Int,
+    tree_size:    Int,
+    /// Hex-encoded root hash at `tree_size`.
+    root_hash:    Text,
+    /// Audit hashes (root → leaf order, hex-encoded).
+    hashes_hex:   List<Text>,
+    /// Base64-encoded signed checkpoint binding the root hash to
+    /// the log's signing key.
+    checkpoint_b64: Text,
+};
+
+// =============================================================================
+// Fulcio
+// =============================================================================
+//
+// Fulcio responses come in two shapes: a PEM-encoded chain (legacy
+// API), or a JSON object wrapping the chain (current `/api/v2/
+// signingCert`). This module exposes both round-trip-safe.
+
+@derive(Clone, Debug)
+public type FulcioCertResponse is {
+    /// Newly-issued ephemeral cert chain, leaf-first (the EE cert
+    /// followed by intermediates up to the root).  Each entry is
+    /// the raw DER of one certificate.
+    cert_chain:    List<List<Byte>>,
+    /// SCTs (Signed Certificate Timestamps) embedded in the EE cert
+    /// or returned as a side-channel. The raw bytes are surfaced
+    /// for callers that want to verify CT inclusion separately.
+    scts_raw:      Maybe<List<Byte>>,
+};
+
+/// Fulcio CSR identity hint — the OIDC-derived subject the requested
+/// cert SHOULD bind to.
+@derive(Clone, Debug)
+public type FulcioIdentity is {
+    /// OIDC `sub` claim (email, GitHub user, SPIFFE ID, etc.).
+    subject:    Text,
+    /// OIDC `iss` claim — pinned by the verifier downstream.
+    issuer_url: Text,
+};
+
+// =============================================================================
+// Sigstore Bundle v0.3 — typed view of the canonical wire format
+// =============================================================================
+//
+// The Bundle binds together: signed payload (DSSE envelope), cert
+// chain (Fulcio EE + intermediates + root), and tlog entries
+// (Rekor LogEntry with inclusion proof). This is the canonical
+// at-rest format produced by `cosign attest` / consumed by
+// `cosign verify` / Verum's registry attestation pipeline.
+//
+// We re-export the DsseEnvelope from `core.security.provenance` —
+// the Bundle just adds verification material + tlog entries on top.
+
+mount security.provenance.{
+    DsseEnvelope, dsse_envelope_to_json, dsse_envelope_from_json,
+    InclusionProof as ProvenanceInclusionProof,
+    TlogEntry as ProvenanceTlogEntry,
+};
+
+@derive(Clone, Debug)
+public type SigstoreBundle is {
+    /// Always `application/vnd.dev.sigstore.bundle+json;version=0.3`.
+    media_type:    Text,
+    /// PEM-encoded cert chain leaf-first (or raw DER lifted into
+    /// PEM). The first cert is the Fulcio EE cert with the OIDC
+    /// identity in SAN + the embedded SCT.
+    cert_chain_pem: List<Text>,
+    /// The signed DSSE envelope. Verifiers extract Statement →
+    /// SLSA / in-toto / SBOM predicate.
+    envelope:      DsseEnvelope,
+    /// Rekor inclusion proofs — at least one required for SLSA L3.
+    tlog_entries:  List<ProvenanceTlogEntry>,
+};
+
+public const SIGSTORE_BUNDLE_MEDIA_TYPE: Text =
+    "application/vnd.dev.sigstore.bundle+json;version=0.3";
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type SigstoreTypeError is
+    | InvalidEntryBody(Text)
+    | UnknownEntryKind(Text)
+    | MalformedDigest(Text)
+    | MissingField(Text);
+
+implement Display for SigstoreTypeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidEntryBody(reason) => f.write_str(f"sigstore/types: invalid entry body: {reason}".as_str()),
+            UnknownEntryKind(kind)   => f.write_str(f"sigstore/types: unknown entry kind: {kind}".as_str()),
+            MalformedDigest(reason)  => f.write_str(f"sigstore/types: malformed digest: {reason}".as_str()),
+            MissingField(field)      => f.write_str(f"sigstore/types: missing required field: {field}".as_str()),
+        }
+    }
+}
+
+implement Debug for SigstoreTypeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+public fn digest_sha256_hex(hex: Text) -> Digest {
+    Digest { algorithm: "sha256".to_text(), hex }
+}
+
+public fn validate_digest(d: &Digest) -> Result<(), SigstoreTypeError> {
+    let expected_len: Int = match d.algorithm.as_str() {
+        "sha256" => 64,
+        "sha384" => 96,
+        "sha512" => 128,
+        _ => return Err(MalformedDigest(format!("unknown algorithm '{}'", d.algorithm).to_text())),
+    };
+    if d.hex.len() != expected_len {
+        return Err(MalformedDigest(format!(
+            "{} digest must be {} hex chars, got {}",
+            d.algorithm, expected_len, d.hex.len()).to_text()));
+    }
+    if !is_hex_lowercase(&d.hex) {
+        return Err(MalformedDigest("digest must be lowercase hex".to_text()));
+    }
+    Ok(())
+}
+
+fn is_hex_lowercase(s: &Text) -> Bool {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let ok = (b >= b'0' && b <= b'9') || (b >= b'a' && b <= b'f');
+        if !ok { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_entry_kind_round_trip() {
+        assert(entry_kind_from_text(&"hashedrekord".to_text()) is EntryKind.HashedRekord);
+        assert(entry_kind_from_text(&"intoto".to_text()) is EntryKind.Intoto);
+        assert(entry_kind_from_text(&"dsse".to_text()) is EntryKind.Dsse);
+        match entry_kind_from_text(&"foo".to_text()) {
+            EntryKind.Other(s) => assert_eq(s, "foo".to_text()),
+            _ => unreachable(),
+        }
+        assert_eq(entry_kind_to_text(&EntryKind.HashedRekord), "hashedrekord".to_text());
+    }
+
+    #[test]
+    fn test_validate_digest_sha256_ok() {
+        let d = Digest { algorithm: "sha256".to_text(), hex: "0".repeat(64) };
+        assert!(validate_digest(&d).is_ok());
+    }
+
+    #[test]
+    fn test_validate_digest_wrong_length() {
+        let d = Digest { algorithm: "sha256".to_text(), hex: "abc".to_text() };
+        assert!(validate_digest(&d).is_err());
+    }
+
+    #[test]
+    fn test_validate_digest_uppercase_rejected() {
+        let d = Digest { algorithm: "sha256".to_text(), hex: "ABCDEF".repeat(11) + "ABCDEF" };
+        match validate_digest(&d) {
+            Err(MalformedDigest(_)) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_constants() {
+        assert!(REKOR_PUBLIC_URL.starts_with("https://"));
+        assert!(FULCIO_PUBLIC_URL.starts_with("https://"));
+        assert!(SIGSTORE_BUNDLE_MEDIA_TYPE.contains("sigstore"));
+    }
+}

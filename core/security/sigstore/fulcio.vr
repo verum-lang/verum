@@ -1,0 +1,433 @@
+// =============================================================================
+// security/sigstore/fulcio.vr — Fulcio ephemeral CSR client
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/{json, base64, pem, der},
+//               security/{ecc/{ed25519, p256}, hash/sha256, x509,
+//               sigstore/types, oidc}, net/http
+// =============================================================================
+//
+// **Purpose.** Fulcio (fulcio.sigstore.dev) is the keyless signing
+// CA: a developer authenticates via OIDC, presents a Certificate
+// Signing Request (PKCS#10) with proof of possession, and receives
+// an ephemeral X.509 certificate (~10 minute validity) bound to
+// their OIDC identity in the SAN extension. The cert has the
+// `id-kp-codeSigning` EKU + an embedded SCT (Signed Certificate
+// Timestamp) from the Sigstore CT log.
+//
+// **Endpoint (Fulcio v2 API).**
+//
+//   POST /api/v2/signingCert
+//     body: {
+//       "credentials": { "oidcIdentityToken": "<jwt>" },
+//       "publicKeyRequest": {
+//         "publicKey":            { "algorithm": "ECDSA"|"ED25519",
+//                                    "content":  "<base64 raw pub key>" },
+//         "proofOfPossession":    "<base64 sig over canonical OIDC subject>"
+//       },
+//       "certificateSigningRequest": "<base64 PEM CSR>"  // alternative
+//     }
+//
+// **Proof of possession.** Fulcio confirms the requester actually
+// holds the private key by requiring a signature over the OIDC
+// `sub` claim (UTF-8 bytes). The signature algorithm matches the
+// public key's algorithm (Ed25519 or ECDSA-P-256).
+//
+// **Response.**
+//
+//   {
+//     "signedCertificateEmbeddedSct": {
+//       "chain": { "certificates": ["<PEM>", "<PEM>", ...] }
+//     }
+//   }
+//
+// or the legacy `chain.certificates` shape (PEM-encoded leaf-first).
+//
+// **Categorical structure.** Fulcio is a contravariant functor from
+// (OIDC token, public key, PoP signature) to ephemeral cert chains:
+// the OIDC subject becomes the cert's SAN, the public key is the
+// SPKI, the PoP is the witness that signing right is held.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Fulcio keyless signing CA client: OIDC + CSR/proof-of-possession + ephemeral cert chain",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.sigstore.fulcio;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.json.{
+    JsonValue, JsonObject, json_object, json_string, decode as json_decode,
+    encode as json_encode,
+};
+mount encoding.base64.{
+    encode_standard as b64_encode, decode_standard as b64_decode,
+};
+mount encoding.pem.{decode_all as pem_decode_all, PemBlock};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount security.ecc.ed25519.{
+    Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
+    sign as ed25519_sign,
+    public_key as ed25519_public_key,
+};
+mount security.ecc.p256.{P256, P256Seed, P256PublicKey, P256Signature};
+mount security.hash.sha256.{Sha256};
+mount security.x509.certificate.{X509Certificate, parse_certificate};
+mount security.sigstore.types.{
+    FulcioCertResponse, FulcioIdentity, FULCIO_PUBLIC_URL,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+public const MAX_FULCIO_RESPONSE_BYTES: Int = 256 * 1024; // 256 KiB
+public const CONTENT_TYPE_JSON: Text = "application/json";
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+@derive(Clone, Debug)
+public type FulcioClientConfig is {
+    /// Fulcio base URL — typically https://fulcio.sigstore.dev.
+    base_url:    Text,
+    /// Maximum acceptable cert lifetime returned by the server.
+    /// Fulcio defaults to ~10 minutes; a hostile server might issue
+    /// longer-lived certs to enable replay. We default-cap at 1h.
+    max_lifetime_seconds: Int,
+};
+
+public fn fulcio_default_config() -> FulcioClientConfig {
+    FulcioClientConfig {
+        base_url:             FULCIO_PUBLIC_URL.to_text(),
+        max_lifetime_seconds: 3600,
+    }
+}
+
+// =============================================================================
+// Key material — Ed25519 + P-256 supported
+// =============================================================================
+
+@derive(Clone, Debug)
+public type FulcioKey is
+    | Ed25519(Ed25519Seed)
+    | EcdsaP256(P256Seed);
+
+public fn fulcio_key_algorithm_text(k: &FulcioKey) -> Text {
+    match k {
+        FulcioKey.Ed25519(_)   => "ED25519".to_text(),
+        FulcioKey.EcdsaP256(_) => "ECDSA".to_text(),
+    }
+}
+
+public fn fulcio_key_public_bytes(k: &FulcioKey) -> List<Byte> {
+    match k {
+        FulcioKey.Ed25519(seed) => {
+            let pk = ed25519_public_key(seed);
+            let mut out: List<Byte> = List.with_capacity(32);
+            let mut i: Int = 0;
+            while i < 32 { out.push(pk[i]); i = i + 1; }
+            out
+        }
+        FulcioKey.EcdsaP256(seed) => {
+            // Uncompressed: 0x04 || X || Y, 65 bytes.
+            let pk = P256.public_key(seed);
+            P256PublicKey.to_uncompressed(&pk)
+        }
+    }
+}
+
+/// Build the proof-of-possession signature: sign the OIDC subject
+/// bytes with the private key.
+pub fn fulcio_proof_of_possession(k: &FulcioKey, oidc_sub: &Text) -> List<Byte> {
+    let msg = oidc_sub.as_bytes();
+    match k {
+        FulcioKey.Ed25519(seed) => {
+            let sig = ed25519_sign(seed, msg);
+            let mut out: List<Byte> = List.with_capacity(64);
+            let mut i: Int = 0;
+            while i < 64 { out.push(sig[i]); i = i + 1; }
+            out
+        }
+        FulcioKey.EcdsaP256(seed) => {
+            let digest = Sha256.digest(msg);
+            let sig = P256.sign_prehashed(seed, &digest);
+            P256Signature.to_der(&sig)
+        }
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type FulcioError is
+    | NetworkError(HttpError)
+    | HttpStatus { status: StatusCode, body: Text }
+    | TooLarge { size: Int, limit: Int }
+    | InvalidJson(Text)
+    | InvalidPem(Text)
+    | InvalidCertificate(Text)
+    | NoCertChain
+    | LifetimeExceedsCap { cert_lifetime_s: Int, cap_s: Int }
+    | OidcTokenMissing;
+
+implement Display for FulcioError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NetworkError(e)              => f.write_str(f"fulcio: network: {e}".as_str()),
+            HttpStatus { status, body }  => f.write_str(f"fulcio: HTTP {status} body={body}".as_str()),
+            TooLarge { size, limit }     => f.write_str(f"fulcio: response too large ({size} > {limit})".as_str()),
+            InvalidJson(reason)          => f.write_str(f"fulcio: invalid JSON: {reason}".as_str()),
+            InvalidPem(reason)           => f.write_str(f"fulcio: invalid PEM: {reason}".as_str()),
+            InvalidCertificate(reason)   => f.write_str(f"fulcio: invalid cert: {reason}".as_str()),
+            NoCertChain                  => f.write_str("fulcio: response did not include a cert chain"),
+            LifetimeExceedsCap { cert_lifetime_s, cap_s } => f.write_str(
+                f"fulcio: cert lifetime {cert_lifetime_s}s exceeds cap {cap_s}s".as_str()),
+            OidcTokenMissing             => f.write_str("fulcio: OIDC token is required"),
+        }
+    }
+}
+
+implement Debug for FulcioError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Request an ephemeral cert from Fulcio.
+///
+/// **Inputs.**
+///   - `oidc_id_token` — JWT from a Fulcio-trusted OIDC issuer
+///     (GitHub Actions / GitLab / Sigstore PKCE).
+///   - `key`           — the (Ed25519 or P-256) seed; the client
+///     keeps the seed locally; the public key + PoP go to Fulcio.
+///   - `oidc_sub`      — the `sub` claim from the OIDC token; used
+///     for proof-of-possession signing.
+///
+/// Returns a parsed cert chain + raw SCTs (when present).
+public async fn request_signing_cert<C: HttpClient>(
+    client: &C,
+    config: &FulcioClientConfig,
+    oidc_id_token: &Text,
+    key:           &FulcioKey,
+    oidc_sub:      &Text,
+) -> Result<FulcioCertResponse, FulcioError> {
+    if oidc_id_token.is_empty() { return Err(OidcTokenMissing); }
+
+    let pub_bytes = fulcio_key_public_bytes(key);
+    let pop_bytes = fulcio_proof_of_possession(key, oidc_sub);
+    let body = build_request_body(oidc_id_token, key, &pub_bytes, &pop_bytes);
+    let body_bytes = json_encode(&body);
+
+    let url = compose_url(&config.base_url, "/api/v2/signingCert");
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("content-type".to_text(), CONTENT_TYPE_JSON.to_text());
+    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
+    headers.insert("user-agent".to_text(), "verum-fulcio/0.1".to_text());
+
+    let req = Request {
+        method: Method.Post,
+        url,
+        headers,
+        body: body_bytes,
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| NetworkError(e))?;
+    if !resp.status.is_success() {
+        return Err(HttpStatus {
+            status: resp.status,
+            body: text_of_body_lossy(&resp.body),
+        });
+    }
+    if resp.body.len() > MAX_FULCIO_RESPONSE_BYTES {
+        return Err(TooLarge { size: resp.body.len(), limit: MAX_FULCIO_RESPONSE_BYTES });
+    }
+    let parsed = parse_signing_cert_response(&resp.body)?;
+    enforce_lifetime_cap(&parsed, config)?;
+    Ok(parsed)
+}
+
+fn build_request_body(
+    oidc_id_token: &Text,
+    key: &FulcioKey,
+    pub_bytes: &List<Byte>,
+    pop_bytes: &List<Byte>,
+) -> JsonValue {
+    let mut creds: JsonObject = JsonObject.new();
+    creds.insert("oidcIdentityToken".to_text(), json_string(oidc_id_token.clone()));
+
+    let mut public_key_obj: JsonObject = JsonObject.new();
+    public_key_obj.insert("algorithm".to_text(), json_string(fulcio_key_algorithm_text(key)));
+    public_key_obj.insert("content".to_text(), json_string(b64_encode(pub_bytes)));
+
+    let mut public_key_request: JsonObject = JsonObject.new();
+    public_key_request.insert("publicKey".to_text(), json_object(public_key_obj));
+    public_key_request.insert("proofOfPossession".to_text(), json_string(b64_encode(pop_bytes)));
+
+    let mut top: JsonObject = JsonObject.new();
+    top.insert("credentials".to_text(), json_object(creds));
+    top.insert("publicKeyRequest".to_text(), json_object(public_key_request));
+    json_object(top)
+}
+
+// =============================================================================
+// Response parsing
+// =============================================================================
+
+fn parse_signing_cert_response(bytes: &List<Byte>) -> Result<FulcioCertResponse, FulcioError> {
+    let value = json_decode(bytes.as_slice())
+        .map_err(|e| InvalidJson(format!("{e}").to_text()))?;
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("response not an object".to_text()))?;
+
+    // Two possible shapes: nested under `signedCertificateEmbeddedSct.chain`
+    // (current) or directly under `chain` (legacy).
+    let chain_obj = obj.get("signedCertificateEmbeddedSct")
+        .and_then(|v| v.as_object())
+        .and_then(|inner| inner.get("chain").and_then(|c| c.as_object()))
+        .or_else(|| obj.get("chain").and_then(|v| v.as_object()))
+        .ok_or_else(|| NoCertChain)?;
+
+    let certs_arr = chain_obj.get("certificates").and_then(|v| v.as_array())
+        .ok_or_else(|| InvalidJson("chain.certificates missing".to_text()))?;
+
+    let mut der_chain: List<List<Byte>> = List.with_capacity(certs_arr.len());
+    let mut i: Int = 0;
+    while i < certs_arr.len() {
+        let pem_text = certs_arr[i].as_string()
+            .ok_or_else(|| InvalidJson(f"chain.certificates[{i}] not a string".to_text()))?;
+        let blocks = pem_decode_all(&pem_text)
+            .map_err(|_| InvalidPem(f"chain.certificates[{i}] PEM decode failed".to_text()))?;
+        let mut pushed = false;
+        let mut j: Int = 0;
+        while j < blocks.len() {
+            if blocks[j].label.as_bytes() == b"CERTIFICATE" {
+                der_chain.push(blocks[j].contents.clone());
+                pushed = true;
+            }
+            j = j + 1;
+        }
+        if !pushed {
+            return Err(InvalidPem(f"chain.certificates[{i}] no CERTIFICATE block".to_text()));
+        }
+        i = i + 1;
+    }
+
+    if der_chain.is_empty() { return Err(NoCertChain); }
+
+    // SCTs as a top-level field (some Fulcio versions); leave the
+    // embedded-in-cert SCTs to downstream verification.
+    let scts_raw = obj.get("signedCertificateTimestamps").and_then(|v| v.as_string())
+        .and_then(|s| b64_decode(&s).ok());
+
+    Ok(FulcioCertResponse { cert_chain: der_chain, scts_raw })
+}
+
+fn enforce_lifetime_cap(
+    response: &FulcioCertResponse,
+    config:   &FulcioClientConfig,
+) -> Result<(), FulcioError> {
+    if response.cert_chain.is_empty() { return Err(NoCertChain); }
+    let leaf = parse_certificate(response.cert_chain[0].as_slice())
+        .map_err(|e| InvalidCertificate(format!("{e}").to_text()))?;
+    let nb = security.x509.time.time_to_unix(&leaf.tbs.validity.not_before);
+    let na = security.x509.time.time_to_unix(&leaf.tbs.validity.not_after);
+    let lifetime = na - nb;
+    if lifetime > config.max_lifetime_seconds {
+        return Err(LifetimeExceedsCap {
+            cert_lifetime_s: lifetime,
+            cap_s: config.max_lifetime_seconds,
+        });
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn compose_url(base: &Text, path: &str) -> Text {
+    if base.ends_with("/") && path.starts_with("/") {
+        format!("{}{}", base.byte_substring(0, base.len() - 1), path).to_text()
+    } else if !base.ends_with("/") && !path.starts_with("/") {
+        format!("{}/{}", base, path).to_text()
+    } else {
+        format!("{}{}", base, path).to_text()
+    }
+}
+
+fn text_of_body_lossy(body: &List<Byte>) -> Text {
+    Text.from_utf8(body.as_slice()).unwrap_or_else(|_| {
+        let mut out: Text = "".to_text();
+        let mut i: Int = 0;
+        while i < body.len() && i < 256 {
+            out = out.append(&format!("{:02x}", body[i]).to_text());
+            i = i + 1;
+        }
+        out
+    })
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use security.ecc.ed25519.generate_seed;
+
+    #[test]
+    fn test_fulcio_key_algorithm_text() {
+        let k = FulcioKey.Ed25519(generate_seed());
+        assert_eq(fulcio_key_algorithm_text(&k), "ED25519".to_text());
+    }
+
+    #[test]
+    fn test_fulcio_key_ed25519_public_bytes_length() {
+        let k = FulcioKey.Ed25519(generate_seed());
+        let bytes = fulcio_key_public_bytes(&k);
+        assert_eq(bytes.len(), 32);
+    }
+
+    #[test]
+    fn test_proof_of_possession_ed25519_round_trip() {
+        let seed = generate_seed();
+        let k = FulcioKey.Ed25519(seed);
+        let sub = "test@example.com".to_text();
+        let pop = fulcio_proof_of_possession(&k, &sub);
+        assert_eq(pop.len(), 64); // Ed25519 sig is 64 bytes
+    }
+
+    #[test]
+    fn test_compose_url_smoothing() {
+        assert_eq(compose_url(&"https://x.io".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
+        assert_eq(compose_url(&"https://x.io/".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
+    }
+
+    #[test]
+    fn test_default_config() {
+        let c = fulcio_default_config();
+        assert(c.base_url.starts_with("https://fulcio"));
+        assert_eq(c.max_lifetime_seconds, 3600);
+    }
+}

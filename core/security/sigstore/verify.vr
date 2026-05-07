@@ -1,0 +1,683 @@
+// =============================================================================
+// security/sigstore/verify.vr — Sigstore keyless verification
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/{json, base64, pem},
+//               security/{x509/{certificate, verifier, trust_store, ext},
+//               sigstore/{types, rekor}, provenance, ecc, hash},
+//               time/{rfc3339, system_time}
+// =============================================================================
+//
+// **Purpose.** End-to-end "keyless" verification per the Sigstore
+// "verification protocol". Given a Sigstore Bundle (DSSE envelope +
+// Fulcio cert chain + Rekor inclusion proof) and an expected OIDC
+// identity (issuer + subject pattern), validate that:
+//
+//   1. Cert chain validates against the Fulcio root CA (via TUF).
+//   2. EE cert was valid at the integrated time recorded by Rekor.
+//   3. The DSSE envelope's signature verifies against the EE cert's
+//      public key.
+//   4. The Rekor inclusion proof is valid (SET + Merkle audit hashes).
+//   5. The EE cert's SAN extension binds to the expected OIDC
+//      identity (issuer URL + subject email/URI/SPIFFE/etc.).
+//
+// **Verification protocol (Sigstore spec §4).**
+//
+//   Inputs: bundle, trust_root, expected_identity
+//   1. Extract cert chain, envelope, tlog entries from bundle.
+//   2. Verify cert chain against trust_root.fulcio_ca with EKU=
+//      codeSigning, time = bundle.tlog_entries[0].integratedTime.
+//   3. For each tlog entry: verify SET via trust_root.rekor_pubkey,
+//      verify inclusion proof if present, check entry references
+//      this envelope (envelope_hash matches body's hash field).
+//   4. Verify DSSE envelope signature using EE cert's SPKI.
+//   5. Extract OIDC identity from EE cert:
+//        - issuer:  custom extension OID 1.3.6.1.4.1.57264.1.1
+//        - subject: SAN entry (email/URI/dnsName/otherName)
+//      Match against expected_identity's `issuer` (exact) +
+//      `subject_pattern` (regex or glob).
+//   6. Return ValidationResult with all verified fields.
+//
+// **Categorical structure.** Verification is the pullback in the
+// category of attestations: bundle + trust_root + expected_identity
+// are projected onto a single ValidationResult that witnesses the
+// commutative diagram of (signature) → (cert) → (OIDC) → (log).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Sigstore keyless verification: bundle + trust-root + identity → ValidationResult",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.sigstore.verify;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Set};
+mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.base64.{decode_standard as b64_decode};
+mount encoding.pem.{decode_all as pem_decode_all};
+mount security.x509.certificate.{X509Certificate, parse_certificate};
+mount security.x509.trust_store.{TrustStore};
+mount security.x509.ext.{ExtensionSet};
+mount security.x509.ext.subject_alt_name.{SubjectAltName, GeneralName};
+mount security.x509.ext.ext_key_usage.{ExtKeyUsage, ExtKeyUsagePurpose};
+mount security.x509.oid.{Oid};
+mount security.x509.verifier.{
+    VerifierConfig, RevocationPolicy, CertPurpose,
+    verify_parsed as verify_x509_parsed,
+    VerificationError as X509VerifyError,
+};
+mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.provenance.{
+    DsseEnvelope, dsse_envelope_from_json, DsseVerifyError,
+};
+mount security.sigstore.types.{
+    SigstoreBundle, LogEntry, EntryBody, HashedRekordBody, IntotoBody,
+    DsseBody, Digest,
+};
+mount security.sigstore.rekor.{
+    RekorClientConfig, RekorError,
+    verify_entry_set, verify_inclusion_proof,
+};
+mount net.http.HttpClient;
+mount time.system_time.epoch_seconds;
+
+// =============================================================================
+// Trust root
+// =============================================================================
+//
+// In production, the Sigstore trust root comes from TUF metadata
+// served at https://tuf-repo-cdn.sigstore.dev. The TUF client
+// (core.security.tuf) downloads + validates the trust root JSON
+// + the Fulcio root CA chain + the Rekor public key. We expose a
+// typed view here.
+
+@derive(Clone, Debug)
+public type SigstoreTrustRoot is {
+    /// Fulcio Certificate Authorities (root + intermediates).
+    fulcio_trust_store: TrustStore,
+    /// Rekor instance configurations (multiple if a log rotated keys).
+    rekor_instances:    List<RekorClientConfig>,
+    /// CT log public keys for SCT verification (currently unused;
+    /// surfaced for future SCT verification).
+    ct_log_keys:        List<P256PublicKey>,
+};
+
+// =============================================================================
+// Expected identity
+// =============================================================================
+
+@derive(Clone, Debug)
+public type IdentityMatcher is
+    /// Exact match on the OIDC subject.
+    | Exact(Text)
+    /// Glob pattern (`*` matches any sequence; `?` any one char).
+    | Glob(Text)
+    /// Match on the OIDC subject's domain — for email-like subjects,
+    /// the part after `@`.
+    | Domain(Text);
+
+@derive(Clone, Debug)
+public type ExpectedIdentity is {
+    /// OIDC issuer URL (exact match).
+    issuer:           Text,
+    /// Pattern for the OIDC subject — typically email / URI / SPIFFE.
+    subject_matcher:  IdentityMatcher,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type SigstoreVerifyError is
+    | InvalidBundle(Text)
+    | InvalidPem(Text)
+    | NoCertsInBundle
+    | NoTlogEntries
+    | X509Failed(X509VerifyError)
+    | RekorSetFailed(RekorError)
+    | RekorInclusionFailed(RekorError)
+    | EnvelopeNotInLog { computed_hash: Text }
+    | DsseSignatureFailed(DsseVerifyError)
+    | IdentityMismatch { want_issuer: Text, want_subject: Text, found_issuer: Maybe<Text>, found_subjects: List<Text> }
+    | IssuerExtMissing
+    | InvalidValidityWindow { cert_not_before: Int, cert_not_after: Int, integrated_time: Int };
+
+implement Display for SigstoreVerifyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidBundle(reason)         => f.write_str(f"sigstore/verify: invalid bundle: {reason}".as_str()),
+            InvalidPem(reason)            => f.write_str(f"sigstore/verify: invalid PEM: {reason}".as_str()),
+            NoCertsInBundle               => f.write_str("sigstore/verify: bundle has no cert chain"),
+            NoTlogEntries                 => f.write_str("sigstore/verify: bundle has no tlog entries"),
+            X509Failed(e)                 => f.write_str(f"sigstore/verify: x509: {e}".as_str()),
+            RekorSetFailed(e)             => f.write_str(f"sigstore/verify: rekor SET: {e}".as_str()),
+            RekorInclusionFailed(e)       => f.write_str(f"sigstore/verify: rekor inclusion: {e}".as_str()),
+            EnvelopeNotInLog { computed_hash } => f.write_str(
+                f"sigstore/verify: envelope hash {computed_hash} not present in any tlog entry".as_str()),
+            DsseSignatureFailed(e)        => f.write_str(f"sigstore/verify: dsse: {e}".as_str()),
+            IdentityMismatch { want_issuer, want_subject, found_issuer, found_subjects } => f.write_str(
+                f"sigstore/verify: identity mismatch (want={want_issuer}/{want_subject}, found_issuer={found_issuer:?}, found_subjects={found_subjects:?})".as_str()),
+            IssuerExtMissing              => f.write_str("sigstore/verify: cert lacks Sigstore-issuer extension"),
+            InvalidValidityWindow { cert_not_before, cert_not_after, integrated_time } => f.write_str(
+                f"sigstore/verify: integratedTime {integrated_time} outside cert validity [{cert_not_before}, {cert_not_after}]".as_str()),
+        }
+    }
+}
+
+implement Debug for SigstoreVerifyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Output
+// =============================================================================
+
+@derive(Clone, Debug)
+public type ValidationResult is {
+    /// EE cert (Fulcio-issued ephemeral cert).
+    ee_cert:                X509Certificate,
+    /// Verified OIDC issuer URL extracted from cert extension
+    /// 1.3.6.1.4.1.57264.1.1.
+    oidc_issuer:            Text,
+    /// Verified OIDC subject (one of the SAN entries).
+    oidc_subject:           Text,
+    /// Integrated time used as the cert validity reference.
+    integrated_time:        Int,
+    /// Rekor entry that anchored the verification.
+    tlog_entry:             core.security.provenance.TlogEntry,
+    /// The DSSE-verified Statement payload (raw JSON).
+    statement_payload:      JsonValue,
+}
+
+// =============================================================================
+// Public entry
+// =============================================================================
+
+/// Verify a Sigstore Bundle end-to-end.
+///
+/// **Preconditions.** `bundle.cert_chain_pem` must be non-empty
+/// (leaf-first); `bundle.tlog_entries` must be non-empty (Sigstore
+/// requires log inclusion). `expected.issuer` must match the
+/// trusted OIDC issuer (e.g., `"https://token.actions.githubusercontent.com"`).
+public async fn verify_bundle<C: HttpClient>(
+    http:      &C,
+    bundle:    &SigstoreBundle,
+    trust:     &SigstoreTrustRoot,
+    expected:  &ExpectedIdentity,
+) -> Result<ValidationResult, SigstoreVerifyError> {
+    // Step 1: parse cert chain.
+    let cert_chain = parse_pem_chain(&bundle.cert_chain_pem)?;
+    if cert_chain.is_empty() { return Err(NoCertsInBundle); }
+    let ee = cert_chain[0].clone();
+    let mut intermediates: List<X509Certificate> = List.new();
+    let mut k: Int = 1;
+    while k < cert_chain.len() { intermediates.push(cert_chain[k].clone()); k = k + 1; }
+
+    // Step 2: ensure tlog entries exist + pick the first one as the
+    // anchor for cert-validity time.
+    if bundle.tlog_entries.is_empty() { return Err(NoTlogEntries); }
+    let anchor_entry = &bundle.tlog_entries[0];
+    let integrated_time = time.rfc3339.to_epoch(&anchor_entry.integrated_time);
+
+    // Step 3: validate EE cert against Fulcio CA at integratedTime.
+    let nb = security.x509.time.time_to_unix(&ee.tbs.validity.not_before);
+    let na = security.x509.time.time_to_unix(&ee.tbs.validity.not_after);
+    if integrated_time < nb || integrated_time > na {
+        return Err(InvalidValidityWindow {
+            cert_not_before: nb,
+            cert_not_after:  na,
+            integrated_time,
+        });
+    }
+    let mut x509_config = security.x509.verifier.verifier_config_for_code_signing();
+    x509_config.now_override = Some(integrated_time);
+    // Fulcio EE certs are short-lived; revocation checks waste budget.
+    x509_config.revocation = RevocationPolicy.NoCheck;
+    let _x509_result = verify_x509_parsed(http, &ee, &intermediates, &trust.fulcio_trust_store, &x509_config).await
+        .map_err(|e| X509Failed(e))?;
+
+    // Step 4: verify each tlog entry's SET against trusted Rekor pubkey.
+    verify_tlog_entries(&bundle.tlog_entries, &trust.rekor_instances)?;
+
+    // Step 5: verify the DSSE envelope's signature against EE cert SPKI.
+    verify_envelope_against_cert(&bundle.envelope, &ee)?;
+
+    // Step 6: extract Statement payload + verify it's anchored in the log.
+    let statement_payload = decode_envelope_payload(&bundle.envelope)?;
+    verify_envelope_in_log(&bundle.envelope, &bundle.tlog_entries)?;
+
+    // Step 7: extract + match OIDC identity.
+    let oidc_issuer = extract_oidc_issuer(&ee).ok_or_else(|| IssuerExtMissing)?;
+    let oidc_subjects = extract_oidc_subjects(&ee);
+    if oidc_issuer != expected.issuer {
+        return Err(IdentityMismatch {
+            want_issuer: expected.issuer.clone(),
+            want_subject: identity_matcher_text(&expected.subject_matcher),
+            found_issuer: Some(oidc_issuer),
+            found_subjects: oidc_subjects,
+        });
+    }
+    let matched_subject = match_subject(&oidc_subjects, &expected.subject_matcher)
+        .ok_or_else(|| IdentityMismatch {
+            want_issuer: expected.issuer.clone(),
+            want_subject: identity_matcher_text(&expected.subject_matcher),
+            found_issuer: Some(expected.issuer.clone()),
+            found_subjects: oidc_subjects.clone(),
+        })?;
+
+    Ok(ValidationResult {
+        ee_cert:           ee,
+        oidc_issuer:       expected.issuer.clone(),
+        oidc_subject:      matched_subject,
+        integrated_time,
+        tlog_entry:        anchor_entry.clone(),
+        statement_payload,
+    })
+}
+
+// =============================================================================
+// Step 1 — PEM chain decode
+// =============================================================================
+
+fn parse_pem_chain(pems: &List<Text>) -> Result<List<X509Certificate>, SigstoreVerifyError> {
+    let mut out: List<X509Certificate> = List.new();
+    let mut i: Int = 0;
+    while i < pems.len() {
+        let blocks = pem_decode_all(&pems[i])
+            .map_err(|_| InvalidPem(f"chain[{i}]".to_text()))?;
+        let mut found = false;
+        let mut j: Int = 0;
+        while j < blocks.len() {
+            if blocks[j].label.as_bytes() == b"CERTIFICATE" {
+                let cert = parse_certificate(blocks[j].contents.as_slice())
+                    .map_err(|e| InvalidBundle(format!("cert[{i}]: {e}").to_text()))?;
+                out.push(cert);
+                found = true;
+            }
+            j = j + 1;
+        }
+        if !found { return Err(InvalidPem(f"chain[{i}] has no CERTIFICATE block".to_text())); }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Step 4 — tlog entry verification
+// =============================================================================
+
+fn verify_tlog_entries(
+    entries: &List<core.security.provenance.TlogEntry>,
+    rekor_instances: &List<RekorClientConfig>,
+) -> Result<(), SigstoreVerifyError> {
+    let mut i: Int = 0;
+    while i < entries.len() {
+        let entry = &entries[i];
+        // Match the entry's log_id against a trusted Rekor instance.
+        let mut matched = false;
+        let mut j: Int = 0;
+        while j < rekor_instances.len() {
+            if rekor_instances[j].log_id_hex == entry.log_id_hex {
+                let log_entry = log_entry_from_provenance(entry);
+                verify_entry_set(&log_entry, &rekor_instances[j])
+                    .map_err(|e| RekorSetFailed(e))?;
+                if entry.inclusion_proof.is_some() {
+                    verify_inclusion_proof(&log_entry)
+                        .map_err(|e| RekorInclusionFailed(e))?;
+                }
+                matched = true;
+                break;
+            }
+            j = j + 1;
+        }
+        if !matched {
+            return Err(RekorSetFailed(RekorError.LogIdMismatch {
+                expected: "<any trusted>".to_text(),
+                found:    entry.log_id_hex.clone(),
+            }));
+        }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry {
+    let inclusion = p.inclusion_proof.as_ref().map(|ip| {
+        security.sigstore.types.InclusionProof {
+            log_index:    ip.log_index,
+            tree_size:    ip.tree_size,
+            root_hash:    "".to_text(), // provenance form does not surface root_hash
+            hashes_hex:   ip.hashes_hex.clone(),
+            checkpoint_b64: ip.checkpoint_sig_hex.clone(),
+        }
+    });
+    LogEntry {
+        uuid:            "".to_text(),
+        body_b64:        p.canonicalized_body_b64.clone(),
+        body:            EntryBody.Raw(JsonValue.Null),
+        integrated_time: time.rfc3339.to_epoch(&p.integrated_time),
+        log_id_hex:      p.log_id_hex.clone(),
+        log_index:       p.log_index,
+        set:             security.sigstore.types.SignedEntryTimestamp { signature_b64: "".to_text() },
+        inclusion_proof: inclusion,
+    }
+}
+
+// =============================================================================
+// Step 5 — DSSE signature against EE cert
+// =============================================================================
+
+fn verify_envelope_against_cert(
+    envelope: &DsseEnvelope,
+    ee: &X509Certificate,
+) -> Result<(), SigstoreVerifyError> {
+    if envelope.signatures.is_empty() {
+        return Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature));
+    }
+    // Extract the EE cert's SPKI raw public key bytes.
+    let spki_bytes = extract_spki_pubkey_bits(ee);
+    let payload_b64 = &envelope.payload_b64;
+    let payload_bytes = b64_decode(payload_b64)
+        .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("payload".to_text())))?;
+    // DSSE PAE prefix
+    let pae = security.provenance.dsse_pae(&envelope.payload_type, &payload_bytes);
+
+    // Try each signature against the EE cert's key.
+    let mut i: Int = 0;
+    while i < envelope.signatures.len() {
+        let sig = &envelope.signatures[i];
+        let sig_bytes = b64_decode(&sig.sig_b64)
+            .map_err(|_| DsseSignatureFailed(DsseVerifyError.DecodeError("sig".to_text())))?;
+
+        // Dispatch on EE cert's public key algorithm.
+        match &ee.tbs.spki.public_key {
+            security.x509.spki.SubjectPublicKey.Ed25519(ed) => {
+                if sig_bytes.len() != 64 { i = i + 1; continue; }
+                let mut sig64: Ed25519Signature = [0_u8; 64];
+                let mut k: Int = 0;
+                while k < 64 { sig64[k] = sig_bytes[k]; k = k + 1; }
+                if ed25519_verify(&ed.bytes, pae.as_slice(), &sig64).is_ok() {
+                    return Ok(());
+                }
+            }
+            security.x509.spki.SubjectPublicKey.EcP256(ec) => {
+                let pk = match P256PublicKey.from_uncompressed(ec.bytes.as_slice()) {
+                    Ok(p)  => p,
+                    Err(_) => { i = i + 1; continue; }
+                };
+                let p_sig = match P256Signature.from_der(sig_bytes.as_slice()) {
+                    Ok(s)  => s,
+                    Err(_) => { i = i + 1; continue; }
+                };
+                let digest = Sha256.digest(pae.as_slice());
+                if P256.verify_prehashed(&pk, &digest, &p_sig).is_ok() {
+                    return Ok(());
+                }
+            }
+            _ => {
+                let _ = spki_bytes; // RSA-PSS / RSA-PKCS1 dispatch — follow-up
+            }
+        }
+        i = i + 1;
+    }
+    Err(DsseSignatureFailed(DsseVerifyError.InvalidSignature))
+}
+
+fn extract_spki_pubkey_bits(cert: &X509Certificate) -> List<Byte> {
+    cert.tbs.spki.raw_der.clone()
+}
+
+// =============================================================================
+// Step 6a — decode envelope payload + verify transcription
+// =============================================================================
+
+fn decode_envelope_payload(envelope: &DsseEnvelope) -> Result<JsonValue, SigstoreVerifyError> {
+    let payload_bytes = b64_decode(&envelope.payload_b64)
+        .map_err(|_| InvalidBundle("payload not base64".to_text()))?;
+    json_decode(payload_bytes.as_slice())
+        .map_err(|e| InvalidBundle(format!("payload not JSON: {e}").to_text()))
+}
+
+// =============================================================================
+// Step 6b — envelope hash present in tlog entries
+// =============================================================================
+//
+// Each tlog entry carries a `canonicalizedBody` (base64-encoded
+// canonical JSON of the entry body). For an Intoto/DSSE entry, the
+// body's `envelope_hash` field is SHA-256 of the canonical envelope.
+// We compute the envelope's canonical hash and look for it.
+
+fn verify_envelope_in_log(
+    envelope: &DsseEnvelope,
+    entries:  &List<core.security.provenance.TlogEntry>,
+) -> Result<(), SigstoreVerifyError> {
+    let envelope_json = security.provenance.dsse_envelope_to_json(envelope);
+    let canonical = encoding.jcs.canonicalize(&envelope_json)
+        .map_err(|_| InvalidBundle("envelope canonicalisation failed".to_text()))?;
+    let envelope_hash_hex = encoding.hex.encode(&sha256_digest(&canonical));
+
+    let mut i: Int = 0;
+    while i < entries.len() {
+        let entry = &entries[i];
+        // Decode the entry's canonicalised body (base64) → JSON.
+        let body_bytes = match b64_decode(&entry.canonicalized_body_b64) {
+            Ok(b)  => b,
+            Err(_) => { i = i + 1; continue; }
+        };
+        let body_value = match json_decode(body_bytes.as_slice()) {
+            Ok(v)  => v,
+            Err(_) => { i = i + 1; continue; }
+        };
+        if body_contains_envelope_hash(&body_value, &envelope_hash_hex) {
+            return Ok(());
+        }
+        i = i + 1;
+    }
+    Err(EnvelopeNotInLog { computed_hash: envelope_hash_hex })
+}
+
+fn body_contains_envelope_hash(body: &JsonValue, want_hex: &Text) -> Bool {
+    // Walk the JSON looking for any `{"algorithm":"sha256","value":"<hex>"}`
+    // shape that matches `want_hex`.
+    match body {
+        JsonValue.Object(obj) => {
+            // Direct match
+            if let (Some(alg), Some(val)) = (
+                obj.get(&"algorithm".to_text()).and_then(|v| v.as_string()),
+                obj.get(&"value".to_text()).and_then(|v| v.as_string()),
+            ) {
+                if alg == "sha256" && val == *want_hex { return true; }
+            }
+            for (_, child) in obj.iter() {
+                if body_contains_envelope_hash(child, want_hex) { return true; }
+            }
+            false
+        }
+        JsonValue.Array(arr) => {
+            let mut i: Int = 0;
+            while i < arr.len() {
+                if body_contains_envelope_hash(&arr[i], want_hex) { return true; }
+                i = i + 1;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+// =============================================================================
+// Step 7 — OIDC identity extraction
+// =============================================================================
+
+/// Extract the OIDC issuer URL from a Fulcio EE cert's custom extension
+/// 1.3.6.1.4.1.57264.1.1 (legacy) or 1.3.6.1.4.1.57264.1.8 (current).
+public fn extract_oidc_issuer(cert: &X509Certificate) -> Maybe<Text> {
+    let legacy_oid = Oid.from(&[1, 3, 6, 1, 4, 1, 57264, 1, 1]);
+    let current_oid = Oid.from(&[1, 3, 6, 1, 4, 1, 57264, 1, 8]);
+    let mut i: Int = 0;
+    while i < cert.tbs.extensions.others.len() {
+        let raw = &cert.tbs.extensions.others[i];
+        if raw.oid.eq(&legacy_oid) || raw.oid.eq(&current_oid) {
+            return decode_issuer_extension(raw.value_der.as_slice());
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn decode_issuer_extension(der: &[Byte]) -> Maybe<Text> {
+    // Legacy form: raw bytes carry the issuer URL directly (UTF-8).
+    // Current form: DER UTF8String.
+    if der.is_empty() { return None; }
+    if der[0] == 0x0C {
+        // UTF8String: tag 0x0C, length, bytes.
+        if der.len() < 2 { return None; }
+        let len = der[1] as Int;
+        if 2 + len > der.len() { return None; }
+        let mut out: List<Byte> = List.with_capacity(len);
+        let mut i: Int = 0;
+        while i < len { out.push(der[2 + i]); i = i + 1; }
+        return Text.from_utf8(out.as_slice()).ok();
+    }
+    // Legacy: direct UTF-8.
+    let mut out: List<Byte> = List.with_capacity(der.len());
+    let mut i: Int = 0;
+    while i < der.len() { out.push(der[i]); i = i + 1; }
+    Text.from_utf8(out.as_slice()).ok()
+}
+
+/// Extract OIDC subjects from the cert's SAN extension. Returns
+/// every email, URI, dNSName, and otherName as a flat list of
+/// strings. The matcher filters down to the expected one.
+public fn extract_oidc_subjects(cert: &X509Certificate) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    if let Some((_, san)) = &cert.tbs.extensions.subject_alt_name {
+        let mut i: Int = 0;
+        while i < san.names.len() {
+            match &san.names[i] {
+                GeneralName.Rfc822Name(e)         => out.push(e.clone()),
+                GeneralName.Uri(u)                => out.push(u.clone()),
+                GeneralName.DnsName(d)            => out.push(d.clone()),
+                GeneralName.OtherName(_)          => {} // SPIFFE/etc. — follow-up parser
+                GeneralName.IpAddress(_)          => {}
+                GeneralName.DirectoryName(_)      => {}
+                GeneralName.Unsupported           => {}
+            }
+            i = i + 1;
+        }
+    }
+    out
+}
+
+fn match_subject(subjects: &List<Text>, matcher: &IdentityMatcher) -> Maybe<Text> {
+    let mut i: Int = 0;
+    while i < subjects.len() {
+        if subject_matches(&subjects[i], matcher) {
+            return Some(subjects[i].clone());
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn subject_matches(subject: &Text, matcher: &IdentityMatcher) -> Bool {
+    match matcher {
+        IdentityMatcher.Exact(want)  => subject == want,
+        IdentityMatcher.Glob(pattern) => glob_match(pattern.as_bytes(), subject.as_bytes(), 0, 0),
+        IdentityMatcher.Domain(want) => {
+            // For email-like subjects: match part after '@'
+            // For URI: match host portion
+            if let Some(at) = subject.find_byte(b'@') {
+                let domain = subject.byte_substring(at + 1, subject.len());
+                domain == *want
+            } else if subject.starts_with("https://") || subject.starts_with("http://") {
+                let host = security.x509.path_validation.extract_uri_host(subject);
+                host == *want
+            } else { false }
+        }
+    }
+}
+
+fn glob_match(p: &[Byte], s: &[Byte], pi: Int, si: Int) -> Bool {
+    if pi == p.len() && si == s.len() { return true; }
+    if pi == p.len() { return false; }
+    let pc = p[pi];
+    if pc == b'*' {
+        if pi + 1 == p.len() { return true; }
+        let mut k = si;
+        loop {
+            if glob_match(p, s, pi + 1, k) { return true; }
+            if k == s.len() { return false; }
+            k = k + 1;
+        }
+    }
+    if pc == b'?' {
+        if si == s.len() { return false; }
+        return glob_match(p, s, pi + 1, si + 1);
+    }
+    if si == s.len() { return false; }
+    if pc != s[si] { return false; }
+    glob_match(p, s, pi + 1, si + 1)
+}
+
+fn identity_matcher_text(m: &IdentityMatcher) -> Text {
+    match m {
+        IdentityMatcher.Exact(s)  => s.clone(),
+        IdentityMatcher.Glob(p)   => format!("glob:{}", p).to_text(),
+        IdentityMatcher.Domain(d) => format!("domain:{}", d).to_text(),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_subject_matches_exact() {
+        let m = IdentityMatcher.Exact("alice@example.com".to_text());
+        assert!(subject_matches(&"alice@example.com".to_text(), &m));
+        assert!(!subject_matches(&"bob@example.com".to_text(), &m));
+    }
+
+    #[test]
+    fn test_subject_matches_glob() {
+        let m = IdentityMatcher.Glob("*@example.com".to_text());
+        assert!(subject_matches(&"alice@example.com".to_text(), &m));
+        assert!(subject_matches(&"bob@example.com".to_text(), &m));
+        assert!(!subject_matches(&"alice@other.com".to_text(), &m));
+    }
+
+    #[test]
+    fn test_subject_matches_domain_email() {
+        let m = IdentityMatcher.Domain("example.com".to_text());
+        assert!(subject_matches(&"alice@example.com".to_text(), &m));
+        assert!(!subject_matches(&"alice@other.com".to_text(), &m));
+    }
+
+    #[test]
+    fn test_glob_recursive_star() {
+        assert!(glob_match("a*c".as_bytes(), "abc".as_bytes(), 0, 0));
+        assert!(glob_match("a*c".as_bytes(), "abxxxc".as_bytes(), 0, 0));
+        assert!(!glob_match("a*c".as_bytes(), "abxxx".as_bytes(), 0, 0));
+    }
+}
