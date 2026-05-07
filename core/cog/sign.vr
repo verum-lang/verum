@@ -1,0 +1,354 @@
+// =============================================================================
+// cog/sign.vr — cog signature primitives
+// =============================================================================
+// Layer: 3 (Cog tooling)
+// Dependencies: core, base, security/{ecc/ed25519, hash/sha256}, encoding/hex
+// =============================================================================
+//
+// **Purpose.** First-class Verum-side signing + verification for cog
+// archives + manifests, using Ed25519. Composes against the existing
+// `core.security.ecc.ed25519` and `core.security.hash.sha256`; this
+// module provides the cog-specific signature *envelope* (what gets
+// signed, encoding, key-management interface).
+//
+// **Signature scheme.** Per registry spec §9.4:
+//
+//   sig = Ed25519(seed,
+//                 SHA-256(canonical_manifest_json) || SHA-256(source_archive))
+//
+// The two halves are concatenated *before* signing — a single Ed25519
+// signature covers both the manifest and the source archive. This
+// binds them: a signature is valid only when manifest and archive
+// agree with the values present at signing time. Any tamper with
+// either invalidates the sig.
+//
+// **Categorical structure.** Signing is the right adjoint of
+// verification: `verify(pubkey, m, s) ⊆ Bool` factors through the
+// identity functor on `(Manifest, Archive, Signature)` triples. The
+// signing function is a partial inverse modulo the public-key.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "cog signature envelope: Ed25519 over (manifest_hash || source_hash)",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cog.sign;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount collections.List;
+mount security.ecc.ed25519.{
+    Ed25519Seed, Ed25519PublicKey, Ed25519Signature, Ed25519Error,
+    sign as ed25519_sign,
+    verify as ed25519_verify,
+    public_key as ed25519_public_key,
+};
+mount security.hash.sha256.{digest as sha256_digest};
+mount encoding.hex.{encode as hex_encode, decode as hex_decode};
+mount time.rfc3339.{Rfc3339Time, now_utc};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// A complete cog signature with its operator identity + timestamp.
+/// JSON-serialisable; persisted in the registry's `versions.signature`
+/// column and emitted by `verum publish` for offline verification.
+@derive(Serialize, Deserialize, Eq, Clone)
+public type CogSignature is {
+    /// Ed25519 public key, hex-encoded (64 chars).
+    public_key: Text { len == 64 },
+    /// Ed25519 signature, hex-encoded (128 chars).
+    signature: Text { len == 128 },
+    /// SHA-256 of the canonical manifest JSON, hex-encoded (64 chars).
+    manifest_sha256: Text { len == 64 },
+    /// SHA-256 of the source archive bytes, hex-encoded (64 chars).
+    source_sha256: Text { len == 64 },
+    /// Wall-clock timestamp at signing.
+    signed_at: Rfc3339Time,
+};
+
+/// Errors the signing / verification path can surface.
+public type CogSignatureError is
+    | InvalidPublicKey(Text)
+    | InvalidSignature(Text)
+    | InvalidManifestHash(Text)
+    | InvalidSourceHash(Text)
+    | HashMismatch { expected: Text, computed: Text }
+    | SignatureFailed(Ed25519Error)
+    | VerificationFailed
+    | EncodingError(Text);
+
+implement Display for CogSignatureError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidPublicKey(reason)    => f.write_str(f"cog-signature: invalid public_key ({reason})".as_str()),
+            InvalidSignature(reason)    => f.write_str(f"cog-signature: invalid signature ({reason})".as_str()),
+            InvalidManifestHash(reason) => f.write_str(f"cog-signature: invalid manifest_sha256 ({reason})".as_str()),
+            InvalidSourceHash(reason)   => f.write_str(f"cog-signature: invalid source_sha256 ({reason})".as_str()),
+            HashMismatch { expected, computed }
+                => f.write_str(f"cog-signature: hash mismatch (expected {expected}, computed {computed})".as_str()),
+            SignatureFailed(e)          => Display.fmt(e, f),
+            VerificationFailed          => f.write_str("cog-signature: verification failed"),
+            EncodingError(reason)       => f.write_str(f"cog-signature: encoding error ({reason})".as_str()),
+        }
+    }
+}
+
+implement Debug for CogSignatureError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Sign a cog: compute SHA-256 of (manifest, source), concatenate the
+/// two hashes, Ed25519-sign the result, return a `CogSignature` record
+/// suitable for persistence + JSON wire encoding.
+///
+/// **Cost annotation.** Two SHA-256 passes (one over the manifest,
+/// one over the source archive) + one Ed25519 sign. Manifests are
+/// small (<10 KiB typical); source archives are bounded at registry
+/// limits (≤ 32 MiB by default).  Total: O(|source|) time.
+public fn sign_cog(
+    seed: &Ed25519Seed,
+    manifest_canonical_json: &List<Byte>,
+    source_archive: &List<Byte>,
+) -> Result<CogSignature, CogSignatureError> {
+    let manifest_hash = sha256_digest(manifest_canonical_json);
+    let source_hash = sha256_digest(source_archive);
+    let to_sign = concat_hashes(&manifest_hash, &source_hash);
+    let signature_bytes = ed25519_sign(seed, &to_sign);
+    let public_key_bytes = ed25519_public_key(seed);
+    Ok(CogSignature {
+        public_key:       hex_encode(&public_key_bytes),
+        signature:        hex_encode(&signature_bytes),
+        manifest_sha256:  hex_encode(&manifest_hash),
+        source_sha256:    hex_encode(&source_hash),
+        signed_at:        now_utc(),
+    })
+}
+
+/// Verify a cog signature against an externally-provided manifest +
+/// source archive. The verifier independently computes the hashes;
+/// any divergence from the signature's stored hashes returns
+/// `HashMismatch` with diagnostic context. The Ed25519 verify is
+/// strict (RFC 8032 + ZIP-215).
+///
+/// Returns `Ok(())` on a fully valid signature; `Err(...)` otherwise.
+public fn verify_cog(
+    sig: &CogSignature,
+    manifest_canonical_json: &List<Byte>,
+    source_archive: &List<Byte>,
+) -> Result<(), CogSignatureError> {
+    // Step 1: compute the two hashes ourselves.
+    let manifest_hash = sha256_digest(manifest_canonical_json);
+    let source_hash = sha256_digest(source_archive);
+    let computed_manifest = hex_encode(&manifest_hash);
+    let computed_source = hex_encode(&source_hash);
+
+    // Step 2: compare against the signature's stored hashes.
+    if computed_manifest != sig.manifest_sha256 {
+        return Err(HashMismatch {
+            expected: sig.manifest_sha256.clone(),
+            computed: computed_manifest,
+        });
+    }
+    if computed_source != sig.source_sha256 {
+        return Err(HashMismatch {
+            expected: sig.source_sha256.clone(),
+            computed: computed_source,
+        });
+    }
+
+    // Step 3: decode public-key + signature from hex.
+    let public_key = decode_public_key(&sig.public_key)?;
+    let signature_bytes = decode_signature(&sig.signature)?;
+
+    // Step 4: Ed25519 verify.
+    let to_verify = concat_hashes(&manifest_hash, &source_hash);
+    match ed25519_verify(&public_key, &to_verify, &signature_bytes) {
+        Ok(_)  => Ok(()),
+        Err(_) => Err(VerificationFailed),
+    }
+}
+
+/// Verify a signature when the verifier already has the manifest
+/// hash + source hash precomputed (e.g., the registry has them in
+/// the `versions` row). Skips the recomputation path; only the
+/// Ed25519 step runs.
+public fn verify_cog_precomputed_hashes(
+    sig: &CogSignature,
+    manifest_sha256: &[Byte; 32],
+    source_sha256: &[Byte; 32],
+) -> Result<(), CogSignatureError> {
+    let computed_manifest = hex_encode(manifest_sha256);
+    let computed_source = hex_encode(source_sha256);
+    if computed_manifest != sig.manifest_sha256 {
+        return Err(HashMismatch {
+            expected: sig.manifest_sha256.clone(),
+            computed: computed_manifest,
+        });
+    }
+    if computed_source != sig.source_sha256 {
+        return Err(HashMismatch {
+            expected: sig.source_sha256.clone(),
+            computed: computed_source,
+        });
+    }
+    let public_key = decode_public_key(&sig.public_key)?;
+    let signature_bytes = decode_signature(&sig.signature)?;
+    let to_verify = concat_hashes(manifest_sha256, source_sha256);
+    match ed25519_verify(&public_key, &to_verify, &signature_bytes) {
+        Ok(_)  => Ok(()),
+        Err(_) => Err(VerificationFailed),
+    }
+}
+
+/// Compute the canonical hex encoding of `(manifest_hash, source_hash)`
+/// — the bytes that get signed. Useful for offline tooling that wants
+/// to verify a signature without re-hashing large source archives.
+public fn signing_message(
+    manifest_canonical_json: &List<Byte>,
+    source_archive: &List<Byte>,
+) -> List<Byte> {
+    let manifest_hash = sha256_digest(manifest_canonical_json);
+    let source_hash = sha256_digest(source_archive);
+    concat_hashes(&manifest_hash, &source_hash)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn concat_hashes(a: &[Byte; 32], b: &[Byte; 32]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 32 { out.push(a[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 32 { out.push(b[j]); j = j + 1; }
+    out
+}
+
+fn decode_public_key(hex: &Text) -> Result<Ed25519PublicKey, CogSignatureError> {
+    if hex.len() != 64 {
+        return Err(InvalidPublicKey(format!("expected 64 hex chars, got {}", hex.len()).to_text()));
+    }
+    let bytes = hex_decode(hex)
+        .map_err(|e| InvalidPublicKey(format!("hex decode: {e}").to_text()))?;
+    if bytes.len() != 32 {
+        return Err(InvalidPublicKey(format!("expected 32 bytes, got {}", bytes.len()).to_text()));
+    }
+    let mut arr: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { arr[i] = bytes[i]; i = i + 1; }
+    Ok(arr)
+}
+
+fn decode_signature(hex: &Text) -> Result<Ed25519Signature, CogSignatureError> {
+    if hex.len() != 128 {
+        return Err(InvalidSignature(format!("expected 128 hex chars, got {}", hex.len()).to_text()));
+    }
+    let bytes = hex_decode(hex)
+        .map_err(|e| InvalidSignature(format!("hex decode: {e}").to_text()))?;
+    if bytes.len() != 64 {
+        return Err(InvalidSignature(format!("expected 64 bytes, got {}", bytes.len()).to_text()));
+    }
+    let mut arr: [Byte; 64] = [0_u8; 64];
+    let mut i: Int = 0;
+    while i < 64 { arr[i] = bytes[i]; i = i + 1; }
+    Ok(arr)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use security.ecc.ed25519.{generate_seed};
+
+    fn fresh_seed() -> Ed25519Seed { generate_seed() }
+
+    fn bytes_of(s: &str) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let bs = s.as_bytes();
+        let mut i: Int = 0;
+        while i < bs.len() { out.push(bs[i]); i = i + 1; }
+        out
+    }
+
+    #[test]
+    fn test_sign_then_verify() {
+        let seed = fresh_seed();
+        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
+        let source = bytes_of("function-body-content-bytes");
+        let sig = sign_cog(&seed, &manifest, &source).unwrap();
+        verify_cog(&sig, &manifest, &source).unwrap();
+    }
+
+    #[test]
+    fn test_tampered_manifest_fails() {
+        let seed = fresh_seed();
+        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
+        let source = bytes_of("function-body-content");
+        let sig = sign_cog(&seed, &manifest, &source).unwrap();
+        let tampered = bytes_of(r#"{"name":"my-cog","version":"99.0.0"}"#);
+        match verify_cog(&sig, &tampered, &source) {
+            Err(HashMismatch { .. }) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_tampered_source_fails() {
+        let seed = fresh_seed();
+        let manifest = bytes_of(r#"{"name":"my-cog","version":"1.0.0"}"#);
+        let source = bytes_of("function-body-content");
+        let sig = sign_cog(&seed, &manifest, &source).unwrap();
+        let tampered = bytes_of("malicious-bytes");
+        match verify_cog(&sig, &manifest, &tampered) {
+            Err(HashMismatch { .. }) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_signing_message_deterministic() {
+        let manifest = bytes_of("a");
+        let source = bytes_of("b");
+        let m1 = signing_message(&manifest, &source);
+        let m2 = signing_message(&manifest, &source);
+        assert_eq(m1.len(), 64);
+        let mut i: Int = 0;
+        while i < 64 {
+            assert_eq(m1.get(i).unwrap(), m2.get(i).unwrap());
+            i = i + 1;
+        }
+    }
+
+    #[test]
+    fn test_invalid_pubkey_format() {
+        let mut sig = sign_cog(&fresh_seed(), &bytes_of("a"), &bytes_of("b")).unwrap();
+        sig.public_key = "not-hex".to_text();
+        match verify_cog(&sig, &bytes_of("a"), &bytes_of("b")) {
+            Err(InvalidPublicKey(_)) => {}
+            _ => unreachable(),
+        }
+    }
+}

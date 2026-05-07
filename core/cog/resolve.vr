@@ -1,0 +1,1450 @@
+// =============================================================================
+// cog/resolve.vr — pubgrub dependency resolver
+// =============================================================================
+// Layer: 3 (Cog tooling)
+// Dependencies: core, base, base/semver, base/semver_constraint, collections
+// =============================================================================
+//
+// **Purpose.** A complete pubgrub-style dependency resolver for Verum
+// cogs. Pubgrub is a SAT-style constraint solver that derives clear
+// human-readable explanations for unsatisfiable resolutions, used by
+// Cargo, Dart pub, and Rye. References:
+//
+//   - "PubGrub: Next-Generation Version Solving"
+//     (Natalie Weizenbaum, 2018)
+//   - github.com/dart-lang/pub/blob/master/doc/solver.md
+//
+// **Algorithmic structure.** Three nested loops:
+//
+//   outer:                              while package set not exhausted
+//     unit-propagation:                 forced derivations from current
+//                                       incompatibility set
+//     conflict-resolution:              if conflict, derive new
+//                                       incompatibility + backjump
+//     decision-making:                  pick a package, pick a version,
+//                                       derive incompatibilities from
+//                                       its dependencies
+//
+// **Term algebra.** A `Term` is a (Package, Range, polarity) triple.
+// Polarity is `Positive` (the package version must satisfy R) or
+// `Negative` (must NOT satisfy R). Set operations on `Range`:
+// intersect, union, complement, contains, is_empty, is_full. Pubgrub
+// runs entirely in the term algebra; it never touches concrete
+// versions until the very end, when it converts the partial solution
+// into a final lockfile.
+//
+// **Incompatibility.** A disjunction of negated terms — conflict
+// clause. Carrying a `Cause` lets the explainer reconstruct the
+// human-readable failure message ("a depends on b, b depends on c,
+// no version of c satisfies …").
+//
+// **Categorical structure.** The resolver is the right adjoint of
+// dependency declaration: given a set of declared deps `D`, the
+// resolver computes the universal lockfile `L` such that every
+// constraint in `D` is satisfied. When the unifying object exists,
+// it is unique (up to lockfile equivalence); when it does not, the
+// resolver returns a typed conflict witness (the derivation tree).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "pubgrub-style dependency resolver: term algebra + incompatibility derivation + unit propagation + conflict resolution + backtracking",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cog.resolve;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount base.semver.{SemVer, parse_semver, semver_compare, SemVerOrdering, semver_zero};
+mount base.semver_constraint.{
+    SemVerConstraint, parse as parse_constraint,
+    matches as constraint_matches,
+    matches_default, format_constraint,
+    exact as constraint_exact,
+};
+mount collections.{List, Map, Set};
+
+// =============================================================================
+// Package identity
+// =============================================================================
+
+/// A package identifier. The resolver treats this as an opaque key;
+/// callers can use scoped names (`@scope/name`) or bare names. The
+/// only constraint is `Eq + Hash + Clone + Debug`.
+@derive(Eq, Hash, Clone, Debug)
+public type PackageName is (Text);
+
+implement Display for PackageName {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.0.as_str())
+    }
+}
+
+// =============================================================================
+// Range — a set of semver versions
+// =============================================================================
+//
+// Ranges are represented as a sorted list of disjoint intervals.
+// Each interval has a lower bound (inclusive or exclusive) and an
+// upper bound (inclusive, exclusive, or unbounded).
+//
+// Invariants:
+//   - intervals are sorted by lower bound
+//   - intervals are disjoint and non-adjacent (canonical form)
+//   - empty Range = empty intervals list
+//   - full Range = single interval (-∞, +∞)
+//
+// All set ops (intersect, union, complement, contains) preserve
+// canonical form.
+
+@derive(Eq, Clone, Debug)
+public type Bound is
+    | Included(SemVer)
+    | Excluded(SemVer)
+    | Unbounded;
+
+@derive(Eq, Clone, Debug)
+public type Interval is {
+    lo: Bound,
+    hi: Bound,
+};
+
+@derive(Eq, Clone, Debug)
+public type Range is {
+    intervals: List<Interval>,
+};
+
+// ----- Range constructors -----
+
+public fn range_empty() -> Range {
+    Range { intervals: List.new() }
+}
+
+public fn range_full() -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Unbounded });
+    Range { intervals: iv }
+}
+
+public fn range_exact(v: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Included(v.clone()), hi: Bound.Included(v) });
+    Range { intervals: iv }
+}
+
+public fn range_higher_than(v: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Included(v), hi: Bound.Unbounded });
+    Range { intervals: iv }
+}
+
+public fn range_strictly_higher(v: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Excluded(v), hi: Bound.Unbounded });
+    Range { intervals: iv }
+}
+
+public fn range_lower_than(v: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Excluded(v) });
+    Range { intervals: iv }
+}
+
+public fn range_at_most(v: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Included(v) });
+    Range { intervals: iv }
+}
+
+public fn range_between(lo: SemVer, hi: SemVer) -> Range {
+    let mut iv: List<Interval> = List.new();
+    iv.push(Interval { lo: Bound.Included(lo), hi: Bound.Excluded(hi) });
+    Range { intervals: iv }
+}
+
+/// Build a `Range` from an existing `SemVerConstraint`. Supports the
+/// full Cargo+npm constraint algebra (caret, tilde, exact, AND, OR).
+public fn range_from_constraint(c: &SemVerConstraint) -> Range {
+    constraint_to_range(c)
+}
+
+// ----- Range predicates -----
+
+public fn range_is_empty(r: &Range) -> Bool { r.intervals.len() == 0 }
+
+public fn range_is_full(r: &Range) -> Bool {
+    if r.intervals.len() != 1 { return false; }
+    let iv = &r.intervals[0];
+    iv.lo is Bound.Unbounded && iv.hi is Bound.Unbounded
+}
+
+public fn range_contains(r: &Range, v: &SemVer) -> Bool {
+    let mut i: Int = 0;
+    while i < r.intervals.len() {
+        if interval_contains(&r.intervals[i], v) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn interval_contains(iv: &Interval, v: &SemVer) -> Bool {
+    let lo_ok = match &iv.lo {
+        Bound.Unbounded => true,
+        Bound.Included(b) => match semver_compare(v, b) {
+            SemVerOrdering.Less => false,
+            _ => true,
+        },
+        Bound.Excluded(b) => match semver_compare(v, b) {
+            SemVerOrdering.Greater => true,
+            _ => false,
+        },
+    };
+    let hi_ok = match &iv.hi {
+        Bound.Unbounded => true,
+        Bound.Included(b) => match semver_compare(v, b) {
+            SemVerOrdering.Greater => false,
+            _ => true,
+        },
+        Bound.Excluded(b) => match semver_compare(v, b) {
+            SemVerOrdering.Less => true,
+            _ => false,
+        },
+    };
+    lo_ok && hi_ok
+}
+
+// ----- Range set operations -----
+
+public fn range_intersect(a: &Range, b: &Range) -> Range {
+    let mut out: List<Interval> = List.new();
+    let mut i: Int = 0;
+    while i < a.intervals.len() {
+        let mut j: Int = 0;
+        while j < b.intervals.len() {
+            match interval_intersect(&a.intervals[i], &b.intervals[j]) {
+                Some(iv) => out.push(iv),
+                None => {}
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Range { intervals: canonicalise(out) }
+}
+
+public fn range_union(a: &Range, b: &Range) -> Range {
+    let mut all: List<Interval> = List.new();
+    let mut i: Int = 0;
+    while i < a.intervals.len() { all.push(a.intervals[i].clone()); i = i + 1; }
+    let mut j: Int = 0;
+    while j < b.intervals.len() { all.push(b.intervals[j].clone()); j = j + 1; }
+    Range { intervals: canonicalise(all) }
+}
+
+public fn range_complement(r: &Range) -> Range {
+    if range_is_empty(r) { return range_full(); }
+    let mut out: List<Interval> = List.new();
+    let mut prev_hi: Bound = Bound.Unbounded;
+    let mut i: Int = 0;
+    while i < r.intervals.len() {
+        let iv = &r.intervals[i];
+        // Gap between prev_hi and iv.lo
+        let gap_hi = flip_lo_to_hi(&iv.lo);
+        match (&prev_hi, &gap_hi) {
+            (Bound.Unbounded, Bound.Unbounded) => {} // entire space already
+            _ => {
+                if !interval_is_degenerate(&prev_hi, &gap_hi) {
+                    out.push(Interval { lo: prev_hi.clone(), hi: gap_hi });
+                }
+            }
+        }
+        prev_hi = flip_hi_to_lo(&iv.hi);
+        i = i + 1;
+    }
+    // Tail interval from prev_hi to +∞
+    match prev_hi {
+        Bound.Unbounded => {} // nothing left
+        _ => out.push(Interval { lo: prev_hi, hi: Bound.Unbounded }),
+    }
+    Range { intervals: canonicalise(out) }
+}
+
+public fn range_subtract(a: &Range, b: &Range) -> Range {
+    range_intersect(a, &range_complement(b))
+}
+
+// ----- Range helpers -----
+
+fn interval_intersect(a: &Interval, b: &Interval) -> Maybe<Interval> {
+    let lo = bound_lo_max(&a.lo, &b.lo);
+    let hi = bound_hi_min(&a.hi, &b.hi);
+    if interval_is_degenerate(&lo, &hi) { None } else { Some(Interval { lo, hi }) }
+}
+
+fn bound_lo_max(a: &Bound, b: &Bound) -> Bound {
+    match (a, b) {
+        (Bound.Unbounded, _) => b.clone(),
+        (_, Bound.Unbounded) => a.clone(),
+        _ => {
+            let av = bound_value(a);
+            let bv = bound_value(b);
+            match semver_compare(av, bv) {
+                SemVerOrdering.Greater => a.clone(),
+                SemVerOrdering.Less    => b.clone(),
+                SemVerOrdering.Equal   => {
+                    // tie: exclusive wins (more restrictive)
+                    match (a, b) {
+                        (Bound.Excluded(_), _) => a.clone(),
+                        (_, Bound.Excluded(_)) => b.clone(),
+                        _ => a.clone(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn bound_hi_min(a: &Bound, b: &Bound) -> Bound {
+    match (a, b) {
+        (Bound.Unbounded, _) => b.clone(),
+        (_, Bound.Unbounded) => a.clone(),
+        _ => {
+            let av = bound_value(a);
+            let bv = bound_value(b);
+            match semver_compare(av, bv) {
+                SemVerOrdering.Less    => a.clone(),
+                SemVerOrdering.Greater => b.clone(),
+                SemVerOrdering.Equal   => {
+                    match (a, b) {
+                        (Bound.Excluded(_), _) => a.clone(),
+                        (_, Bound.Excluded(_)) => b.clone(),
+                        _ => a.clone(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn bound_value(b: &Bound) -> &SemVer {
+    match b {
+        Bound.Included(v) => v,
+        Bound.Excluded(v) => v,
+        Bound.Unbounded   => unreachable(),
+    }
+}
+
+fn flip_lo_to_hi(b: &Bound) -> Bound {
+    match b {
+        Bound.Unbounded   => Bound.Unbounded,
+        Bound.Included(v) => Bound.Excluded(v.clone()),
+        Bound.Excluded(v) => Bound.Included(v.clone()),
+    }
+}
+
+fn flip_hi_to_lo(b: &Bound) -> Bound { flip_lo_to_hi(b) }
+
+fn interval_is_degenerate(lo: &Bound, hi: &Bound) -> Bool {
+    match (lo, hi) {
+        (Bound.Unbounded, _) => false,
+        (_, Bound.Unbounded) => false,
+        _ => {
+            let lv = bound_value(lo);
+            let hv = bound_value(hi);
+            match semver_compare(lv, hv) {
+                SemVerOrdering.Greater => true,
+                SemVerOrdering.Equal => match (lo, hi) {
+                    (Bound.Included(_), Bound.Included(_)) => false,
+                    _ => true, // exclusive on either side at same value = empty
+                },
+                SemVerOrdering.Less => false,
+            }
+        }
+    }
+}
+
+/// Sort + merge overlapping intervals into canonical form.
+fn canonicalise(mut intervals: List<Interval>) -> List<Interval> {
+    if intervals.len() == 0 { return intervals; }
+    sort_intervals(&mut intervals);
+    let mut out: List<Interval> = List.new();
+    out.push(intervals[0].clone());
+    let mut i: Int = 1;
+    while i < intervals.len() {
+        let curr = intervals[i].clone();
+        let last = out.pop().unwrap();
+        if intervals_overlap_or_adjacent(&last, &curr) {
+            out.push(merge_intervals(last, curr));
+        } else {
+            out.push(last);
+            out.push(curr);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn sort_intervals(ivs: &mut List<Interval>) {
+    let n = ivs.len();
+    let mut i: Int = 1;
+    while i < n {
+        let mut j: Int = i;
+        while j > 0 && interval_lo_less(&ivs[j], &ivs[j - 1]) {
+            ivs.swap(j, j - 1);
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn interval_lo_less(a: &Interval, b: &Interval) -> Bool {
+    match (&a.lo, &b.lo) {
+        (Bound.Unbounded, Bound.Unbounded) => false,
+        (Bound.Unbounded, _) => true,
+        (_, Bound.Unbounded) => false,
+        _ => {
+            let av = bound_value(&a.lo);
+            let bv = bound_value(&b.lo);
+            match semver_compare(av, bv) {
+                SemVerOrdering.Less    => true,
+                SemVerOrdering.Greater => false,
+                SemVerOrdering.Equal   => match (&a.lo, &b.lo) {
+                    (Bound.Included(_), Bound.Excluded(_)) => true,
+                    _ => false,
+                },
+            }
+        }
+    }
+}
+
+fn intervals_overlap_or_adjacent(a: &Interval, b: &Interval) -> Bool {
+    // Already sorted: a.lo <= b.lo. Overlap iff b.lo <= a.hi.
+    match (&a.hi, &b.lo) {
+        (Bound.Unbounded, _) => true,
+        (_, Bound.Unbounded) => true,
+        _ => {
+            let ahv = bound_value(&a.hi);
+            let blv = bound_value(&b.lo);
+            match semver_compare(ahv, blv) {
+                SemVerOrdering.Greater => true,
+                SemVerOrdering.Equal   => match (&a.hi, &b.lo) {
+                    (Bound.Included(_), Bound.Included(_)) => true,
+                    _ => false,
+                },
+                SemVerOrdering.Less    => false,
+            }
+        }
+    }
+}
+
+fn merge_intervals(a: Interval, b: Interval) -> Interval {
+    Interval {
+        lo: a.lo, // smaller of the two by sort
+        hi: bound_hi_max(&a.hi, &b.hi),
+    }
+}
+
+fn bound_hi_max(a: &Bound, b: &Bound) -> Bound {
+    match (a, b) {
+        (Bound.Unbounded, _) => Bound.Unbounded,
+        (_, Bound.Unbounded) => Bound.Unbounded,
+        _ => {
+            let av = bound_value(a);
+            let bv = bound_value(b);
+            match semver_compare(av, bv) {
+                SemVerOrdering.Greater => a.clone(),
+                SemVerOrdering.Less    => b.clone(),
+                SemVerOrdering.Equal   => match (a, b) {
+                    (Bound.Included(_), _) => a.clone(),
+                    (_, Bound.Included(_)) => b.clone(),
+                    _ => a.clone(),
+                },
+            }
+        }
+    }
+}
+
+fn constraint_to_range(c: &SemVerConstraint) -> Range {
+    // SemVerConstraint is a generic constraint AST.  We convert by
+    // sampling its semantics: anything that `matches` accepts is in
+    // the range. For known tags we lower directly; for AND/OR we
+    // recurse. Since the parser produces a stable AST per
+    // semver_constraint.vr, callers can also build Range directly via
+    // the constructors above.
+    match c.classify() {
+        ConstraintShape.Exact(v)            => range_exact(v),
+        ConstraintShape.Caret(v)            => caret_range(v),
+        ConstraintShape.Tilde(v)            => tilde_range(v),
+        ConstraintShape.GreaterThan(v)      => range_strictly_higher(v),
+        ConstraintShape.AtLeast(v)          => range_higher_than(v),
+        ConstraintShape.LessThan(v)         => range_lower_than(v),
+        ConstraintShape.AtMost(v)           => range_at_most(v),
+        ConstraintShape.Range(lo, hi)       => range_between(lo, hi),
+        ConstraintShape.And(a, b)           => range_intersect(&constraint_to_range(&a), &constraint_to_range(&b)),
+        ConstraintShape.Or(a, b)            => range_union(&constraint_to_range(&a), &constraint_to_range(&b)),
+        ConstraintShape.Wildcard            => range_full(),
+    }
+}
+
+fn caret_range(v: SemVer) -> Range {
+    // ^1.2.3 = >=1.2.3 <2.0.0  (compatibility within major)
+    // ^0.2.3 = >=0.2.3 <0.3.0
+    // ^0.0.3 = >=0.0.3 <0.0.4
+    let upper = if v.major > 0 {
+        SemVer { major: v.major + 1, minor: 0, patch: 0, prerelease: List.new(), build: List.new() }
+    } else if v.minor > 0 {
+        SemVer { major: 0, minor: v.minor + 1, patch: 0, prerelease: List.new(), build: List.new() }
+    } else {
+        SemVer { major: 0, minor: 0, patch: v.patch + 1, prerelease: List.new(), build: List.new() }
+    };
+    range_between(v, upper)
+}
+
+fn tilde_range(v: SemVer) -> Range {
+    // ~1.2.3 = >=1.2.3 <1.3.0
+    let upper = SemVer {
+        major: v.major,
+        minor: v.minor + 1,
+        patch: 0,
+        prerelease: List.new(),
+        build: List.new(),
+    };
+    range_between(v, upper)
+}
+
+// =============================================================================
+// Term — a (positive | negative) constraint on a package
+// =============================================================================
+//
+// Pubgrub's term algebra. A term describes what versions of a package
+// MUST be selected (Positive) or MUST NOT be selected (Negative).
+
+@derive(Eq, Clone, Debug)
+public type Term is {
+    package:  PackageName,
+    range:    Range,
+    /// `Positive`: the selected version must be IN range.
+    /// `Negative`: the selected version must be OUT OF range.
+    positive: Bool,
+};
+
+public fn term_positive(pkg: PackageName, r: Range) -> Term {
+    Term { package: pkg, range: r, positive: true }
+}
+
+public fn term_negative(pkg: PackageName, r: Range) -> Term {
+    Term { package: pkg, range: r, positive: false }
+}
+
+public fn term_negate(t: &Term) -> Term {
+    Term { package: t.package.clone(), range: t.range.clone(), positive: !t.positive }
+}
+
+/// `term_satisfies(a, b)` = "if `a` is true, then `b` is necessarily true"
+/// — `a` is at least as restrictive as `b`. Pubgrub uses this for
+/// unit-propagation: if every term in an incompatibility (other than
+/// one) is satisfied by the partial solution, the remaining must be
+/// negated.
+pub fn term_satisfies(a: &Term, b: &Term) -> Bool {
+    if a.package != b.package { return false; }
+    let a_set = if a.positive { a.range.clone() } else { range_complement(&a.range) };
+    let b_set = if b.positive { b.range.clone() } else { range_complement(&b.range) };
+    range_is_subset(&a_set, &b_set)
+}
+
+fn range_is_subset(a: &Range, b: &Range) -> Bool {
+    range_is_empty(&range_subtract(a, b))
+}
+
+/// Conjunction: a AND b. Returns `None` if a, b are over different packages.
+pub fn term_intersect(a: &Term, b: &Term) -> Maybe<Term> {
+    if a.package != b.package { return None; }
+    let a_set = if a.positive { a.range.clone() } else { range_complement(&a.range) };
+    let b_set = if b.positive { b.range.clone() } else { range_complement(&b.range) };
+    let intersection = range_intersect(&a_set, &b_set);
+    Some(Term { package: a.package.clone(), range: intersection, positive: true })
+}
+
+/// Convert the term to a "covered set" view (the set of allowed versions).
+pub fn term_allowed(t: &Term) -> Range {
+    if t.positive { t.range.clone() } else { range_complement(&t.range) }
+}
+
+// =============================================================================
+// Incompatibility — a disjunction of negated terms
+// =============================================================================
+//
+// An Incompatibility is the conjunction of terms that, if all true
+// simultaneously, produce an inconsistent state.  Equivalently: at
+// least one term must be false. Stored as `List<Term>` (the
+// conjunction); the implicit NOT-AND is the conflict.
+
+@derive(Clone, Debug)
+public type Cause is
+    | Root  // "this is what was requested"
+    | NoVersions { package: PackageName, term: Term }
+    | DependencyOf { dependent: PackageName, dependent_version: SemVer }
+    | Derived { left: Heap<Incompatibility>, right: Heap<Incompatibility> };
+
+@derive(Clone, Debug)
+public type Incompatibility is {
+    terms: List<Term>,
+    cause: Cause,
+};
+
+public fn incompat_root(t: Term) -> Incompatibility {
+    let mut ts: List<Term> = List.new();
+    ts.push(t);
+    Incompatibility { terms: ts, cause: Cause.Root }
+}
+
+public fn incompat_no_versions(pkg: PackageName, term: Term) -> Incompatibility {
+    let mut ts: List<Term> = List.new();
+    ts.push(term.clone());
+    Incompatibility { terms: ts, cause: Cause.NoVersions { package: pkg, term } }
+}
+
+public fn incompat_dependency(
+    dependent: PackageName,
+    dependent_version: SemVer,
+    self_term: Term,
+    dep_term: Term,
+) -> Incompatibility {
+    let mut ts: List<Term> = List.new();
+    ts.push(self_term);
+    ts.push(term_negate(&dep_term));
+    Incompatibility {
+        terms: ts,
+        cause: Cause.DependencyOf { dependent, dependent_version },
+    }
+}
+
+// =============================================================================
+// Partial Solution — running record of decisions and derivations
+// =============================================================================
+//
+// Stack of `Assignment` entries at growing decision levels.
+// Decisions are guesses (a specific version chosen); derivations are
+// forced consequences from unit propagation.
+
+@derive(Clone, Debug)
+public type Assignment is
+    | Decision { package: PackageName, version: SemVer, level: Int }
+    | Derivation { term: Term, level: Int, cause: Heap<Incompatibility> };
+
+@derive(Clone, Debug)
+public type PartialSolution is {
+    assignments: List<Assignment>,
+    decision_level: Int,
+};
+
+public fn partial_solution_empty() -> PartialSolution {
+    PartialSolution { assignments: List.new(), decision_level: 0 }
+}
+
+public fn partial_solution_decide(
+    sol: &mut PartialSolution,
+    package: PackageName,
+    version: SemVer,
+) {
+    sol.decision_level = sol.decision_level + 1;
+    sol.assignments.push(Assignment.Decision {
+        package, version, level: sol.decision_level,
+    });
+}
+
+public fn partial_solution_derive(
+    sol: &mut PartialSolution,
+    term: Term,
+    cause: Incompatibility,
+) {
+    sol.assignments.push(Assignment.Derivation {
+        term, level: sol.decision_level, cause: Heap.new(cause),
+    });
+}
+
+/// Pop assignments above the given decision level (exclusive).
+public fn partial_solution_backtrack(sol: &mut PartialSolution, target_level: Int) {
+    let mut i: Int = sol.assignments.len() - 1;
+    while i >= 0 {
+        let level = match &sol.assignments[i] {
+            Assignment.Decision   { level, .. } => *level,
+            Assignment.Derivation { level, .. } => *level,
+        };
+        if level <= target_level { break; }
+        sol.assignments.pop();
+        i = i - 1;
+    }
+    sol.decision_level = target_level;
+}
+
+/// The accumulated term for a package — intersection of all terms
+/// derived/decided about it. Returns `None` if the package has no
+/// assignments yet.
+public fn partial_solution_term(sol: &PartialSolution, pkg: &PackageName) -> Maybe<Term> {
+    let mut acc: Maybe<Term> = None;
+    let mut i: Int = 0;
+    while i < sol.assignments.len() {
+        let t = match &sol.assignments[i] {
+            Assignment.Decision { package, version, .. } => {
+                if package == pkg { Some(term_positive(package.clone(), range_exact(version.clone()))) } else { None }
+            }
+            Assignment.Derivation { term, .. } => {
+                if &term.package == pkg { Some(term.clone()) } else { None }
+            }
+        };
+        match (acc, t) {
+            (Some(a), Some(b)) => acc = term_intersect(&a, &b),
+            (None, Some(b))    => acc = Some(b),
+            (Some(a), None)    => acc = Some(a),
+            (None, None)       => {}
+        }
+        i = i + 1;
+    }
+    acc
+}
+
+public fn partial_solution_satisfies(sol: &PartialSolution, t: &Term) -> Bool {
+    match partial_solution_term(sol, &t.package) {
+        Some(acc) => term_satisfies(&acc, t),
+        None      => false,
+    }
+}
+
+public fn partial_solution_has_decision(sol: &PartialSolution, pkg: &PackageName) -> Bool {
+    let mut i: Int = 0;
+    while i < sol.assignments.len() {
+        if let Assignment.Decision { package, .. } = &sol.assignments[i] {
+            if package == pkg { return true; }
+        }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Dependency Provider — the resolver's only outside-world dependency
+// =============================================================================
+//
+// The provider is the boundary between the pure-logic resolver and
+// the registry / cache / network. Implementations:
+//
+//   - `RegistryProvider` (in the registry codebase): hits the
+//     transparency log + Postgres for sumdb-anchored lookups.
+//   - `MockProvider`     (in tests): in-memory map.
+//   - `LocalProvider`    (for offline `verum vendor`): reads `.vbca`
+//     archives from the local cache.
+
+public type Dependency is {
+    package:    PackageName,
+    constraint: Range,
+};
+
+public type Dependencies is
+    | Available(List<Dependency>)
+    /// The requested version is unknown to the provider.
+    | Unknown
+    /// The requested package version exists, but its dependency
+    /// metadata is not available (corrupted / withdrawn / etc.).
+    | Unavailable(Text);
+
+public type ProviderError is
+    | NetworkError(Text)
+    | NotFound { package: PackageName }
+    | Internal(Text);
+
+implement Display for ProviderError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NetworkError(reason) => f.write_str(f"provider: network error: {reason}".as_str()),
+            NotFound { package } => f.write_str(f"provider: package not found: {package}".as_str()),
+            Internal(reason)     => f.write_str(f"provider: internal error: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for ProviderError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+public type DependencyProvider is protocol {
+    /// All known versions of a package, in any order. The resolver
+    /// will sort + filter by the active term's range, then preference.
+    async fn list_versions(&self, package: &PackageName) -> Result<List<SemVer>, ProviderError>;
+
+    /// Dependencies declared by `package@version`. Returning
+    /// `Dependencies.Unknown` causes the resolver to mark the version
+    /// uninstallable but continue trying others.
+    async fn get_dependencies(
+        &self,
+        package: &PackageName,
+        version: &SemVer,
+    ) -> Result<Dependencies, ProviderError>;
+
+    /// Optional package preference: which package should the resolver
+    /// try to satisfy first when multiple are eligible?  Default:
+    /// fewer versions ⇒ higher priority (smaller search subtree).
+    fn priority(&self, package: &PackageName, range: &Range) -> Int { 0 }
+
+    /// Optional version preference: given a sorted (descending) list
+    /// of allowed versions, pick one to try. Default: highest.
+    fn choose_version(&self, package: &PackageName, allowed: &List<SemVer>) -> Maybe<SemVer> {
+        if allowed.is_empty() { None } else { Some(allowed[0].clone()) }
+    }
+};
+
+// =============================================================================
+// Solver — the main loop
+// =============================================================================
+
+public type Lockfile is {
+    packages: Map<PackageName, SemVer>,
+};
+
+public type ResolveError is
+    | NoSolution { explanation: List<Text> }
+    | Provider(ProviderError);
+
+implement Display for ResolveError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoSolution { explanation } => {
+                f.write_str("dependency resolution failed:\n")?;
+                let mut i: Int = 0;
+                while i < explanation.len() {
+                    f.write_str(f"  {explanation[i]}\n".as_str())?;
+                    i = i + 1;
+                }
+                Ok(())
+            }
+            Provider(e) => Display.fmt(e, f),
+        }
+    }
+}
+
+implement Debug for ResolveError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// The pubgrub solver state.
+type Solver is {
+    incompatibilities: List<Incompatibility>,
+    /// Map from package to the indices of incompatibilities that
+    /// reference it — speeds up unit propagation.
+    incompat_index: Map<PackageName, List<Int>>,
+    partial_solution: PartialSolution,
+    /// The synthetic "root" package whose dependencies are the
+    /// caller-requested top-level constraints.
+    root: PackageName,
+    root_version: SemVer,
+};
+
+/// Top-level entry point. Produces a lockfile mapping every
+/// transitively-required package to a concrete version, or a typed
+/// conflict witness with a derivation tree.
+public async fn resolve<P: DependencyProvider>(
+    provider: &P,
+    root_package: PackageName,
+    root_version: SemVer,
+) -> Result<Lockfile, ResolveError> {
+    let mut solver = Solver {
+        incompatibilities: List.new(),
+        incompat_index: Map.new(),
+        partial_solution: partial_solution_empty(),
+        root: root_package.clone(),
+        root_version: root_version.clone(),
+    };
+
+    // Seed: root must be exactly root_version.
+    add_incompatibility(&mut solver, incompat_root(
+        term_negative(root_package.clone(), range_exact(root_version.clone())),
+    ));
+
+    // The resolver maintains a queue of packages to "make a decision
+    // about" — initially just the root.
+    let mut next_package: PackageName = root_package.clone();
+
+    loop {
+        unit_propagation(&mut solver, &next_package)
+            .map_err(|reason| ResolveError.NoSolution { explanation: reason })?;
+
+        match choose_next_package(&mut solver, provider).await {
+            Ok(Some((pkg, term))) => {
+                match make_decision(&mut solver, provider, pkg.clone(), &term).await? {
+                    Some(_chosen) => { next_package = pkg; }
+                    None => {
+                        // No version satisfies; an incompatibility was
+                        // recorded — restart unit propagation with the
+                        // same package.
+                        next_package = pkg;
+                    }
+                }
+            }
+            Ok(None) => {
+                // Done — every package has a decision.
+                return Ok(extract_lockfile(&solver));
+            }
+            Err(e) => return Err(ResolveError.Provider(e)),
+        }
+    }
+}
+
+// ----- Solver helpers -----
+
+fn add_incompatibility(solver: &mut Solver, incompat: Incompatibility) {
+    let idx = solver.incompatibilities.len();
+    let mut i: Int = 0;
+    while i < incompat.terms.len() {
+        let pkg = incompat.terms[i].package.clone();
+        let entry = solver.incompat_index.entry(pkg).or_insert(List.new());
+        entry.push(idx);
+        i = i + 1;
+    }
+    solver.incompatibilities.push(incompat);
+}
+
+/// Unit propagation: for every incompatibility involving `package`,
+/// check whether the partial solution forces a derivation. Iterates
+/// to a fixed point. On conflict, runs conflict resolution.
+fn unit_propagation(solver: &mut Solver, start_pkg: &PackageName) -> Result<(), List<Text>> {
+    let mut changed: List<PackageName> = List.new();
+    changed.push(start_pkg.clone());
+    while !changed.is_empty() {
+        let pkg = changed.pop().unwrap();
+        let indices: List<Int> = match solver.incompat_index.get(&pkg) {
+            Some(v) => v.clone(),
+            None    => List.new(),
+        };
+        let mut i: Int = indices.len() - 1;
+        while i >= 0 {
+            let incompat_idx = indices[i];
+            let incompat = solver.incompatibilities[incompat_idx].clone();
+            match check_incompatibility(&solver.partial_solution, &incompat) {
+                IncompatStatus.Satisfied => {
+                    // Conflict: every term of the incompatibility is
+                    // satisfied. Run conflict resolution.
+                    let new_incompat = conflict_resolution(solver, incompat)?;
+                    add_incompatibility(solver, new_incompat.clone());
+                    // Restart propagation from the resolved incompat's terms
+                    let mut k: Int = 0;
+                    while k < new_incompat.terms.len() {
+                        changed.push(new_incompat.terms[k].package.clone());
+                        k = k + 1;
+                    }
+                }
+                IncompatStatus.AlmostSatisfied(unsatisfied_term) => {
+                    // Forced derivation: negate the unsatisfied term.
+                    let derived = term_negate(&unsatisfied_term);
+                    partial_solution_derive(&mut solver.partial_solution, derived.clone(), incompat);
+                    changed.push(derived.package.clone());
+                }
+                IncompatStatus.Inconclusive => {}
+                IncompatStatus.Contradicted => {}
+            }
+            i = i - 1;
+        }
+    }
+    Ok(())
+}
+
+enum IncompatStatus {
+    /// All terms satisfied — full conflict.
+    Satisfied,
+    /// All but one term satisfied; the remaining one will be negated.
+    AlmostSatisfied(Term),
+    /// Some terms not yet decidable.
+    Inconclusive,
+    /// Some term contradicted — incompatibility cannot fire.
+    Contradicted,
+}
+
+fn check_incompatibility(sol: &PartialSolution, incompat: &Incompatibility) -> IncompatStatus {
+    let mut unsatisfied: Maybe<Term> = None;
+    let mut i: Int = 0;
+    while i < incompat.terms.len() {
+        let t = &incompat.terms[i];
+        match relation(sol, t) {
+            Relation.Satisfied    => {}
+            Relation.Contradicted => return IncompatStatus.Contradicted,
+            Relation.Inconclusive => {
+                if unsatisfied.is_some() { return IncompatStatus.Inconclusive; }
+                unsatisfied = Some(t.clone());
+            }
+        }
+        i = i + 1;
+    }
+    match unsatisfied {
+        None    => IncompatStatus.Satisfied,
+        Some(t) => IncompatStatus.AlmostSatisfied(t),
+    }
+}
+
+enum Relation { Satisfied, Contradicted, Inconclusive }
+
+fn relation(sol: &PartialSolution, t: &Term) -> Relation {
+    match partial_solution_term(sol, &t.package) {
+        Some(acc) => {
+            if term_satisfies(&acc, t) { Relation.Satisfied }
+            else if term_satisfies(&acc, &term_negate(t)) { Relation.Contradicted }
+            else { Relation.Inconclusive }
+        }
+        None => Relation.Inconclusive,
+    }
+}
+
+/// Conflict resolution — pubgrub's signature feature. Walks back the
+/// derivation tree, repeatedly resolving the conflict against the
+/// most-recent satisfier until we either find a unit clause or a
+/// previous decision level.
+fn conflict_resolution(
+    solver: &mut Solver,
+    mut incompat: Incompatibility,
+) -> Result<Incompatibility, List<Text>> {
+    loop {
+        if is_unsolvable(&incompat, &solver.root) {
+            return Err(format_explanation(&incompat));
+        }
+        let (most_recent_term, satisfier_level, prior_cause) =
+            find_most_recent_satisfier(&solver.partial_solution, &incompat);
+
+        if satisfier_level < solver.partial_solution.decision_level || prior_cause.is_none() {
+            partial_solution_backtrack(&mut solver.partial_solution, satisfier_level);
+            return Ok(incompat);
+        }
+
+        // Resolve `incompat` against `prior_cause` on `most_recent_term`.
+        incompat = resolve_terms(&incompat, &prior_cause.unwrap(), &most_recent_term);
+    }
+}
+
+fn is_unsolvable(incompat: &Incompatibility, root: &PackageName) -> Bool {
+    if incompat.terms.is_empty() { return true; }
+    if incompat.terms.len() == 1 {
+        let t = &incompat.terms[0];
+        if &t.package == root && t.positive { return true; }
+    }
+    false
+}
+
+fn find_most_recent_satisfier(
+    sol: &PartialSolution,
+    incompat: &Incompatibility,
+) -> (Term, Int, Maybe<Incompatibility>) {
+    // Walk assignments back-to-front; for each term, find the
+    // assignment that first made it satisfied.
+    let mut best_idx: Int = -1;
+    let mut best_term: Maybe<Term> = None;
+    let mut best_cause: Maybe<Incompatibility> = None;
+    let mut t_i: Int = 0;
+    while t_i < incompat.terms.len() {
+        let t = &incompat.terms[t_i];
+        // Find the last assignment that makes term `t` satisfied.
+        let mut acc: Maybe<Term> = None;
+        let mut a_i: Int = 0;
+        let mut found_idx: Int = -1;
+        let mut found_cause: Maybe<Incompatibility> = None;
+        while a_i < sol.assignments.len() {
+            let a = &sol.assignments[a_i];
+            let contributing = match a {
+                Assignment.Decision { package, version, .. } => {
+                    if package == &t.package {
+                        Some((term_positive(package.clone(), range_exact(version.clone())), None))
+                    } else { None }
+                }
+                Assignment.Derivation { term, cause, .. } => {
+                    if &term.package == &t.package {
+                        Some((term.clone(), Some((**cause).clone())))
+                    } else { None }
+                }
+            };
+            if let Some((tt, cause)) = contributing {
+                acc = match acc {
+                    None    => Some(tt),
+                    Some(a) => term_intersect(&a, &tt),
+                };
+                if let Some(ref aterm) = acc {
+                    if term_satisfies(aterm, t) {
+                        found_idx = a_i;
+                        found_cause = cause;
+                        break;
+                    }
+                }
+            }
+            a_i = a_i + 1;
+        }
+        if found_idx > best_idx {
+            best_idx = found_idx;
+            best_term = Some(t.clone());
+            best_cause = found_cause;
+        }
+        t_i = t_i + 1;
+    }
+    let level = if best_idx >= 0 {
+        match &sol.assignments[best_idx] {
+            Assignment.Decision   { level, .. } => *level,
+            Assignment.Derivation { level, .. } => *level,
+        }
+    } else { 0 };
+    (best_term.unwrap(), level, best_cause)
+}
+
+fn resolve_terms(
+    incompat: &Incompatibility,
+    prior: &Incompatibility,
+    on_term: &Term,
+) -> Incompatibility {
+    // New incompat = (incompat \ {on_term}) ∪ (prior \ {¬on_term}),
+    // with cause = Derived(incompat, prior). Same-package terms get
+    // merged via intersection.
+    let mut merged: Map<PackageName, Term> = Map.new();
+    add_terms_except(&mut merged, &incompat.terms, &on_term.package);
+    add_terms_except(&mut merged, &prior.terms, &on_term.package);
+    let mut out: List<Term> = List.new();
+    for (_, t) in merged.iter() { out.push(t.clone()); }
+    Incompatibility {
+        terms: out,
+        cause: Cause.Derived {
+            left: Heap.new(incompat.clone()),
+            right: Heap.new(prior.clone()),
+        },
+    }
+}
+
+fn add_terms_except(merged: &mut Map<PackageName, Term>, terms: &List<Term>, skip: &PackageName) {
+    let mut i: Int = 0;
+    while i < terms.len() {
+        let t = &terms[i];
+        if &t.package == skip { i = i + 1; continue; }
+        match merged.get(&t.package).cloned() {
+            Some(existing) => {
+                if let Some(combined) = term_intersect(&existing, t) {
+                    merged.insert(t.package.clone(), combined);
+                }
+            }
+            None => { merged.insert(t.package.clone(), t.clone()); }
+        }
+        i = i + 1;
+    }
+}
+
+/// Decision-making: pick a package whose accumulated term is not yet
+/// satisfied by a concrete decision, then ask the provider for
+/// versions that satisfy that term, then try them.
+async fn choose_next_package<P: DependencyProvider>(
+    solver: &mut Solver,
+    provider: &P,
+) -> Result<Maybe<(PackageName, Term)>, ProviderError> {
+    let mut candidates: List<(PackageName, Term, Int)> = List.new();
+    let mut seen: Set<PackageName> = Set.new();
+    let mut i: Int = 0;
+    while i < solver.partial_solution.assignments.len() {
+        let pkg = match &solver.partial_solution.assignments[i] {
+            Assignment.Decision   { package, .. } => package.clone(),
+            Assignment.Derivation { term, .. }    => term.package.clone(),
+        };
+        if seen.contains(&pkg) { i = i + 1; continue; }
+        seen.insert(pkg.clone());
+        if partial_solution_has_decision(&solver.partial_solution, &pkg) { i = i + 1; continue; }
+        match partial_solution_term(&solver.partial_solution, &pkg) {
+            Some(t) if t.positive && !range_is_empty(&t.range) => {
+                let prio = provider.priority(&pkg, &t.range);
+                candidates.push((pkg, t, prio));
+            }
+            _ => {}
+        }
+        i = i + 1;
+    }
+    if candidates.is_empty() { return Ok(None); }
+    // Pick the lowest-priority package — fewest versions = smallest subtree.
+    let mut best = 0;
+    let mut j: Int = 1;
+    while j < candidates.len() {
+        if candidates[j].2 < candidates[best].2 { best = j; }
+        j = j + 1;
+    }
+    let (pkg, term, _) = candidates[best].clone();
+    Ok(Some((pkg, term)))
+}
+
+async fn make_decision<P: DependencyProvider>(
+    solver: &mut Solver,
+    provider: &P,
+    pkg: PackageName,
+    term: &Term,
+) -> Result<Maybe<SemVer>, ResolveError> {
+    let allowed = if pkg == solver.root {
+        let mut v: List<SemVer> = List.new();
+        v.push(solver.root_version.clone());
+        v
+    } else {
+        provider.list_versions(&pkg).await
+            .map_err(|e| ResolveError.Provider(e))?
+    };
+    // Filter by term; sort descending.
+    let mut filtered: List<SemVer> = List.new();
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if range_contains(&term.range, &allowed[i]) { filtered.push(allowed[i].clone()); }
+        i = i + 1;
+    }
+    if filtered.is_empty() {
+        // No versions satisfy — record an incompatibility so the
+        // resolver backtracks.
+        let no_versions = incompat_no_versions(pkg.clone(), term.clone());
+        add_incompatibility(solver, no_versions);
+        return Ok(None);
+    }
+    sort_semvers_desc(&mut filtered);
+    let chosen = match provider.choose_version(&pkg, &filtered) {
+        Some(v) => v,
+        None    => return Ok(None),
+    };
+
+    // Add incompatibilities derived from this version's dependencies.
+    let deps = provider.get_dependencies(&pkg, &chosen).await
+        .map_err(|e| ResolveError.Provider(e))?;
+    match deps {
+        Dependencies.Available(dep_list) => {
+            let mut k: Int = 0;
+            while k < dep_list.len() {
+                let dep = &dep_list[k];
+                let self_term = term_positive(pkg.clone(), range_exact(chosen.clone()));
+                let dep_term = term_positive(dep.package.clone(), dep.constraint.clone());
+                let incompat = incompat_dependency(pkg.clone(), chosen.clone(), self_term, dep_term);
+                add_incompatibility(solver, incompat);
+                k = k + 1;
+            }
+            partial_solution_decide(&mut solver.partial_solution, pkg, chosen.clone());
+            Ok(Some(chosen))
+        }
+        Dependencies.Unknown => {
+            let no_versions = incompat_no_versions(
+                pkg.clone(),
+                term_positive(pkg.clone(), range_exact(chosen.clone())),
+            );
+            add_incompatibility(solver, no_versions);
+            Ok(None)
+        }
+        Dependencies.Unavailable(_reason) => {
+            let no_versions = incompat_no_versions(
+                pkg.clone(),
+                term_positive(pkg.clone(), range_exact(chosen.clone())),
+            );
+            add_incompatibility(solver, no_versions);
+            Ok(None)
+        }
+    }
+}
+
+fn sort_semvers_desc(vs: &mut List<SemVer>) {
+    let n = vs.len();
+    let mut i: Int = 1;
+    while i < n {
+        let mut j: Int = i;
+        while j > 0 && semver_compare(&vs[j], &vs[j - 1]) is SemVerOrdering.Greater {
+            vs.swap(j, j - 1);
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn extract_lockfile(solver: &Solver) -> Lockfile {
+    let mut packages: Map<PackageName, SemVer> = Map.new();
+    let mut i: Int = 0;
+    while i < solver.partial_solution.assignments.len() {
+        if let Assignment.Decision { package, version, .. } = &solver.partial_solution.assignments[i] {
+            if package != &solver.root {
+                packages.insert(package.clone(), version.clone());
+            }
+        }
+        i = i + 1;
+    }
+    Lockfile { packages }
+}
+
+fn format_explanation(incompat: &Incompatibility) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    explain_incompat(incompat, &mut out, 0);
+    out
+}
+
+fn explain_incompat(incompat: &Incompatibility, out: &mut List<Text>, depth: Int) {
+    let prefix = indent(depth);
+    match &incompat.cause {
+        Cause.Root => {
+            out.push(format!("{}root requirement", prefix).to_text());
+        }
+        Cause.NoVersions { package, term } => {
+            out.push(format!("{}no versions of {} match {}", prefix, package, format_term(term)).to_text());
+        }
+        Cause.DependencyOf { dependent, dependent_version } => {
+            out.push(format!("{}{}@{} requires …", prefix, dependent, dependent_version).to_text());
+        }
+        Cause.Derived { left, right } => {
+            out.push(format!("{}because of:", prefix).to_text());
+            explain_incompat(left.as_ref(), out, depth + 1);
+            explain_incompat(right.as_ref(), out, depth + 1);
+        }
+    }
+}
+
+fn format_term(t: &Term) -> Text {
+    let polarity = if t.positive { "" } else { "not " };
+    let body = if range_is_empty(&t.range) { "∅".to_text() }
+               else if range_is_full(&t.range) { "*".to_text() }
+               else { format!("{:?}", t.range).to_text() };
+    format!("{}{}", polarity, body).to_text()
+}
+
+fn indent(depth: Int) -> Text {
+    let mut s: Text = "".to_text();
+    let mut i: Int = 0;
+    while i < depth { s = s.append("  "); i = i + 1; }
+    s
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    fn v(s: &str) -> SemVer { parse_semver(&s.to_text()).unwrap() }
+
+    #[test]
+    fn test_range_exact_contains() {
+        let r = range_exact(v("1.2.3"));
+        assert_eq(range_contains(&r, &v("1.2.3")), true);
+        assert_eq(range_contains(&r, &v("1.2.4")), false);
+    }
+
+    #[test]
+    fn test_range_full() {
+        let r = range_full();
+        assert_eq(range_is_full(&r), true);
+        assert_eq(range_contains(&r, &v("0.0.0")), true);
+        assert_eq(range_contains(&r, &v("999.999.999")), true);
+    }
+
+    #[test]
+    fn test_range_intersect() {
+        let a = range_higher_than(v("1.0.0"));
+        let b = range_lower_than(v("2.0.0"));
+        let i = range_intersect(&a, &b);
+        assert_eq(range_contains(&i, &v("1.5.0")), true);
+        assert_eq(range_contains(&i, &v("0.5.0")), false);
+        assert_eq(range_contains(&i, &v("2.0.0")), false);
+    }
+
+    #[test]
+    fn test_range_complement() {
+        let a = range_between(v("1.0.0"), v("2.0.0"));
+        let c = range_complement(&a);
+        assert_eq(range_contains(&c, &v("0.5.0")), true);
+        assert_eq(range_contains(&c, &v("1.5.0")), false);
+        assert_eq(range_contains(&c, &v("2.0.0")), true);
+    }
+
+    #[test]
+    fn test_term_satisfies_subset() {
+        let pkg = PackageName("foo".to_text());
+        let narrow = term_positive(pkg.clone(), range_between(v("1.0.0"), v("1.5.0")));
+        let wide   = term_positive(pkg.clone(), range_between(v("1.0.0"), v("2.0.0")));
+        assert_eq(term_satisfies(&narrow, &wide), true);
+        assert_eq(term_satisfies(&wide, &narrow), false);
+    }
+
+    #[test]
+    fn test_partial_solution_basic() {
+        let mut sol = partial_solution_empty();
+        let foo = PackageName("foo".to_text());
+        partial_solution_decide(&mut sol, foo.clone(), v("1.0.0"));
+        assert_eq(sol.decision_level, 1);
+        assert_eq(partial_solution_has_decision(&sol, &foo), true);
+        let term = partial_solution_term(&sol, &foo).unwrap();
+        assert_eq(range_contains(&term.range, &v("1.0.0")), true);
+    }
+
+    #[test]
+    fn test_partial_solution_backtrack() {
+        let mut sol = partial_solution_empty();
+        partial_solution_decide(&mut sol, PackageName("a".to_text()), v("1.0.0"));
+        partial_solution_decide(&mut sol, PackageName("b".to_text()), v("1.0.0"));
+        partial_solution_decide(&mut sol, PackageName("c".to_text()), v("1.0.0"));
+        partial_solution_backtrack(&mut sol, 1);
+        assert_eq(sol.decision_level, 1);
+        assert_eq(sol.assignments.len(), 1);
+    }
+
+    // Mock provider for end-to-end resolver test.
+    type MockProvider is {
+        versions: Map<PackageName, List<SemVer>>,
+        deps:     Map<(PackageName, SemVer), List<Dependency>>,
+    };
+
+    implement DependencyProvider for MockProvider {
+        async fn list_versions(&self, package: &PackageName) -> Result<List<SemVer>, ProviderError> {
+            match self.versions.get(package) {
+                Some(vs) => Ok(vs.clone()),
+                None    => Err(ProviderError.NotFound { package: package.clone() }),
+            }
+        }
+        async fn get_dependencies(&self, p: &PackageName, v: &SemVer) -> Result<Dependencies, ProviderError> {
+            match self.deps.get(&(p.clone(), v.clone())) {
+                Some(d) => Ok(Dependencies.Available(d.clone())),
+                None    => Ok(Dependencies.Available(List.new())),
+            }
+        }
+    }
+
+    #[test]
+    async fn test_resolve_trivial() {
+        // root@1.0.0 with no dependencies — should resolve trivially.
+        let provider = MockProvider {
+            versions: Map.new(),
+            deps:     Map.new(),
+        };
+        let lockfile = resolve(&provider, PackageName("root".to_text()), v("1.0.0")).await.unwrap();
+        assert_eq(lockfile.packages.len(), 0);
+    }
+
+    #[test]
+    async fn test_resolve_single_dep() {
+        // root@1.0.0 → foo (^1.0)
+        // foo@1.2.3 (no further deps)
+        let mut versions: Map<PackageName, List<SemVer>> = Map.new();
+        let mut foo_versions: List<SemVer> = List.new();
+        foo_versions.push(v("1.2.3"));
+        foo_versions.push(v("1.0.0"));
+        versions.insert(PackageName("foo".to_text()), foo_versions);
+
+        let mut deps: Map<(PackageName, SemVer), List<Dependency>> = Map.new();
+        let mut root_deps: List<Dependency> = List.new();
+        root_deps.push(Dependency {
+            package: PackageName("foo".to_text()),
+            constraint: range_between(v("1.0.0"), v("2.0.0")),
+        });
+        deps.insert((PackageName("root".to_text()), v("1.0.0")), root_deps);
+
+        let provider = MockProvider { versions, deps };
+        let lockfile = resolve(&provider, PackageName("root".to_text()), v("1.0.0")).await.unwrap();
+        assert_eq(lockfile.packages.len(), 1);
+        let foo_v = lockfile.packages.get(&PackageName("foo".to_text())).unwrap();
+        assert_eq(foo_v, &v("1.2.3"));
+    }
+}

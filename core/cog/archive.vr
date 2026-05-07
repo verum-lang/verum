@@ -1,0 +1,513 @@
+// =============================================================================
+// cog/archive.vr — .vbca archive reader
+// =============================================================================
+// Layer: 3 (Cog tooling)
+// Dependencies: core, base, security/hash/sha256, encoding/varint
+// Bridges: verum_vbc::archive (kernel side, via @intrinsic)
+// =============================================================================
+//
+// **Purpose.** Read .vbca archive files (the on-disk representation
+// of compiled Verum cogs) into a typed `CogArchive` surface that
+// downstream tooling — registry, package manager, IDE — can inspect
+// without re-implementing the byte-level format.
+//
+// **Format.** The .vbca on-disk layout (matches kernel
+// `verum_vbc::archive::write_archive`):
+//
+//     +---------------------+  offset 0
+//     | Magic "VBCA"  (4)   |
+//     | Major version (2)   |
+//     | Minor version (2)   |
+//     | Flags         (4)   |
+//     | Module count  (4)   |
+//     | Index offset  (8)   |
+//     | Index size    (8)   |
+//     +---------------------+  ARCHIVE_HEADER_SIZE = 32
+//     | Module data         |
+//     |   ...               |
+//     +---------------------+  index_offset
+//     | bincode(Vec<ModuleEntry>) |
+//     +---------------------+  index_offset + index_size
+//
+// **Strategy.** Parse the header in pure Verum (cheap), then bridge
+// to the kernel for the bincode-encoded index + per-module bytecode
+// decode. The kernel intrinsic returns module names, sizes, content
+// hashes, and dependency graph; the heavyweight work
+// (instruction-level decode, validation) stays kernel-side. This
+// boundary is intentional: it keeps the user-side surface ~600 lines
+// while preserving zero-copy access to bytecode for AOT lowering.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: ".vbca archive reader: header parse + kernel-bridged module index",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cog.archive;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount collections.{List, Map};
+mount security.hash.sha256.{digest as sha256_digest};
+mount encoding.hex.{encode as hex_encode};
+mount io.path.{Path, PathBuf};
+
+// =============================================================================
+// Constants — match kernel `verum_vbc::archive`
+// =============================================================================
+
+public const ARCHIVE_MAGIC: [Byte; 4] = [0x56, 0x42, 0x43, 0x41]; // "VBCA"
+public const ARCHIVE_VERSION_MAJOR: Int { >= 0, <= 65535 } = 1;
+public const ARCHIVE_VERSION_MINOR: Int { >= 0, <= 65535 } = 0;
+public const ARCHIVE_HEADER_SIZE: Int = 32;
+
+// Flag bits — packaging compression, source-map presence, etc.
+public const FLAG_COMPRESSED:        Int = 0x0001;
+public const FLAG_HAS_DEBUG_INFO:    Int = 0x0002;
+public const FLAG_HAS_SOURCE_MAP:    Int = 0x0004;
+public const FLAG_STRIPPED:          Int = 0x0008;
+public const FLAG_SIGNED:            Int = 0x0010;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+@derive(Debug, Eq, Clone)
+public type ArchiveHeader is {
+    magic:         [Byte; 4],
+    version_major: Int { >= 0, <= 65535 },
+    version_minor: Int { >= 0, <= 65535 },
+    flags:         Int { >= 0, <= 4294967295 },
+    module_count:  Int { >= 0 },
+    index_offset:  Int { >= 0 },
+    index_size:    Int { >= 0 },
+};
+
+@derive(Debug, Eq, Clone)
+public type ModuleEntry is {
+    /// Fully-qualified module name (e.g., `"core.collections.list"`).
+    name:         Text,
+    /// Byte offset of the module's bytecode payload.
+    data_offset:  Int { >= 0 },
+    /// Length of the module's bytecode payload.
+    data_size:    Int { >= 0 },
+    /// 64-bit content hash for cache invalidation.
+    content_hash: Int,
+    /// Indices into `modules[]` of modules this module depends on.
+    dependencies: List<Int>,
+};
+
+/// A complete decoded archive — header + per-module index + raw bytes.
+/// The `module_data` parallel-array layout matches kernel
+/// `verum_vbc::archive::VbcArchive` so the kernel-bridged decode can
+/// hand the bytes back without reshape.
+@derive(Debug, Clone)
+public type CogArchive is {
+    header:      ArchiveHeader,
+    modules:     List<ModuleEntry>,
+    /// Raw module bytecode payloads, indexed by `modules[i]`.
+    /// Each `module_data[i].len()` equals `modules[i].data_size`.
+    module_data: List<List<Byte>>,
+    /// Hex-encoded SHA-256 of the entire archive bytes — content
+    /// addressing for the registry's object store.
+    sha256:      Text { len == 64 },
+};
+
+public type ArchiveError is
+    | InvalidMagic { expected: [Byte; 4], found: [Byte; 4] }
+    | UnsupportedVersion { major: Int, minor: Int }
+    | TruncatedHeader { expected: Int, found: Int }
+    | TruncatedIndex { offset: Int, size: Int, total: Int }
+    | TruncatedModule { module: Text, offset: Int, size: Int, total: Int }
+    | InvalidIndexEncoding(Text)
+    | KernelBridge(Text)
+    | IoError(Text);
+
+implement Display for ArchiveError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidMagic { expected, found } => f.write_str(
+                f"vbca: invalid magic (expected {hex_encode(&expected.to_list())}, found {hex_encode(&found.to_list())})".as_str()),
+            UnsupportedVersion { major, minor } => f.write_str(
+                f"vbca: unsupported version {major}.{minor} (this verum supports {ARCHIVE_VERSION_MAJOR}.{ARCHIVE_VERSION_MINOR})".as_str()),
+            TruncatedHeader { expected, found } => f.write_str(
+                f"vbca: truncated header (expected {expected} bytes, got {found})".as_str()),
+            TruncatedIndex { offset, size, total } => f.write_str(
+                f"vbca: truncated index (offset={offset} size={size} total={total})".as_str()),
+            TruncatedModule { module, offset, size, total } => f.write_str(
+                f"vbca: truncated module {module} (offset={offset} size={size} total={total})".as_str()),
+            InvalidIndexEncoding(reason) => f.write_str(f"vbca: invalid index encoding ({reason})".as_str()),
+            KernelBridge(reason)         => f.write_str(f"vbca: kernel bridge: {reason}".as_str()),
+            IoError(reason)              => f.write_str(f"vbca: io error: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for ArchiveError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Parse just the header — cheap, validates magic + version. Useful
+/// when callers want to reject hostile / wrong-version archives
+/// before paying for the full index decode.
+public fn read_header(bytes: &List<Byte>) -> Result<ArchiveHeader, ArchiveError> {
+    if bytes.len() < ARCHIVE_HEADER_SIZE {
+        return Err(TruncatedHeader { expected: ARCHIVE_HEADER_SIZE, found: bytes.len() });
+    }
+    let magic = read_magic(bytes, 0);
+    if magic != ARCHIVE_MAGIC {
+        return Err(InvalidMagic { expected: ARCHIVE_MAGIC, found: magic });
+    }
+    let version_major = read_u16_le(bytes, 4);
+    let version_minor = read_u16_le(bytes, 6);
+    if version_major != ARCHIVE_VERSION_MAJOR {
+        return Err(UnsupportedVersion { major: version_major, minor: version_minor });
+    }
+    let flags        = read_u32_le(bytes, 8);
+    let module_count = read_u32_le(bytes, 12);
+    let index_offset = read_u64_le(bytes, 16);
+    let index_size   = read_u64_le(bytes, 24);
+    Ok(ArchiveHeader {
+        magic,
+        version_major,
+        version_minor,
+        flags,
+        module_count,
+        index_offset,
+        index_size,
+    })
+}
+
+/// Decode a complete archive from in-memory bytes. Bridges to the
+/// kernel for the bincode-encoded index decode (kernel side is
+/// authoritative for the wire format; user-side just owns the
+/// type-shaped surface).
+public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveError> {
+    let header = read_header(bytes)?;
+
+    if header.index_offset + header.index_size > bytes.len() {
+        return Err(TruncatedIndex {
+            offset: header.index_offset,
+            size:   header.index_size,
+            total:  bytes.len(),
+        });
+    }
+
+    // Kernel-bridged: decode the bincode index into typed entries.
+    let modules = vbc_archive_decode_index(bytes, header.index_offset, header.index_size)
+        .map_err(|e| InvalidIndexEncoding(e))?;
+    if modules.len() != header.module_count {
+        return Err(InvalidIndexEncoding(
+            f"index entry count {modules.len()} != header module_count {header.module_count}".to_text()));
+    }
+
+    // Verify each module's payload bounds.
+    let mut module_data: List<List<Byte>> = List.with_capacity(modules.len());
+    let mut i: Int = 0;
+    while i < modules.len() {
+        let entry = &modules[i];
+        if entry.data_offset + entry.data_size > bytes.len() {
+            return Err(TruncatedModule {
+                module: entry.name.clone(),
+                offset: entry.data_offset,
+                size:   entry.data_size,
+                total:  bytes.len(),
+            });
+        }
+        module_data.push(slice_bytes(bytes, entry.data_offset, entry.data_size));
+        i = i + 1;
+    }
+
+    let sha256 = hex_encode(&sha256_digest(bytes));
+    Ok(CogArchive { header, modules, module_data, sha256 })
+}
+
+/// Read a `.vbca` from a filesystem path.
+public async fn read_archive(path: &Path) -> Result<CogArchive, ArchiveError>
+    using [Filesystem]
+{
+    let bytes = Filesystem.read_file_bytes(path).await
+        .map_err(|e| IoError(format!("{e}").to_text()))?;
+    read_archive_bytes(&bytes)
+}
+
+/// Lookup a module by fully-qualified name. O(N) scan; archives are
+/// typically <500 modules, well below the cost of indexing infra.
+public fn find_module<'a>(archive: &'a CogArchive, name: &Text) -> Maybe<&'a ModuleEntry> {
+    let mut i: Int = 0;
+    while i < archive.modules.len() {
+        if archive.modules[i].name == *name {
+            return Some(&archive.modules[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// Borrow a module's raw bytecode payload by name.
+public fn module_bytes<'a>(archive: &'a CogArchive, name: &Text) -> Maybe<&'a List<Byte>> {
+    let mut i: Int = 0;
+    while i < archive.modules.len() {
+        if archive.modules[i].name == *name {
+            return Some(&archive.module_data[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// Total uncompressed bytes across all module payloads.
+public fn total_payload_size(archive: &CogArchive) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < archive.modules.len() {
+        sum = sum + archive.modules[i].data_size;
+        i = i + 1;
+    }
+    sum
+}
+
+/// Build the dependency adjacency map: module-name → List<dependency-name>.
+/// Resolved from index dependency-by-index.
+public fn dependency_graph(archive: &CogArchive) -> Map<Text, List<Text>> {
+    let mut graph: Map<Text, List<Text>> = Map.new();
+    let mut i: Int = 0;
+    while i < archive.modules.len() {
+        let entry = &archive.modules[i];
+        let mut deps: List<Text> = List.with_capacity(entry.dependencies.len());
+        let mut j: Int = 0;
+        while j < entry.dependencies.len() {
+            let dep_idx = entry.dependencies[j];
+            if dep_idx >= 0 && dep_idx < archive.modules.len() {
+                deps.push(archive.modules[dep_idx].name.clone());
+            }
+            j = j + 1;
+        }
+        graph.insert(entry.name.clone(), deps);
+        i = i + 1;
+    }
+    graph
+}
+
+/// Topological sort of modules: returns names in dependency-first
+/// order (a module appears after all its dependencies). Returns
+/// `Err` on cycle. Used by the registry's archive validator and the
+/// AOT linker.
+public fn topological_order(archive: &CogArchive) -> Result<List<Text>, Text> {
+    enum Mark { Unvisited, Pending, Done }
+    let n = archive.modules.len();
+    let mut marks: List<Mark> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { marks.push(Mark.Unvisited); i = i + 1; }
+    let mut order: List<Text> = List.with_capacity(n);
+    let mut k: Int = 0;
+    while k < n {
+        if marks[k] is Mark.Unvisited {
+            visit(archive, k, &mut marks, &mut order)?;
+        }
+        k = k + 1;
+    }
+    Ok(order)
+}
+
+fn visit(
+    archive: &CogArchive,
+    idx: Int,
+    marks: &mut List<Mark>,
+    order: &mut List<Text>,
+) -> Result<(), Text> {
+    match marks[idx] {
+        Mark.Done    => return Ok(()),
+        Mark.Pending => return Err(f"cycle through module {archive.modules[idx].name}".to_text()),
+        Mark.Unvisited => {}
+    }
+    marks[idx] = Mark.Pending;
+    let entry = &archive.modules[idx];
+    let mut j: Int = 0;
+    while j < entry.dependencies.len() {
+        visit(archive, entry.dependencies[j], marks, order)?;
+        j = j + 1;
+    }
+    marks[idx] = Mark.Done;
+    order.push(entry.name.clone());
+    Ok(())
+}
+
+// =============================================================================
+// Header introspection
+// =============================================================================
+
+public fn is_compressed(h: &ArchiveHeader) -> Bool { (h.flags & FLAG_COMPRESSED) != 0 }
+public fn has_debug_info(h: &ArchiveHeader) -> Bool { (h.flags & FLAG_HAS_DEBUG_INFO) != 0 }
+public fn has_source_map(h: &ArchiveHeader) -> Bool { (h.flags & FLAG_HAS_SOURCE_MAP) != 0 }
+public fn is_stripped(h: &ArchiveHeader) -> Bool { (h.flags & FLAG_STRIPPED) != 0 }
+public fn is_signed(h: &ArchiveHeader) -> Bool { (h.flags & FLAG_SIGNED) != 0 }
+
+// =============================================================================
+// Helpers — byte parsing
+// =============================================================================
+
+fn read_magic(bytes: &List<Byte>, offset: Int) -> [Byte; 4] {
+    [bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]
+}
+
+fn read_u16_le(bytes: &List<Byte>, offset: Int) -> Int {
+    (bytes[offset] as Int) | ((bytes[offset + 1] as Int) << 8)
+}
+
+fn read_u32_le(bytes: &List<Byte>, offset: Int) -> Int {
+      (bytes[offset]     as Int)
+    | ((bytes[offset + 1] as Int) << 8)
+    | ((bytes[offset + 2] as Int) << 16)
+    | ((bytes[offset + 3] as Int) << 24)
+}
+
+fn read_u64_le(bytes: &List<Byte>, offset: Int) -> Int {
+      (bytes[offset]     as Int)
+    | ((bytes[offset + 1] as Int) << 8)
+    | ((bytes[offset + 2] as Int) << 16)
+    | ((bytes[offset + 3] as Int) << 24)
+    | ((bytes[offset + 4] as Int) << 32)
+    | ((bytes[offset + 5] as Int) << 40)
+    | ((bytes[offset + 6] as Int) << 48)
+    | ((bytes[offset + 7] as Int) << 56)
+}
+
+fn slice_bytes(bytes: &List<Byte>, offset: Int, len: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(len);
+    let mut i: Int = 0;
+    while i < len { out.push(bytes[offset + i]); i = i + 1; }
+    out
+}
+
+// =============================================================================
+// Kernel bridge — bincode-encoded ModuleEntry index decode
+// =============================================================================
+//
+// The intrinsic owns the bincode wire format; this user-side surface
+// just transforms the kernel's flat tuple representation into typed
+// `ModuleEntry` records. Kernel-side: `verum_vbc::archive::read_archive`'s
+// index-decode path, exposed verbatim as `vbc_archive_decode_index`.
+//
+// Returns `Result<List<ModuleEntry>, Text>` where Text is a kernel
+// diagnostic on bincode-decode failure.
+
+@intrinsic("vbc_archive_decode_index")
+fn vbc_archive_decode_index(
+    bytes:        &List<Byte>,
+    index_offset: Int,
+    index_size:   Int,
+) -> Result<List<ModuleEntry>, Text>;
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    fn fake_header_bytes(module_count: Int, index_offset: Int, index_size: Int) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        // Magic
+        out.push(0x56); out.push(0x42); out.push(0x43); out.push(0x41);
+        // Version 1.0
+        out.push(0x01); out.push(0x00);
+        out.push(0x00); out.push(0x00);
+        // Flags = 0
+        out.push(0x00); out.push(0x00); out.push(0x00); out.push(0x00);
+        // module_count (u32 LE)
+        let mc = module_count;
+        out.push((mc & 0xFF) as Byte);
+        out.push(((mc >> 8) & 0xFF) as Byte);
+        out.push(((mc >> 16) & 0xFF) as Byte);
+        out.push(((mc >> 24) & 0xFF) as Byte);
+        // index_offset (u64 LE)
+        let mut io = index_offset;
+        let mut i: Int = 0;
+        while i < 8 { out.push((io & 0xFF) as Byte); io = io >> 8; i = i + 1; }
+        // index_size (u64 LE)
+        let mut is = index_size;
+        let mut j: Int = 0;
+        while j < 8 { out.push((is & 0xFF) as Byte); is = is >> 8; j = j + 1; }
+        out
+    }
+
+    #[test]
+    fn test_header_roundtrip_zero() {
+        let bytes = fake_header_bytes(0, 32, 0);
+        let h = read_header(&bytes).unwrap();
+        assert_eq(h.magic, ARCHIVE_MAGIC);
+        assert_eq(h.version_major, 1);
+        assert_eq(h.version_minor, 0);
+        assert_eq(h.module_count, 0);
+        assert_eq(h.index_offset, 32);
+        assert_eq(h.index_size, 0);
+    }
+
+    #[test]
+    fn test_truncated_header() {
+        let mut bytes: List<Byte> = List.new();
+        bytes.push(0x56);
+        match read_header(&bytes) {
+            Err(TruncatedHeader { expected, found }) => {
+                assert_eq(expected, 32);
+                assert_eq(found, 1);
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_invalid_magic() {
+        let mut bytes = fake_header_bytes(0, 32, 0);
+        bytes[0] = 0xFF;
+        match read_header(&bytes) {
+            Err(InvalidMagic { .. }) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_unsupported_version() {
+        let mut bytes = fake_header_bytes(0, 32, 0);
+        bytes[4] = 0x99;
+        match read_header(&bytes) {
+            Err(UnsupportedVersion { major, .. }) => assert_eq(major, 0x99),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_flag_introspection() {
+        let h = ArchiveHeader {
+            magic:         ARCHIVE_MAGIC,
+            version_major: 1,
+            version_minor: 0,
+            flags:         FLAG_SIGNED | FLAG_HAS_DEBUG_INFO,
+            module_count:  0,
+            index_offset:  32,
+            index_size:    0,
+        };
+        assert_eq(is_signed(&h), true);
+        assert_eq(has_debug_info(&h), true);
+        assert_eq(is_compressed(&h), false);
+        assert_eq(is_stripped(&h), false);
+    }
+}
