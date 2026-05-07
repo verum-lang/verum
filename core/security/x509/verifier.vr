@@ -1,0 +1,502 @@
+// =============================================================================
+// security/x509/verifier.vr — end-to-end PKI verifier
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, security/x509/{certificate, trust_store, path_building,
+//               path_validation, ocsp_client, crl_client, ext}, net/http,
+//               time/system_time
+// =============================================================================
+//
+// **Purpose.** A unified entry point that composes:
+//
+//   1. Path building   (RFC 5280 §6.1 path discovery)
+//   2. Path validation (RFC 5280 §6.1 algorithm-precise)
+//   3. Revocation      (OCSP-first with CRL fallback per cert)
+//   4. Purpose-aware EKU enforcement (ServerAuth / ClientAuth /
+//      CodeSigning / OCSPSigning / TimeStamping)
+//
+// for callers that want a single high-level "verify this cert
+// against my trust store" API.
+//
+// **Categorical structure.** The verifier is a chain of fallible
+// transformations: the input bag-of-DER is mapped through parse →
+// path_build → path_validate → revoke_check → purpose_check, with
+// each step able to short-circuit. The composed type is the
+// initial-fail or final-success monad over `VerificationError`.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "end-to-end PKI verifier composing path build + path validation + revocation + purpose-aware EKU",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.x509.verifier;
+
+mount core.*;
+mount core.collections.{List, Set};
+mount core.security.x509.certificate.{X509Certificate, parse_certificate};
+mount core.security.x509.trust_store.{TrustStore};
+mount core.security.x509.path_building.{
+    CandidatePath, PathBuildError, build_paths, candidate_path_to_list,
+};
+mount core.security.x509.path_validation.{
+    PathValidationInput, ValidatedPath, PathError, PolicySet,
+    input_default, validate_path,
+};
+mount core.security.x509.ocsp_client.{
+    CertIdHash, OcspCheckOptions, OcspCheckResult, OcspCheckError,
+    check_options_default as ocsp_check_options_default,
+    check_certificate_status as ocsp_check_status,
+};
+mount core.security.x509.crl_client.{
+    CrlCheckOptions, CrlCheckResult, CrlOperationError, CrlCache,
+    crl_cache_new, crl_check_options_default,
+    check_certificate_status_via_crl,
+};
+mount core.security.x509.ocsp.{CertStatus};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.ext.ext_key_usage.{ExtKeyUsage, ExtKeyUsagePurpose};
+mount net.http.{HttpClient};
+mount time.system_time.{epoch_seconds};
+
+// =============================================================================
+// Purpose
+// =============================================================================
+//
+// Maps the user's intent to required EKU OIDs per RFC 5280 §4.2.1.12.
+// "ServerAuth" requires `id-kp-serverAuth` (1.3.6.1.5.5.7.3.1) etc.
+
+@derive(Eq, Clone, Debug)
+public type CertPurpose is
+    | ServerAuth
+    | ClientAuth
+    | CodeSigning
+    | EmailProtection
+    | TimeStamping
+    | OcspSigning
+    /// Verifier should not enforce any EKU requirements.
+    | AnyPurpose;
+
+fn purpose_oid(p: &CertPurpose) -> Maybe<Oid> {
+    match p {
+        ServerAuth      => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1])),
+        ClientAuth      => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 2])),
+        CodeSigning     => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 3])),
+        EmailProtection => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 4])),
+        TimeStamping    => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 8])),
+        OcspSigning     => Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 9])),
+        AnyPurpose      => None,
+    }
+}
+
+fn any_extended_key_usage_oid() -> Oid {
+    Oid.from(&[2, 5, 29, 37, 0])  // anyExtendedKeyUsage
+}
+
+fn cert_meets_purpose(cert: &X509Certificate, purpose: &CertPurpose) -> Bool {
+    let want = match purpose_oid(purpose) {
+        Some(o) => o,
+        None    => return true,
+    };
+    match &cert.tbs.extensions.ext_key_usage {
+        Some((_, eku)) => eku_contains(eku, &want) || eku_contains(eku, &any_extended_key_usage_oid()),
+        None => true, // EKU absent = unrestricted (RFC 5280 §4.2.1.12)
+    }
+}
+
+fn eku_contains(eku: &ExtKeyUsage, want: &Oid) -> Bool {
+    let mut i: Int = 0;
+    while i < eku.purposes.len() {
+        let p = &eku.purposes[i];
+        let oid = match p {
+            ExtKeyUsagePurpose.ServerAuth      => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1]),
+            ExtKeyUsagePurpose.ClientAuth      => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 2]),
+            ExtKeyUsagePurpose.CodeSigning     => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 3]),
+            ExtKeyUsagePurpose.EmailProtection => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 4]),
+            ExtKeyUsagePurpose.TimeStamping    => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 8]),
+            ExtKeyUsagePurpose.OcspSigning     => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 9]),
+            ExtKeyUsagePurpose.Other(o)        => o.clone(),
+        };
+        if oid.eq(want) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Revocation policy
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type RevocationPolicy is
+    /// Skip revocation checks entirely. Suitable only for offline
+    /// validation against an embedded snapshot.
+    | NoCheck
+    /// Try OCSP, fall back to CRL on failure. If both fail, the
+    /// verification still succeeds — "soft-fail". Matches Chrome
+    /// pre-2018 / Firefox default for non-EV certs.
+    | SoftFail
+    /// Try OCSP, fall back to CRL. If both fail to give a definitive
+    /// answer, the verification fails — "hard-fail". Required by
+    /// strict supply-chain settings (SLSA Build L3, code-signing).
+    | HardFail
+    /// OCSP only — no CRL fallback. Used by environments that ban
+    /// large CRL downloads (mobile, embedded).
+    | OcspOnly { hard_fail: Bool };
+
+// =============================================================================
+// Verifier configuration
+// =============================================================================
+
+@derive(Clone, Debug)
+public type VerifierConfig is {
+    purpose:           CertPurpose,
+    revocation:        RevocationPolicy,
+    ocsp_options:      OcspCheckOptions,
+    crl_options:       CrlCheckOptions,
+    /// Override the validation time (else now).
+    now_override:      Maybe<Int>,
+};
+
+public fn verifier_config_for_tls_server_auth() -> VerifierConfig {
+    VerifierConfig {
+        purpose:      CertPurpose.ServerAuth,
+        revocation:   RevocationPolicy.SoftFail,
+        ocsp_options: ocsp_check_options_default(),
+        crl_options:  crl_check_options_default(),
+        now_override: None,
+    }
+}
+
+public fn verifier_config_for_code_signing() -> VerifierConfig {
+    VerifierConfig {
+        purpose:      CertPurpose.CodeSigning,
+        revocation:   RevocationPolicy.HardFail,
+        ocsp_options: ocsp_check_options_default(),
+        crl_options:  crl_check_options_default(),
+        now_override: None,
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type VerificationError is
+    | ParseFailed { index: Int, reason: Text }
+    | NoCertsProvided
+    | BuildFailed(PathBuildError)
+    | ValidationFailed(PathError)
+    | RevokedCert { reason: Text }
+    | RevocationCheckFailed { ocsp: Maybe<Text>, crl: Maybe<Text> }
+    | PurposeNotMet { want: CertPurpose };
+
+implement Display for VerificationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ParseFailed { index, reason } => f.write_str(f"verifier: cert[{index}] parse failed: {reason}".as_str()),
+            NoCertsProvided               => f.write_str("verifier: no certificates provided"),
+            BuildFailed(e)                => f.write_str(f"verifier: path build: {e}".as_str()),
+            ValidationFailed(e)           => f.write_str(f"verifier: path validation: {e}".as_str()),
+            RevokedCert { reason }        => f.write_str(f"verifier: cert revoked ({reason})".as_str()),
+            RevocationCheckFailed { ocsp, crl } => f.write_str(
+                f"verifier: revocation check failed (ocsp={ocsp:?}, crl={crl:?})".as_str()),
+            PurposeNotMet { want }        => f.write_str(f"verifier: cert does not satisfy purpose {want:?}".as_str()),
+        }
+    }
+}
+
+implement Debug for VerificationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Output
+// =============================================================================
+
+@derive(Clone, Debug)
+public type VerificationResult is {
+    validated_path: ValidatedPath,
+    /// Per-cert revocation results (for callers that want to log
+    /// which method answered for which intermediate). None for
+    /// `NoCheck` policy.
+    revocation_results: List<PerCertRevocationResult>,
+};
+
+@derive(Clone, Debug)
+public type PerCertRevocationResult is {
+    cert_index: Int,
+    method:     RevocationMethod,
+    status:     RevocationStatus,
+};
+
+@derive(Eq, Clone, Debug)
+public type RevocationMethod is
+    | Ocsp
+    | Crl
+    | Skipped;
+
+@derive(Clone, Debug)
+public type RevocationStatus is
+    | Good
+    | Revoked { reason: Text }
+    | Unknown;
+
+// =============================================================================
+// End-to-end verify
+// =============================================================================
+
+/// Verify a chain of DER-encoded certificates. The first entry is
+/// the EE; the rest are intermediates (any order). The trust store
+/// supplies the anchors; the HTTP client is used for revocation
+/// fetches.
+public async fn verify_certs<C: HttpClient>(
+    http: &C,
+    chain_der: &List<List<Byte>>,
+    trust:   &TrustStore,
+    config:  &VerifierConfig,
+) -> Result<VerificationResult, VerificationError> {
+    if chain_der.is_empty() { return Err(NoCertsProvided); }
+
+    // Step 1: parse.
+    let mut parsed: List<X509Certificate> = List.with_capacity(chain_der.len());
+    let mut i: Int = 0;
+    while i < chain_der.len() {
+        match parse_certificate(chain_der[i].as_slice()) {
+            Ok(c)  => parsed.push(c),
+            Err(e) => return Err(ParseFailed { index: i, reason: format!("{e}").to_text() }),
+        }
+        i = i + 1;
+    }
+    let ee = parsed[0].clone();
+    let mut intermediates: List<X509Certificate> = List.new();
+    let mut k: Int = 1;
+    while k < parsed.len() { intermediates.push(parsed[k].clone()); k = k + 1; }
+
+    verify_parsed(http, &ee, &intermediates, trust, config).await
+}
+
+/// Verify pre-parsed certificates.
+public async fn verify_parsed<C: HttpClient>(
+    http: &C,
+    ee:    &X509Certificate,
+    intermediates: &List<X509Certificate>,
+    trust: &TrustStore,
+    config:&VerifierConfig,
+) -> Result<VerificationResult, VerificationError> {
+    // Step 2: build candidate paths.
+    let candidates = build_paths(ee, intermediates, trust)
+        .map_err(|e| BuildFailed(e))?;
+
+    // Step 3: try each candidate path through path_validation.
+    let now = config.now_override.unwrap_or_else(epoch_seconds);
+    let mut last_validation_error: Maybe<PathError> = None;
+    let mut k: Int = 0;
+    while k < candidates.len() {
+        let path = &candidates[k];
+        let chain = candidate_path_to_list(path);
+        let input = path_validation_input_for_chain(chain, now);
+        match validate_path(&input) {
+            Ok(validated) => {
+                // Step 4: purpose check on EE.
+                if !cert_meets_purpose(&validated.ee, &config.purpose) {
+                    return Err(PurposeNotMet { want: config.purpose.clone() });
+                }
+                // Step 5: revocation.
+                let revocation_results = check_revocation(
+                    http, &validated, &config.revocation,
+                    &config.ocsp_options, &config.crl_options,
+                ).await?;
+                return Ok(VerificationResult { validated_path: validated, revocation_results });
+            }
+            Err(e) => last_validation_error = Some(e),
+        }
+        k = k + 1;
+    }
+    Err(ValidationFailed(last_validation_error.unwrap_or_else(|| PathError.EmptyChain)))
+}
+
+fn path_validation_input_for_chain(
+    chain: List<X509Certificate>,
+    now: Int,
+) -> PathValidationInput {
+    input_default(chain, now)
+}
+
+// =============================================================================
+// Revocation orchestration
+// =============================================================================
+
+async fn check_revocation<C: HttpClient>(
+    http: &C,
+    path: &ValidatedPath,
+    policy: &RevocationPolicy,
+    ocsp_opts: &OcspCheckOptions,
+    crl_opts: &CrlCheckOptions,
+) -> Result<List<PerCertRevocationResult>, VerificationError> {
+    if let RevocationPolicy.NoCheck = policy {
+        let mut out: List<PerCertRevocationResult> = List.new();
+        out.push(PerCertRevocationResult {
+            cert_index: 0,
+            method:     RevocationMethod.Skipped,
+            status:     RevocationStatus.Good,
+        });
+        return Ok(out);
+    }
+
+    // Build a list of (cert, issuer) pairs to check.
+    let mut pairs: List<(X509Certificate, X509Certificate)> = List.new();
+    pairs.push((path.ee.clone(), issuer_of_ee(path)));
+    let mut i: Int = 0;
+    while i < path.intermediates.len() {
+        let cert = path.intermediates[i].clone();
+        let issuer = if i + 1 < path.intermediates.len() {
+            path.intermediates[i + 1].clone()
+        } else {
+            path.anchor.clone()
+        };
+        pairs.push((cert, issuer));
+        i = i + 1;
+    }
+
+    let crl_cache = crl_cache_new();
+    let mut results: List<PerCertRevocationResult> = List.with_capacity(pairs.len());
+    let mut idx: Int = 0;
+    while idx < pairs.len() {
+        let (cert, issuer) = &pairs[idx];
+        let res = check_one_revocation(http, &crl_cache, cert, issuer, policy, ocsp_opts, crl_opts).await?;
+        if let RevocationStatus.Revoked { reason } = &res.status {
+            return Err(VerificationError.RevokedCert { reason: reason.clone() });
+        }
+        results.push(res);
+        idx = idx + 1;
+    }
+    Ok(results)
+}
+
+fn issuer_of_ee(path: &ValidatedPath) -> X509Certificate {
+    if path.intermediates.is_empty() {
+        path.anchor.clone()
+    } else {
+        path.intermediates[0].clone()
+    }
+}
+
+async fn check_one_revocation<C: HttpClient>(
+    http: &C,
+    crl_cache: &CrlCache,
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    policy: &RevocationPolicy,
+    ocsp_opts: &OcspCheckOptions,
+    crl_opts: &CrlCheckOptions,
+) -> Result<PerCertRevocationResult, VerificationError> {
+    // OCSP first.
+    let ocsp_outcome = ocsp_check_status(http, cert, issuer, ocsp_opts).await;
+
+    match ocsp_outcome {
+        Ok(check) => match check.status {
+            CertStatus.Good => return Ok(PerCertRevocationResult {
+                cert_index: 0,
+                method:     RevocationMethod.Ocsp,
+                status:     RevocationStatus.Good,
+            }),
+            CertStatus.Revoked { reason, .. } => return Ok(PerCertRevocationResult {
+                cert_index: 0,
+                method:     RevocationMethod.Ocsp,
+                status:     RevocationStatus.Revoked { reason: format!("{reason:?}").to_text() },
+            }),
+            CertStatus.Unknown => {} // try CRL
+        },
+        Err(_) => {} // try CRL
+    }
+
+    // CRL fallback (skipped for OcspOnly).
+    if let RevocationPolicy.OcspOnly { hard_fail } = policy {
+        if *hard_fail {
+            return Err(VerificationError.RevocationCheckFailed {
+                ocsp: Some("ocsp inconclusive".to_text()),
+                crl:  None,
+            });
+        }
+        return Ok(PerCertRevocationResult {
+            cert_index: 0,
+            method:     RevocationMethod.Ocsp,
+            status:     RevocationStatus.Unknown,
+        });
+    }
+
+    let crl_outcome = check_certificate_status_via_crl(
+        http, crl_cache, cert, issuer, crl_opts,
+    ).await;
+
+    match crl_outcome {
+        Ok(CrlCheckResult.Good { .. }) => Ok(PerCertRevocationResult {
+            cert_index: 0,
+            method:     RevocationMethod.Crl,
+            status:     RevocationStatus.Good,
+        }),
+        Ok(CrlCheckResult.Revoked { reason, .. }) => Ok(PerCertRevocationResult {
+            cert_index: 0,
+            method:     RevocationMethod.Crl,
+            status:     RevocationStatus.Revoked { reason: format!("{reason:?}").to_text() },
+        }),
+        Err(e) => match policy {
+            RevocationPolicy.HardFail => Err(VerificationError.RevocationCheckFailed {
+                ocsp: Some("inconclusive".to_text()),
+                crl:  Some(format!("{e}").to_text()),
+            }),
+            _ => Ok(PerCertRevocationResult {
+                cert_index: 0,
+                method:     RevocationMethod.Crl,
+                status:     RevocationStatus.Unknown,
+            }),
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_purpose_oid_server_auth() {
+        let want = purpose_oid(&CertPurpose.ServerAuth).unwrap();
+        assert(want.eq(&Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1])));
+    }
+
+    #[test]
+    fn test_purpose_oid_any_purpose_returns_none() {
+        assert(purpose_oid(&CertPurpose.AnyPurpose).is_none());
+    }
+
+    #[test]
+    fn test_default_tls_config() {
+        let c = verifier_config_for_tls_server_auth();
+        assert(c.purpose is CertPurpose.ServerAuth);
+        assert(c.revocation is RevocationPolicy.SoftFail);
+    }
+
+    #[test]
+    fn test_default_codesign_config() {
+        let c = verifier_config_for_code_signing();
+        assert(c.purpose is CertPurpose.CodeSigning);
+        assert(c.revocation is RevocationPolicy.HardFail);
+    }
+}

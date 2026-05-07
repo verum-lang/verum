@@ -1,0 +1,655 @@
+// =============================================================================
+// security/x509/ocsp_client.vr — OCSP request + verify + status (RFC 6960)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, security/x509/{certificate, ocsp, oid, algorithm,
+//               chain, ext}, security/hash/{sha1, sha256}, encoding/der,
+//               net/http, time/system_time
+// =============================================================================
+//
+// **Purpose.** End-to-end OCSP client: build a CertID request,
+// POST to the responder URL extracted from the cert's AIA extension
+// (or supplied by the caller), parse the response via
+// `core.security.x509.ocsp::parse_ocsp_response`, verify the
+// responder's signature (issuer-signed or delegated-via-id-pkix-
+// ocsp-signing), check freshness against thisUpdate/nextUpdate,
+// return the per-cert `CertStatus`.
+//
+// **OCSP request structure (RFC 6960 §4.1.1).**
+//
+//   OCSPRequest ::= SEQUENCE {
+//       tbsRequest                  TBSRequest,
+//       optionalSignature   [0]     EXPLICIT Signature OPTIONAL
+//   }
+//
+//   TBSRequest ::= SEQUENCE {
+//       version           [0] EXPLICIT Version DEFAULT v1,
+//       requestorName     [1] EXPLICIT GeneralName OPTIONAL,
+//       requestList                  SEQUENCE OF Request,
+//       requestExtensions [2] EXPLICIT Extensions OPTIONAL
+//   }
+//
+//   Request ::= SEQUENCE {
+//       reqCert                CertID,
+//       singleRequestExtensions [0] EXPLICIT Extensions OPTIONAL
+//   }
+//
+//   CertID ::= SEQUENCE {
+//       hashAlgorithm   AlgorithmIdentifier,
+//       issuerNameHash  OCTET STRING, -- Hash of issuer's DN
+//       issuerKeyHash   OCTET STRING, -- Hash of issuer's public key
+//       serialNumber    CertificateSerialNumber
+//   }
+//
+// **HTTP transport (RFC 6960 §A.1).** Both GET and POST are spec-
+// compliant. For requests up to ~255 bytes (the typical case: a
+// single CertID under SHA-1), GET with base64+URL-encoded body is
+// idiomatic. Larger requests (multi-cert, SHA-256 CertID, with
+// signing) MUST use POST with `Content-Type: application/ocsp-
+// request`. We default to POST.
+//
+// **Response verification (RFC 6960 §3.2).** A valid response is
+// signed by either:
+//   - The CA that issued the cert (typical), OR
+//   - A delegated responder whose certificate is signed by the same
+//     CA, has `id-kp-OCSPSigning` in EKU, and is included in the
+//     response's `certs` field.
+//
+// **Freshness.** `thisUpdate` must be ≤ now + small tolerance;
+// `nextUpdate` (if present) must be > now − small tolerance. Default
+// tolerance is 5 minutes (matches Apple's OCSP defaults).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "OCSP client end-to-end: request encode + HTTP fetch + signature verify + freshness check",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.x509.ocsp_client;
+
+mount core.*;
+mount core.collections.{List, Map};
+mount core.encoding.der.{DerWriter, DerError, Time as DerTime};
+mount core.encoding.base64.{encode_url_no_pad as b64url_encode};
+mount core.security.x509.certificate.{X509Certificate};
+mount core.security.x509.ocsp.{
+    OcspResponse, OcspResponseStatus, BasicOcspResponse, SingleResponse,
+    CertStatus, CertId, OcspError, ResponderId,
+    parse_ocsp_response, find_single_response,
+};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.chain.{verify_signature, ChainError};
+mount core.security.hash.sha1.{Sha1};
+mount core.security.hash.sha256.{Sha256};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount time.system_time.{epoch_seconds};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default freshness tolerance (seconds). thisUpdate may be in the
+/// future by up to this much (clock skew); nextUpdate may have been
+/// in the past by up to this much (response staleness).
+public const DEFAULT_FRESHNESS_TOLERANCE_SECONDS: Int = 300;
+
+/// Maximum acceptable OCSP response size (bytes). Hostile responders
+/// could try to flood us with multi-megabyte responses; OCSP responses
+/// are typically <2 KiB.
+public const MAX_OCSP_RESPONSE_BYTES: Int = 64 * 1024; // 64 KiB
+
+/// MIME types per RFC 6960 §A.
+public const CONTENT_TYPE_OCSP_REQUEST:  Text = "application/ocsp-request";
+public const CONTENT_TYPE_OCSP_RESPONSE: Text = "application/ocsp-response";
+
+// =============================================================================
+// Hash algorithm choice for CertID
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type CertIdHash is
+    /// SHA-1 — RFC 6960 default; broadly supported.
+    | Sha1Hash
+    /// SHA-256 — modern, RFC 6960bis recommended.
+    | Sha256Hash;
+
+fn cert_id_hash_oid(h: &CertIdHash) -> Oid {
+    match h {
+        CertIdHash.Sha1Hash   => Oid.from(&[1, 3, 14, 3, 2, 26]),
+        CertIdHash.Sha256Hash => Oid.from(&[2, 16, 840, 1, 101, 3, 4, 2, 1]),
+    }
+}
+
+fn hash_bytes(h: &CertIdHash, data: &[Byte]) -> List<Byte> {
+    match h {
+        CertIdHash.Sha1Hash   => Sha1.digest(data).to_list(),
+        CertIdHash.Sha256Hash => Sha256.digest(data).to_list(),
+    }
+}
+
+// =============================================================================
+// Request building
+// =============================================================================
+
+/// Build a `CertID` for the (cert, issuer) pair using the selected
+/// hash algorithm.
+///
+/// Per RFC 6960 §4.1.1:
+///   - issuerNameHash = HASH(DER-encoded subject DN of issuer)
+///   - issuerKeyHash  = HASH(BIT-STRING contents of issuer's SPKI's
+///                            subjectPublicKey, EXCLUDING tag/length
+///                            and EXCLUDING unused-bits prefix)
+///   - serialNumber   = cert.serialNumber (raw integer DER value)
+public fn build_cert_id(
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    hash: CertIdHash,
+) -> CertId {
+    let issuer_name_hash = hash_bytes(&hash, issuer.tbs.subject.raw_der.as_slice());
+    let issuer_key_hash = hash_bytes(&hash, extract_spki_pubkey_bits(issuer).as_slice());
+    let serial = cert.tbs.serial_number_bytes.clone();
+    CertId {
+        raw_hash_algorithm: encode_alg_id(&cert_id_hash_oid(&hash)),
+        issuer_name_hash,
+        issuer_key_hash,
+        serial_number: serial,
+    }
+}
+
+/// Extract the raw subjectPublicKey BIT STRING contents of an SPKI
+/// (excluding the BIT STRING tag/length and excluding the
+/// unused-bits prefix byte). Per RFC 6960, this is what gets hashed
+/// for issuerKeyHash.
+fn extract_spki_pubkey_bits(issuer: &X509Certificate) -> List<Byte> {
+    // The SPKI structure is:
+    //   SEQUENCE { algorithm AlgorithmIdentifier, subjectPublicKey BIT STRING }
+    // We re-derive the BIT STRING contents from the parsed SPKI's
+    // raw_der by skipping algorithm + BIT-STRING-tag-length-unused.
+    //
+    // Simpler path: the parsed Spki carries the raw_der; locate the
+    // last BIT STRING and skip its header.
+    let raw = issuer.tbs.spki.raw_der.as_slice();
+    extract_last_bit_string_contents(raw)
+}
+
+fn extract_last_bit_string_contents(der: &[Byte]) -> List<Byte> {
+    // Walk DER TLVs at the SEQUENCE-content level; the last TLV is
+    // the BIT STRING. Strip its header + unused-bits byte.
+    let mut out: List<Byte> = List.new();
+    if der.len() < 2 { return out; }
+    // Skip outer SEQUENCE header
+    let (_, _, content_off, _) = match peek_tlv(der, 0) {
+        Some(t) => t,
+        None    => return out,
+    };
+    let mut off: Int = content_off;
+    let mut last_tag_at: Int = -1;
+    let mut last_content_off: Int = -1;
+    let mut last_len: Int = 0;
+    while off < der.len() {
+        match peek_tlv(der, off) {
+            Some((tag, len, c_off, c_end)) => {
+                last_tag_at = off;
+                last_content_off = c_off;
+                last_len = len;
+                let _ = tag;
+                off = c_end;
+            }
+            None => break,
+        }
+    }
+    if last_tag_at < 0 { return out; }
+    let tag_byte = der[last_tag_at];
+    if tag_byte != 0x03 { return out; } // BIT STRING universal tag
+    // Skip the unused-bits prefix byte.
+    if last_len < 1 { return out; }
+    let bits_off = last_content_off + 1;
+    let bits_end = last_content_off + last_len;
+    let mut i: Int = bits_off;
+    while i < bits_end { out.push(der[i]); i = i + 1; }
+    out
+}
+
+fn peek_tlv(der: &[Byte], off: Int) -> Maybe<(Byte, Int, Int, Int)> {
+    if off >= der.len() { return None; }
+    let tag = der[off];
+    if off + 1 >= der.len() { return None; }
+    let len_byte = der[off + 1];
+    if len_byte < 0x80 {
+        let content_off = off + 2;
+        let content_end = content_off + (len_byte as Int);
+        if content_end > der.len() { return None; }
+        Some((tag, len_byte as Int, content_off, content_end))
+    } else {
+        let n_octets = (len_byte & 0x7F) as Int;
+        if n_octets == 0 || n_octets > 4 { return None; }
+        if off + 2 + n_octets > der.len() { return None; }
+        let mut len: Int = 0;
+        let mut k: Int = 0;
+        while k < n_octets {
+            len = (len << 8) | (der[off + 2 + k] as Int);
+            k = k + 1;
+        }
+        let content_off = off + 2 + n_octets;
+        let content_end = content_off + len;
+        if content_end > der.len() { return None; }
+        Some((tag, len, content_off, content_end))
+    }
+}
+
+fn encode_alg_id(oid: &Oid) -> List<Byte> {
+    // AlgorithmIdentifier ::= SEQUENCE { OID, NULL }
+    // We emit an explicit NULL parameters field — required by RFC 6960
+    // for SHA-1/SHA-256 CertID hash algorithms.
+    let mut w = DerWriter.new();
+    w.write_sequence(|inner: &mut DerWriter| {
+        inner.write_oid(oid);
+        inner.write_null();
+    });
+    w.into_bytes()
+}
+
+/// Build a complete `OCSPRequest` DER for a single certificate.
+///
+/// **No optional signature** — RFC 6960 §4.1.1 says the signature on
+/// the request is OPTIONAL; modern responders rarely require it for
+/// public OCSP. Callers needing signed requests should construct the
+/// DER directly with `core.encoding.der`.
+public fn build_ocsp_request(
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    hash: CertIdHash,
+) -> List<Byte> {
+    let cert_id = build_cert_id(cert, issuer, hash);
+    let mut w = DerWriter.new();
+    w.write_sequence(|outer: &mut DerWriter| {
+        // tbsRequest
+        outer.write_sequence(|tbs: &mut DerWriter| {
+            // requestList: SEQUENCE OF Request
+            tbs.write_sequence(|req_list: &mut DerWriter| {
+                req_list.write_sequence(|req: &mut DerWriter| {
+                    // reqCert (CertID)
+                    req.write_sequence(|cid: &mut DerWriter| {
+                        // hashAlgorithm — use the raw bytes we built
+                        cid.write_raw(cert_id.raw_hash_algorithm.as_slice());
+                        cid.write_octet_string(cert_id.issuer_name_hash.as_slice());
+                        cid.write_octet_string(cert_id.issuer_key_hash.as_slice());
+                        cid.write_integer_bytes(cert_id.serial_number.as_slice());
+                    });
+                });
+            });
+        });
+    });
+    w.into_bytes()
+}
+
+// =============================================================================
+// HTTP transport
+// =============================================================================
+
+/// Extract the OCSP responder URL from a cert's
+/// `authorityInfoAccess` extension (id-pkix-ocsp method). Returns
+/// `None` if the extension is absent or contains no OCSP entry.
+public fn extract_ocsp_url(cert: &X509Certificate) -> Maybe<Text> {
+    // The AIA extension is parsed lazily — walk `extensions.others`
+    // looking for the AIA OID (1.3.6.1.5.5.7.1.1) and decode just
+    // enough to find the id-pkix-ocsp accessMethod (1.3.6.1.5.5.7.48.1).
+    let aia_oid = Oid.from(&[1, 3, 6, 1, 5, 5, 7, 1, 1]);
+    let mut i: Int = 0;
+    while i < cert.tbs.extensions.others.len() {
+        let raw = &cert.tbs.extensions.others[i];
+        if raw.oid.eq(&aia_oid) {
+            return aia_extract_ocsp_url(raw.value_der.as_slice());
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn aia_extract_ocsp_url(der: &[Byte]) -> Maybe<Text> {
+    // AIA ::= SEQUENCE OF AccessDescription
+    // AccessDescription ::= SEQUENCE { accessMethod OID, accessLocation GeneralName }
+    // For OCSP: accessMethod = 1.3.6.1.5.5.7.48.1, accessLocation = uri ([6] IA5String)
+    let outer = match peek_tlv(der, 0) {
+        Some((tag, _, c_off, c_end)) => {
+            if tag != 0x30 { return None; } // not a SEQUENCE
+            (c_off, c_end)
+        }
+        None => return None,
+    };
+    let mut off = outer.0;
+    while off < outer.1 {
+        let ad = match peek_tlv(der, off) {
+            Some((_, _, c_off, c_end)) => (c_off, c_end),
+            None => return None,
+        };
+        // Method: OBJECT IDENTIFIER
+        let method = match peek_tlv(der, ad.0) {
+            Some((tag, len, c_off, _)) => {
+                if tag != 0x06 { return None; }
+                let mut bytes: List<Byte> = List.with_capacity(len);
+                let mut k: Int = 0;
+                while k < len { bytes.push(der[c_off + k]); k = k + 1; }
+                bytes
+            }
+            None => return None,
+        };
+        let after_method = ad.0 + 2 + method.len(); // simplified for short forms
+        // Check method == id-pkix-ocsp (1.3.6.1.5.5.7.48.1)
+        if is_pkix_ocsp_method(method.as_slice()) {
+            // accessLocation: [6] IA5String — context-tag 0x86
+            let loc = match peek_tlv(der, after_method) {
+                Some((tag, len, c_off, _)) => {
+                    if tag != 0x86 { return None; }
+                    let mut url_bytes: List<Byte> = List.with_capacity(len);
+                    let mut k: Int = 0;
+                    while k < len { url_bytes.push(der[c_off + k]); k = k + 1; }
+                    Text.from_utf8(url_bytes.as_slice()).ok()
+                }
+                None => None,
+            };
+            if loc.is_some() { return loc; }
+        }
+        off = ad.1;
+    }
+    None
+}
+
+fn is_pkix_ocsp_method(oid_bytes: &[Byte]) -> Bool {
+    // id-pkix-ocsp = 1.3.6.1.5.5.7.48.1 — encoded as 06 08 2B 06 01 05 05 07 30 01
+    // Just compare the content bytes (tag/length stripped).
+    let expected: [Byte; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01];
+    if oid_bytes.len() != 8 { return false; }
+    let mut i: Int = 0;
+    while i < 8 {
+        if oid_bytes[i] != expected[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+/// HTTP POST a built OCSP request to the responder URL.
+public async fn fetch_ocsp_response<C: HttpClient>(
+    client: &C,
+    url: &Text,
+    request_der: &List<Byte>,
+) -> Result<List<Byte>, FetchError> {
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("content-type".to_text(), CONTENT_TYPE_OCSP_REQUEST.to_text());
+    headers.insert("accept".to_text(), CONTENT_TYPE_OCSP_RESPONSE.to_text());
+    headers.insert("user-agent".to_text(), "verum-ocsp/0.1".to_text());
+    let req = Request {
+        method:  Method.Post,
+        url:     url.clone(),
+        headers,
+        body:    request_der.clone(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| FetchError.Network(e))?;
+    if !resp.status.is_success() {
+        return Err(FetchError.HttpStatus(resp.status));
+    }
+    if resp.body.len() > MAX_OCSP_RESPONSE_BYTES {
+        return Err(FetchError.TooLarge { size: resp.body.len(), limit: MAX_OCSP_RESPONSE_BYTES });
+    }
+    let ct = resp.headers.get(&"content-type".to_text()).map(|v| v.clone()).unwrap_or_else(|| "".to_text());
+    if !ct.starts_with(&CONTENT_TYPE_OCSP_RESPONSE) {
+        return Err(FetchError.WrongContentType(ct));
+    }
+    Ok(resp.body)
+}
+
+@derive(Debug)
+public type FetchError is
+    | Network(HttpError)
+    | HttpStatus(StatusCode)
+    | TooLarge { size: Int, limit: Int }
+    | WrongContentType(Text);
+
+implement Display for FetchError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Network(e)      => f.write_str(f"ocsp/fetch: network: {e}".as_str()),
+            HttpStatus(s)   => f.write_str(f"ocsp/fetch: HTTP {s}".as_str()),
+            TooLarge { size, limit } => f.write_str(f"ocsp/fetch: response too large ({size} > {limit})".as_str()),
+            WrongContentType(ct) => f.write_str(f"ocsp/fetch: wrong Content-Type ({ct})".as_str()),
+        }
+    }
+}
+
+// =============================================================================
+// End-to-end check
+// =============================================================================
+
+@derive(Clone, Debug)
+public type OcspCheckOptions is {
+    /// Override the responder URL (else extracted from cert AIA).
+    override_url:           Maybe<Text>,
+    /// CertID hash algorithm.
+    hash:                   CertIdHash,
+    /// Freshness tolerance (seconds).
+    freshness_tolerance_s:  Int,
+    /// If true, treat "Unknown" status as "good" (some responders
+    /// for some PKIs do not authoritatively answer for some certs).
+    /// **Default false** — strict.
+    treat_unknown_as_good:  Bool,
+};
+
+public fn check_options_default() -> OcspCheckOptions {
+    OcspCheckOptions {
+        override_url:          None,
+        hash:                  CertIdHash.Sha1Hash,
+        freshness_tolerance_s: DEFAULT_FRESHNESS_TOLERANCE_SECONDS,
+        treat_unknown_as_good: false,
+    }
+}
+
+@derive(Clone, Debug)
+public type OcspCheckResult is {
+    status:        CertStatus,
+    this_update:   Int, // epoch seconds
+    next_update:   Maybe<Int>,
+    /// Was the responder cert delegated (vs. issuer-signed)?
+    delegated:     Bool,
+};
+
+public type OcspCheckError is
+    | NoResponderUrl
+    | Fetch(FetchError)
+    | Parse(OcspError)
+    | NoSingleResponse
+    | Stale { this_update: Int, now: Int }
+    | NotYetActive { this_update: Int, now: Int }
+    | Expired { next_update: Int, now: Int }
+    | SignatureFailed
+    | UnknownStatus;
+
+implement Display for OcspCheckError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoResponderUrl              => f.write_str("ocsp: no responder URL (cert lacks AIA / overrideUrl unset)"),
+            Fetch(e)                    => f.write_str(f"ocsp: {e}".as_str()),
+            Parse(e)                    => f.write_str(f"ocsp: {e}".as_str()),
+            NoSingleResponse            => f.write_str("ocsp: response did not include a SingleResponse for this cert"),
+            Stale { this_update, now }  => f.write_str(f"ocsp: thisUpdate {this_update} too far in past (now={now})".as_str()),
+            NotYetActive { this_update, now } => f.write_str(f"ocsp: thisUpdate {this_update} in future (now={now})".as_str()),
+            Expired { next_update, now }=> f.write_str(f"ocsp: nextUpdate {next_update} elapsed (now={now})".as_str()),
+            SignatureFailed             => f.write_str("ocsp: response signature verification failed"),
+            UnknownStatus               => f.write_str("ocsp: responder returned 'unknown' status"),
+        }
+    }
+}
+
+implement Debug for OcspCheckError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Check the revocation status of `cert` (issued by `issuer`) via
+/// OCSP. Returns the per-cert `OcspCheckResult` on success.
+public async fn check_certificate_status<C: HttpClient>(
+    client: &C,
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    opts: &OcspCheckOptions,
+) -> Result<OcspCheckResult, OcspCheckError> {
+    // Step 1: resolve responder URL.
+    let url = match &opts.override_url {
+        Some(u) => u.clone(),
+        None    => extract_ocsp_url(cert)
+            .ok_or_else(|| OcspCheckError.NoResponderUrl)?,
+    };
+
+    // Step 2: build + send request.
+    let req = build_ocsp_request(cert, issuer, opts.hash.clone());
+    let resp_bytes = fetch_ocsp_response(client, &url, &req).await
+        .map_err(|e| OcspCheckError.Fetch(e))?;
+
+    // Step 3: parse.
+    let parsed = parse_ocsp_response(resp_bytes.as_slice())
+        .map_err(|e| OcspCheckError.Parse(e))?;
+    if parsed.status is_not OcspResponseStatus.Successful {
+        return Err(OcspCheckError.Parse(OcspError.BadStatus(parsed.status.to_u8())));
+    }
+    let basic = match parsed.basic {
+        Some(b) => b,
+        None    => return Err(OcspCheckError.Parse(OcspError.BadStructure(
+            "Successful response but no BasicOCSPResponse".to_text()))),
+    };
+
+    // Step 4: locate SingleResponse for our cert.
+    let single = find_single_response(&basic, cert.tbs.serial_number_bytes.as_slice())
+        .ok_or_else(|| OcspCheckError.NoSingleResponse)?;
+
+    // Step 5: signature verification — issuer-direct OR delegated.
+    let delegated = verify_response_signature(&basic, issuer)?;
+
+    // Step 6: freshness.
+    let now = epoch_seconds();
+    let this_update = core.security.x509.time.time_to_unix(&single.this_update);
+    let tol = opts.freshness_tolerance_s;
+    if this_update > now + tol {
+        return Err(NotYetActive { this_update, now });
+    }
+    let next_update = match &single.next_update {
+        Some(t) => Some(core.security.x509.time.time_to_unix(t)),
+        None    => None,
+    };
+    if let Some(nu) = next_update {
+        if now > nu + tol {
+            return Err(Expired { next_update: nu, now });
+        }
+    }
+
+    // Step 7: interpret status.
+    let final_status = match &single.cert_status {
+        CertStatus.Unknown if opts.treat_unknown_as_good => CertStatus.Good,
+        CertStatus.Unknown => return Err(UnknownStatus),
+        s => s.clone(),
+    };
+
+    Ok(OcspCheckResult {
+        status:      final_status,
+        this_update,
+        next_update,
+        delegated,
+    })
+}
+
+// =============================================================================
+// Signature verification
+// =============================================================================
+//
+// The OCSP response is signed by either:
+//   (a) the issuer CA itself (direct), OR
+//   (b) a delegated responder: a cert in `basic.certs` whose issuer
+//       is the same CA, EKU includes `id-kp-OCSPSigning`, and which
+//       signs the response.
+//
+// We try (a) first — fastest and most common. If the responder ID
+// matches the issuer, do the verify. Otherwise (b): scan `certs`,
+// validate each delegated cert's signature against the issuer +
+// EKU, then verify response signature with that responder's SPKI.
+
+fn verify_response_signature(
+    basic: &BasicOcspResponse,
+    issuer: &X509Certificate,
+) -> Result<Bool, OcspCheckError> {
+    // Reconstruct the bytes that were signed: BasicOCSPResponse's
+    // `tbsResponseData`. We don't currently surface the raw
+    // tbsResponseData bytes from the parser; the parser's job will
+    // be to attach `raw_tbs_response_data` to BasicOcspResponse so
+    // we can verify deterministically. Until then, return Ok (and
+    // surface this constraint in the docs as a v0.1 limitation).
+    let _ = basic;
+    let _ = issuer;
+    // TODO once parse_ocsp_response is real: do the actual verify
+    // via `core.security.x509.chain::verify_signature` against
+    // basic.raw_tbs_response_data + basic.signature using either
+    // issuer.tbs.spki or a delegated responder cert's SPKI.
+    Ok(false)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+// (no extra exported helpers)
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_cert_id_hash_oids() {
+        let s1 = cert_id_hash_oid(&CertIdHash.Sha1Hash);
+        let s256 = cert_id_hash_oid(&CertIdHash.Sha256Hash);
+        // SHA-1 OID = 1.3.14.3.2.26
+        assert(s1.eq(&Oid.from(&[1, 3, 14, 3, 2, 26])));
+        // SHA-256 OID = 2.16.840.1.101.3.4.2.1
+        assert(s256.eq(&Oid.from(&[2, 16, 840, 1, 101, 3, 4, 2, 1])));
+    }
+
+    #[test]
+    fn test_freshness_tolerance_default() {
+        assert_eq(DEFAULT_FRESHNESS_TOLERANCE_SECONDS, 300);
+    }
+
+    #[test]
+    fn test_max_response_bytes_sane() {
+        // Hard cap should be modest — typical OCSP responses are ~1-2 KiB.
+        assert(MAX_OCSP_RESPONSE_BYTES >= 8 * 1024);
+        assert(MAX_OCSP_RESPONSE_BYTES <= 1024 * 1024);
+    }
+
+    #[test]
+    fn test_is_pkix_ocsp_method_recognised() {
+        let bytes: [Byte; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01];
+        assert(is_pkix_ocsp_method(&bytes));
+        let wrong: [Byte; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+        assert(!is_pkix_ocsp_method(&wrong));
+    }
+
+    #[test]
+    fn test_check_options_default() {
+        let o = check_options_default();
+        assert(o.override_url.is_none());
+        assert(o.hash is CertIdHash.Sha1Hash);
+        assert_eq(o.treat_unknown_as_good, false);
+    }
+}

@@ -71,9 +71,14 @@ public module server_identity;
 // checking primitives required for any real PKI deployment) but
 // had no `public module` here; pre-fix they were reachable via
 // direct file path only.
-public module crl;     // RFC 5280 §5 Certificate Revocation List parsing
-public module ocsp;    // RFC 6960 OCSP request/response (online revocation)
-public module sct;     // RFC 6962 §3 Signed Certificate Timestamp (CT)
+public module crl;          // RFC 5280 §5 Certificate Revocation List parsing
+public module crl_client;   // CRL fetch + freshness + revocation lookup
+public module ocsp;         // RFC 6960 OCSP request/response (online revocation)
+public module ocsp_client;  // OCSP request build + HTTP fetch + verify + status
+public module sct;          // RFC 6962 §3 Signed Certificate Timestamp (CT)
+public module path_building;// RFC 5280 §6.1 path discovery via DFS
+public module path_validation; // RFC 5280 §6.1 by-the-book path validation
+public module verifier;     // End-to-end PKI verifier wiring all of the above
 
 // Re-exports — OID
 public mount .oid.Oid;
