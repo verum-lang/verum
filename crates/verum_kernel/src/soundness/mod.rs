@@ -53,6 +53,7 @@ pub mod coq;
 pub mod corpus_export;
 pub mod discharge_status;
 pub mod expr_translate;
+pub mod isabelle;
 pub mod kernel_v0_manifest;
 pub mod lean;
 pub mod proof_body_translate;
@@ -498,7 +499,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
                 // proofs reduce to `fun _ => trivial` after the
                 // soundness-export refactor.  See `lean.rs` for the
                 // structural fragment which has *real* per-rule proofs.
-                "  intro _. trivial.",
+                "  intros _. trivial.",
                 "  intro _; trivial",
             ),
         ),
@@ -528,7 +529,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             0,
             true,
             proved(
-                "  intro _. trivial.",
+                "  intros _. trivial.",
                 "  intro _; trivial",
             ),
         ),

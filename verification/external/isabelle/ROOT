@@ -1,0 +1,4 @@
+session "KernelSoundness" = HOL +
+  options [document = false, timeout = 600]
+  theories
+    KernelSoundness
