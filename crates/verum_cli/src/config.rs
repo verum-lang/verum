@@ -1529,18 +1529,24 @@ pub struct Profile {
     pub cbgr_checks: CbgrCheckMode,
 }
 
-// CBGR check modes
-// All: every reference checked at runtime (~15ns each)
-// Optimized: escape analysis eliminates provably-safe checks
-// Proven: only emit checks where safety cannot be statically proven
+// CBGR check modes — each level expresses a real architectural choice.
+// All:          every reference checked at runtime (~15ns each).
+// Optimized:    escape analysis eliminates provably-safe checks.
+// Proven:       only emit checks where safety cannot be statically proven.
+// AuditPoints:  checks only at audit-protocol boundary points — the
+//               transitions between known-safe regions and unverified
+//               code, mirroring the L4 architectural-shape audit gates.
+//               Strictly stronger framing than `Proven`: the boundaries
+//               are identified by the audit subsystem, not the optimiser.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub enum CbgrCheckMode {
     #[default]
     All, // All CBGR checks enabled
-    Optimized, // Escape analysis optimization
-    Proven,    // Only unproven checks
+    Optimized,   // Escape analysis optimization
+    Proven,      // Only unproven checks
+    AuditPoints, // Boundary-point checks aligned to L4 audit gates
 }
 
 impl Default for Profile {
