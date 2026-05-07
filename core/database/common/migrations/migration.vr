@@ -1,0 +1,174 @@
+// =============================================================================
+// database/common/migrations/migration.vr — Migration record + builder
+// =============================================================================
+// Layer: 2 (Database — vendor-neutral)
+// Dependencies: core, base
+// =============================================================================
+//
+// **Migration** — a fully-described database schema-evolution step
+// that any registered `MigrationStore` (sqlite / postgres / mysql /
+// future) can apply through the universal `MigrationRunner`.
+//
+//   * `version`      — strict-monotonic identifier; the integer
+//                      written to the persistent journal after this
+//                      migration successfully applies.
+//   * `name`         — human-readable label for journal output.
+//   * `up_sql`       — SQL run on apply.
+//   * `down_sql`     — SQL run on rollback. `None` ⇒ irreversible;
+//                      rollback past it requires manual intervention.
+//   * `depends_on`   — list of versions that must apply first.
+//   * `is_idempotent`— `True` ⇒ safe to re-run without checksum guard.
+//
+// Vendor-neutrality: this record carries no SQLite- or Postgres-specific
+// constructs. The vendor adapter (`MigrationStore`) is responsible for:
+//   * Choosing the appropriate dialect when constructing migrations.
+//   * Persisting journal state through its connection.
+//   * Acquiring vendor-specific concurrency locks (Postgres advisory
+//     lock; SQLite no-op).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral Migration record + status + builder",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.common.migrations.migration;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Migration
+// -----------------------------------------------------------------------------
+
+public type Migration is {
+    version: Int,
+    name: Text,
+    up_sql: Text,
+    down_sql: Maybe<Text>,
+    depends_on: List<Int>,
+    is_idempotent: Bool,
+};
+
+public fn migration_new(version: Int, name: Text, up_sql: Text) -> Migration {
+    Migration {
+        version: version,
+        name: name,
+        up_sql: up_sql,
+        down_sql: None,
+        depends_on: List.new(),
+        is_idempotent: false,
+    }
+}
+
+implement Migration {
+    public fn with_down(mut self, sql: Text) -> Migration {
+        self.down_sql = Some(sql);
+        self
+    }
+
+    public fn with_dependency(mut self, version: Int) -> Migration {
+        self.depends_on.push(version);
+        self
+    }
+
+    public fn mark_idempotent(mut self) -> Migration {
+        self.is_idempotent = true;
+        self
+    }
+
+    public fn is_reversible(&self) -> Bool {
+        match &self.down_sql { Some(_) => true, None => false }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MigrationStatus
+// -----------------------------------------------------------------------------
+
+public type MigrationStatus is
+      MsPending          // declared but not applied
+    | MsApplied(Int64)   // applied — wall-clock ns of completion
+    | MsRolledBack(Int64)
+    | MsFailed(Text);    // the error text from the failure
+
+public fn status_name(s: &MigrationStatus) -> Text {
+    match s {
+        MsPending      => "pending".clone(),
+        MsApplied(_)   => "applied".clone(),
+        MsRolledBack(_)=> "rolled_back".clone(),
+        MsFailed(_)    => "failed".clone(),
+    }
+}
+
+public fn clone_status(s: &MigrationStatus) -> MigrationStatus {
+    match s {
+        MsPending       => MsPending,
+        MsApplied(t)    => MsApplied(*t),
+        MsRolledBack(t) => MsRolledBack(*t),
+        MsFailed(e)     => MsFailed(e.clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+public fn clone_migration(m: &Migration) -> Migration {
+    let mut deps: List<Int> = List.with_capacity(m.depends_on.len());
+    deps.extend_from_slice(m.depends_on.as_slice());
+    let down = match &m.down_sql {
+        Some(s) => Some(s.clone()),
+        None    => None,
+    };
+    Migration {
+        version: m.version,
+        name: m.name.clone(),
+        up_sql: m.up_sql.clone(),
+        down_sql: down,
+        depends_on: deps,
+        is_idempotent: m.is_idempotent,
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_builder() {
+        let m = migration_new(1, "init".to_text(), "CREATE TABLE x (id INT)".to_text())
+            .with_down("DROP TABLE x".to_text())
+            .with_dependency(0)
+            .mark_idempotent();
+        assert_eq(m.version, 1);
+        assert!(m.is_reversible());
+        assert!(m.is_idempotent);
+        assert_eq(m.depends_on.len(), 1);
+    }
+
+    #[test]
+    fn test_status_name() {
+        assert_eq(status_name(&MsPending), "pending".to_text());
+        assert_eq(status_name(&MsApplied(0_i64)), "applied".to_text());
+        assert_eq(status_name(&MsRolledBack(0_i64)), "rolled_back".to_text());
+        assert_eq(status_name(&MsFailed("e".to_text())), "failed".to_text());
+    }
+}

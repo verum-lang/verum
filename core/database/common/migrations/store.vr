@@ -1,0 +1,204 @@
+// =============================================================================
+// database/common/migrations/store.vr — MigrationStore protocol
+// =============================================================================
+// Layer: 2 (Database — vendor-neutral)
+// Dependencies: core, base, common/protocol, common/error,
+//               common/migrations/{migration, journal}
+// =============================================================================
+//
+// **The vendor-neutralisation pivot.** `MigrationStore` is the protocol
+// that decouples the universal `MigrationRunner` from any specific
+// database. Every vendor adapter (sqlite / postgres / mysql / future)
+// implements `MigrationStore` to provide:
+//
+//   1. **Schema bootstrap** (`init`) — create the persistent migration
+//      tracking table if it does not exist. Adapter chooses column types
+//      and naming dialect.
+//
+//   2. **Journal load** (`load_journal`) — read all rows of the tracking
+//      table back into a `MigrationJournal` aggregate.
+//
+//   3. **Journal persist** (`upsert_entry`) — write one journal entry
+//      (INSERT or UPDATE on conflict).
+//
+//   4. **Concurrency lock** (`acquire_lock` / `release_lock`) — vendor
+//      may serialise concurrent migration runners. Postgres uses
+//      `pg_advisory_lock`; SQLite uses a no-op (write-ahead log
+//      already serialises); MySQL uses `GET_LOCK`.
+//
+//   5. **DDL execution** (`execute_sql`) — run a vendor-dialect SQL
+//      statement. Used by the runner to apply the migration's
+//      `up_sql` / `down_sql`.
+//
+// **Categorical structure.** `MigrationStore` is the right side of an
+// adjunction with the abstract `Migration` plan: the runner's
+// "compute what to do" lives in the universal category; the store's
+// "do it on this vendor" lives in the vendor-specific category. The
+// adjunction unit is `init`; the counit is `release_lock` after a
+// completed run.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral protocol decoupling MigrationRunner from DB-specific persistence",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.common.migrations.store;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.common.error.{DbError};
+mount core.database.common.migrations.journal.{MigrationJournal, JournalEntry};
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+/// Universal migration-store configuration. Vendor-specific stores
+/// extend with their own fields (advisory-lock key for Postgres, etc.).
+public type MigrationStoreConfig is {
+    /// Name of the persistent tracking table. Default `__verum_migrations`.
+    table_name: Text,
+    /// If `true`, every migration runs inside a transaction; the
+    /// `__verum_migrations` row is updated in the same transaction so
+    /// either both succeed or both roll back. SQLite + Postgres support
+    /// this; MySQL has caveats with non-transactional DDL.
+    transactional: Bool,
+};
+
+public fn store_config_default() -> MigrationStoreConfig {
+    MigrationStoreConfig {
+        table_name: "__verum_migrations".to_text(),
+        transactional: true,
+    }
+}
+
+implement MigrationStoreConfig {
+    public fn with_table_name(mut self, name: Text) -> MigrationStoreConfig {
+        self.table_name = name;
+        self
+    }
+
+    public fn with_transactional(mut self, b: Bool) -> MigrationStoreConfig {
+        self.transactional = b;
+        self
+    }
+}
+
+// =============================================================================
+// MigrationStore — the core protocol
+// =============================================================================
+
+public protocol MigrationStore {
+    /// Adapter dialect identifier (e.g., "sqlite", "postgres"). Used in
+    /// diagnostics and run-report headers.
+    fn dialect(&self) -> Text;
+
+    /// Configuration used at construction.
+    fn config(&self) -> &MigrationStoreConfig;
+
+    /// Create the migration tracking table if it does not exist.
+    /// Idempotent. Vendor chooses column types and dialect-specific
+    /// quoting.
+    async fn init(&mut self) -> Result<(), DbError>;
+
+    /// Load every row of the tracking table into a `MigrationJournal`.
+    async fn load_journal(&mut self) -> Result<MigrationJournal, DbError>;
+
+    /// Persist a journal entry (INSERT or UPDATE on `(version)` conflict).
+    async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError>;
+
+    /// Acquire a process/cluster-wide lock that serialises concurrent
+    /// migration runners. Postgres: `pg_advisory_lock`. SQLite: no-op.
+    /// MySQL: `GET_LOCK`. Returns immediately on acquire; blocks while
+    /// lock is held by another runner.
+    async fn acquire_lock(&mut self) -> Result<(), DbError>;
+
+    /// Release the lock acquired in `acquire_lock`. Called even on
+    /// migration failure.
+    async fn release_lock(&mut self) -> Result<(), DbError>;
+
+    /// Execute one DDL/DML statement from a migration's up_sql/down_sql.
+    /// The store decides whether to wrap in a transaction (per
+    /// `config.transactional`).
+    async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError>;
+
+    /// Drop the entire migration tracking table. Used by tooling
+    /// ("reset migrations") and by tests. Idempotent.
+    async fn drop_tracking_table(&mut self) -> Result<(), DbError>;
+}
+
+// =============================================================================
+// Convenience helpers
+// =============================================================================
+
+/// Default DDL fragment: column shape used by both SQLite and Postgres
+/// MigrationStore impls. Adapters substitute their own integer / text
+/// types around this canonical column set.
+public fn canonical_columns_doc() -> Text {
+    "version INTEGER PRIMARY KEY,
+     name TEXT NOT NULL,
+     status TEXT NOT NULL,
+     applied_at INTEGER,
+     error TEXT,
+     checksum INTEGER NOT NULL".to_text()
+}
+
+/// FNV-1a 64-bit hash of the table-name string, used as the advisory-lock
+/// key on Postgres (`pg_advisory_lock(<key>)`) so that multiple cogs
+/// using different tracking tables on the same database do not contend.
+public fn advisory_lock_key_for(table_name: &Text) -> Int64 {
+    let mut h: Int64 = -3750763034362895579 as Int64;
+    let bs = table_name.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        h = h ^ (bs[i] as Int64);
+        h = h * 1099511628211_i64;
+        i = i + 1;
+    }
+    h
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_default_config() {
+        let c = store_config_default();
+        assert_eq(c.table_name, "__verum_migrations".to_text());
+        assert!(c.transactional);
+    }
+
+    #[test]
+    fn test_with_table_name() {
+        let c = store_config_default().with_table_name("custom_migrations".to_text());
+        assert_eq(c.table_name, "custom_migrations".to_text());
+    }
+
+    #[test]
+    fn test_advisory_lock_key_stable() {
+        let k1 = advisory_lock_key_for(&"__verum_migrations".to_text());
+        let k2 = advisory_lock_key_for(&"__verum_migrations".to_text());
+        let k3 = advisory_lock_key_for(&"other_table".to_text());
+        assert_eq(k1, k2);
+        assert!(k1 != k3);
+    }
+}

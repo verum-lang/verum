@@ -14,18 +14,14 @@
 //   * Runner dry-run produces decisions without executing
 //   * Strict-mode rollback on failure (LIFO)
 
-mount core.database.sqlite.native.migrations.migration.{
+// Migration framework now lifted to core.database.common.migrations.*;
+// SQLite still re-exports the same surface plus its SqliteMigrationStore.
+mount core.database.common.migrations.{
     Migration, MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
     migration_new, status_name,
-};
-mount core.database.sqlite.native.migrations.plan.{
     MigrationPlanError, PeDuplicateVersion, PeUnknownDependency, PeCycle,
     MigrationPlan, build,
-};
-mount core.database.sqlite.native.migrations.journal.{
     JournalEntry, MigrationJournal, journal_new, checksum_for_sql,
-};
-mount core.database.sqlite.native.migrations.runner.{
     RunMode, RmDryRun, RmStrict, RmContinueOnDrift,
     RunDecision, RdSkip, RdApply, RdSkipDrift, RdAbortDrift,
     RunReport, report_zero,

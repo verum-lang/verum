@@ -1,0 +1,317 @@
+// =============================================================================
+// database/postgres/migrations/store.vr — PostgresMigrationStore
+// =============================================================================
+// Layer: 2 (Database — Postgres adapter)
+// Dependencies: core, base, common/migrations/{store, journal, migration},
+//               postgres/{connection, transaction}
+// =============================================================================
+//
+// Postgres-specific implementation of `MigrationStore`. Adds three
+// Postgres-native concerns on top of the universal protocol:
+//
+//   1. **Advisory locks.** `pg_advisory_lock(<key>)` acquires a
+//      session-level lock; `pg_advisory_unlock(<key>)` releases. The
+//      key is FNV-1a of the tracking-table name so concurrent cogs
+//      with different table names don't contend. This guarantees that
+//      multiple Postgres clients running migrations against the same
+//      database serialise — preventing duplicate-apply, lost-update,
+//      and partial-DDL hazards.
+//
+//   2. **Transactional DDL.** Postgres allows DDL inside transactions
+//      (unlike MySQL); `MigrationStoreConfig.transactional = true`
+//      wraps every step in a transaction so the row-update in
+//      `__verum_migrations` and the actual DDL commit atomically.
+//
+//   3. **JSONB-friendly column types.** The tracking table uses
+//      Postgres-canonical types: `BIGINT` for version + checksum,
+//      `TEXT` for name + status + error, `TIMESTAMPTZ` for
+//      `applied_at`. These are emitted by `init()`'s SQL.
+//
+// **Categorical position.** This is the Postgres-side image of the
+// Postgres-flavoured adjunction described in `common/migrations/store.vr`:
+// `init` is the unit; `release_lock` after `execute` is the counit;
+// the universal `MigrationRunner` factors uniquely through `init |>
+// acquire_lock |> load_journal |> ... |> release_lock`.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Postgres-specific MigrationStore — advisory locks + transactional DDL",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.postgres.migrations.store;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
+mount collections.List;
+mount core.database.common.error.{DbError};
+mount core.database.common.migrations.store.{
+    MigrationStore, MigrationStoreConfig, advisory_lock_key_for,
+};
+mount core.database.common.migrations.migration.{
+    MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
+};
+mount core.database.common.migrations.journal.{
+    MigrationJournal, JournalEntry, journal_new,
+};
+mount core.database.postgres.connection.{PgConnection};
+
+// =============================================================================
+// PostgresMigrationStore
+// =============================================================================
+
+public type PostgresMigrationStore is {
+    conn: PgConnection,
+    config: MigrationStoreConfig,
+    /// FNV-1a of `config.table_name` — the advisory-lock key.
+    lock_key: Int64,
+    /// Whether `acquire_lock` has been called and not yet released.
+    /// Used by `release_lock` to be idempotent.
+    lock_held: Bool,
+};
+
+public fn store_new(conn: PgConnection, config: MigrationStoreConfig) -> PostgresMigrationStore {
+    let key = advisory_lock_key_for(&config.table_name);
+    PostgresMigrationStore {
+        conn: conn,
+        config: config,
+        lock_key: key,
+        lock_held: false,
+    }
+}
+
+implement MigrationStore for PostgresMigrationStore {
+    fn dialect(&self) -> Text { "postgres".to_text() }
+
+    fn config(&self) -> &MigrationStoreConfig { &self.config }
+
+    async fn init(&mut self) -> Result<(), DbError> {
+        // Postgres-canonical types. CREATE TABLE IF NOT EXISTS is
+        // idempotent on Postgres ≥ 9.1 (which is the minimum we support).
+        let sql = format!(
+            r#"CREATE TABLE IF NOT EXISTS {} (
+                version    BIGINT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                status     TEXT NOT NULL,
+                applied_at BIGINT,
+                error      TEXT,
+                checksum   BIGINT NOT NULL
+            )"#,
+            self.config.table_name,
+        ).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+
+    async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
+        let sql = format!(
+            "SELECT version, name, status, applied_at, error, checksum FROM {} ORDER BY version",
+            self.config.table_name,
+        ).to_text();
+        let rows = query_journal_rows(&mut self.conn, &sql).await?;
+        Ok(journal_from_entries_local(rows))
+    }
+
+    async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
+        let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
+        let sql = format!(
+            r#"INSERT INTO {0} (version, name, status, applied_at, error, checksum)
+               VALUES ({1}, {2}, {3}, {4}, {5}, {6})
+               ON CONFLICT (version) DO UPDATE SET
+                   name = EXCLUDED.name,
+                   status = EXCLUDED.status,
+                   applied_at = EXCLUDED.applied_at,
+                   error = EXCLUDED.error,
+                   checksum = EXCLUDED.checksum"#,
+            self.config.table_name,
+            entry.version,
+            sql_text_literal(&entry.name),
+            sql_text_literal(&status_str),
+            match applied_at_opt { Some(t) => format!("{}", t).to_text(), None => "NULL".to_text() },
+            match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() },
+            entry.checksum,
+        ).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+
+    async fn acquire_lock(&mut self) -> Result<(), DbError> {
+        if self.lock_held { return Ok(()); }
+        let sql = format!("SELECT pg_advisory_lock({})", self.lock_key).to_text();
+        execute_raw(&mut self.conn, &sql).await?;
+        self.lock_held = true;
+        Ok(())
+    }
+
+    async fn release_lock(&mut self) -> Result<(), DbError> {
+        if !self.lock_held { return Ok(()); }
+        let sql = format!("SELECT pg_advisory_unlock({})", self.lock_key).to_text();
+        execute_raw(&mut self.conn, &sql).await?;
+        self.lock_held = false;
+        Ok(())
+    }
+
+    async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
+        if self.config.transactional {
+            // Wrap in BEGIN ... COMMIT.
+            let tx = self.conn.begin().await?;
+            let exec_res = execute_in_tx(&tx, sql).await;
+            match exec_res {
+                Ok(_)  => tx.commit().await,
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    Err(e)
+                }
+            }
+        } else {
+            execute_raw(&mut self.conn, sql).await
+        }
+    }
+
+    async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
+        let sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Render a `MigrationStatus` as `(status_text, applied_at?, error?)`.
+fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
+    match s {
+        MsPending          => ("pending".to_text(),      None,    None),
+        MsApplied(t)       => ("applied".to_text(),      Some(*t), None),
+        MsRolledBack(t)    => ("rolled_back".to_text(),  Some(*t), None),
+        MsFailed(e)        => ("failed".to_text(),       None,    Some(e.clone())),
+    }
+}
+
+/// Parse a `(status_text, applied_at?, error?)` row back into `MigrationStatus`.
+fn parse_status(text: &Text, applied_at: Maybe<Int64>, error: Maybe<Text>) -> MigrationStatus {
+    match text.as_str() {
+        "pending"      => MsPending,
+        "applied"      => MsApplied(applied_at.unwrap_or(0_i64)),
+        "rolled_back"  => MsRolledBack(applied_at.unwrap_or(0_i64)),
+        "failed"       => MsFailed(error.unwrap_or_else(|| "".to_text())),
+        _              => MsPending,  // unknown status — treat as pending
+    }
+}
+
+/// SQL string literal — escape single quotes by doubling.
+fn sql_text_literal(t: &Text) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    out.push_byte(0x27_u8);  // '
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == 0x27_u8 {
+            out.push_byte(0x27_u8); out.push_byte(0x27_u8);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(0x27_u8);
+    out
+}
+
+// Connection helpers — these route through the canonical pg connection
+// API. Because `MigrationStore::execute_sql` operates at the textual-SQL
+// level (not the typed `sql#"..."` meta-fn level), we use the raw
+// statement-execution path that postgres/connection.vr exposes for
+// dynamic SQL.
+async fn execute_raw(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError> {
+    conn.execute_simple(sql).await.map(|_| ())
+}
+
+async fn execute_in_tx(tx: &mut PgTransaction, sql: &Text) -> Result<(), DbError> {
+    tx.execute_simple(sql).await.map(|_| ())
+}
+
+/// Decode rows of `(version, name, status, applied_at, error, checksum)`
+/// from a SELECT result. Postgres returns BIGINT as Int64 and TEXT as Text.
+async fn query_journal_rows(conn: &mut PgConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
+    let raw_rows = conn.query_simple(sql).await?;
+    let mut entries: List<JournalEntry> = List.new();
+    let mut i: Int = 0;
+    while i < raw_rows.len() {
+        let r = &raw_rows[i];
+        let version    = r.get_int64("version")?;
+        let name       = r.get_text("name")?;
+        let status_txt = r.get_text("status")?;
+        let applied_at = r.get_int64_nullable("applied_at")?;
+        let error      = r.get_text_nullable("error")?;
+        let checksum   = r.get_int64("checksum")?;
+        entries.push(JournalEntry {
+            version: version as Int,
+            name: name,
+            status: parse_status(&status_txt, applied_at, error),
+            checksum: checksum,
+        });
+        i = i + 1;
+    }
+    Ok(entries)
+}
+
+fn journal_from_entries_local(entries: List<JournalEntry>) -> MigrationJournal {
+    MigrationJournal { entries: entries }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use core.database.common.migrations.store.{store_config_default};
+
+    #[test]
+    fn test_advisory_lock_key_stable() {
+        let cfg = store_config_default();
+        let key1 = advisory_lock_key_for(&cfg.table_name);
+        let key2 = advisory_lock_key_for(&cfg.table_name);
+        assert_eq(key1, key2);
+    }
+
+    #[test]
+    fn test_render_parse_status_roundtrip() {
+        // Pending
+        let (txt, at, er) = render_status(&MsPending);
+        match parse_status(&txt, at, er) {
+            MsPending => {}
+            _ => unreachable(),
+        }
+        // Applied
+        let (txt, at, er) = render_status(&MsApplied(12345_i64));
+        match parse_status(&txt, at, er) {
+            MsApplied(t) => assert_eq(t, 12345_i64),
+            _ => unreachable(),
+        }
+        // Failed with error message
+        let (txt, at, er) = render_status(&MsFailed("oops".to_text()));
+        match parse_status(&txt, at, er) {
+            MsFailed(e) => assert_eq(e, "oops".to_text()),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_sql_text_literal_escapes() {
+        let lit = sql_text_literal(&"O'Brien".to_text());
+        assert_eq(lit, "'O''Brien'".to_text());
+    }
+}

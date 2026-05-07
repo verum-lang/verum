@@ -1,0 +1,242 @@
+// =============================================================================
+// database/sqlite/native/migrations/store.vr — SqliteMigrationStore
+// =============================================================================
+// Layer: 2 (Database — SQLite adapter)
+// Dependencies: core, base, common/migrations/{store, journal, migration},
+//               sqlite/native/connection
+// =============================================================================
+//
+// SQLite-specific implementation of `MigrationStore`. SQLite's
+// concurrency model (write-ahead log + reader/writer lock at the
+// database level) already serialises concurrent writers, so the
+// `acquire_lock` / `release_lock` operations are no-ops. SQLite also
+// supports DDL inside transactions, so `transactional = true` works
+// the same way as on Postgres.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "SQLite-specific MigrationStore implementing the universal protocol",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.sqlite.native.migrations.store;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
+mount collections.List;
+mount core.database.common.error.{DbError};
+mount core.database.common.migrations.store.{
+    MigrationStore, MigrationStoreConfig,
+};
+mount core.database.common.migrations.migration.{
+    MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
+};
+mount core.database.common.migrations.journal.{
+    MigrationJournal, JournalEntry,
+};
+mount core.database.sqlite.native.connection.{SqliteConnection};
+
+// =============================================================================
+// SqliteMigrationStore
+// =============================================================================
+
+public type SqliteMigrationStore is {
+    conn: SqliteConnection,
+    config: MigrationStoreConfig,
+};
+
+public fn store_new(conn: SqliteConnection, config: MigrationStoreConfig) -> SqliteMigrationStore {
+    SqliteMigrationStore { conn: conn, config: config }
+}
+
+implement MigrationStore for SqliteMigrationStore {
+    fn dialect(&self) -> Text { "sqlite".to_text() }
+
+    fn config(&self) -> &MigrationStoreConfig { &self.config }
+
+    async fn init(&mut self) -> Result<(), DbError> {
+        // SQLite-canonical types. CREATE TABLE IF NOT EXISTS is idempotent.
+        let sql = format!(
+            r#"CREATE TABLE IF NOT EXISTS {} (
+                version    INTEGER PRIMARY KEY,
+                name       TEXT NOT NULL,
+                status     TEXT NOT NULL,
+                applied_at INTEGER,
+                error      TEXT,
+                checksum   INTEGER NOT NULL
+            )"#,
+            self.config.table_name,
+        ).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+
+    async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
+        let sql = format!(
+            "SELECT version, name, status, applied_at, error, checksum FROM {} ORDER BY version",
+            self.config.table_name,
+        ).to_text();
+        let entries = query_journal_rows(&mut self.conn, &sql).await?;
+        Ok(MigrationJournal { entries: entries })
+    }
+
+    async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
+        let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
+        // SQLite's "UPSERT" — `INSERT ... ON CONFLICT DO UPDATE`.
+        let sql = format!(
+            r#"INSERT INTO {0} (version, name, status, applied_at, error, checksum)
+               VALUES ({1}, {2}, {3}, {4}, {5}, {6})
+               ON CONFLICT(version) DO UPDATE SET
+                   name = excluded.name,
+                   status = excluded.status,
+                   applied_at = excluded.applied_at,
+                   error = excluded.error,
+                   checksum = excluded.checksum"#,
+            self.config.table_name,
+            entry.version,
+            sql_text_literal(&entry.name),
+            sql_text_literal(&status_str),
+            match applied_at_opt { Some(t) => format!("{}", t).to_text(), None => "NULL".to_text() },
+            match &error_opt { Some(e) => sql_text_literal(e), None => "NULL".to_text() },
+            entry.checksum,
+        ).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+
+    /// SQLite's WAL-mode + database-level locking already serialises
+    /// concurrent writers; no advisory-lock equivalent is needed.
+    async fn acquire_lock(&mut self) -> Result<(), DbError> { Ok(()) }
+    async fn release_lock(&mut self) -> Result<(), DbError> { Ok(()) }
+
+    async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
+        if self.config.transactional {
+            // SQLite supports DDL in transactions. Wrap in BEGIN/COMMIT.
+            execute_raw(&mut self.conn, &"BEGIN".to_text()).await?;
+            let exec_res = execute_raw(&mut self.conn, sql).await;
+            match exec_res {
+                Ok(_)  => execute_raw(&mut self.conn, &"COMMIT".to_text()).await,
+                Err(e) => {
+                    let _ = execute_raw(&mut self.conn, &"ROLLBACK".to_text()).await;
+                    Err(e)
+                }
+            }
+        } else {
+            execute_raw(&mut self.conn, sql).await
+        }
+    }
+
+    async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
+        let sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name).to_text();
+        execute_raw(&mut self.conn, &sql).await
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
+    match s {
+        MsPending          => ("pending".to_text(),      None,    None),
+        MsApplied(t)       => ("applied".to_text(),      Some(*t), None),
+        MsRolledBack(t)    => ("rolled_back".to_text(),  Some(*t), None),
+        MsFailed(e)        => ("failed".to_text(),       None,    Some(e.clone())),
+    }
+}
+
+fn parse_status(text: &Text, applied_at: Maybe<Int64>, error: Maybe<Text>) -> MigrationStatus {
+    match text.as_str() {
+        "pending"      => MsPending,
+        "applied"      => MsApplied(applied_at.unwrap_or(0_i64)),
+        "rolled_back"  => MsRolledBack(applied_at.unwrap_or(0_i64)),
+        "failed"       => MsFailed(error.unwrap_or_else(|| "".to_text())),
+        _              => MsPending,
+    }
+}
+
+fn sql_text_literal(t: &Text) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    out.push_byte(0x27_u8);
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == 0x27_u8 {
+            out.push_byte(0x27_u8); out.push_byte(0x27_u8);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(0x27_u8);
+    out
+}
+
+async fn execute_raw(conn: &mut SqliteConnection, sql: &Text) -> Result<(), DbError> {
+    conn.execute_simple(sql).await.map(|_| ())
+}
+
+async fn query_journal_rows(conn: &mut SqliteConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
+    let raw_rows = conn.query_simple(sql).await?;
+    let mut entries: List<JournalEntry> = List.new();
+    let mut i: Int = 0;
+    while i < raw_rows.len() {
+        let r = &raw_rows[i];
+        let version    = r.get_int64("version")?;
+        let name       = r.get_text("name")?;
+        let status_txt = r.get_text("status")?;
+        let applied_at = r.get_int64_nullable("applied_at")?;
+        let error      = r.get_text_nullable("error")?;
+        let checksum   = r.get_int64("checksum")?;
+        entries.push(JournalEntry {
+            version: version as Int,
+            name: name,
+            status: parse_status(&status_txt, applied_at, error),
+            checksum: checksum,
+        });
+        i = i + 1;
+    }
+    Ok(entries)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_render_status_pending() {
+        let (s, at, er) = render_status(&MsPending);
+        assert_eq(s, "pending".to_text());
+        assert!(at.is_none());
+        assert!(er.is_none());
+    }
+
+    #[test]
+    fn test_render_status_failed() {
+        let (s, at, er) = render_status(&MsFailed("oops".to_text()));
+        assert_eq(s, "failed".to_text());
+        assert!(at.is_none());
+        match er { Some(e) => assert_eq(e, "oops".to_text()), None => unreachable() }
+    }
+
+    #[test]
+    fn test_sql_text_escape() {
+        assert_eq(sql_text_literal(&"hello".to_text()), "'hello'".to_text());
+        assert_eq(sql_text_literal(&"O'Brien".to_text()), "'O''Brien'".to_text());
+    }
+}

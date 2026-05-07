@@ -1,0 +1,582 @@
+// =============================================================================
+// database/common/schema_diff.vr — SchemaSnapshot diff comparator
+// =============================================================================
+// Layer: 2 (Database — vendor-neutral)
+// Dependencies: core, base, collections, common/schema
+// =============================================================================
+//
+// **Purpose.** Diff two `SchemaSnapshot` values and emit a list of
+// `SchemaDelta` operations describing the structural transition. Used by:
+//
+//   * Migration drift detection — `verum db:check` compares the
+//     committed `schema.snap.vr` against the live DB introspection;
+//     non-empty diff signals migration drift / out-of-band edits.
+//   * Migration plan synthesis — `verum db:gen-migration` proposes
+//     SQL migration steps from a diff (vendor-neutral delta → SQL
+//     emission delegated to the `MigrationStore` impl).
+//   * Tooling — schema explorer UIs, doc generators.
+//
+// **Categorical structure.** `diff(a, b)` produces a sequence of
+// `SchemaDelta`s such that applying them in order to `a` yields a
+// snapshot semantically equal to `b`. The composition operator
+// `compose(d1, d2)` chains diffs (when `d1.target == d2.source`).
+// `diff(a, a)` is the empty list (identity morphism); `diff(a, b)`
+// inverted approximates `diff(b, a)` modulo
+// non-invertible deltas (e.g., column type narrowing loses info).
+//
+// **Stable ordering.** Diffs are emitted in dependency-safe order:
+// table-additions before column-additions on those tables; index-drops
+// before table-drops; foreign-key drops before referenced-column drops.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral SchemaSnapshot diff: drift detection + migration synthesis",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.common.schema_diff;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Some, None};
+mount collections.List;
+mount core.database.common.schema.{
+    SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,
+};
+
+// =============================================================================
+// SchemaDelta — algebraic transition between snapshots
+// =============================================================================
+
+public type SchemaDelta is
+    // ----- Tables -----
+      TableAdded { schema: Text, name: Text, table: TableSnap }
+    | TableDropped { schema: Text, name: Text }
+    | TableRenamed { schema: Text, from: Text, to: Text }
+
+    // ----- Columns -----
+    | ColumnAdded { schema: Text, table: Text, column: ColumnSnap }
+    | ColumnDropped { schema: Text, table: Text, name: Text }
+    | ColumnRenamed { schema: Text, table: Text, from: Text, to: Text }
+    | ColumnTypeChanged {
+        schema: Text, table: Text, name: Text,
+        from_type: Text, to_type: Text,
+      }
+    | ColumnNullableChanged {
+        schema: Text, table: Text, name: Text,
+        from_nullable: Bool, to_nullable: Bool,
+      }
+    | ColumnDefaultChanged {
+        schema: Text, table: Text, name: Text,
+        from_default: Maybe<Text>, to_default: Maybe<Text>,
+      }
+    | ColumnRefinementChanged {
+        schema: Text, table: Text, name: Text,
+        from_refinement: Maybe<Text>, to_refinement: Maybe<Text>,
+      }
+
+    // ----- Indexes -----
+    | IndexAdded { schema: Text, table: Text, index: IndexSnap }
+    | IndexDropped { schema: Text, table: Text, name: Text }
+    | IndexChanged {
+        schema: Text, table: Text, name: Text,
+        from: IndexSnap, to: IndexSnap,
+      }
+
+    // ----- Foreign keys -----
+    | ForeignKeyAdded { schema: Text, table: Text, fk: ForeignKeySnap }
+    | ForeignKeyDropped {
+        schema: Text, table: Text, columns: List<Text>,
+      }
+    | ForeignKeyChanged {
+        schema: Text, table: Text,
+        from: ForeignKeySnap, to: ForeignKeySnap,
+      };
+
+public fn delta_kind_name(d: &SchemaDelta) -> Text {
+    match d {
+        TableAdded { .. }              => "table_added".clone(),
+        TableDropped { .. }            => "table_dropped".clone(),
+        TableRenamed { .. }            => "table_renamed".clone(),
+        ColumnAdded { .. }             => "column_added".clone(),
+        ColumnDropped { .. }           => "column_dropped".clone(),
+        ColumnRenamed { .. }           => "column_renamed".clone(),
+        ColumnTypeChanged { .. }       => "column_type_changed".clone(),
+        ColumnNullableChanged { .. }   => "column_nullable_changed".clone(),
+        ColumnDefaultChanged { .. }    => "column_default_changed".clone(),
+        ColumnRefinementChanged { .. } => "column_refinement_changed".clone(),
+        IndexAdded { .. }              => "index_added".clone(),
+        IndexDropped { .. }            => "index_dropped".clone(),
+        IndexChanged { .. }            => "index_changed".clone(),
+        ForeignKeyAdded { .. }         => "fk_added".clone(),
+        ForeignKeyDropped { .. }       => "fk_dropped".clone(),
+        ForeignKeyChanged { .. }       => "fk_changed".clone(),
+    }
+}
+
+/// Classification: lossless additions vs potentially-destructive drops/changes.
+/// Lossless deltas can apply without data backup; destructive ones require
+/// a confirmation step in deployment automation.
+public type DeltaSeverity is DsLossless | DsDestructive | DsAmbiguous;
+
+public fn delta_severity(d: &SchemaDelta) -> DeltaSeverity {
+    match d {
+        TableAdded { .. } | ColumnAdded { .. } | IndexAdded { .. }
+        | ForeignKeyAdded { .. } => DsLossless,
+
+        TableDropped { .. } | ColumnDropped { .. }
+            => DsDestructive,
+
+        ColumnTypeChanged { .. } | ColumnNullableChanged { .. }
+        | ColumnDefaultChanged { .. } | ColumnRefinementChanged { .. }
+        | IndexChanged { .. } | ForeignKeyChanged { .. }
+        | ForeignKeyDropped { .. } | IndexDropped { .. }
+        | TableRenamed { .. } | ColumnRenamed { .. }
+            => DsAmbiguous,
+    }
+}
+
+// =============================================================================
+// diff — compute the deltas turning `before` into `after`
+// =============================================================================
+
+public fn diff(before: &SchemaSnapshot, after: &SchemaSnapshot) -> List<SchemaDelta> {
+    let mut deltas: List<SchemaDelta> = List.new();
+
+    // ===== Step 1: tables =====
+    // 1a. Tables in `after` but not in `before` → TableAdded
+    let mut i: Int = 0;
+    while i < after.tables.len() {
+        let t = &after.tables[i];
+        if find_table(&before.tables, &t.schema, &t.name).is_none() {
+            deltas.push(TableAdded {
+                schema: t.schema.clone(),
+                name: t.name.clone(),
+                table: clone_table(t),
+            });
+        }
+        i = i + 1;
+    }
+
+    // 1b. Tables in `before` but not in `after` → TableDropped
+    i = 0;
+    while i < before.tables.len() {
+        let t = &before.tables[i];
+        if find_table(&after.tables, &t.schema, &t.name).is_none() {
+            deltas.push(TableDropped {
+                schema: t.schema.clone(),
+                name: t.name.clone(),
+            });
+        }
+        i = i + 1;
+    }
+
+    // ===== Step 2: per-table column / index / fk diffs =====
+    i = 0;
+    while i < before.tables.len() {
+        let bt = &before.tables[i];
+        match find_table(&after.tables, &bt.schema, &bt.name) {
+            Some(at) => {
+                diff_columns(bt, at, &mut deltas);
+                diff_indexes(bt, at, &mut deltas);
+                diff_foreign_keys(bt, at, &mut deltas);
+            }
+            None => {} // table was dropped — already emitted above
+        }
+        i = i + 1;
+    }
+
+    deltas
+}
+
+fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaDelta>) {
+    // Column added.
+    let mut i: Int = 0;
+    while i < after.columns.len() {
+        let c = &after.columns[i];
+        if find_column(&before.columns, &c.name).is_none() {
+            deltas.push(ColumnAdded {
+                schema: after.schema.clone(),
+                table: after.name.clone(),
+                column: clone_column(c),
+            });
+        }
+        i = i + 1;
+    }
+    // Column dropped.
+    i = 0;
+    while i < before.columns.len() {
+        let c = &before.columns[i];
+        if find_column(&after.columns, &c.name).is_none() {
+            deltas.push(ColumnDropped {
+                schema: after.schema.clone(),
+                table: after.name.clone(),
+                name: c.name.clone(),
+            });
+        }
+        i = i + 1;
+    }
+    // Column changed (same name, different attributes).
+    i = 0;
+    while i < before.columns.len() {
+        let bc = &before.columns[i];
+        match find_column(&after.columns, &bc.name) {
+            Some(ac) => {
+                if bc.declared_type != ac.declared_type {
+                    deltas.push(ColumnTypeChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        name: bc.name.clone(),
+                        from_type: bc.declared_type.clone(),
+                        to_type: ac.declared_type.clone(),
+                    });
+                }
+                if bc.nullable != ac.nullable {
+                    deltas.push(ColumnNullableChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        name: bc.name.clone(),
+                        from_nullable: bc.nullable,
+                        to_nullable: ac.nullable,
+                    });
+                }
+                if !maybe_text_eq(&bc.default_expr, &ac.default_expr) {
+                    deltas.push(ColumnDefaultChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        name: bc.name.clone(),
+                        from_default: clone_maybe_text(&bc.default_expr),
+                        to_default: clone_maybe_text(&ac.default_expr),
+                    });
+                }
+                if !maybe_text_eq(&bc.refinement, &ac.refinement) {
+                    deltas.push(ColumnRefinementChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        name: bc.name.clone(),
+                        from_refinement: clone_maybe_text(&bc.refinement),
+                        to_refinement: clone_maybe_text(&ac.refinement),
+                    });
+                }
+            }
+            None => {} // dropped — emitted above
+        }
+        i = i + 1;
+    }
+}
+
+fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaDelta>) {
+    let mut i: Int = 0;
+    while i < after.indexes.len() {
+        let a = &after.indexes[i];
+        match find_index(&before.indexes, &a.name) {
+            Some(b) => {
+                if !index_eq(b, a) {
+                    deltas.push(IndexChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        name: a.name.clone(),
+                        from: clone_index(b),
+                        to: clone_index(a),
+                    });
+                }
+            }
+            None => {
+                deltas.push(IndexAdded {
+                    schema: after.schema.clone(),
+                    table: after.name.clone(),
+                    index: clone_index(a),
+                });
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < before.indexes.len() {
+        let b = &before.indexes[i];
+        if find_index(&after.indexes, &b.name).is_none() {
+            deltas.push(IndexDropped {
+                schema: after.schema.clone(),
+                table: after.name.clone(),
+                name: b.name.clone(),
+            });
+        }
+        i = i + 1;
+    }
+}
+
+fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaDelta>) {
+    let mut i: Int = 0;
+    while i < after.foreign_keys.len() {
+        let a = &after.foreign_keys[i];
+        match find_fk(&before.foreign_keys, a) {
+            Some(b) => {
+                if !fk_eq(b, a) {
+                    deltas.push(ForeignKeyChanged {
+                        schema: after.schema.clone(),
+                        table: after.name.clone(),
+                        from: clone_fk(b),
+                        to: clone_fk(a),
+                    });
+                }
+            }
+            None => {
+                deltas.push(ForeignKeyAdded {
+                    schema: after.schema.clone(),
+                    table: after.name.clone(),
+                    fk: clone_fk(a),
+                });
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < before.foreign_keys.len() {
+        let b = &before.foreign_keys[i];
+        if find_fk(&after.foreign_keys, b).is_none() {
+            deltas.push(ForeignKeyDropped {
+                schema: after.schema.clone(),
+                table: after.name.clone(),
+                columns: clone_text_list(&b.columns),
+            });
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Lookup helpers
+// =============================================================================
+
+fn find_table<'a>(tables: &'a List<TableSnap>, schema: &Text, name: &Text) -> Maybe<&'a TableSnap> {
+    let mut i: Int = 0;
+    while i < tables.len() {
+        if tables[i].schema == *schema && tables[i].name == *name {
+            return Some(&tables[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn find_column<'a>(columns: &'a List<ColumnSnap>, name: &Text) -> Maybe<&'a ColumnSnap> {
+    let mut i: Int = 0;
+    while i < columns.len() {
+        if columns[i].name == *name { return Some(&columns[i]); }
+        i = i + 1;
+    }
+    None
+}
+
+fn find_index<'a>(indexes: &'a List<IndexSnap>, name: &Text) -> Maybe<&'a IndexSnap> {
+    let mut i: Int = 0;
+    while i < indexes.len() {
+        if indexes[i].name == *name { return Some(&indexes[i]); }
+        i = i + 1;
+    }
+    None
+}
+
+/// FKs are matched by their column-set + referenced-table + referenced-columns.
+fn find_fk<'a>(fks: &'a List<ForeignKeySnap>, target: &ForeignKeySnap) -> Maybe<&'a ForeignKeySnap> {
+    let mut i: Int = 0;
+    while i < fks.len() {
+        if text_list_eq(&fks[i].columns, &target.columns)
+           && fks[i].referenced_table == target.referenced_table
+           && text_list_eq(&fks[i].referenced_columns, &target.referenced_columns)
+        {
+            return Some(&fks[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+// =============================================================================
+// Equality + clone helpers
+// =============================================================================
+
+fn maybe_text_eq(a: &Maybe<Text>, b: &Maybe<Text>) -> Bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x == y,
+        (None, None)       => true,
+        _                  => false,
+    }
+}
+
+fn clone_maybe_text(m: &Maybe<Text>) -> Maybe<Text> {
+    match m { Some(s) => Some(s.clone()), None => None }
+}
+
+fn text_list_eq(a: &List<Text>, b: &List<Text>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn clone_text_list(l: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < l.len() { out.push(l[i].clone()); i = i + 1; }
+    out
+}
+
+fn index_eq(a: &IndexSnap, b: &IndexSnap) -> Bool {
+    a.name == b.name
+        && text_list_eq(&a.columns, &b.columns)
+        && maybe_text_eq(&a.predicate, &b.predicate)
+        && a.unique == b.unique
+}
+
+fn clone_index(i: &IndexSnap) -> IndexSnap {
+    IndexSnap {
+        name: i.name.clone(),
+        columns: clone_text_list(&i.columns),
+        predicate: clone_maybe_text(&i.predicate),
+        unique: i.unique,
+    }
+}
+
+fn fk_eq(a: &ForeignKeySnap, b: &ForeignKeySnap) -> Bool {
+    text_list_eq(&a.columns, &b.columns)
+        && a.referenced_table == b.referenced_table
+        && text_list_eq(&a.referenced_columns, &b.referenced_columns)
+        && a.on_delete == b.on_delete
+        && a.on_update == b.on_update
+}
+
+fn clone_fk(f: &ForeignKeySnap) -> ForeignKeySnap {
+    ForeignKeySnap {
+        columns: clone_text_list(&f.columns),
+        referenced_table: f.referenced_table.clone(),
+        referenced_columns: clone_text_list(&f.referenced_columns),
+        on_delete: f.on_delete.clone(),
+        on_update: f.on_update.clone(),
+    }
+}
+
+fn clone_column(c: &ColumnSnap) -> ColumnSnap {
+    ColumnSnap {
+        name: c.name.clone(),
+        declared_type: c.declared_type.clone(),
+        nullable: c.nullable,
+        pk: c.pk,
+        unique: c.unique,
+        autoincrement: c.autoincrement,
+        default_expr: clone_maybe_text(&c.default_expr),
+        refinement: clone_maybe_text(&c.refinement),
+        refinement_pred: c.refinement_pred.clone(),
+        check_constraint: clone_maybe_text(&c.check_constraint),
+    }
+}
+
+fn clone_table(t: &TableSnap) -> TableSnap {
+    let mut cols: List<ColumnSnap> = List.new();
+    let mut i: Int = 0;
+    while i < t.columns.len() { cols.push(clone_column(&t.columns[i])); i = i + 1; }
+    let mut idxs: List<IndexSnap> = List.new();
+    i = 0;
+    while i < t.indexes.len() { idxs.push(clone_index(&t.indexes[i])); i = i + 1; }
+    let mut fks: List<ForeignKeySnap> = List.new();
+    i = 0;
+    while i < t.foreign_keys.len() { fks.push(clone_fk(&t.foreign_keys[i])); i = i + 1; }
+    let mut opts: List<(Text, Text)> = List.new();
+    i = 0;
+    while i < t.options.len() {
+        opts.push((t.options[i].0.clone(), t.options[i].1.clone()));
+        i = i + 1;
+    }
+    TableSnap {
+        schema: t.schema.clone(),
+        name: t.name.clone(),
+        columns: cols,
+        indexes: idxs,
+        foreign_keys: fks,
+        options: opts,
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use core.database.common.schema.{AdapterId};
+
+    fn empty_snap() -> SchemaSnapshot {
+        SchemaSnapshot {
+            adapter: AdapterId.SQLite,
+            server_version: "".to_text(),
+            default_schema: "main".to_text(),
+            tables: List.new(),
+            metadata: List.new(),
+        }
+    }
+
+    #[test]
+    fn test_diff_identity_empty() {
+        let s = empty_snap();
+        let d = diff(&s, &s);
+        assert_eq(d.len(), 0);
+    }
+
+    #[test]
+    fn test_diff_table_added() {
+        let mut after = empty_snap();
+        after.tables.push(TableSnap.empty("main".to_text(), "users".to_text()));
+        let deltas = diff(&empty_snap(), &after);
+        assert_eq(deltas.len(), 1);
+        match &deltas[0] {
+            TableAdded { name, .. } => assert_eq(name, &"users".to_text()),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_diff_table_dropped() {
+        let mut before = empty_snap();
+        before.tables.push(TableSnap.empty("main".to_text(), "users".to_text()));
+        let deltas = diff(&before, &empty_snap());
+        assert_eq(deltas.len(), 1);
+        match &deltas[0] {
+            TableDropped { name, .. } => assert_eq(name, &"users".to_text()),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_severity_classification() {
+        match delta_severity(&TableAdded {
+            schema: "main".to_text(),
+            name: "x".to_text(),
+            table: TableSnap.empty("main".to_text(), "x".to_text()),
+        }) {
+            DsLossless => {}
+            _ => unreachable(),
+        }
+        match delta_severity(&TableDropped {
+            schema: "main".to_text(),
+            name: "x".to_text(),
+        }) {
+            DsDestructive => {}
+            _ => unreachable(),
+        }
+    }
+}

@@ -1,0 +1,256 @@
+// =============================================================================
+// database/common/migrations/journal.vr — applied-migration log
+// =============================================================================
+// Layer: 2 (Database — vendor-neutral)
+// Dependencies: core, base, common/migrations/migration
+// =============================================================================
+//
+// `MigrationJournal` is the structured representation of the persistent
+// `__verum_migrations` table (or whatever the vendor's `MigrationStore`
+// names it). Vendor-neutral in-memory aggregate; vendors persist
+// individual entries through their `MigrationStore` impl.
+//
+// Canonical schema (vendor-specific naming and column types delegated to
+// the `MigrationStore` impl):
+//
+// ```
+//   CREATE TABLE __verum_migrations (
+//       version    INTEGER PRIMARY KEY,
+//       name       TEXT NOT NULL,
+//       status     TEXT NOT NULL,    -- pending/applied/rolled_back/failed
+//       applied_at INTEGER,           -- monotonic ns; NULL when pending
+//       error      TEXT,              -- non-NULL on Failed
+//       checksum   INTEGER NOT NULL   -- FNV-1a fingerprint of up_sql
+//   );
+// ```
+//
+// **Drift detection.** Every entry stores an FNV-1a 64-bit fingerprint
+// of the migration's `up_sql`. The runner re-computes the fingerprint
+// on each invocation and compares — divergence indicates the source
+// migration text has been edited after application, which is normally
+// an authoring error.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral applied-migration journal + drift detection",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.common.migrations.journal;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.common.migrations.migration.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    clone_status,
+};
+
+// -----------------------------------------------------------------------------
+// JournalEntry
+// -----------------------------------------------------------------------------
+
+public type JournalEntry is {
+    version: Int,
+    name: Text,
+    status: MigrationStatus,
+    /// FNV-1a hash of `up_sql` — used to detect drift.
+    checksum: Int64,
+};
+
+/// FNV-1a 64-bit fingerprint of an SQL text. Adequate for drift
+/// detection (not for cryptographic identity).
+public fn checksum_for_sql(sql: &Text) -> Int64 {
+    let mut h: Int64 = -3750763034362895579 as Int64;   // FNV offset basis
+    let bs = sql.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        h = h ^ (bs[i] as Int64);
+        h = h * 1099511628211_i64;
+        i = i + 1;
+    }
+    h
+}
+
+public fn clone_entry(e: &JournalEntry) -> JournalEntry {
+    JournalEntry {
+        version: e.version,
+        name: e.name.clone(),
+        status: clone_status(&e.status),
+        checksum: e.checksum,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MigrationJournal — in-memory aggregate
+// -----------------------------------------------------------------------------
+
+public type MigrationJournal is {
+    entries: List<JournalEntry>,
+};
+
+public fn journal_new() -> MigrationJournal {
+    MigrationJournal { entries: List.new() }
+}
+
+public fn journal_from_entries(entries: List<JournalEntry>) -> MigrationJournal {
+    MigrationJournal { entries: entries }
+}
+
+implement MigrationJournal {
+    public fn entry_count(&self) -> Int { self.entries.len() }
+
+    public fn entries(&self) -> &List<JournalEntry> { &self.entries }
+
+    public fn record_pending(&mut self, m: &Migration) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsPending, cs);
+    }
+
+    public fn record_applied(&mut self, m: &Migration, applied_at_ns: Int64) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsApplied(applied_at_ns), cs);
+    }
+
+    public fn record_rolled_back(&mut self, m: &Migration, ts_ns: Int64) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsRolledBack(ts_ns), cs);
+    }
+
+    public fn record_failed(&mut self, m: &Migration, error: Text) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsFailed(error), cs);
+    }
+
+    public fn lookup(&self, version: Int) -> Maybe<JournalEntry> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].version == version {
+                return Some(clone_entry(&self.entries[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn is_applied(&self, version: Int) -> Bool {
+        match self.lookup(version) {
+            Some(e) => match e.status {
+                MsApplied(_) => true,
+                _            => false,
+            },
+            None => false,
+        }
+    }
+
+    public fn high_water(&self) -> Int {
+        let mut hi: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            match &self.entries[i].status {
+                MsApplied(_) => {
+                    if self.entries[i].version > hi { hi = self.entries[i].version; }
+                }
+                _ => {}
+            }
+            i = i + 1;
+        }
+        hi
+    }
+
+    public fn drift_detected(&self, m: &Migration) -> Bool {
+        let now = checksum_for_sql(&m.up_sql);
+        match self.lookup(m.version) {
+            Some(e) => e.checksum != now,
+            None    => false,
+        }
+    }
+
+    fn replace_or_insert(
+        &mut self,
+        version: Int,
+        name: Text,
+        status: MigrationStatus,
+        checksum: Int64,
+    ) {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].version == version {
+                self.entries[i] = JournalEntry {
+                    version: version,
+                    name: name.clone(),
+                    status: clone_status(&status),
+                    checksum: checksum,
+                };
+                return;
+            }
+            i = i + 1;
+        }
+        self.entries.push(JournalEntry {
+            version: version,
+            name: name,
+            status: status,
+            checksum: checksum,
+        });
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use core.database.common.migrations.migration.migration_new;
+
+    #[test]
+    fn test_record_and_lookup() {
+        let mut j = journal_new();
+        let m = migration_new(1, "init".to_text(), "CREATE TABLE x (id INT)".to_text());
+        j.record_applied(&m, 1234567890_i64);
+        match j.lookup(1) {
+            Some(e) => {
+                assert_eq(e.version, 1);
+                match e.status {
+                    MsApplied(t) => assert_eq(t, 1234567890_i64),
+                    _ => unreachable(),
+                }
+            }
+            None => unreachable(),
+        }
+        assert!(j.is_applied(1));
+    }
+
+    #[test]
+    fn test_drift_detection() {
+        let mut j = journal_new();
+        let m1 = migration_new(1, "init".to_text(), "CREATE TABLE x (id INT)".to_text());
+        j.record_applied(&m1, 1_i64);
+        let m1b = migration_new(1, "init".to_text(), "CREATE TABLE y (id INT)".to_text());
+        assert!(j.drift_detected(&m1b));
+    }
+
+    #[test]
+    fn test_high_water() {
+        let mut j = journal_new();
+        let m1 = migration_new(1, "a".to_text(), "x".to_text());
+        let m3 = migration_new(3, "c".to_text(), "z".to_text());
+        j.record_applied(&m1, 1_i64);
+        j.record_applied(&m3, 3_i64);
+        assert_eq(j.high_water(), 3);
+    }
+}
