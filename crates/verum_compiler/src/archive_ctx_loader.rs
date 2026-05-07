@@ -101,6 +101,7 @@ pub struct LoadStats {
 pub fn populate_ctx_from_archive(
     archive: &VbcArchive,
     ctx: &mut CodegenContext,
+    next_id: &mut u32,
 ) -> Result<LoadStats, CtxLoadError> {
     let mut stats = LoadStats::default();
 
@@ -117,7 +118,7 @@ pub fn populate_ctx_from_archive(
                 continue;
             }
         };
-        register_module(&module, &entry.name, ctx, &mut stats);
+        register_module(&module, &entry.name, ctx, &mut stats, next_id);
         stats.modules_loaded += 1;
     }
 
@@ -131,6 +132,7 @@ fn register_module(
     module_name: &str,
     ctx: &mut CodegenContext,
     stats: &mut LoadStats,
+    next_id: &mut u32,
 ) {
     // Pass 1: parent_type_id → name.  Used by methods (functions
     // with `parent_type` set) to recover their carrier-type name for
@@ -237,8 +239,13 @@ fn register_module(
         let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
 
+        // Remap each archive function to a globally-unique id slot.
+        // See `register_module_filtered` for the rationale.
+        let new_id = verum_vbc::module::FunctionId(*next_id);
+        *next_id = next_id.saturating_add(1);
+
         let info = FunctionInfo {
-            id: fn_desc.id,
+            id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
             param_type_names: vec![],
@@ -273,6 +280,90 @@ fn register_module(
         if ctx.lookup_function(&simple_name).is_none() {
             ctx.register_function(simple_name, info);
             stats.functions_registered += 1;
+        }
+    }
+
+    // Pass 4 — variant constructor registration from
+    // `module.types[*].variants`.  Architectural background in the
+    // matching block at the bottom of `register_module_filtered`.
+    use verum_vbc::module::FunctionId;
+    for ty in &module.types {
+        let parent_name = match module.strings.get(ty.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        for variant in &ty.variants {
+            let vname = match module.strings.get(variant.name) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let qualified = format!("{}.{}", parent_name, vname);
+            if ctx.lookup_function(&qualified).is_some() {
+                continue;
+            }
+            let (arity, payload_field_types) = match variant.kind {
+                VariantKind::Unit => (0usize, Vec::<String>::new()),
+                VariantKind::Tuple => (
+                    variant.arity as usize,
+                    variant
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                        })
+                        .collect(),
+                ),
+                VariantKind::Record => (
+                    variant.fields.len(),
+                    variant
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                        })
+                        .collect(),
+                ),
+            };
+            let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
+            let info = FunctionInfo {
+                id: FunctionId(u32::MAX - variant.tag),
+                param_count: arity,
+                param_names,
+                param_type_names: vec![],
+                is_async: false,
+                is_generator: false,
+                contexts: vec![],
+                return_type: None,
+                yield_type: None,
+                intrinsic_name: None,
+                variant_tag: Some(variant.tag),
+                parent_type_name: Some(parent_name.clone()),
+                variant_payload_types: if payload_field_types.is_empty() {
+                    None
+                } else {
+                    Some(payload_field_types)
+                },
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
+                return_type_name: Some(parent_name.clone()),
+                return_type_inner: None,
+            };
+            ctx.register_function(qualified, info);
+            stats.variant_ctors_resolved += 1;
+            // Deliberately do NOT register simple-name here.  Pass 4
+            // synthesises variant constructors for stdlib sum types
+            // BEFORE user-side `register_type_constructors` runs;
+            // adding `Help` (e.g. from
+            // `core.meta.contexts.DiagnosticSeverity.Help`) under the
+            // bare key would then collide with a user-defined
+            // `type ParsedArgs is | Help | ...`, the user-mode
+            // collision rule unregisters the simple name and inserts
+            // it into `variant_collisions`, and codegen for the
+            // user's bare `Help` falls through to ambiguous
+            // suffix-disambiguation.  Qualified `ParentType.Variant`
+            // is sufficient for `compile_record`'s descriptor-table
+            // fallback and `find_variant_by_suffix_and_args` to
+            // resolve the user's local sum type unambiguously.
         }
     }
 }
@@ -362,7 +453,14 @@ impl ArchiveCtxCache {
     ) -> &HashMap<String, FunctionInfo> {
         self.table.get_or_init(|| {
             let mut staging = CodegenContext::new();
-            let _ = populate_ctx_from_archive(archive, &mut staging);
+            // Local id allocator for the staging path.  This call site
+            // exports a frozen FunctionInfo table for re-use across
+            // compiles; callers of the table (`get_or_build`'s consumers)
+            // own their own next_func_id so the IDs allocated here are
+            // best-effort placeholders that downstream `apply_lazy`
+            // re-allocates against the live codegen counter.
+            let mut next_id: u32 = 0;
+            let _ = populate_ctx_from_archive(archive, &mut staging, &mut next_id);
             staging.export_functions()
         })
     }
@@ -399,6 +497,7 @@ impl ArchiveCtxCache {
         archive: &VbcArchive,
         ctx: &mut CodegenContext,
         user_module: &verum_ast::Module,
+        next_id: &mut u32,
     ) {
         let mut wanted: std::collections::HashSet<String> =
             std::collections::HashSet::new();
@@ -473,7 +572,7 @@ impl ArchiveCtxCache {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            register_module_filtered(&module, &entry.name, ctx, &wanted);
+            register_module_filtered(&module, &entry.name, ctx, &wanted, next_id);
         }
         // For wanted names that have NO qualified form (e.g. user
         // code calls `Maybe.Some(x)` without a `mount Maybe`
@@ -511,7 +610,7 @@ impl ArchiveCtxCache {
                 if !any_match {
                     continue;
                 }
-                register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted);
+                register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted, next_id);
             }
         }
     }
@@ -520,6 +619,194 @@ impl ArchiveCtxCache {
 impl Default for ArchiveCtxCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ArchiveCtxCache {
+    /// Walks every archive module the user mounts (transitively, via
+    /// `harvest_names_in_*`) and pushes each module's TypeDescriptors
+    /// into the user codegen via `import_archive_type`.  Pairs with
+    /// `apply_lazy`, which handles the function side; this method
+    /// closes the type-table side so stdlib sum types can flow through
+    /// `MakeVariantTyped` and the runtime's type-scoped variant-name
+    /// lookup.
+    ///
+    /// Bounded the same way as `apply_lazy`: only modules whose names
+    /// are prefixes of wanted qualified names get loaded — typical
+    /// scripts touch a small fraction of the archive's module set, so
+    /// the cost is amortised across compilations.
+    ///
+    /// Returns the number of modules whose type tables were imported.
+    pub fn import_types_for_module(
+        archive: &VbcArchive,
+        codegen: &mut verum_vbc::codegen::VbcCodegen,
+        user_module: &verum_ast::Module,
+    ) -> usize {
+        let mut wanted: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for item in user_module.items.iter() {
+            collect_referenced_function_names(item, &mut wanted);
+        }
+        if wanted.is_empty() {
+            return 0;
+        }
+        // Up to 2-hop ancestor walk (mirrors apply_lazy) — same
+        // grandparent-bundling shape: e.g. `core/io/path.vr` declares
+        // `module path;` and lands under archive entry `core.io`.
+        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
+            .iter()
+            .flat_map(|name| {
+                let mut prefixes: Vec<String> = Vec::new();
+                let mut cur = name.as_str();
+                let mut hops = 0;
+                while let Some(idx) = cur.rfind('.') {
+                    cur = &cur[..idx];
+                    prefixes.push(cur.to_string());
+                    hops += 1;
+                    if hops >= 2 {
+                        break;
+                    }
+                }
+                prefixes
+            })
+            .collect();
+        let mut imported = 0usize;
+        for entry in &archive.index {
+            if !wanted_module_prefixes.contains(&entry.name) {
+                continue;
+            }
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if module.types.is_empty() {
+                continue;
+            }
+            codegen.import_archive_module_types(&module);
+            imported += 1;
+        }
+        imported
+    }
+
+    /// Combined function- AND type-table import in a single archive
+    /// walk.  Replaces the `apply_lazy` + `import_types_for_module`
+    /// pair when the caller has access to both `&mut VbcCodegen` and
+    /// the cache — each archive module decodes ONCE instead of twice,
+    /// halving the cold-start archive-load cost on cache misses.
+    ///
+    /// Behaves as the union of the two helpers: lazy filtering on
+    /// `wanted_module_prefixes`, function registration with id remap
+    /// (Pass 3 + 4 from `register_module_filtered`) AND type-table
+    /// import via `import_archive_module_types`.
+    pub fn apply_lazy_with_types(
+        &self,
+        archive: &VbcArchive,
+        codegen: &mut verum_vbc::codegen::VbcCodegen,
+        user_module: &verum_ast::Module,
+    ) -> (usize, usize) {
+        let mut wanted: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for item in user_module.items.iter() {
+            collect_referenced_function_names(item, &mut wanted);
+        }
+        if wanted.is_empty() {
+            return (0, 0);
+        }
+        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
+            .iter()
+            .flat_map(|name| {
+                let mut prefixes: Vec<String> = Vec::new();
+                let mut cur = name.as_str();
+                let mut hops = 0;
+                while let Some(idx) = cur.rfind('.') {
+                    cur = &cur[..idx];
+                    prefixes.push(cur.to_string());
+                    hops += 1;
+                    if hops >= 2 {
+                        break;
+                    }
+                }
+                prefixes
+            })
+            .collect();
+        let mut fn_modules = 0usize;
+        let mut type_modules = 0usize;
+        // Split borrows: ctx and next_func_id are separate fields, but
+        // both need &mut from VbcCodegen.  Re-using the same raw-ptr
+        // round-trip discipline as the apply_lazy call site in
+        // `pipeline/vbc_codegen.rs`.
+        let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
+        for entry in &archive.index {
+            if !wanted_module_prefixes.contains(&entry.name) {
+                continue;
+            }
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            // Function side first so Pass 4 (variant ctors) sees
+            // the stable function-id namespace.
+            // SAFETY: ctx and next_func_id are non-overlapping fields
+            // on the same VbcCodegen — splitting via raw pointer keeps
+            // the borrow checker out of the way without breaking
+            // aliasing rules.
+            let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
+            register_module_filtered(
+                &module,
+                &entry.name,
+                codegen.ctx_mut(),
+                &wanted,
+                next_id_ref,
+            );
+            fn_modules += 1;
+            // Type side — push every non-protocol descriptor.
+            if !module.types.is_empty() {
+                codegen.import_archive_module_types(&module);
+                type_modules += 1;
+            }
+        }
+        // Unqualified-wanted second pass — same logic as apply_lazy's
+        // tail block.  Module-prefix gate already filtered the
+        // primary pass; this fills in any user code that uses a bare
+        // `Maybe.Some(x)` without a `mount` directive.
+        let unqualified_wanted: std::collections::HashSet<String> = wanted
+            .iter()
+            .filter(|n| !n.contains('.'))
+            .cloned()
+            .collect();
+        if !unqualified_wanted.is_empty() {
+            for entry in &archive.index {
+                if wanted_module_prefixes.contains(&entry.name) {
+                    continue;
+                }
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let any_match = unqualified_wanted.iter().any(|w| {
+                    module.strings.iter().any(|(s, _)| s == w)
+                });
+                if !any_match {
+                    continue;
+                }
+                let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
+                register_module_filtered(
+                    &module,
+                    &entry.name,
+                    codegen.ctx_mut(),
+                    &unqualified_wanted,
+                    next_id_ref,
+                );
+                fn_modules += 1;
+                // Skip the type-side push for unqualified-wanted — at
+                // this point we're already deep in the slow fallback;
+                // type printing of these typically falls under the
+                // legacy global tag scan and that's fine because
+                // unqualified-wanted is narrow (`Maybe.Some`,
+                // `Result.Ok`, …) and covered by built-in variants.
+            }
+        }
+        (fn_modules, type_modules)
     }
 }
 
@@ -546,7 +833,8 @@ mod tests {
             None => return, // bootstrap build without archive — skip
         };
         let mut ctx = CodegenContext::new();
-        let stats = populate_ctx_from_archive(archive, &mut ctx).expect("load");
+        let mut next_id: u32 = 0;
+        let stats = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).expect("load");
 
         assert!(
             stats.modules_loaded > 100,
@@ -614,7 +902,8 @@ mod tests {
             }
         }
         let mut ctx = CodegenContext::new();
-        let _ = populate_ctx_from_archive(archive, &mut ctx).unwrap();
+        let mut next_id: u32 = 0;
+        let _ = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).unwrap();
         let exported = ctx.export_functions();
         for k in exported.keys() {
             if k.contains("current_dir") {
@@ -921,6 +1210,28 @@ fn harvest_names_in_expr(
             }
         }
         ExprKind::TypeExpr(ty) => harvest_names_in_type(ty, out),
+        ExprKind::Record { path, fields, base } => {
+            // Critical for stdlib variant constructors: a literal like
+            // `ShellError.SpawnFailed { command, reason }` must seed
+            // the wanted-set with both `ShellError` (parent) and
+            // `SpawnFailed` (variant) so the archive-load pass
+            // includes the parent module's TypeDescriptor and Pass 4
+            // (variant ctor registration) fires.  Pre-fix the lazy
+            // walker missed these because `Record` fell into the
+            // catch-all and the parent never made it to `wanted`,
+            // so register_module_filtered's parent_in_scope gate
+            // rejected the type's variants and codegen fell through
+            // to the plain-record path with field-name-id slots.
+            harvest_names_in_path(path, out);
+            for f in fields.iter() {
+                if let Maybe::Some(v) = &f.value {
+                    harvest_names_in_expr(v, out);
+                }
+            }
+            if let Maybe::Some(b) = base {
+                harvest_names_in_expr(b, out);
+            }
+        }
         // Other expression forms (interpolation, generators, …)
         // are walked best-effort — over-inclusion is harmless.
         _ => {}
@@ -1078,6 +1389,7 @@ fn register_module_filtered(
     module_name: &str,
     ctx: &mut CodegenContext,
     wanted: &std::collections::HashSet<String>,
+    next_id: &mut u32,
 ) {
     let mut type_id_to_name: HashMap<TypeId, String> = HashMap::new();
     for ty in &module.types {
@@ -1112,6 +1424,11 @@ fn register_module_filtered(
             });
         }
     }
+    // Per-module ID remap.  Each archive function gets a globally-
+    // unique FunctionId allocated from `next_id` so two archive
+    // modules with overlapping local ids don't collapse onto a
+    // single ctx.functions slot at codegen finalisation time.  See
+    // the long-form rationale in `apply_lazy`'s caller comment.
     for fn_desc in &module.functions {
         let simple_name = match module.strings.get(fn_desc.name) {
             Some(s) => s.to_string(),
@@ -1144,6 +1461,14 @@ fn register_module_filtered(
         {
             continue;
         }
+        // Allocate a fresh globally-unique id so emit_missing_stub_descriptors
+        // produces a one-to-one stub at this slot.  Without remapping,
+        // multiple archive modules' local id=0 collide on the same
+        // ctx.functions slot, the longest-dotted name wins, and Call
+        // sites that intended a different function dispatch through the
+        // wrong intercept (or fall through to a Unit-returning stub).
+        let new_id = verum_vbc::module::FunctionId(*next_id);
+        *next_id = next_id.saturating_add(1);
         let variant_hit = variant_index
             .get(&simple_name)
             .filter(|hit| hit.arity == fn_desc.params.len());
@@ -1179,7 +1504,7 @@ fn register_module_filtered(
         let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
         let info = FunctionInfo {
-            id: fn_desc.id,
+            id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
             param_type_names: vec![],
@@ -1199,9 +1524,164 @@ fn register_module_filtered(
             return_type_name,
             return_type_inner,
         };
-        ctx.register_function(qualified, info.clone());
+        ctx.register_function(qualified.clone(), info.clone());
+        // ALSO register under any qualified path from `wanted` whose
+        // last segment matches `simple_name`.  This closes the
+        // grandparent-bundling discrepancy: when the precompiler
+        // bundles `core.shell.script.args` under archive entry
+        // `core.shell` (because `script.vr` declares `module
+        // script;`), the entry-derived `qualified` name is
+        // `core.shell.args` — but the user's `mount
+        // core.shell.script.{args as script_args}` looks up
+        // `core.shell.script.args`.  Without this fanout, the
+        // simple-name `args` ends up as the only ctx.functions
+        // entry under the function's id, `emit_missing_stub_descriptors`
+        // picks the bare name as the descriptor, and runtime
+        // intercepts that key on a deeper qualifier (e.g.
+        // `func_name.contains("script.args")`) miss.
+        for w in wanted.iter() {
+            if w == &qualified {
+                continue;
+            }
+            if w.contains('.')
+                && w.rsplit('.').next() == Some(simple_name.as_str())
+                && ctx.lookup_function(w).is_none()
+            {
+                ctx.register_function(w.clone(), info.clone());
+            }
+        }
         if ctx.lookup_function(&simple_name).is_none() {
             ctx.register_function(simple_name, info);
+        }
+    }
+
+    // Pass 4: register every sum-type's variant constructors from
+    // `module.types`.  In the source-driven path,
+    // `register_type_constructors` writes variant constructor
+    // FunctionInfos into ctx.functions (with sentinel IDs and
+    // `variant_tag` set).  These sentinel-IDed entries are NOT real
+    // FunctionDescriptors in the VBC module — they live only in the
+    // codegen context — so they don't survive archive serialisation.
+    // Without this pass, qualified record-variant literals like
+    // `ShellError.SpawnFailed { command, reason }` fall through every
+    // variant-tag lookup, hit the plain-record codegen fallback, and
+    // emit `New + SetField #<interned-name-id>` — runtime then crashes
+    // with `field write out of bounds: field index N exceeds object
+    // data size 16`.
+    //
+    // Walk every TypeDescriptor's variants — when the type name appears
+    // in `wanted` (or has a method-of-wanted-type fanout), register the
+    // variant constructor with a sentinel `u32::MAX - tag` ID, matching
+    // the source-driven path's discipline.  The `variant_index` HashMap
+    // built above already tracks first-wins per simple name, so re-using
+    // it for collision detection keeps the archive-load path bit-aligned
+    // with `register_type_constructors`.
+    use verum_vbc::module::FunctionId;
+    for ty in &module.types {
+        let parent_name = match module.strings.get(ty.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        // Filter: only register variants of types in scope. A type is
+        // "in scope" when its name is in `wanted`, OR when one of its
+        // variants' simple names is wanted (covers `mount Foo.Variant`).
+        // Without this gate every type in every loaded archive module
+        // dumps its variants into ctx.functions — historically that's
+        // the path that produced bare-name collisions like
+        // `Closed`/`Open`/`Done` from a dozen unrelated stdlib types.
+        let parent_in_scope = wanted.contains(&parent_name);
+        let any_variant_wanted = ty.variants.iter().any(|v| {
+            match module.strings.get(v.name) {
+                Some(s) => wanted.contains(&s.to_string()),
+                None => false,
+            }
+        });
+        // Method-of-wanted-type fanout: when the user writes
+        // `mount core.shell.{ShellError}` the typechecker may further
+        // surface qualified `ShellError.SpawnFailed` as wanted at
+        // record-literal compile time, but the lazy walker's `wanted`
+        // set is built once before codegen runs. The conservative
+        // policy here: also include variants whose qualified
+        // `<ParentType>.<VariantName>` form is wanted.
+        let qualified_variant_wanted = ty.variants.iter().any(|v| {
+            let vn = match module.strings.get(v.name) {
+                Some(s) => s.to_string(),
+                None => return false,
+            };
+            let qualified = format!("{}.{}", parent_name, vn);
+            wanted.contains(&qualified)
+        });
+        if !parent_in_scope && !any_variant_wanted && !qualified_variant_wanted {
+            continue;
+        }
+        for variant in &ty.variants {
+            let vname = match module.strings.get(variant.name) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let qualified = format!("{}.{}", parent_name, vname);
+            // Skip if a real FunctionDescriptor already covered this
+            // (e.g. tuple variants do appear as ctor functions in
+            // some stdlib modules — Pass 3 above already registered
+            // them with the right tag).
+            if ctx.lookup_function(&qualified).is_some() {
+                continue;
+            }
+            // Compute arity + per-field info.  Tuple variants carry
+            // arity in `variant.arity`; record variants carry their
+            // declared field count via `fields.len()`.
+            let (arity, payload_field_types) = match variant.kind {
+                VariantKind::Unit => (0usize, Vec::<String>::new()),
+                VariantKind::Tuple => (
+                    variant.arity as usize,
+                    variant
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                        })
+                        .collect(),
+                ),
+                VariantKind::Record => (
+                    variant.fields.len(),
+                    variant
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                        })
+                        .collect(),
+                ),
+            };
+            let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
+            let info = FunctionInfo {
+                id: FunctionId(u32::MAX - variant.tag),
+                param_count: arity,
+                param_names,
+                param_type_names: vec![],
+                is_async: false,
+                is_generator: false,
+                contexts: vec![],
+                return_type: None,
+                yield_type: None,
+                intrinsic_name: None,
+                variant_tag: Some(variant.tag),
+                parent_type_name: Some(parent_name.clone()),
+                variant_payload_types: if payload_field_types.is_empty() {
+                    None
+                } else {
+                    Some(payload_field_types)
+                },
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
+                return_type_name: Some(parent_name.clone()),
+                return_type_inner: None,
+            };
+            ctx.register_function(qualified, info);
+            // Deliberately skip simple-name registration — see the
+            // matching site in `register_module_filtered` for the
+            // collision rationale (user `type ... is | Help | ...`
+            // would otherwise be silently de-aliased).
         }
     }
 }

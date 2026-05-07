@@ -390,6 +390,21 @@ pub(in super::super) fn handle_call_method(
     let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
         let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
         state.registers.get_absolute(abs_index)
+    } else if receiver.is_thin_ref() {
+        // ThinRef encodes `&value` for cross-frame argument passing.
+        // The path_ops_runtime intercept (and other heap-shape intercepts
+        // below) gate on `receiver.is_ptr()` — ThinRef and CBGR-ref both
+        // tag as non-ptr, so leaving the ThinRef intact would cause the
+        // intercept to fail open and the dispatch would fall through to
+        // a stub body returning Unit.  Unwrap into the pointed-to Value
+        // up-front so the rest of the dispatch chain operates on the
+        // raw heap pointer.
+        let tr = receiver.as_thin_ref();
+        if !tr.ptr.is_null() {
+            unsafe { *(tr.ptr as *const Value) }
+        } else {
+            receiver
+        }
     } else {
         receiver
     };

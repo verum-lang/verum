@@ -594,6 +594,71 @@ impl VbcCodegen {
     /// table consultation. Falls through to None when the path is
     /// a single segment (bare variant name with no qualifier) — the
     /// caller's other lookup avenues then take over.
+    /// Last-resort variant lookup through the codegen's `TypeDescriptor`
+    /// table. Closes the gap where a sum-type's variant constructors
+    /// were never registered as functions in `ctx.functions` — for
+    /// example a stdlib type loaded via archive metadata (so
+    /// `compile_type_decl` never ran on its AST) — but the type's
+    /// `TypeDescriptor` (with populated `variants`) DID land via a
+    /// metadata import path.
+    ///
+    /// Returns `(tag, parent_canonical_name, declared_field_names)` where
+    /// `declared_field_names` is the variant's record-form field names
+    /// in declaration order (empty for tuple/unit variants). The caller
+    /// can use these names to remap user-side literal-order field-init
+    /// pairs to declared-order positional indices.
+    ///
+    /// `parent_path` may carry `.` or `::` separators or be a bare
+    /// simple name; we attempt: exact match, simple-name suffix match
+    /// against every registered type. The final `parent_canonical_name`
+    /// returned is the descriptor's recorded name (whatever form that
+    /// took at registration), so the caller can wire it through
+    /// `emit_make_variant`'s typed-form gate which keys off
+    /// `type_name_to_id`.
+    pub(super) fn find_variant_in_type_descriptors(
+        &self,
+        parent_path: &str,
+        variant_name: &str,
+    ) -> Option<(u32, String, Vec<String>)> {
+        let parent_simple = parent_path
+            .rsplit(|c| c == '.' || c == ':')
+            .next()
+            .unwrap_or(parent_path);
+        for type_desc in self.types.iter() {
+            let tn_idx = type_desc.name.0 as usize;
+            let tn = match self.ctx.strings.get(tn_idx) {
+                Some(s) => s.as_str(),
+                None => continue,
+            };
+            // Match on full path or simple name.
+            let tn_simple = tn.rsplit(|c| c == '.' || c == ':').next().unwrap_or(tn);
+            if tn != parent_path && tn_simple != parent_simple {
+                continue;
+            }
+            for variant in type_desc.variants.iter() {
+                let vn = match self.ctx.strings.get(variant.name.0 as usize) {
+                    Some(s) => s.as_str(),
+                    None => continue,
+                };
+                if vn != variant_name {
+                    continue;
+                }
+                // Found. Pull declared field names so the caller can
+                // remap literal order → declaration order.
+                let mut field_names: Vec<String> = Vec::with_capacity(variant.fields.len());
+                for fd in variant.fields.iter() {
+                    if let Some(name) = self.ctx.strings.get(fd.name.0 as usize) {
+                        field_names.push(name.clone());
+                    } else {
+                        field_names.push(String::new());
+                    }
+                }
+                return Some((variant.tag, tn.to_string(), field_names));
+            }
+        }
+        None
+    }
+
     pub(super) fn parent_type_from_qualified_name(&self, name: &str) -> Option<String> {
         let last_dot = name.rfind('.');
         let last_colon = name.rfind("::");
@@ -1545,8 +1610,20 @@ impl VbcCodegen {
         let right_type = self.infer_expr_type_kind(right);
         let is_float = matches!(left_type, Some(verum_ast::ty::TypeKind::Float))
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Float));
+        // Text detection: both the direct primitive `Text` AND `&Text`
+        // (typical for stdlib param signatures) must route through the
+        // generic CmpG path so the runtime's deep-string equality
+        // applies.  Pre-fix `&Text == &Text` fell into the operator-
+        // method dispatch below (Text.eq), and that body's
+        // `self.as_bytes()` then mis-handled small-string operands —
+        // surfaced as a `false` return for two values whose bit
+        // patterns are identical.
+        let left_type_name = self.extract_expr_type_name(left);
+        let right_type_name = self.extract_expr_type_name(right);
         let is_text = matches!(left_type, Some(verum_ast::ty::TypeKind::Text))
-            || matches!(right_type, Some(verum_ast::ty::TypeKind::Text));
+            || matches!(right_type, Some(verum_ast::ty::TypeKind::Text))
+            || left_type_name.as_deref() == Some("Text")
+            || right_type_name.as_deref() == Some("Text");
         // Check if both types are known primitives (Int, Bool, Char)
         // For unknown types (Maybe<T>, Result<T, E>, etc.), use generic comparison
         let is_primitive = matches!(
@@ -12626,6 +12703,16 @@ impl VbcCodegen {
         // Check if this is a record variant constructor (e.g., Branch { value: 1, left: x, right: y })
         let variant_name = format!("{}", path);
         let dot_name = variant_name.replace("::", ".");
+        // `descriptor_match` carries the (parent_canonical_name,
+        // declared_field_names) extracted from a TypeDescriptor scan when
+        // `ctx.functions` doesn't have the variant constructor registered
+        // (typical for stdlib sum types loaded via archive metadata
+        // without compile_type_decl running on their AST). Used below to
+        // remap literal-order field initialisers to declared-order
+        // positional indices for SetVariantData — fixes a long-standing
+        // hazard where user-reordered field literals would silently
+        // permute payload slots.
+        let mut descriptor_match: Option<(String, Vec<String>)> = None;
         let variant_tag = self
             .ctx
             .lookup_function(&variant_name)
@@ -12649,6 +12736,36 @@ impl VbcCodegen {
                 let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
                 self.ctx
                     .find_variant_by_suffix_and_args(simple, fields.len())
+            })
+            .or_else(|| {
+                // Final fallback: scan the codegen's `TypeDescriptor`
+                // table.  Cross-module stdlib sum types
+                // (e.g. `core.shell.result.ShellError`) reach codegen
+                // via metadata import — their `TypeDescriptor.variants`
+                // are populated, but `register_type_constructors` (which
+                // pushes variant ctors into `ctx.functions`) only runs
+                // for types whose `compile_type_decl` was invoked. The
+                // type-table scan covers exactly that gap.
+                //
+                // Without this branch, qualified variant literals like
+                // `ShellError.SpawnFailed { command, reason }` fell
+                // through to the plain-record path below, allocated a
+                // type=0 New, and resolved field indices via the
+                // global interned-name id table — which produced
+                // out-of-bounds SetField at runtime (field index = the
+                // interned name id, not the variant's positional slot).
+                let last_dot_or_colon = dot_name.rfind('.');
+                if let Some(idx) = last_dot_or_colon {
+                    let parent_path = &dot_name[..idx];
+                    let last = &dot_name[idx + 1..];
+                    if let Some((tag, parent_canonical, decl_field_names)) =
+                        self.find_variant_in_type_descriptors(parent_path, last)
+                    {
+                        descriptor_match = Some((parent_canonical, decl_field_names));
+                        return Some(tag);
+                    }
+                }
+                None
             });
 
         if let Some(tag) = variant_tag {
@@ -12659,8 +12776,14 @@ impl VbcCodegen {
             // Fall through to the FunctionInfo lookup as a backup
             // (covers bare-variant-name uses inside the defining
             // module, where the path is just `Variant` with no Type
-            // qualifier).
-            let path_parent = self.parent_type_from_qualified_name(&dot_name);
+            // qualifier).  When the descriptor-table fallback fired
+            // we already have the canonical parent name in hand —
+            // prefer it because the FunctionInfo lookup can't surface
+            // it (the variant ctor wasn't registered as a function).
+            let path_parent = descriptor_match
+                .as_ref()
+                .map(|(p, _)| p.clone())
+                .or_else(|| self.parent_type_from_qualified_name(&dot_name));
             if let Some(parent) = path_parent {
                 self.emit_make_variant(result, tag, fields.len() as u32, Some(&parent));
             } else {
@@ -12675,7 +12798,30 @@ impl VbcCodegen {
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = format!("{}", path);
-            for (i, field) in fields.iter().enumerate() {
+            // Field-init order in the source literal need not match the
+            // variant's declared payload order. SetVariantData uses a
+            // POSITIONAL slot, so emitting `field: i as u32` (raw
+            // literal order) silently permutes slots when the user
+            // reorders fields. When we have declared field names from
+            // either the descriptor scan or the type-field-layout
+            // registry, remap each literal field to the declared
+            // index; otherwise fall back to literal order (the
+            // historical behaviour, valid for in-order writes).
+            let declared_order: Option<Vec<String>> =
+                descriptor_match.as_ref().map(|(_, names)| names.clone());
+            let declared_order: Option<Vec<String>> = declared_order.or_else(|| {
+                // Variant record fields are also registered into
+                // `type_field_layouts` under the variant's simple name
+                // by `register_type_constructors`. Use that as a fallback
+                // for the user-defined-variant case (which doesn't go
+                // through the descriptor scan).
+                let last = variant_name
+                    .rsplit(|c| c == '.' || c == ':')
+                    .next()
+                    .unwrap_or(&variant_name);
+                self.type_field_layouts.get(last).cloned()
+            });
+            for (literal_idx, field) in fields.iter().enumerate() {
                 let saved_field_type =
                     self.push_field_type_context(&variant_type_name, &field.name.name);
 
@@ -12695,9 +12841,16 @@ impl VbcCodegen {
                     src: value_reg,
                 });
 
+                let field_name_str: &str = field.name.name.as_str();
+                let positional_idx = declared_order
+                    .as_ref()
+                    .and_then(|order| order.iter().position(|n| n.as_str() == field_name_str))
+                    .map(|p| p as u32)
+                    .unwrap_or(literal_idx as u32);
+
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
-                    field: i as u32,
+                    field: positional_idx,
                     value: cloned_reg,
                 });
 

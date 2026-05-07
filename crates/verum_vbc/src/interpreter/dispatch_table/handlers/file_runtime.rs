@@ -676,32 +676,72 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
+    // Unwrap CBGR-ref AND ThinRef.  Pre-fix only CBGR was unwrapped;
+    // ThinRef-encoded `&path` arguments fell into the fast-text
+    // branch as a non-Text value, hit the field-drill fallback with
+    // garbage, and bottomed out in the `<value:bits>` debug
+    // rendering — surfacing as `NotFound` against a path the user
+    // never typed.
+    let mut unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)
     } else {
         v
     };
+    if unwrapped.is_thin_ref() {
+        let tr = unwrapped.as_thin_ref();
+        if !tr.ptr.is_null() {
+            unwrapped = unsafe { *(tr.ptr as *const Value) };
+        }
+    }
     // Fast path: it's already a Text.
     if value_is_text(&unwrapped) {
         return extract_string(&unwrapped, state);
     }
-    // Slow path: try to peek field 0 of a 1-field record. Verum's
-    // `Path is { inner: Text }` lays out as `[ObjectHeader][Value(text)]`
-    // — a single-field record, payload size = 8 bytes (one Value slot).
+    // Slow path: drill through the canonical 1- or 2-field record
+    // shapes carrying a Text payload.
+    //
+    //   * `Path    { inner: Text }`        — 1 level: peek field 0
+    //   * `PathBuf { path: Path { … } }`   — 2 levels: peek field 0
+    //     of field 0
+    //
+    // Pre-fix this only drilled one level, so a `PathBuf` argument
+    // (typical when user code calls `path_exists(&pathbuf.as_path())`
+    // and as_path is intercepted by `path_ops_runtime`) returned the
+    // inner Path-record pointer formatted as a debug string, and the
+    // `std::path::Path::new(&path).exists()` host call then asked
+    // about a path like `<ptr@0x600003a8c000>` which never exists.
     if unwrapped.is_ptr() && !unwrapped.is_nil() {
         let ptr = unwrapped.as_ptr::<u8>();
         if !ptr.is_null()
             && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
         {
             let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-            // Single-field record carries a payload of exactly 8 bytes
-            // (one Value slot). Peek field 0; if it's a Text, that's
-            // the path content.
             if (header.size as usize) >= std::mem::size_of::<Value>() {
                 let field0 = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 if value_is_text(&field0) {
                     return extract_string(&field0, state);
+                }
+                // Second level (PathBuf-shaped): if field0 is itself a
+                // 1-field record whose own field 0 is a Text, return
+                // that Text.
+                if field0.is_ptr() && !field0.is_nil() {
+                    let inner_ptr = field0.as_ptr::<u8>();
+                    if !inner_ptr.is_null()
+                        && (inner_ptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        let inner_header =
+                            unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                        if (inner_header.size as usize) >= std::mem::size_of::<Value>() {
+                            let inner_field0 = unsafe {
+                                *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
+                            };
+                            if value_is_text(&inner_field0) {
+                                return extract_string(&inner_field0, state);
+                            }
+                        }
+                    }
                 }
             }
         }

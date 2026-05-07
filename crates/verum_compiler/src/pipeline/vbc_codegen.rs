@@ -353,7 +353,35 @@ impl<'s> CompilationPipeline<'s> {
         static CTX_CACHE: crate::archive_ctx_loader::ArchiveCtxCache =
             crate::archive_ctx_loader::ArchiveCtxCache::new();
         let t_pop = std::time::Instant::now();
-        CTX_CACHE.apply_lazy(archive, codegen.ctx_mut(), module);
+        // Split borrows so apply_lazy can REMAP each archive-local
+        // FunctionId to a globally-unique slot.  Without this, two
+        // archive modules with overlapping local ids (canonical
+        // example: `core.text.Text.trim_end_matches` and
+        // `core.shell.script.args` both at id=0 within their
+        // respective module-local function tables) collapse onto a
+        // single `ctx.functions` slot — `emit_missing_stub_descriptors`
+        // then emits exactly one stub for id=0 with whichever name
+        // wins the longest-dotted tiebreak, and Call(0) at runtime
+        // dispatches every call site through that one name's
+        // intercept (or, when no intercept matches, returns Unit).
+        // Combined archive load: function table + type table in a
+        // single walk, so each archive module is decoded exactly once
+        // (apply_lazy + import_types_for_module previously decoded the
+        // same module twice — measurable cold-start regression on
+        // scripts with deep mount trees).  Function/id remap and
+        // type-side first-wins discipline are layered inside.
+        let (fn_modules, type_modules) = CTX_CACHE.apply_lazy_with_types(
+            archive,
+            &mut codegen,
+            module,
+        );
+        tracing::debug!(
+            target: "compile_ast_to_vbc",
+            "archive lazy apply (combined): {} fn-modules + {} type-modules in {:.2}ms",
+            fn_modules,
+            type_modules,
+            t_pop.elapsed().as_secs_f64() * 1000.0,
+        );
         tracing::debug!(
             target: "compile_ast_to_vbc",
             "archive lazy pre-population in {:.2}ms",
