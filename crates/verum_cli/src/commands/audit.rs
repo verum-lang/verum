@@ -2450,13 +2450,13 @@ pub fn audit_external_prover_replay_with_format(
     strict: bool,
 ) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
-        ui::step("External-prover replay (Lean 4 + Coq/Rocq)");
+        ui::step("External-prover replay (Lean 4 + Coq/Rocq + Isabelle/HOL)");
     }
 
  // Step 1 — regenerate the corpus exports so we always replay
  // against the current Verum-side source-of-truth.  This is
  // intentionally a self-call: the existing audit_kernel_soundness
- // gate writes both files into target/audit-reports/kernel-soundness/
+ // gate writes all three files into target/audit-reports/kernel-soundness/
  // and exits with the corpus-drift verdict only.  We capture its
  // output silently and proceed.
     let manifest_dir = Manifest::find_manifest_dir()?;
@@ -2468,6 +2468,7 @@ pub fn audit_external_prover_replay_with_format(
         use verum_kernel::soundness::SoundnessBackend;
         use verum_kernel::soundness::SoundnessExporter;
         use verum_kernel::soundness::coq::CoqBackend;
+        use verum_kernel::soundness::isabelle::IsabelleBackend;
         use verum_kernel::soundness::lean::LeanBackend;
 
         let exporter = SoundnessExporter::new();
@@ -2480,16 +2481,23 @@ pub fn audit_external_prover_replay_with_format(
         std::fs::create_dir_all(&report_dir).ok();
         let coq = CoqBackend::new();
         let lean = LeanBackend::new();
+        let isabelle = IsabelleBackend::new();
         std::fs::write(report_dir.join(coq.output_filename()), exporter.emit(&coq)).ok();
         std::fs::write(
             report_dir.join(lean.output_filename()),
             exporter.emit(&lean),
         )
         .ok();
+        std::fs::write(
+            report_dir.join(isabelle.output_filename()),
+            exporter.emit(&isabelle),
+        )
+        .ok();
     }
 
     let coq_export = report_dir.join("kernel_soundness.v");
     let lean_export = report_dir.join("KernelSoundness.lean");
+    let isabelle_export = report_dir.join("KernelSoundness.thy");
 
  // Step 2 — choose backends.  Empty filter = all.  Repeated --backend
  // values are unioned; "all" expands.
@@ -2497,6 +2505,8 @@ pub fn audit_external_prover_replay_with_format(
         || backend_filter.iter().any(|b| b == "lean" || b == "all");
     let want_coq = backend_filter.is_empty()
         || backend_filter.iter().any(|b| b == "coq" || b == "all");
+    let want_isabelle = backend_filter.is_empty()
+        || backend_filter.iter().any(|b| b == "isabelle" || b == "all");
 
     let mut reports: Vec<BackendReport> = Vec::new();
     if want_lean {
@@ -2504,6 +2514,9 @@ pub fn audit_external_prover_replay_with_format(
     }
     if want_coq {
         reports.push(replay_coq(&manifest_dir, &coq_export));
+    }
+    if want_isabelle {
+        reports.push(replay_isabelle(&manifest_dir, &isabelle_export));
     }
 
  // Step 3 — render report.
@@ -2767,6 +2780,152 @@ fn replay_coq(manifest_dir: &Path, coq_export: &Path) -> BackendReport {
         }
         Err(e) => BackendReport {
             backend: "coq",
+            invocation,
+            duration_ms,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("spawn failed: {e}")],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        },
+    }
+}
+
+/// Replay the kernel-soundness export through Isabelle/HOL.
+///
+/// We invoke `isabelle process -T KernelSoundness -d <dir>` which
+/// type-checks the theory file in non-interactive batch mode.  The
+/// Isabelle binary is auto-discovered from the standard macOS cask
+/// install (`/Applications/Isabelle*.app/bin/isabelle`), the
+/// Linux apt path (`/usr/bin/isabelle`), or `$PATH`.  Absence is
+/// reported as `not_available` (advisory unless `--strict`).
+fn replay_isabelle(manifest_dir: &Path, isabelle_export: &Path) -> BackendReport {
+    use std::process::Command;
+    use std::time::Instant;
+
+    // Auto-discovery: Isabelle 2025-2 macOS cask, Homebrew Cellar
+    // path, Linux apt, plus PATH lookup.  We pick the first that
+    // exists to keep the audit deterministic on per-machine installs.
+    let candidates = [
+        std::path::PathBuf::from("/Applications/Isabelle2025-2.app/bin/isabelle"),
+        std::path::PathBuf::from("/Applications/Isabelle.app/bin/isabelle"),
+        std::path::PathBuf::from("/opt/homebrew/Caskroom/isabelle/2025-2/Isabelle.app/bin/isabelle"),
+        std::path::PathBuf::from("/usr/bin/isabelle"),
+        std::path::PathBuf::from("/usr/local/bin/isabelle"),
+        std::path::PathBuf::from("isabelle"),
+    ];
+    let isabelle = candidates
+        .iter()
+        .find(|p| p.exists())
+        .cloned()
+        .unwrap_or(std::path::PathBuf::from("isabelle"));
+    if !isabelle.exists() && !is_on_path("isabelle") {
+        return BackendReport {
+            backend: "isabelle",
+            invocation: format!("{} process -T KernelSoundness", isabelle.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: "install via `brew install --cask isabelle` (macOS) or apt's isabelle package".into(),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let isa_dir = find_verification_root(manifest_dir)
+        .map(|v| v.join("external").join("isabelle"))
+        .unwrap_or_else(|| manifest_dir.join("verification").join("external").join("isabelle"));
+    if !isa_dir.exists() {
+        return BackendReport {
+            backend: "isabelle",
+            invocation: format!("{} process -T KernelSoundness", isabelle.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: format!("Isabelle workspace missing at {}", isa_dir.display()),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    // Sync the freshly-emitted .thy file into the Isabelle workspace.
+    let isa_target = isa_dir.join("KernelSoundness.thy");
+    if let Err(e) = std::fs::copy(isabelle_export, &isa_target) {
+        return BackendReport {
+            backend: "isabelle",
+            invocation: format!(
+                "cp {} {}",
+                isabelle_export.display(),
+                isa_target.display()
+            ),
+            duration_ms: 0,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("sync failed: {}", e)],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    // `isabelle build -d . -v KernelSoundness` re-elaborates the
+    // theory + session in non-interactive batch mode.  Errors surface
+    // on stderr with `*** ` prefix; honest `oops` declarations emit
+    // their `Step "oops" successful` message on stdout.
+    let started = Instant::now();
+    let invocation = format!(
+        "{} build -d . -v KernelSoundness (cwd: {})",
+        isabelle.display(),
+        isa_dir.display(),
+    );
+    let output = Command::new(&isabelle)
+        .args(["build", "-d", ".", "-v", "KernelSoundness"])
+        .current_dir(&isa_dir)
+        .output();
+    let duration_ms = started.elapsed().as_millis();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let combined = format!("{stdout}\n{stderr}");
+            // Isabelle batch-mode prints `*** Error` for hard errors.
+            // We treat any `***` as a hard-error indicator.  Honest
+            // IOUs are `oops` declarations — counted by re-reading the
+            // emitted source.
+            let mut hard_errors: Vec<String> = Vec::new();
+            for line in combined.lines() {
+                if line.starts_with("***") || line.contains("\n***") {
+                    hard_errors.push(line.to_string());
+                }
+            }
+            let oops_count = std::fs::read_to_string(&isa_target)
+                .map(|s| s.matches("\n  oops").count())
+                .unwrap_or(0);
+            let verdict = if !out.status.success() || !hard_errors.is_empty() {
+                ReplayVerdict::HardError {
+                    error_count: hard_errors.len().max(1),
+                    sample: hard_errors.into_iter().take(8).collect(),
+                }
+            } else if oops_count > 0 {
+                ReplayVerdict::IouOnly {
+                    sorry_count: oops_count,
+                }
+            } else {
+                ReplayVerdict::Clean
+            };
+            BackendReport {
+                backend: "isabelle",
+                invocation,
+                duration_ms,
+                verdict,
+                stdout_tail: tail_lines(&stdout, 8),
+                stderr_tail: tail_lines(&stderr, 8),
+            }
+        }
+        Err(e) => BackendReport {
+            backend: "isabelle",
             invocation,
             duration_ms,
             verdict: ReplayVerdict::HardError {

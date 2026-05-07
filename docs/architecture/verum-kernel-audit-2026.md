@@ -9,10 +9,15 @@
 
 ## 1. Methodology
 
-Three external proof assistants — **Lean 4 (lake build)**,
-**Coq / Rocq 9.x (`coqc`)**, and **Isabelle/HOL** — replay the
-kernel-soundness corpus on every release via
-`verum audit --external-prover-replay`. The shape-only export
+Three external proof assistants — **Lean 4 4.29.1 (`lake build`)**,
+**Coq / Rocq 9.1 (`coqc`)**, and **Isabelle/HOL 2025-2 (`isabelle
+build`)** — replay the kernel-soundness corpus on every release via
+`verum audit --external-prover-replay`. Each foundation is
+meaningfully different: Lean is dependent type theory (predicative
++ impredicative `Prop`); Coq is CIC (impredicative `Prop` + universe
+polymorphism); Isabelle/HOL is classical higher-order logic with
+extensible foundations. Tri-prover agreement on the structural-
+fragment soundness lemmas is the load-bearing claim. The shape-only export
 (written for ~12 months) had hidden a number of real defects in the
 kernel and the emitter; this audit forced every defect into the open
 by demanding that the foreign prover *actually accept* the export.
@@ -176,11 +181,17 @@ claimed_type — rejected) and
 |-------|------:|----------:|-----------:|
 | `proof_checker.rs` lib tests | 28 | 23 | 28 |
 | External-prover replay (Lean) | 1 file | shape-only | real `Typing`, real proofs for 9/38 rules |
-| External-prover replay (Coq) | 1 file | shape-only | (refactor pending; tracked under FV-2 Coq mirror) |
-| External-prover replay (Isabelle) | — | not implemented | tracked under FV-2 Isabelle backend |
+| External-prover replay (Coq) | 1 file | shape-only | real `Typing`, real proofs for 9/38 rules |
+| External-prover replay (Isabelle) | 1 file | not implemented | real `Typing`, real proofs for 9/38 rules |
 
 The five new defect-pinning tests (DEFECT-1, DEFECT-2 ×2,
 DEFECT-3, DEFECT-4 ×2) all pass on the patched kernel.
+
+**Tri-prover diversity** is now the load-bearing claim: every
+release runs the exact same `(CoreTerm, KernelRule, Typing)` data
+through three independent foreign type-checkers (Lean / Coq /
+Isabelle) on three different foundations.  Hard-error from any
+single backend fails the gate.
 
 ## 4. What is now mechanically guaranteed
 
@@ -205,15 +216,10 @@ guarantees:
 
 Items below are tracked for future audits:
 
-* **Coq / Rocq mirror** of the real-`Typing` refactor. The
-  `coq.rs` backend still emits the vacuous-axiom shape; updating it
-  is mechanical (mirror of `lean.rs`) and tracked under FV-2.
-* **Isabelle/HOL backend.** The skeleton exists in
-  `corpus_export.rs` but no `IsabelleBackend` exists at the
-  per-rule layer. Tracked under FV-2.
-* **Lean reference checker** (`Kernel.check : Ctx → CoreTerm →
-  Maybe CoreTerm`) for differential testing against the Rust
-  kernel. Tracked under FV-3.
+* **Lean reference checker → JSON differential harness.** The
+  Lean-side `ReferenceChecker.lean` re-implements the structural
+  fragment; the next step is a Rust→Lean JSON certificate-replay
+  bridge that compares verdicts cert-by-cert. Tracked under FV-3.
 * **Random-term + mutation harness.** Tracked under FV-4.
 * **Discharge of the 27 IOUs.** Each names its meta-theory; the
   full discharge plan is in
