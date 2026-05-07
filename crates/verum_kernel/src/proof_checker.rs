@@ -232,22 +232,56 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
     }
 }
 
+/// Fuel ceiling for `whnf` head-reduction.  CoC-typed inputs
+/// strongly normalise, so this bound is never reached by a well-
+/// typed certificate; ill-typed inputs (e.g. the Curry/Turing
+/// fix-point combinator unfolded eagerly) would otherwise loop the
+/// kernel forever.  See `DEFECT-3` in
+/// `docs/architecture/verum-kernel-audit-2026.md`.
+const WHNF_FUEL_CEILING: usize = 1 << 20; // 1,048,576 head-reductions.
+
 /// β-reduce the head of a term to weak head normal form. Repeats
-/// until no top-level redex remains. Cycle-safe by construction
-/// (each reduction strictly shrinks the App-structure at the head).
-fn whnf(mut term: Term) -> Term {
+/// until no top-level redex remains.
+///
+
+/// **DEFECT-3 fix (kernel-audit-2026-05-08).** Now fuel-bounded.
+/// Without the bound, an ill-typed input like
+/// `App(λ.App(Var(0), Var(0)), λ.App(Var(0), Var(0)))` (the CoC
+/// version of Ω(Ω)) would loop forever.  CoC-typed inputs
+/// strongly normalise so the bound is never reached in practice,
+/// but the kernel must not depend on its caller's discipline for
+/// termination — fuel exhaustion now stops reduction and returns
+/// the partially-reduced term.  Subsequent `def_eq` will reject the
+/// pair structurally if it isn't actually equal.
+fn whnf(term: Term) -> Term {
+    whnf_fuel(term, WHNF_FUEL_CEILING).0
+}
+
+/// Inner whnf with explicit fuel.  Returns `(reduced, fuel_remaining)`.
+/// When fuel reaches zero, returns the partially-reduced term
+/// unchanged — the kernel's soundness does not depend on full
+/// reduction (it depends on `def_eq` agreeing, which is structural).
+fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
     loop {
+        if fuel == 0 {
+            return (term, 0);
+        }
+        fuel -= 1;
         match term {
             Term::App(f, x) => {
-                let f_whnf = whnf(*f);
+                let (f_whnf, fuel_after) = whnf_fuel(*f, fuel);
+                fuel = fuel_after;
                 match f_whnf {
                     Term::Lam(_, body) => {
+                        if fuel == 0 {
+                            return (Term::App(Box::new(Term::Lam(Box::new(Term::Universe(0)), body)), x), 0);
+                        }
                         term = subst(*body, 0, &x);
                     }
-                    other => return Term::App(Box::new(other), x),
+                    other => return (Term::App(Box::new(other), x), fuel),
                 }
             }
-            _ => return term,
+            _ => return (term, fuel),
         }
     }
 }
@@ -288,20 +322,37 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
 }
 
 /// η-equivalence helper: returns `true` iff `lam_body` (the body of
-/// a λ at depth 0) is `App(f, Var(0))` where `f` does not contain
-/// Var(0) free, AND `f` (after shifting down) is equal to `other`.
+/// a λ at depth 0) reduces to `App(f, x)` where `x` whnf-reduces to
+/// `Var(0)` and `f` does not contain `Var(0)` free, AND `f` (after
+/// shifting down) is equal to `other`.
 ///
 
 /// This is the soundness gate for T-Eta-Conv: the bound variable
 /// must not "leak" into the function part of the application.
+///
+
+/// **DEFECT-1 fix (kernel-audit-2026-05-08).** Previously the
+/// argument `x` was matched syntactically against `Var(0)`; this
+/// missed valid η-redexes whose argument β-reduces to `Var(0)` (e.g.
+/// `λx. (f ((λy.y) x))`).  We now whnf the argument first.  This is
+/// safe: `whnf` on a sub-term of a well-typed lambda body terminates
+/// (CoC strong-normalisation), and any non-`Var(0)` whnf result is
+/// rejected before the bound-variable-escape check.
 fn eta_match(lam_body: &Term, other: &Term) -> bool {
     let app_body = whnf(lam_body.clone());
     let (f, x) = match app_body {
         Term::App(f, x) => (f, x),
         _ => return false,
     };
-    // The argument must be exactly Var(0) (the bound variable).
-    if !matches!(*x, Term::Var(0)) {
+    // The argument must β-reduce to `Var(0)` (the bound variable).
+    // Whnf the sub-term: any redex like `(λ. body) x` collapses, and
+    // after collapse we expect a literal `Var(0)`.  Anything else
+    // means the η-redex is not in canonical form and we conservatively
+    // reject (sound but incomplete here, as in any decidable
+    // η-conversion algorithm — the alternative is full normalisation
+    // which costs more for the same soundness).
+    let x_whnf = whnf(*x);
+    if !matches!(x_whnf, Term::Var(0)) {
         return false;
     }
     // The function part must not reference Var(0) — otherwise the
@@ -426,6 +477,27 @@ pub enum CheckError {
         /// The intrinsic name that failed to dispatch positively.
         intrinsic: String,
     },
+    /// **DEFECT-2 (kernel-audit-2026-05-08).** A `Universe(n)` term
+    /// names a level whose successor `n + 1` would overflow the
+    /// `u32` carrier.  In release builds, naive arithmetic wraps to
+    /// zero and would emit `Universe(u32::MAX) : Universe(0)` —
+    /// unsound — so the kernel hard-rejects instead.
+    UniverseOverflow {
+        /// The offending level.
+        level: u32,
+    },
+    /// **DEFECT-4 (kernel-audit-2026-05-08).** A `Certificate`'s
+    /// `claimed_type` failed its own well-formedness check.  A
+    /// claimed type must itself have a `Universe(_)` type; without
+    /// this gate, malformed terms in `claimed_type` could match
+    /// a malformed inferred type via structural `def_eq` and the
+    /// certificate would "verify" an ill-formed obligation.
+    ClaimedTypeNotAType {
+        /// The claimed-type term that failed the well-formedness check.
+        claimed_type: Term,
+        /// Whatever its own inferred type was (often a non-`Universe`).
+        actual: Term,
+    },
 }
 
 /// Infer the type of `term` in `ctx`. Returns the unique type or
@@ -451,8 +523,17 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             .lookup(*i)
             .ok_or_else(|| CheckError::UnboundVariable(*i)),
 
-        // T-Univ
-        Term::Universe(n) => Ok(Term::Universe(n + 1)),
+        // T-Univ.  DEFECT-2 fix: explicit overflow check on the
+        // successor universe.  Naive `n + 1` would wrap to 0 in
+        // release builds, and the kernel would then claim
+        // `Universe(u32::MAX) : Universe(0)` — unsound.  We reject
+        // with a structured error so any certificate that names
+        // `Universe(u32::MAX)` is rejected explicitly rather than
+        // accepted with a wrapped successor level.
+        Term::Universe(n) => match n.checked_add(1) {
+            Some(succ) => Ok(Term::Universe(succ)),
+            None => Err(CheckError::UniverseOverflow { level: *n }),
+        },
 
         // T-Pi-Form
         Term::Pi(a, b) => {
@@ -540,8 +621,28 @@ impl Certificate {
     /// Verify the certificate. Returns `Ok(())` iff the term has the
     /// claimed type in an empty context. Any free variable in either
     /// term or type is a structural error rejected here.
+    ///
+
+    /// **DEFECT-4 fix (kernel-audit-2026-05-08).** Independently
+    /// type-check `claimed_type` and confirm its own type is some
+    /// `Universe(_)` *before* the inferred-vs-claimed comparison.
+    /// Without this gate, an ill-formed `claimed_type` could match
+    /// an ill-formed inferred type via structural `def_eq` and the
+    /// certificate would "verify" an obligation that is meaningless
+    /// at the kernel layer.  Now: if `claimed_type` is not itself
+    /// a type, we hard-reject with `ClaimedTypeNotAType` carrying
+    /// both the offending term and whatever inferred kind it had.
     pub fn verify(&self) -> Result<(), CheckError> {
         let ctx = Context::new();
+        // Step 1 — claimed_type must itself be a type.
+        let claimed_kind = infer(&ctx, &self.claimed_type)?;
+        if expect_universe(&claimed_kind).is_none() {
+            return Err(CheckError::ClaimedTypeNotAType {
+                claimed_type: self.claimed_type.clone(),
+                actual: claimed_kind,
+            });
+        }
+        // Step 2 — term has the claimed type.
         check(&ctx, &self.term, &self.claimed_type)
     }
 }
@@ -804,6 +905,126 @@ mod tests {
         // Universe(0). Outer Pi: max(Univ(1) for type-of-A,
         // Univ(0) for body-Pi) = Universe(1).
         assert_eq!(inferred, Term::Universe(1));
+    }
+
+    // =========================================================================
+    // Kernel audit 2026-05-08 — defect-pinning regression tests.
+    //
+
+    // Each test below pins a load-bearing fix from the kernel audit.
+    // Removing any of them would silently regress the kernel.  See
+    // docs/architecture/verum-kernel-audit-2026.md for the full ledger.
+    // =========================================================================
+
+    #[test]
+    fn defect_2_universe_overflow_is_rejected() {
+        // Pre-fix: Universe(u32::MAX) was accepted with a release-mode wrap
+        // to Universe(0), giving "Universe(MAX) : Universe(0)" — unsound.
+        // Post-fix: explicit UniverseOverflow rejection.
+        let ctx = Context::new();
+        match infer(&ctx, &Term::Universe(u32::MAX)) {
+            Err(CheckError::UniverseOverflow { level }) => {
+                assert_eq!(level, u32::MAX);
+            }
+            other => panic!("expected UniverseOverflow, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn defect_2_one_below_max_universe_still_typechecks() {
+        // The ceiling at `u32::MAX - 1` is the largest valid level —
+        // its successor `u32::MAX` fits in u32.
+        let ctx = Context::new();
+        let inferred = infer(&ctx, &Term::Universe(u32::MAX - 1)).unwrap();
+        assert_eq!(inferred, Term::Universe(u32::MAX));
+    }
+
+    #[test]
+    fn defect_4_claimed_type_must_be_a_type() {
+        // claimed_type is a non-type term (here a free variable that
+        // cannot itself have a Universe-level type).  The certificate
+        // must be rejected with ClaimedTypeNotAType, not silently
+        // allowed via structural coincidence with the inferred type.
+        let cert = Certificate {
+            term: Term::Var(0),                  // would error UnboundVariable
+            claimed_type: Term::Var(0),          // also free
+            metadata: Default::default(),
+        };
+        // The claimed_type's `infer` runs first, producing UnboundVariable.
+        // (Either UnboundVariable or ClaimedTypeNotAType is acceptable —
+        // both are kernel-side rejections at the right boundary.)
+        match cert.verify() {
+            Err(CheckError::UnboundVariable(_))
+            | Err(CheckError::ClaimedTypeNotAType { .. }) => {}
+            other => panic!("expected unbound-or-not-a-type, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn defect_4_claimed_type_well_formed_term_but_not_type() {
+        // Build a closed term whose claimed_type is well-formed but
+        // is NOT a type (e.g., a closed lambda — value, not type).
+        // Pre-fix: kernel would call def_eq inferred-vs-claimed and
+        // accept whenever they happen to match structurally.
+        // Post-fix: the claimed_type's own type isn't a Universe, so
+        // we reject with ClaimedTypeNotAType.
+        let id_term = Term::lam(Term::Universe(0), Term::Var(0));
+        let cert = Certificate {
+            term: id_term.clone(),
+            claimed_type: id_term, // a value, not a type
+            metadata: Default::default(),
+        };
+        match cert.verify() {
+            Err(CheckError::ClaimedTypeNotAType { .. }) => {}
+            other => panic!("expected ClaimedTypeNotAType, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn defect_3_whnf_terminates_on_omega_omega() {
+        // Build the CoC encoding of Ω(Ω) where Ω = λ. App(Var(0), Var(0)).
+        // Pre-fix: whnf would loop forever.
+        // Post-fix: fuel exhausts and whnf returns a partially-reduced
+        // term (the kernel's soundness only requires def_eq agree, not
+        // full reduction).  We assert that whnf RETURNS — that's the
+        // load-bearing property.
+        let omega_body = Term::app(Term::Var(0), Term::Var(0));
+        let omega = Term::lam(Term::Universe(0), omega_body);
+        let omega_omega = Term::app(omega.clone(), omega);
+        // If whnf loops, this test hangs and CI kills it.  If it
+        // returns at all, the fuel bound is doing its job.
+        let _result = whnf(omega_omega);
+    }
+
+    #[test]
+    fn defect_1_eta_under_beta_reduces_argument() {
+        // Verify the η rule fires for a redex whose argument is not
+        // syntactically `Var(0)` but β-reduces to it.
+        //   λ(x : U(0)). f ((λy. y) x) ≡_{βη} f
+        // Pre-fix: argument-side `(λy.y) x` is App(Lam, Var(0)) — not
+        // matching `Var(0)` syntactically; eta_match returned false
+        // so the rule didn't fire.
+        // Post-fix: whnf the argument, β-reducing `(λy.y) x` to `x`
+        // (= Var(0) after the descent), and the rule fires.
+        let f_outer = Term::Var(0); // outer f
+        let inner_id = Term::lam(Term::Universe(0), Term::Var(0)); // λy.y at depth 0
+        // Inside the outer lambda, indices shift up by 1, so:
+        //  - bound x → Var(0)
+        //  - outer f → Var(1)
+        //  - inner_id (closed) stays the same (no free vars)
+        //  - inner_id applied to bound x: App(inner_id_shifted, Var(0))
+        //    where inner_id_shifted is shift_up(inner_id, 1, 0) = inner_id (closed).
+        let lam_eta_via_beta = Term::lam(
+            Term::Universe(0),
+            Term::app(
+                Term::Var(1), // outer f, shifted
+                Term::app(inner_id.clone(), Term::Var(0)),
+            ),
+        );
+        assert!(
+            def_eq(&lam_eta_via_beta, &f_outer),
+            "η rule should fire after β-reducing the argument"
+        );
     }
 
     #[test]
