@@ -1221,6 +1221,40 @@ enum Commands {
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
+ /// Run the external-prover replay gate. Drives the kernel-
+ /// soundness corpus through Lake (Lean 4) and `coqc` (Rocq /
+ /// Coq), capturing per-backend pass / sorry-only / hard-error
+ /// verdict. Distinguishes:
+ ///
+ /// * **clean** — backend re-elaborates without errors and the
+ ///   only diagnostics are honest IOUs (`sorry` / `Admitted`)
+ ///   that match the corpus's declared admit list.
+ /// * **iou-only** — same as clean, but the diagnostic count
+ ///   matches the admit-list count; surfaces accidental admit
+ ///   leakage if the count drifts.
+ /// * **hard-error** — backend rejected the export with a
+ ///   real type / parse / scoping error. This is the load-bearing
+ ///   regression surface. Exits non-zero in `--strict` mode.
+ ///
+ /// Tools auto-detected on `$PATH`; absence is reported as
+ /// `not_available` (does not fail the gate unless `--strict`).
+ /// Backend selection: `--backend lean|coq|all` (default `all`).
+ ///
+ /// Output: `target/audit-reports/external-prover-replay.json`.
+        #[clap(long = "external-prover-replay")]
+        external_prover_replay: bool,
+
+ /// Backend filter for `--external-prover-replay`. Accepts
+ /// `lean`, `coq`, or `all` (default). Repeatable.
+        #[clap(long = "backend", value_name = "BACKEND")]
+        external_prover_backend: Vec<String>,
+
+ /// Strict mode for `--external-prover-replay`. Fails the gate
+ /// on hard-errors AND on any backend reporting `not_available`.
+ /// Use in CI where every backend must be installed.
+        #[clap(long = "strict", requires = "external_prover_replay")]
+        external_prover_strict: bool,
+
  /// kernel_v0 roster audit (task #154 / Phase 3).
  /// Walks the canonical 10-rule kernel_v0 manifest and the
  /// `core/verify/kernel_v0/rules/` directory on disk.
@@ -4054,6 +4088,9 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             kernel_recheck,
             kernel_soundness,
+            external_prover_replay,
+            external_prover_backend,
+            external_prover_strict,
             kernel_v0_roster,
             dependent_theorems,
             codegen_attestation,
@@ -4117,6 +4154,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_recheck_with_format(output_format)
             } else if kernel_soundness {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
+            } else if external_prover_replay {
+                commands::audit::audit_external_prover_replay_with_format(
+                    output_format,
+                    &external_prover_backend,
+                    external_prover_strict,
+                )
             } else if kernel_v0_roster {
                 commands::audit::audit_kernel_v0_roster_with_format(output_format)
             } else if let Some(axiom_name) = dependent_theorems.as_deref() {

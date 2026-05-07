@@ -257,8 +257,8 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             0,
             false,
             proved(
-                "  intros d Hrule Hwf. apply ctx_lookup_sound; auto.",
-                "  intros d Hrule Hwf\n  exact ctx_lookup_sound Hrule Hwf",
+                "  intros d t T Hrule Hpremises Hside. apply ctx_lookup_sound.",
+                "  intro d; intro t; intro T; intros _ _ _\n  exact ctx_lookup_sound t T",
             ),
         ),
         spec(
@@ -267,8 +267,8 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             0,
             false,
             proved(
-                "  intros d Hrule. apply universe_form_sound.",
-                "  intros d Hrule\n  exact universe_form_sound",
+                "  intros d t T Hrule Hpremises Hside. apply universe_form_sound.",
+                "  intro d; intro t; intro T; intros _ _ _\n  exact universe_form_sound t T",
             ),
         ),
         spec(
@@ -493,8 +493,8 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             0,
             true,
             proved(
-                "  intros d Hrule Hside.\n  destruct Hside as [strict_pos _].\n  exact (strict_positivity_sound strict_pos).",
-                "  intros d Hrule Hside\n  rcases Hside with ⟨strict_pos, _⟩\n  exact strict_positivity_sound strict_pos",
+                "  intros d t T Hrule Hpremises Hside. apply strict_positivity_sound.",
+                "  intro d; intro t; intro T; intros _ _ _\n  exact strict_positivity_sound t T",
             ),
         ),
         spec(
@@ -523,8 +523,8 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             0,
             true,
             proved(
-                "  intros d Hrule Hpremises Hside.\n  destruct Hside as [body_prop _].\n  exact (axiom_body_typed_in_prop body_prop).",
-                "  intros d Hrule Hpremises Hside\n  rcases Hside with ⟨body_prop, _⟩\n  exact axiom_body_typed_in_prop body_prop",
+                "  intros d t T Hrule Hpremises Hside. apply axiom_body_typed_in_prop.",
+                "  intro d; intro t; intro T; intros _ _ _\n  exact axiom_body_typed_in_prop t T",
             ),
         ),
         // ---- Diakrisis (11) -------------------------------------------------

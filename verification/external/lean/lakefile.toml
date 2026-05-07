@@ -1,0 +1,6 @@
+name = "VerumExternalReplay"
+version = "0.1.0"
+defaultTargets = ["VerumExternalReplay"]
+
+[[lean_lib]]
+name = "VerumExternalReplay"

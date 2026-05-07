@@ -60,8 +60,8 @@ impl SoundnessBackend for CoqBackend {
              (* --kernel-soundness`. *)\n\
              (* ============================================================== *)\n\
              \n\
-             From Coq Require Import Strings.String.\n\
-             From Coq Require Import Lists.List.\n\
+             From Stdlib Require Import Strings.String.\n\
+             From Stdlib Require Import Lists.List.\n\
              Import ListNotations.\n\
              Open Scope string_scope."
             .to_string()
