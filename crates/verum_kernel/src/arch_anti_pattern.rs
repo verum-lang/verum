@@ -2447,8 +2447,8 @@ pub fn check_self_reference_without_operator(
              self_reference: Some(SelfReferenceWitness { \
              operator: \"path.to.operator_cog\", \
              fixed_point: \"path.to.fixed_point_cog\", \
-             fixpoint_class: FixpointClass.Banach \
-             /* or Tarski / Adamek / CustomFixpoint(\"...\") */ \
+             fixpoint_class: fixpoint_class_banach() \
+             /* or fixpoint_class_tarski() / _adamek() / _custom_fixpoint(\"citation\") */ \
              }), .. }`. The operator cog must have lifecycle ≥ \
              Conditional and discharge the cited fixpoint-class \
              obligation."

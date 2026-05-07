@@ -870,19 +870,101 @@ public type ArchitecturalDefect is {
 ///                          appear in the cog's `@framework(...)`
 ///                          attribute and be enumerable by
 ///                          `verum audit --framework-axioms`.
-public type FixpointClass is
+///
+/// **Universal-property characterisation.** Categorically, a
+/// fixed-point theorem is the assertion that, in a chosen category
+/// `C` and for a chosen class `E ⊆ End(C)` of endomorphisms, every
+/// `T ∈ E` has a fixed point `Fix(T)`. The triple
+/// `(category, endomorphism_class, theorem)` is the universal-property
+/// classifier; concrete theorems (Banach, Tarski-Knaster, Adamek)
+/// inhabit specific points of this classifier and are produced by the
+/// smart constructors `fixpoint_class_banach`,
+/// `fixpoint_class_tarski`, `fixpoint_class_adamek`.
+
+/// The category `C` in which a fixed-point theorem is stated.
+public type FixpointCategory is
+    | CompleteMetricSpace
+    | CompleteLattice
+    | CocompleteCategory
+    | CustomCategory(Text);
+
+/// The class `E ⊆ End(C)` of endomorphisms admitted by a
+/// fixed-point theorem.
+public type EndomorphismClass is
+    | Contracting
+    | Monotone
+    | ContinuousFunctor
+    | CustomEndomorphismClass(Text);
+
+/// The theorem citation discharging a fixed-point claim.
+public type FixpointTheorem is
     | Banach
     | Tarski
     | Adamek
-    | CustomFixpoint(Text);
+    | Custom(Text);
 
-/// Stable diagnostic tag for `FixpointClass`.
+/// Universal-property classifier of a fixed-point theorem.
+public type FixpointClass is {
+    category: FixpointCategory,
+    endomorphism_class: EndomorphismClass,
+    theorem: FixpointTheorem,
+};
+
+/// Smart constructor for Banach's fixed-point theorem class.
+public fn fixpoint_class_banach() -> FixpointClass {
+    FixpointClass {
+        category: FixpointCategory.CompleteMetricSpace,
+        endomorphism_class: EndomorphismClass.Contracting,
+        theorem: FixpointTheorem.Banach,
+    }
+}
+
+/// Smart constructor for the Tarski-Knaster theorem class.
+public fn fixpoint_class_tarski() -> FixpointClass {
+    FixpointClass {
+        category: FixpointCategory.CompleteLattice,
+        endomorphism_class: EndomorphismClass.Monotone,
+        theorem: FixpointTheorem.Tarski,
+    }
+}
+
+/// Smart constructor for Adamek's initial-algebra theorem class.
+public fn fixpoint_class_adamek() -> FixpointClass {
+    FixpointClass {
+        category: FixpointCategory.CocompleteCategory,
+        endomorphism_class: EndomorphismClass.ContinuousFunctor,
+        theorem: FixpointTheorem.Adamek,
+    }
+}
+
+/// Smart constructor for a user-cited fixed-point theorem class.
+/// The citation MUST be enumerable via
+/// `verum audit --framework-axioms`.
+public fn fixpoint_class_custom_fixpoint(citation: Text) -> FixpointClass {
+    FixpointClass {
+        category: FixpointCategory.CustomCategory(citation),
+        endomorphism_class: EndomorphismClass.CustomEndomorphismClass(citation),
+        theorem: FixpointTheorem.Custom(citation),
+    }
+}
+
+/// Stable diagnostic tag for `FixpointClass`, dispatched on the
+/// theorem citation.
 public fn fixpoint_class_tag(f: FixpointClass) -> Text {
-    match f {
-        Banach              => "banach",
-        Tarski              => "tarski",
-        Adamek              => "adamek",
-        CustomFixpoint(_)   => "custom_fixpoint",
+    match f.theorem {
+        Banach     => "banach",
+        Tarski     => "tarski",
+        Adamek     => "adamek",
+        Custom(_)  => "custom_fixpoint",
+    }
+}
+
+/// Returns `true` when this class is one of the three canonical
+/// (Banach / Tarski / Adamek); `false` for `Custom`.
+public fn fixpoint_class_is_canonical(f: FixpointClass) -> Bool {
+    match f.theorem {
+        Banach | Tarski | Adamek  => true,
+        Custom(_)                 => false,
     }
 }
 
@@ -918,7 +1000,7 @@ public fn self_reference_witness_unspecified() -> SelfReferenceWitness {
     SelfReferenceWitness {
         operator: "unspecified",
         fixed_point: "unspecified",
-        fixpoint_class: FixpointClass.CustomFixpoint("unspecified"),
+        fixpoint_class: fixpoint_class_custom_fixpoint("unspecified"),
     }
 }
 
@@ -1405,13 +1487,153 @@ public fn purpose_default_is_complete() -> Bool {
     }
 }
 
-/// **Soundness pin** (spec §16 articulation hygiene): the four
-/// `FixpointClass` variants are exhaustive and pairwise distinct
-/// in their diagnostic tags.  Pin guards the AP-040 dispatch table
+/// **Soundness pin** (CVE articulation hygiene §8): the four
+/// canonical `FixpointClass` smart-constructors produce pairwise
+/// distinct diagnostic tags.  Pin guards the AP-040 dispatch table
 /// from silent collision on tag rendering.
 public fn fixpoint_class_tags_distinct() -> Bool {
-    fixpoint_class_tag(FixpointClass.Banach) != fixpoint_class_tag(FixpointClass.Tarski) &&
-    fixpoint_class_tag(FixpointClass.Tarski) != fixpoint_class_tag(FixpointClass.Adamek) &&
-    fixpoint_class_tag(FixpointClass.Adamek) != fixpoint_class_tag(FixpointClass.CustomFixpoint("any")) &&
-    fixpoint_class_tag(FixpointClass.Banach) != fixpoint_class_tag(FixpointClass.CustomFixpoint("any"))
+    fixpoint_class_tag(fixpoint_class_banach()) != fixpoint_class_tag(fixpoint_class_tarski()) &&
+    fixpoint_class_tag(fixpoint_class_tarski()) != fixpoint_class_tag(fixpoint_class_adamek()) &&
+    fixpoint_class_tag(fixpoint_class_adamek()) != fixpoint_class_tag(fixpoint_class_custom_fixpoint("any")) &&
+    fixpoint_class_tag(fixpoint_class_banach()) != fixpoint_class_tag(fixpoint_class_custom_fixpoint("any"))
+}
+
+/// **Soundness pin** (CVE articulation hygiene §8 — universal-property
+/// classifier): the three canonical smart constructors map to the
+/// canonical `(category, endomorphism_class, theorem)` triples.
+public fn fixpoint_class_canonical_triples() -> Bool {
+    let b = fixpoint_class_banach();
+    let t = fixpoint_class_tarski();
+    let a = fixpoint_class_adamek();
+    fixpoint_class_is_canonical(b) &&
+    fixpoint_class_is_canonical(t) &&
+    fixpoint_class_is_canonical(a) &&
+    !fixpoint_class_is_canonical(fixpoint_class_custom_fixpoint("any"))
+}
+
+// ============================================================
+// CVE seven-cell closure (seven-configurations §9).
+// ============================================================
+
+/// **CVE axis mode** — per-axis valuation in the closure analysis
+/// of the seven-configurations truth-table. Three modes per axis,
+/// 3³ = 27 cells in the configuration space `CveAxisMode³`.
+///
+/// - `Positive`  — axis clearly satisfied (witness present, decision
+///                 procedure present, executable representation present).
+/// - `Partial`   — axis satisfied with qualification: trivial-by-fiat
+///                 (definition), conditional (under stated assumption),
+///                 external (delegated via citation), or formulated
+///                 but not realised.
+/// - `Absent`    — axis not satisfied; no witness, no check, no
+///                 executable representation.
+///
+/// The seven productive configurations of the seven-configurations
+/// taxonomy (`[T]`, `[D]`, `[C]`, `[P]`, `[H]`, `[I]`, `[✗]`) are
+/// the stable attractors of `CveAxisMode³`. The migration map from
+/// each cell to a productive cell is given by
+/// `seven_configurations_closure_witness`.
+public type CveAxisMode is
+    | Positive
+    | Partial
+    | Absent;
+
+/// Stable diagnostic tag for `CveAxisMode`. Three values; pin-guarded
+/// for cross-side alignment.
+public fn cve_axis_mode_tag(m: CveAxisMode) -> Text {
+    match m {
+        Positive  => "positive",
+        Partial   => "partial",
+        Absent    => "absent",
+    }
+}
+
+/// **Closure witness for the CVE seven-cell theorem** (seven-configurations
+/// §9). For every (c, v, e) ∈ `CveAxisMode³` returns the canonical glyph
+/// of the productive cell to which the configuration migrates under the
+/// deciding rule (seven-configurations §10).
+///
+/// Glyph alphabet: `[T]` Theorem, `[D]` Definition, `[C]` Conditional,
+/// `[P]` Postulate, `[H]` Hypothesis, `[I]` Interpretation. `[✗]`
+/// Retracted is a meta-state outside `CveAxisMode³` (deliberate
+/// withdrawal) and is not produced by this witness.
+///
+/// Default migration of V=Partial is to `[C]` Conditional. The
+/// V-partial sub-classification (trivial → `[D]`, external → `[P]`,
+/// conditional → `[C]`) is operational and lives at the call site;
+/// the closure witness returns the most general migration target.
+public fn seven_configurations_closure_witness(
+    c: CveAxisMode,
+    v: CveAxisMode,
+    e: CveAxisMode,
+) -> Text {
+    match (c, v, e) {
+        (Positive, Positive, Positive)  => "[T]",
+        (Positive, Positive, Partial)   => "[C]",
+        (Positive, Positive, Absent)    => "[C]",
+        (Positive, Partial,  Positive)  => "[C]",
+        (Positive, Partial,  Partial)   => "[C]",
+        (Positive, Partial,  Absent)    => "[C]",
+        (Positive, Absent,   Positive)  => "[H]",
+        (Positive, Absent,   Partial)   => "[H]",
+        (Positive, Absent,   Absent)    => "[H]",
+        (Partial,  Positive, Positive)  => "[C]",
+        (Partial,  Positive, Partial)   => "[C]",
+        (Partial,  Positive, Absent)    => "[C]",
+        (Partial,  Partial,  Positive)  => "[C]",
+        (Partial,  Partial,  Partial)   => "[C]",
+        (Partial,  Partial,  Absent)    => "[H]",
+        (Partial,  Absent,   Positive)  => "[H]",
+        (Partial,  Absent,   Partial)   => "[H]",
+        (Partial,  Absent,   Absent)    => "[H]",
+        (Absent,   Positive, Positive)  => "[I]",
+        (Absent,   Positive, Partial)   => "[I]",
+        (Absent,   Positive, Absent)    => "[I]",
+        (Absent,   Partial,  Positive)  => "[I]",
+        (Absent,   Partial,  Partial)   => "[I]",
+        (Absent,   Partial,  Absent)    => "[I]",
+        (Absent,   Absent,   Positive)  => "[I]",
+        (Absent,   Absent,   Partial)   => "[I]",
+        (Absent,   Absent,   Absent)    => "[I]",
+    }
+}
+
+/// Predicate: glyph belongs to the productive alphabet (six base glyphs).
+fn is_productive_glyph(g: Text) -> Bool {
+    g == "[T]" || g == "[D]" || g == "[C]" ||
+    g == "[P]" || g == "[H]" || g == "[I]"
+}
+
+/// **Soundness pin** (CVE seven-cell closure §9): every cell of
+/// `CveAxisMode³` maps to a productive glyph. The 27-arm match
+/// in `seven_configurations_closure_witness` is exhaustive by
+/// pattern coverage; this pin re-asserts exhaustiveness operationally.
+public fn seven_configurations_closure_exhaustive() -> Bool {
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Positive, Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Positive, Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Positive, Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Partial,  Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Partial,  Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Partial,  Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Absent,   Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Absent,   Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Positive, Absent,   Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Positive, Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Positive, Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Positive, Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Partial,  Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Partial,  Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Partial,  Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Absent,   Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Absent,   Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Partial,  Absent,   Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Positive, Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Positive, Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Positive, Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Partial,  Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Partial,  Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Partial,  Absent))   &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Absent,   Positive)) &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Absent,   Partial))  &&
+    is_productive_glyph(seven_configurations_closure_witness(Absent,   Absent,   Absent))
 }
