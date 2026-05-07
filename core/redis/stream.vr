@@ -1,0 +1,288 @@
+// =============================================================================
+// redis/stream.vr — Redis Streams (XADD / XREAD / XRANGE / XGROUP)
+// =============================================================================
+// Layer: 4 (Redis subsystem)
+//
+// Redis Streams (Redis ≥ 5.0) are append-only logs with consumer
+// groups + at-least-once delivery semantics — the canonical
+// Redis-native event-queue primitive.
+//
+// API surface:
+//   - `xadd(client, stream, fields)` — append; returns assigned ID
+//   - `xrange(client, stream, start, end)` — historical range read
+//   - `xread(client, streams, count, block_ms)` — multi-stream blocking read
+//   - `xgroup_create(client, stream, group, start)` — consumer-group setup
+//   - `xreadgroup(client, group, consumer, streams, count, block_ms)`
+//   - `xack(client, stream, group, ids)` — acknowledge processed entries
+//   - `xpending(client, stream, group)` — inspect pending PEL
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Redis Streams — append-only log with consumer groups".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.stream;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+
+mount core.redis.client.{RedisClient, RedisError, exec, exec_bytes};
+mount core.redis.protocol.RespValue;
+
+// =============================================================================
+// Stream entry
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type StreamEntry is {
+    /// Server-assigned ID, format `<ms>-<seq>` (e.g., `1700000000000-0`).
+    id:     Text,
+    /// Field-value pairs in insertion order.
+    fields: List<(Text, List<Byte>)>,
+};
+
+// =============================================================================
+// XADD
+// =============================================================================
+
+/// Append an entry. Pass `id = "*"` to let Redis assign one.
+pub async fn xadd(
+    client: &RedisClient,
+    stream: &Text,
+    id:     &Text,
+    fields: &[(Text, List<Byte>)],
+) -> Result<Text, RedisError> {
+    let mut a: List<List<Byte>> = List.with_capacity(3 + 2 * fields.len());
+    a.push("XADD".to_text().as_bytes().to_list());
+    a.push(stream.as_bytes().to_list());
+    a.push(id.as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < fields.len() {
+        a.push(fields[i].0.as_bytes().to_list());
+        a.push(fields[i].1.clone());
+        i = i + 1;
+    }
+    match exec_bytes(client, &a).await? {
+        RespValue.BulkString(b) => Text.from_utf8(b.as_slice())
+            .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
+        RespValue.SimpleString(s) => Ok(s),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"XADD unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// XRANGE
+// =============================================================================
+
+pub async fn xrange(
+    client: &RedisClient,
+    stream: &Text,
+    start:  &Text,
+    end:    &Text,
+    count:  Maybe<Int>,
+) -> Result<List<StreamEntry>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("XRANGE".to_text());
+    a.push(stream.clone()); a.push(start.clone()); a.push(end.clone());
+    if let Some(c) = count { a.push("COUNT".to_text()); a.push(f"{c}"); }
+    parse_entry_array(exec(client, a.as_slice()).await?)
+}
+
+// =============================================================================
+// XREAD (multi-stream non-group blocking read)
+// =============================================================================
+
+pub async fn xread(
+    client:   &RedisClient,
+    streams:  &[(Text, Text)], // (stream, last_id)
+    count:    Maybe<Int>,
+    block_ms: Maybe<Int>,
+) -> Result<List<(Text, List<StreamEntry>)>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("XREAD".to_text());
+    if let Some(c) = count { a.push("COUNT".to_text()); a.push(f"{c}"); }
+    if let Some(b) = block_ms { a.push("BLOCK".to_text()); a.push(f"{b}"); }
+    a.push("STREAMS".to_text());
+    let mut i: Int = 0;
+    while i < streams.len() { a.push(streams[i].0.clone()); i = i + 1; }
+    let mut j: Int = 0;
+    while j < streams.len() { a.push(streams[j].1.clone()); j = j + 1; }
+
+    match exec(client, a.as_slice()).await? {
+        RespValue.NullArray | RespValue.Nil_ => Ok(List.new()),
+        RespValue.Array(arr) => {
+            let mut out: List<(Text, List<StreamEntry>)> = List.with_capacity(arr.len());
+            let mut k: Int = 0;
+            while k < arr.len() {
+                let inner = match &arr[k] {
+                    RespValue.Array(pair) if pair.len() == 2 => pair,
+                    _ => return Err(RedisError.InvalidReply("XREAD: stream entry not pair".to_text())),
+                };
+                let stream_name = bulk_to_text(&inner[0])?;
+                let entries = parse_entry_array(inner[1].clone())?;
+                out.push((stream_name, entries));
+                k = k + 1;
+            }
+            Ok(out)
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"XREAD unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// Consumer groups
+// =============================================================================
+
+pub async fn xgroup_create(
+    client:    &RedisClient,
+    stream:    &Text,
+    group:     &Text,
+    start_id:  &Text,
+    mkstream:  Bool,
+) -> Result<(), RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("XGROUP".to_text()); a.push("CREATE".to_text());
+    a.push(stream.clone()); a.push(group.clone()); a.push(start_id.clone());
+    if mkstream { a.push("MKSTREAM".to_text()); }
+    match exec(client, a.as_slice()).await? {
+        RespValue.SimpleString(_) => Ok(()),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"XGROUP CREATE unexpected: {other:?}")),
+    }
+}
+
+pub async fn xreadgroup(
+    client:    &RedisClient,
+    group:     &Text,
+    consumer:  &Text,
+    streams:   &[(Text, Text)], // (stream, id_or_">")
+    count:     Maybe<Int>,
+    block_ms:  Maybe<Int>,
+) -> Result<List<(Text, List<StreamEntry>)>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("XREADGROUP".to_text());
+    a.push("GROUP".to_text()); a.push(group.clone()); a.push(consumer.clone());
+    if let Some(c) = count    { a.push("COUNT".to_text()); a.push(f"{c}"); }
+    if let Some(b) = block_ms { a.push("BLOCK".to_text()); a.push(f"{b}"); }
+    a.push("STREAMS".to_text());
+    let mut i: Int = 0;
+    while i < streams.len() { a.push(streams[i].0.clone()); i = i + 1; }
+    let mut j: Int = 0;
+    while j < streams.len() { a.push(streams[j].1.clone()); j = j + 1; }
+    match exec(client, a.as_slice()).await? {
+        RespValue.NullArray | RespValue.Nil_ => Ok(List.new()),
+        RespValue.Array(arr) => {
+            let mut out: List<(Text, List<StreamEntry>)> = List.with_capacity(arr.len());
+            let mut k: Int = 0;
+            while k < arr.len() {
+                let inner = match &arr[k] {
+                    RespValue.Array(pair) if pair.len() == 2 => pair,
+                    _ => return Err(RedisError.InvalidReply("XREADGROUP: bad shape".to_text())),
+                };
+                let stream_name = bulk_to_text(&inner[0])?;
+                let entries = parse_entry_array(inner[1].clone())?;
+                out.push((stream_name, entries));
+                k = k + 1;
+            }
+            Ok(out)
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"XREADGROUP unexpected: {other:?}")),
+    }
+}
+
+pub async fn xack(
+    client: &RedisClient,
+    stream: &Text,
+    group:  &Text,
+    ids:    &[Text],
+) -> Result<Int, RedisError> {
+    if ids.is_empty() { return Ok(0); }
+    let mut a: List<Text> = List.with_capacity(3 + ids.len());
+    a.push("XACK".to_text()); a.push(stream.clone()); a.push(group.clone());
+    let mut i: Int = 0;
+    while i < ids.len() { a.push(ids[i].clone()); i = i + 1; }
+    match exec(client, a.as_slice()).await? {
+        RespValue.Integer(n) => Ok(n),
+        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"XACK unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn parse_entry_array(v: RespValue) -> Result<List<StreamEntry>, RedisError> {
+    match v {
+        RespValue.NullArray | RespValue.Nil_ => Ok(List.new()),
+        RespValue.Array(arr) => {
+            let mut out: List<StreamEntry> = List.with_capacity(arr.len());
+            let mut i: Int = 0;
+            while i < arr.len() {
+                let pair = match &arr[i] {
+                    RespValue.Array(p) if p.len() == 2 => p,
+                    _ => return Err(RedisError.InvalidReply("stream entry not [id, fields]".to_text())),
+                };
+                let id = bulk_to_text(&pair[0])?;
+                let fields = parse_field_pairs(&pair[1])?;
+                out.push(StreamEntry { id, fields });
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"unexpected stream array: {other:?}")),
+    }
+}
+
+fn parse_field_pairs(v: &RespValue) -> Result<List<(Text, List<Byte>)>, RedisError> {
+    match v {
+        RespValue.Array(items) => {
+            let mut out: List<(Text, List<Byte>)> = List.new();
+            let mut i: Int = 0;
+            while i + 1 < items.len() {
+                let f = bulk_to_text(&items[i])?;
+                let val = bulk_to_bytes(&items[i + 1])?;
+                out.push((f, val));
+                i = i + 2;
+            }
+            Ok(out)
+        }
+        _ => Err(RedisError.InvalidReply("fields not array".to_text())),
+    }
+}
+
+fn bulk_to_text(v: &RespValue) -> Result<Text, RedisError> {
+    match v {
+        RespValue.BulkString(b) => Text.from_utf8(b.as_slice())
+            .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
+        RespValue.SimpleString(s) => Ok(s.clone()),
+        _ => Err(RedisError.InvalidReply("expected bulk".to_text())),
+    }
+}
+
+fn bulk_to_bytes(v: &RespValue) -> Result<List<Byte>, RedisError> {
+    match v {
+        RespValue.BulkString(b) => Ok(b.clone()),
+        RespValue.SimpleString(s) => Ok(s.as_bytes().to_list()),
+        RespValue.NullBulk | RespValue.Nil_ => Ok(List.new()),
+        _ => Err(RedisError.InvalidReply("expected bulk".to_text())),
+    }
+}

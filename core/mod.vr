@@ -222,6 +222,48 @@ public module security;
 public module compress;
 
 // =============================================================================
+// Layer 4.91: Multi-purpose data stores (Depends on: core, net, sync, async)
+// =============================================================================
+
+// Redis (RESP3) — multi-purpose data store: cache, pub/sub,
+// streams (event queue), transactions (MULTI/EXEC/WATCH), Lua
+// scripting, sorted-set leaderboards, distributed locks. Layered
+// design: protocol.vr / client.vr (low-level pool) + commands.vr
+// (typed surface) + pubsub.vr / stream.vr / transaction.vr /
+// script.vr.  Application-side adapters in core.cache /
+// core.queue / etc. compose this for protocol-shaped surfaces.
+public module redis;
+
+// =============================================================================
+// Layer 4.92: Caching (Depends on: redis)
+// =============================================================================
+
+// Abstract caching protocol — `CacheBackend` + concrete adapters in
+// core.cache.adapters.*. Consumers compose against the abstract
+// protocol; the concrete adapter is selected at construction.
+public module cache;
+
+// =============================================================================
+// Layer 4.93: Search (Depends on: net.http)
+// =============================================================================
+
+// Abstract search-index protocol — `SearchIndex` + concrete
+// adapters: MeiliSearch (v1 REST), future: Elasticsearch,
+// Typesense, SQLite-FTS5. Faceted query algebra + paginated
+// results + index configuration.
+public module search;
+
+// =============================================================================
+// Layer 4.94: Object storage (Depends on: net.http, security.{hash, mac})
+// =============================================================================
+
+// Abstract object-store protocol — `ObjectStore` + concrete
+// adapters: S3-compatible (AWS S3, MinIO, R2, Wasabi, Backblaze
+// B2 S3 endpoint) with full SigV4 authentication, future: GCS,
+// Azure Blob, local filesystem.
+public module storage;
+
+// =============================================================================
 // Layer 4.9: Archive (Depends on: core, compress, encoding, security)
 // =============================================================================
 

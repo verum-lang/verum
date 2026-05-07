@@ -1,0 +1,265 @@
+// =============================================================================
+// search/types.vr — abstract search-index protocol
+// =============================================================================
+// Layer: 4 (Search)
+// Dependencies: core, base, collections, encoding/json
+// =============================================================================
+//
+// **Purpose.** Universal abstraction over full-text + faceted search
+// engines. Concrete adapters: MeiliSearch, Elasticsearch, Typesense,
+// SQLite-FTS5, in-memory. The protocol exposes typed query +
+// paginated results + faceted-filter algebra.
+//
+// **Categorical structure.** A SearchIndex is a fibration of
+// (document IDs) over (matching scores under a query). Composition
+// is filter-conjunction: applying two compatible filters yields a
+// new fibration whose fibres are the intersection.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract search-index protocol — SearchIndex + SearchQuery + SearchResults".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.search.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.json.JsonValue;
+
+// =============================================================================
+// Document model
+// =============================================================================
+
+/// A search document. The `id` field is the stable identifier the
+/// index uses for upsert / delete; the other fields are the indexed
+/// payload (full-text + facet attributes + sort attributes).
+@derive(Eq, Clone, Debug)
+public type Document is {
+    id:     Text,
+    fields: JsonValue,
+};
+
+// =============================================================================
+// Query algebra
+// =============================================================================
+
+/// Filter algebra — a small typed subset that every backend can
+/// express. Backend-specific extras (geo, vector similarity) go via
+/// `RawFilter(Text)` for cases that fall outside the algebra.
+@derive(Clone, Debug)
+public type SearchFilter is
+    /// `field == value`.
+    | Eq { field: Text, value: JsonValue }
+    /// `field > value`.
+    | Gt { field: Text, value: JsonValue }
+    /// `field >= value`.
+    | Gte { field: Text, value: JsonValue }
+    /// `field < value`.
+    | Lt { field: Text, value: JsonValue }
+    /// `field <= value`.
+    | Lte { field: Text, value: JsonValue }
+    /// `field IN [values...]`.
+    | In { field: Text, values: List<JsonValue> }
+    /// AND-combination.
+    | And(List<SearchFilter>)
+    /// OR-combination.
+    | Or(List<SearchFilter>)
+    /// Negation.
+    | Not(Heap<SearchFilter>)
+    /// Backend-specific raw expression (escape hatch).
+    | RawFilter(Text);
+
+@derive(Eq, Clone, Debug)
+public type SortDirection is
+    | Asc
+    | Desc;
+
+@derive(Clone, Debug)
+public type SortSpec is {
+    field: Text,
+    direction: SortDirection,
+};
+
+/// A search query. `q` is the free-text query (empty = match all);
+/// `filter` constrains the result set; `sort` orders it; `facets`
+/// requests faceted aggregations.
+@derive(Clone, Debug)
+public type SearchQuery is {
+    q:        Text,
+    filter:   Maybe<SearchFilter>,
+    sort:     List<SortSpec>,
+    facets:   List<Text>,
+    limit:    Int { >= 1, <= 1000 },
+    offset:   Int { >= 0 },
+    /// Restrict the document fields returned (empty = all fields).
+    /// Useful for trimming wire size on large records.
+    fields:   List<Text>,
+    /// Highlight matching terms in these attributes. Producer-side
+    /// only — the result is a per-hit `_formatted` JSON object.
+    highlight: List<Text>,
+};
+
+pub fn search_query_match_all(limit: Int, offset: Int) -> SearchQuery {
+    SearchQuery {
+        q: "".to_text(),
+        filter: None,
+        sort: List.new(),
+        facets: List.new(),
+        limit,
+        offset,
+        fields: List.new(),
+        highlight: List.new(),
+    }
+}
+
+// =============================================================================
+// Results
+// =============================================================================
+
+@derive(Clone, Debug)
+public type SearchHit is {
+    id:        Text,
+    document:  JsonValue,
+    /// Backend-supplied relevance score in [0, 1] when available.
+    score:     Maybe<Float>,
+    /// Highlighted excerpts per highlighted field — present when
+    /// the query requested highlighting.
+    formatted: Maybe<JsonValue>,
+};
+
+/// Faceted-aggregation result — a count for each value of a faceted
+/// attribute that appears in the (filtered) result set.
+@derive(Clone, Debug)
+public type FacetDistribution is {
+    field:  Text,
+    values: List<(Text, Int)>,
+};
+
+@derive(Clone, Debug)
+public type SearchResults is {
+    hits:                List<SearchHit>,
+    /// Total matching documents, NOT just the ones in `hits`.
+    estimated_total_hits: Int { >= 0 },
+    /// Pagination — the offset of the FIRST hit in `hits`.
+    offset:              Int { >= 0 },
+    facets:              List<FacetDistribution>,
+    /// Backend-reported processing time in milliseconds.
+    processing_ms:       Int { >= 0 },
+};
+
+// =============================================================================
+// Index configuration
+// =============================================================================
+
+@derive(Clone, Debug)
+public type IndexConfig is {
+    /// Document field used as the unique identifier.
+    primary_key:           Text,
+    /// Fields searched by the free-text query (empty = all string fields).
+    searchable_attributes: List<Text>,
+    /// Fields available as facets in queries.
+    filterable_attributes: List<Text>,
+    /// Fields available for sorting.
+    sortable_attributes:   List<Text>,
+    /// Fields excluded from full-text indexing (still stored).
+    stop_words:            List<Text>,
+    /// Synonyms — `(canonical, [alts...])`.
+    synonyms:              List<(Text, List<Text>)>,
+    /// Distinct attribute — deduplicate hits by this field's value.
+    distinct_attribute:    Maybe<Text>,
+    /// Ranking rules — order matters, default is words-typo-proximity.
+    ranking_rules:         List<Text>,
+};
+
+pub fn index_config_default(primary_key: Text) -> IndexConfig {
+    let mut ranking: List<Text> = List.new();
+    ranking.push("words".to_text());
+    ranking.push("typo".to_text());
+    ranking.push("proximity".to_text());
+    ranking.push("attribute".to_text());
+    ranking.push("sort".to_text());
+    ranking.push("exactness".to_text());
+    IndexConfig {
+        primary_key,
+        searchable_attributes: List.new(),
+        filterable_attributes: List.new(),
+        sortable_attributes:   List.new(),
+        stop_words:            List.new(),
+        synonyms:              List.new(),
+        distinct_attribute:    None,
+        ranking_rules:         ranking,
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type SearchError is
+    | Network(Text)
+    | InvalidQuery(Text)
+    | IndexNotFound(Text)
+    | DocumentNotFound(Text)
+    | SchemaConflict(Text)
+    | TooManyDocuments { count: Int, limit: Int }
+    | Backend(Text);
+
+implement Display for SearchError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SearchError.Network(reason)         => f.write_str(f"search: network: {reason}".as_str()),
+            SearchError.InvalidQuery(reason)    => f.write_str(f"search: invalid query: {reason}".as_str()),
+            SearchError.IndexNotFound(name)     => f.write_str(f"search: index not found: {name}".as_str()),
+            SearchError.DocumentNotFound(id)    => f.write_str(f"search: document not found: {id}".as_str()),
+            SearchError.SchemaConflict(reason)  => f.write_str(f"search: schema conflict: {reason}".as_str()),
+            SearchError.TooManyDocuments { count, limit } => f.write_str(
+                f"search: too many documents in batch ({count} > {limit})".as_str()),
+            SearchError.Backend(reason)         => f.write_str(f"search: backend: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for SearchError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// SearchIndex protocol
+// =============================================================================
+
+public type SearchIndex is protocol {
+    /// Run a search query.
+    async fn search(&self, query: &SearchQuery) -> Result<SearchResults, SearchError>;
+
+    /// Upsert a batch of documents. Documents are matched by their
+    /// primary-key field; existing documents are replaced.
+    async fn upsert_documents(&self, docs: &List<Document>) -> Result<(), SearchError>;
+
+    /// Delete a document by primary-key.
+    async fn delete_document(&self, id: &Text) -> Result<(), SearchError>;
+
+    /// Delete every document matching a filter.
+    async fn delete_by_filter(&self, filter: &SearchFilter) -> Result<Int, SearchError>;
+
+    /// Apply or update the index configuration. The exact subset
+    /// each backend supports is documented per-adapter; unsupported
+    /// fields are silently ignored.
+    async fn configure(&self, config: &IndexConfig) -> Result<(), SearchError>;
+
+    /// Probe the backend (round-trip).
+    async fn health(&self) -> Result<(), SearchError>;
+};

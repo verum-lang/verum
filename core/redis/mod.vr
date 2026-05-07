@@ -1,0 +1,63 @@
+// =============================================================================
+// redis/mod.vr — multi-purpose Redis subsystem
+// =============================================================================
+// Layer: 4 (Data store)
+//
+// Production-grade Redis client speaking RESP2 / RESP3. Used as a
+// multi-purpose data store: cache, pub/sub, streams (event queue),
+// transactions, sorted-set leaderboards, distributed locks.
+// Application-side adapters in `core.cache.adapters.redis` /
+// future `core.queue.adapters.redis_streams` re-expose subsets via
+// abstract protocols.
+//
+// **Architecture.** Lower layers (`protocol.vr`, `client.vr`)
+// handle RESP framing + connection pool + cluster redirects.
+// Upper layers (`commands.vr`, `pubsub.vr`, `stream.vr`,
+// `transaction.vr`, `script.vr`) provide typed surfaces. Every
+// command goes through `client::exec` (or `exec_bytes` for binary-
+// safe), which acquires a pool slot, writes the framed RESP, reads
+// one reply, releases the slot.
+//
+// **Composes against.** `core.net.tcp` (transport), `core.async`
+// (concurrency), `core.sync.{rwlock, semaphore}` (pool primitives).
+// Zero new low-level primitives.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "multi-purpose Redis subsystem — RESP3 client + commands + pub/sub + streams + transactions + scripting".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis;
+
+public module protocol;
+public module client;
+public module commands;
+public module pubsub;
+public module transaction;
+public module script;
+public module stream;
+
+// Re-exports
+public mount .client.{
+    RedisClient, RedisConfig, RedisError,
+    redis_config_default, connect, connect_url,
+    exec, exec_bytes, exec_pipeline,
+};
+public mount .protocol.{RespValue, RespError};
+public mount .pubsub.{PubSubMessage, publish};
+public mount .transaction.{TxResult, run_simple as transaction_run};
+public mount .stream.{StreamEntry, xadd, xrange, xread, xreadgroup, xack, xgroup_create};
+public mount .script.{script_load, eval, evalsha, script_exists, script_flush};

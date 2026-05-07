@@ -1,0 +1,41 @@
+// =============================================================================
+// storage/mod.vr — abstract object-storage subsystem
+// =============================================================================
+// Universal object-store abstraction. Concrete adapters implement
+// `core.storage.types::ObjectStore` over specific backends:
+//
+//   - `core.storage.s3` — S3-compatible (AWS S3, MinIO, R2, Wasabi, B2)
+//   - (future: gcs, azure_blob, local_filesystem)
+//
+// Consumers compose against `ObjectStore`; the concrete adapter is
+// selected at construction.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract object-store subsystem — ObjectStore protocol + concrete adapters".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.storage;
+
+public module types;
+public module s3;
+
+public mount .types.{
+    ObjectStore, StorageError, ObjectMetadata,
+    PutOptions, GetOptions, ListOptions, ListPage,
+    PresignOptions, PresignMethod,
+    put_options_default, get_options_default, presign_options_get,
+};

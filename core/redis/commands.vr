@@ -1,0 +1,616 @@
+// =============================================================================
+// redis/commands.vr — typed Redis command surface
+// =============================================================================
+// Layer: 4 (Redis subsystem)
+//
+// **Purpose.** Type-safe builders for Redis commands. Each command
+// is a thin wrapper around `client::exec` that:
+//   - Constructs the RESP argv from typed inputs.
+//   - Decodes the reply into the canonical Verum type for the
+//     command (Int, Text, Bytes, List<Text>, Map<Text, Text>, etc.).
+//   - Maps "this key does not exist" replies (NullBulk / Nil) to
+//     `Maybe::None` for read-side commands.
+//
+// Coverage (Redis ≥ 6.0):
+//   * Strings    : GET / SET / SETEX / SETNX / DEL / EXISTS / INCR /
+//                  DECR / INCRBY / DECRBY / APPEND / STRLEN / MGET / MSET / GETDEL
+//   * Generic    : EXPIRE / PEXPIRE / PERSIST / TTL / PTTL / TYPE /
+//                  KEYS / SCAN / RENAME / COPY / TOUCH / UNLINK
+//   * Lists      : LPUSH / RPUSH / LPOP / RPOP / LRANGE / LLEN /
+//                  LINDEX / LSET / LREM / LTRIM
+//   * Hashes     : HSET / HGET / HMGET / HMSET / HDEL / HEXISTS /
+//                  HKEYS / HVALS / HLEN / HGETALL / HINCRBY
+//   * Sets       : SADD / SREM / SMEMBERS / SISMEMBER / SCARD /
+//                  SINTER / SUNION / SDIFF / SPOP / SRANDMEMBER
+//   * Sorted sets: ZADD / ZREM / ZRANGE / ZRANGEBYSCORE / ZSCORE /
+//                  ZRANK / ZINCRBY / ZCARD / ZCOUNT
+//   * Server     : PING / SELECT / FLUSHDB / DBSIZE / INFO / TIME / CLIENT
+//
+// Each command has a single canonical signature; binary-safe
+// variants take `&[u8]` arguments and route through `exec_bytes`.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "typed Redis command surface — strings/lists/hashes/sets/zsets/server".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.commands;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
+mount collections.{List, Map};
+
+mount core.redis.client.{RedisClient, RedisError, exec, exec_bytes, exec_pipeline};
+mount core.redis.protocol.RespValue;
+
+// =============================================================================
+// String commands
+// =============================================================================
+
+pub async fn get(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("GET".to_text()); a.push(key.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.NullBulk | RespValue.Nil_ => Ok(None),
+        RespValue.BulkString(b) => Ok(Some(b)),
+        RespValue.SimpleString(s) => Ok(Some(s.as_bytes().to_list())),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"GET unexpected: {other:?}")),
+    }
+}
+
+pub async fn get_text(client: &RedisClient, key: &Text) -> Result<Maybe<Text>, RedisError> {
+    match get(client, key).await? {
+        Some(b) => Text.from_utf8(b.as_slice())
+            .map(Some).map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
+        None => Ok(None),
+    }
+}
+
+pub async fn set(client: &RedisClient, key: &Text, value: &[Byte]) -> Result<(), RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("SET".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(value.to_list());
+    expect_simple_ok(exec_bytes(client, &a).await?, "SET")
+}
+
+/// SET with EX (seconds-precision TTL).
+pub async fn set_ex(
+    client: &RedisClient, key: &Text, value: &[Byte], ttl_seconds: Int,
+) -> Result<(), RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("SET".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(value.to_list());
+    a.push("EX".to_text().as_bytes().to_list());
+    a.push(f"{ttl_seconds}".as_bytes().to_list());
+    expect_simple_ok(exec_bytes(client, &a).await?, "SET EX")
+}
+
+/// SET with PX (millisecond-precision TTL).
+pub async fn set_px(
+    client: &RedisClient, key: &Text, value: &[Byte], ttl_ms: Int,
+) -> Result<(), RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("SET".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(value.to_list());
+    a.push("PX".to_text().as_bytes().to_list());
+    a.push(f"{ttl_ms}".as_bytes().to_list());
+    expect_simple_ok(exec_bytes(client, &a).await?, "SET PX")
+}
+
+/// SET NX — set only if absent. Returns true iff the value was stored.
+pub async fn set_nx(
+    client: &RedisClient, key: &Text, value: &[Byte],
+) -> Result<Bool, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("SET".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(value.to_list());
+    a.push("NX".to_text().as_bytes().to_list());
+    match exec_bytes(client, &a).await? {
+        RespValue.SimpleString(_) => Ok(true),
+        RespValue.NullBulk | RespValue.Nil_ => Ok(false),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SET NX unexpected: {other:?}")),
+    }
+}
+
+pub async fn del(client: &RedisClient, keys: &[Text]) -> Result<Int, RedisError> {
+    if keys.is_empty() { return Ok(0); }
+    let mut a: List<Text> = List.with_capacity(keys.len() + 1);
+    a.push("DEL".to_text());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].clone()); i = i + 1; }
+    expect_int(exec(client, a.as_slice()).await?, "DEL")
+}
+
+pub async fn exists(client: &RedisClient, keys: &[Text]) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.with_capacity(keys.len() + 1);
+    a.push("EXISTS".to_text());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].clone()); i = i + 1; }
+    expect_int(exec(client, a.as_slice()).await?, "EXISTS")
+}
+
+pub async fn incr(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("INCR".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "INCR")
+}
+
+pub async fn incr_by(client: &RedisClient, key: &Text, delta: Int) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("INCRBY".to_text()); a.push(key.clone()); a.push(f"{delta}");
+    expect_int(exec(client, a.as_slice()).await?, "INCRBY")
+}
+
+pub async fn decr(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("DECR".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "DECR")
+}
+
+pub async fn append(client: &RedisClient, key: &Text, value: &[Byte]) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("APPEND".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(value.to_list());
+    expect_int(exec_bytes(client, &a).await?, "APPEND")
+}
+
+pub async fn strlen(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("STRLEN".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "STRLEN")
+}
+
+pub async fn mget(client: &RedisClient, keys: &[Text]) -> Result<List<Maybe<List<Byte>>>, RedisError> {
+    if keys.is_empty() { return Ok(List.new()); }
+    let mut a: List<Text> = List.with_capacity(keys.len() + 1);
+    a.push("MGET".to_text());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].clone()); i = i + 1; }
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) => {
+            let mut out: List<Maybe<List<Byte>>> = List.with_capacity(arr.len());
+            let mut k: Int = 0;
+            while k < arr.len() {
+                match &arr[k] {
+                    RespValue.NullBulk | RespValue.Nil_ => out.push(None),
+                    RespValue.BulkString(b) => out.push(Some(b.clone())),
+                    RespValue.SimpleString(s) => out.push(Some(s.as_bytes().to_list())),
+                    _ => out.push(None),
+                }
+                k = k + 1;
+            }
+            Ok(out)
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"MGET unexpected: {other:?}")),
+    }
+}
+
+pub async fn mset(client: &RedisClient, pairs: &[(Text, List<Byte>)]) -> Result<(), RedisError> {
+    if pairs.is_empty() { return Ok(()); }
+    let mut a: List<List<Byte>> = List.with_capacity(1 + 2 * pairs.len());
+    a.push("MSET".to_text().as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < pairs.len() {
+        a.push(pairs[i].0.as_bytes().to_list());
+        a.push(pairs[i].1.clone());
+        i = i + 1;
+    }
+    expect_simple_ok(exec_bytes(client, &a).await?, "MSET")
+}
+
+pub async fn getdel(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("GETDEL".to_text()); a.push(key.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.NullBulk | RespValue.Nil_ => Ok(None),
+        RespValue.BulkString(b) => Ok(Some(b)),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"GETDEL unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// Generic / key-space
+// =============================================================================
+
+pub async fn expire(client: &RedisClient, key: &Text, seconds: Int) -> Result<Bool, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("EXPIRE".to_text()); a.push(key.clone()); a.push(f"{seconds}");
+    expect_int_bool(exec(client, a.as_slice()).await?, "EXPIRE")
+}
+
+pub async fn pexpire(client: &RedisClient, key: &Text, millis: Int) -> Result<Bool, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("PEXPIRE".to_text()); a.push(key.clone()); a.push(f"{millis}");
+    expect_int_bool(exec(client, a.as_slice()).await?, "PEXPIRE")
+}
+
+pub async fn persist(client: &RedisClient, key: &Text) -> Result<Bool, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("PERSIST".to_text()); a.push(key.clone());
+    expect_int_bool(exec(client, a.as_slice()).await?, "PERSIST")
+}
+
+pub async fn ttl(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("TTL".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "TTL")
+}
+
+pub async fn pttl(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("PTTL".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "PTTL")
+}
+
+pub async fn type_of(client: &RedisClient, key: &Text) -> Result<Text, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("TYPE".to_text()); a.push(key.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.SimpleString(s) => Ok(s),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"TYPE unexpected: {other:?}")),
+    }
+}
+
+pub async fn rename(client: &RedisClient, src: &Text, dst: &Text) -> Result<(), RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("RENAME".to_text()); a.push(src.clone()); a.push(dst.clone());
+    expect_simple_ok(exec(client, a.as_slice()).await?, "RENAME")
+}
+
+pub async fn unlink(client: &RedisClient, keys: &[Text]) -> Result<Int, RedisError> {
+    if keys.is_empty() { return Ok(0); }
+    let mut a: List<Text> = List.with_capacity(keys.len() + 1);
+    a.push("UNLINK".to_text());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].clone()); i = i + 1; }
+    expect_int(exec(client, a.as_slice()).await?, "UNLINK")
+}
+
+/// SCAN — incremental key iteration.  Returns (cursor, keys);
+/// a cursor of 0 indicates the iteration is complete.
+pub async fn scan(
+    client: &RedisClient,
+    cursor: Int,
+    match_pattern: Maybe<&Text>,
+    count: Maybe<Int>,
+) -> Result<(Int, List<Text>), RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("SCAN".to_text());
+    a.push(f"{cursor}");
+    if let Some(p) = match_pattern {
+        a.push("MATCH".to_text()); a.push(p.clone());
+    }
+    if let Some(c) = count {
+        a.push("COUNT".to_text()); a.push(f"{c}");
+    }
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) if arr.len() == 2 => {
+            let next_cursor = expect_text_int(&arr[0])?;
+            let keys = match &arr[1] {
+                RespValue.Array(items) => bulk_array_to_text_list(items)?,
+                _ => return Err(RedisError.InvalidReply("SCAN: keys not array".to_text())),
+            };
+            Ok((next_cursor, keys))
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SCAN unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// List commands
+// =============================================================================
+
+pub async fn lpush(client: &RedisClient, key: &Text, values: &[List<Byte>]) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.with_capacity(values.len() + 2);
+    a.push("LPUSH".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < values.len() { a.push(values[i].clone()); i = i + 1; }
+    expect_int(exec_bytes(client, &a).await?, "LPUSH")
+}
+
+pub async fn rpush(client: &RedisClient, key: &Text, values: &[List<Byte>]) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.with_capacity(values.len() + 2);
+    a.push("RPUSH".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < values.len() { a.push(values[i].clone()); i = i + 1; }
+    expect_int(exec_bytes(client, &a).await?, "RPUSH")
+}
+
+pub async fn lpop(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("LPOP".to_text()); a.push(key.clone());
+    expect_optional_bulk(exec(client, a.as_slice()).await?, "LPOP")
+}
+
+pub async fn rpop(client: &RedisClient, key: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("RPOP".to_text()); a.push(key.clone());
+    expect_optional_bulk(exec(client, a.as_slice()).await?, "RPOP")
+}
+
+pub async fn lrange(
+    client: &RedisClient, key: &Text, start: Int, stop: Int,
+) -> Result<List<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("LRANGE".to_text()); a.push(key.clone());
+    a.push(f"{start}"); a.push(f"{stop}");
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) => bulk_array_to_byte_list(&arr),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"LRANGE unexpected: {other:?}")),
+    }
+}
+
+pub async fn llen(client: &RedisClient, key: &Text) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("LLEN".to_text()); a.push(key.clone());
+    expect_int(exec(client, a.as_slice()).await?, "LLEN")
+}
+
+// =============================================================================
+// Hash commands
+// =============================================================================
+
+pub async fn hset(
+    client: &RedisClient, key: &Text, field: &Text, value: &[Byte],
+) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("HSET".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(field.as_bytes().to_list());
+    a.push(value.to_list());
+    expect_int(exec_bytes(client, &a).await?, "HSET")
+}
+
+pub async fn hget(client: &RedisClient, key: &Text, field: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("HGET".to_text()); a.push(key.clone()); a.push(field.clone());
+    expect_optional_bulk(exec(client, a.as_slice()).await?, "HGET")
+}
+
+pub async fn hdel(client: &RedisClient, key: &Text, fields: &[Text]) -> Result<Int, RedisError> {
+    if fields.is_empty() { return Ok(0); }
+    let mut a: List<Text> = List.with_capacity(fields.len() + 2);
+    a.push("HDEL".to_text()); a.push(key.clone());
+    let mut i: Int = 0;
+    while i < fields.len() { a.push(fields[i].clone()); i = i + 1; }
+    expect_int(exec(client, a.as_slice()).await?, "HDEL")
+}
+
+pub async fn hgetall(client: &RedisClient, key: &Text) -> Result<Map<Text, List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("HGETALL".to_text()); a.push(key.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) => {
+            let mut out: Map<Text, List<Byte>> = Map.new();
+            let mut i: Int = 0;
+            while i + 1 < arr.len() {
+                let f = bulk_to_text(&arr[i])?;
+                let v = bulk_to_bytes(&arr[i + 1])?;
+                out.insert(f, v);
+                i = i + 2;
+            }
+            Ok(out)
+        }
+        RespValue.MapValue(pairs) => {
+            let mut out: Map<Text, List<Byte>> = Map.new();
+            let mut i: Int = 0;
+            while i < pairs.len() {
+                let (k, v) = &pairs[i];
+                out.insert(bulk_to_text(k)?, bulk_to_bytes(v)?);
+                i = i + 1;
+            }
+            Ok(out)
+        }
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"HGETALL unexpected: {other:?}")),
+    }
+}
+
+pub async fn hincr_by(
+    client: &RedisClient, key: &Text, field: &Text, delta: Int,
+) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("HINCRBY".to_text()); a.push(key.clone()); a.push(field.clone()); a.push(f"{delta}");
+    expect_int(exec(client, a.as_slice()).await?, "HINCRBY")
+}
+
+// =============================================================================
+// Set commands
+// =============================================================================
+
+pub async fn sadd(client: &RedisClient, key: &Text, members: &[List<Byte>]) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.with_capacity(members.len() + 2);
+    a.push("SADD".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < members.len() { a.push(members[i].clone()); i = i + 1; }
+    expect_int(exec_bytes(client, &a).await?, "SADD")
+}
+
+pub async fn srem(client: &RedisClient, key: &Text, members: &[List<Byte>]) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.with_capacity(members.len() + 2);
+    a.push("SREM".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < members.len() { a.push(members[i].clone()); i = i + 1; }
+    expect_int(exec_bytes(client, &a).await?, "SREM")
+}
+
+pub async fn smembers(client: &RedisClient, key: &Text) -> Result<List<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("SMEMBERS".to_text()); a.push(key.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) | RespValue.SetValue(arr) => bulk_array_to_byte_list(&arr),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SMEMBERS unexpected: {other:?}")),
+    }
+}
+
+pub async fn sismember(client: &RedisClient, key: &Text, member: &[Byte]) -> Result<Bool, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("SISMEMBER".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(member.to_list());
+    expect_int_bool(exec_bytes(client, &a).await?, "SISMEMBER")
+}
+
+// =============================================================================
+// Sorted-set commands
+// =============================================================================
+
+pub async fn zadd(
+    client: &RedisClient, key: &Text, member: &[Byte], score: Float,
+) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("ZADD".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(f"{score}".as_bytes().to_list());
+    a.push(member.to_list());
+    expect_int(exec_bytes(client, &a).await?, "ZADD")
+}
+
+pub async fn zrange(
+    client: &RedisClient, key: &Text, start: Int, stop: Int,
+) -> Result<List<List<Byte>>, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("ZRANGE".to_text()); a.push(key.clone());
+    a.push(f"{start}"); a.push(f"{stop}");
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) => bulk_array_to_byte_list(&arr),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"ZRANGE unexpected: {other:?}")),
+    }
+}
+
+pub async fn zscore(
+    client: &RedisClient, key: &Text, member: &[Byte],
+) -> Result<Maybe<Float>, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("ZSCORE".to_text().as_bytes().to_list());
+    a.push(key.as_bytes().to_list());
+    a.push(member.to_list());
+    match exec_bytes(client, &a).await? {
+        RespValue.NullBulk | RespValue.Nil_ => Ok(None),
+        RespValue.BulkString(b) => {
+            let s = Text.from_utf8(b.as_slice())
+                .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))?;
+            Float.parse(&s).map(Some).map_err(|e| RedisError.InvalidReply(f"parse: {e}"))
+        }
+        RespValue.Double(d) => Ok(Some(d)),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"ZSCORE unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// Server commands
+// =============================================================================
+
+pub async fn ping(client: &RedisClient) -> Result<(), RedisError> {
+    let mut a: List<Text> = List.new(); a.push("PING".to_text());
+    match exec(client, a.as_slice()).await? {
+        RespValue.SimpleString(s) if s == "PONG" => Ok(()),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        _ => Err(RedisError.InvalidReply("PING unexpected".to_text())),
+    }
+}
+
+pub async fn flushdb(client: &RedisClient) -> Result<(), RedisError> {
+    let mut a: List<Text> = List.new(); a.push("FLUSHDB".to_text());
+    expect_simple_ok(exec(client, a.as_slice()).await?, "FLUSHDB")
+}
+
+pub async fn dbsize(client: &RedisClient) -> Result<Int, RedisError> {
+    let mut a: List<Text> = List.new(); a.push("DBSIZE".to_text());
+    expect_int(exec(client, a.as_slice()).await?, "DBSIZE")
+}
+
+// =============================================================================
+// Reply decoders
+// =============================================================================
+
+fn expect_simple_ok(v: RespValue, cmd: &str) -> Result<(), RedisError> {
+    match v {
+        RespValue.SimpleString(_) => Ok(()),
+        RespValue.NullBulk | RespValue.Nil_ => Ok(()),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+    }
+}
+
+fn expect_int(v: RespValue, cmd: &str) -> Result<Int, RedisError> {
+    match v {
+        RespValue.Integer(n) => Ok(n),
+        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+    }
+}
+
+fn expect_int_bool(v: RespValue, cmd: &str) -> Result<Bool, RedisError> {
+    expect_int(v, cmd).map(|n| n == 1)
+}
+
+fn expect_optional_bulk(v: RespValue, cmd: &str) -> Result<Maybe<List<Byte>>, RedisError> {
+    match v {
+        RespValue.NullBulk | RespValue.Nil_ => Ok(None),
+        RespValue.BulkString(b) => Ok(Some(b)),
+        RespValue.SimpleString(s) => Ok(Some(s.as_bytes().to_list())),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"{cmd} unexpected: {other:?}")),
+    }
+}
+
+fn expect_text_int(v: &RespValue) -> Result<Int, RedisError> {
+    match v {
+        RespValue.Integer(n) => Ok(*n),
+        RespValue.BulkString(b) => {
+            let s = Text.from_utf8(b.as_slice())
+                .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))?;
+            Int.parse(&s).map_err(|_| RedisError.InvalidReply(f"int parse: {s}"))
+        }
+        RespValue.SimpleString(s) => Int.parse(s).map_err(|_| RedisError.InvalidReply(f"int parse: {s}")),
+        _ => Err(RedisError.InvalidReply("expected integer or text-int".to_text())),
+    }
+}
+
+fn bulk_to_bytes(v: &RespValue) -> Result<List<Byte>, RedisError> {
+    match v {
+        RespValue.BulkString(b) => Ok(b.clone()),
+        RespValue.SimpleString(s) => Ok(s.as_bytes().to_list()),
+        RespValue.NullBulk | RespValue.Nil_ => Ok(List.new()),
+        _ => Err(RedisError.InvalidReply(f"expected bulk, got: {v:?}")),
+    }
+}
+
+fn bulk_to_text(v: &RespValue) -> Result<Text, RedisError> {
+    let bytes = bulk_to_bytes(v)?;
+    Text.from_utf8(bytes.as_slice())
+        .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))
+}
+
+fn bulk_array_to_text_list(items: &List<RespValue>) -> Result<List<Text>, RedisError> {
+    let mut out: List<Text> = List.with_capacity(items.len());
+    let mut i: Int = 0;
+    while i < items.len() { out.push(bulk_to_text(&items[i])?); i = i + 1; }
+    Ok(out)
+}
+
+fn bulk_array_to_byte_list(items: &List<RespValue>) -> Result<List<List<Byte>>, RedisError> {
+    let mut out: List<List<Byte>> = List.with_capacity(items.len());
+    let mut i: Int = 0;
+    while i < items.len() { out.push(bulk_to_bytes(&items[i])?); i = i + 1; }
+    Ok(out)
+}

@@ -1,0 +1,41 @@
+// =============================================================================
+// search/mod.vr — abstract search subsystem
+// =============================================================================
+// Universal search abstraction. Concrete adapters implement
+// `core.search.types::SearchIndex` over specific engines:
+//
+//   - `core.search.meilisearch` — MeiliSearch v1 REST.
+//   - (future: elasticsearch, typesense, sqlite_fts5, in_memory)
+//
+// Consumers compose against `SearchIndex`; the concrete adapter
+// is selected at construction.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract search subsystem — SearchIndex protocol + concrete adapters".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.search;
+
+public module types;
+public module meilisearch;
+
+public mount .types.{
+    SearchIndex, SearchError, SearchQuery, SearchResults, SearchHit,
+    SearchFilter, SortDirection, SortSpec, FacetDistribution,
+    Document, IndexConfig,
+    search_query_match_all, index_config_default,
+};

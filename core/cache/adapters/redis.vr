@@ -1,0 +1,184 @@
+// =============================================================================
+// cache/adapters/redis.vr — CacheBackend adapter over core.redis
+// =============================================================================
+// Layer: 4 (Cache)
+// Dependencies: core, base, collections, cache/types, redis/{client, commands}
+// =============================================================================
+//
+// **Purpose.** Thin adapter exposing the multi-purpose
+// `core.redis.RedisClient` as a `core.cache.types::CacheBackend`.
+// Composition, not duplication: the heavy lifting (RESP protocol,
+// connection pool, cluster redirects) lives in `core.redis`; this
+// adapter just routes the abstract Cache primitives to the
+// corresponding Redis commands.
+//
+// **What this adapter SHOULD NOT do.** Re-implement Redis. Any
+// Redis-specific feature (pub/sub, streams, sorted sets, scripting)
+// is accessed via `core.redis` directly — the registry is a
+// canonical example, using the cache adapter for cache-shaped
+// access AND the raw client for pub/sub-style notifications.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "thin adapter exposing core.redis as core.cache.types::CacheBackend".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cache.adapters.redis;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+
+mount core.cache.types.{
+    CacheBackend, CacheError, CacheValue, CacheTtl,
+    ttl_to_millis, ttl_to_seconds,
+};
+mount core.redis.{RedisClient, RedisError};
+mount core.redis.commands as cmd;
+
+// =============================================================================
+// Adapter
+// =============================================================================
+
+@derive(Debug)
+public type RedisCacheAdapter is {
+    inner: RedisClient,
+}
+
+pub fn from_client(client: RedisClient) -> RedisCacheAdapter {
+    RedisCacheAdapter { inner: client }
+}
+
+implement CacheBackend for RedisCacheAdapter {
+    async fn get(&self, key: &Text) -> Result<Maybe<CacheValue>, CacheError> {
+        match cmd.get(&self.inner, key).await {
+            Ok(Some(b)) => Ok(Some(CacheValue.Bytes(b))),
+            Ok(None)    => Ok(None),
+            Err(e)      => Err(redis_to_cache(e)),
+        }
+    }
+
+    async fn set(
+        &self,
+        key:   &Text,
+        value: &CacheValue,
+        ttl:   &CacheTtl,
+    ) -> Result<(), CacheError> {
+        let bytes = value_to_bytes(value)?;
+        match ttl {
+            CacheTtl.Persistent => cmd.set(&self.inner, key, bytes.as_slice()).await,
+            CacheTtl.Seconds(s) => cmd.set_ex(&self.inner, key, bytes.as_slice(), *s).await,
+            CacheTtl.Millis(ms) => cmd.set_px(&self.inner, key, bytes.as_slice(), *ms).await,
+        }.map_err(redis_to_cache)
+    }
+
+    async fn set_if_absent(
+        &self,
+        key:   &Text,
+        value: &CacheValue,
+        ttl:   &CacheTtl,
+    ) -> Result<Bool, CacheError> {
+        let bytes = value_to_bytes(value)?;
+        // SET key value NX [EX|PX] is the canonical idiom.
+        let stored = cmd.set_nx(&self.inner, key, bytes.as_slice()).await
+            .map_err(redis_to_cache)?;
+        if stored {
+            // Apply TTL after successful NX-set when one was requested.
+            if let Some(ms) = ttl_to_millis(ttl) {
+                let _ = cmd.pexpire(&self.inner, key, ms).await
+                    .map_err(redis_to_cache)?;
+            }
+        }
+        Ok(stored)
+    }
+
+    async fn delete(&self, key: &Text) -> Result<Int, CacheError> {
+        let mut keys: List<Text> = List.new();
+        keys.push(key.clone());
+        cmd.del(&self.inner, keys.as_slice()).await.map_err(redis_to_cache)
+    }
+
+    async fn mget(&self, keys: &List<Text>) -> Result<List<Maybe<CacheValue>>, CacheError> {
+        let raw = cmd.mget(&self.inner, keys.as_slice()).await
+            .map_err(redis_to_cache)?;
+        let mut out: List<Maybe<CacheValue>> = List.with_capacity(raw.len());
+        let mut i: Int = 0;
+        while i < raw.len() {
+            match &raw[i] {
+                Some(b) => out.push(Some(CacheValue.Bytes(b.clone()))),
+                None    => out.push(None),
+            }
+            i = i + 1;
+        }
+        Ok(out)
+    }
+
+    async fn incr_by(&self, key: &Text, delta: Int) -> Result<Int, CacheError> {
+        cmd.incr_by(&self.inner, key, delta).await.map_err(redis_to_cache)
+    }
+
+    async fn expire(&self, key: &Text, ttl: &CacheTtl) -> Result<Bool, CacheError> {
+        match ttl {
+            CacheTtl.Persistent => cmd.persist(&self.inner, key).await,
+            CacheTtl.Seconds(s) => cmd.expire(&self.inner, key, *s).await,
+            CacheTtl.Millis(ms) => cmd.pexpire(&self.inner, key, *ms).await,
+        }.map_err(redis_to_cache)
+    }
+
+    async fn ping(&self) -> Result<(), CacheError> {
+        cmd.ping(&self.inner).await.map_err(redis_to_cache)
+    }
+}
+
+// =============================================================================
+// Convenience constructor used by the registry
+// =============================================================================
+
+pub async fn connect_url(url: &Text) -> Result<RedisCacheAdapter, CacheError>
+    using [Logger]
+{
+    let client = core.redis.connect_url(url).await
+        .map_err(redis_to_cache)?;
+    Ok(RedisCacheAdapter { inner: client })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn value_to_bytes(v: &CacheValue) -> Result<List<Byte>, CacheError> {
+    match v {
+        CacheValue.Bytes(b)     => Ok(b.clone()),
+        CacheValue.TextValue(t) => Ok(t.as_bytes().to_list()),
+        CacheValue.Counter(n)   => Ok(f"{n}".as_bytes().to_list()),
+        CacheValue.StringSet(_) => Err(CacheError.Encoding(
+            "StringSet: use core.redis.commands.sadd directly for set values".to_text())),
+    }
+}
+
+fn redis_to_cache(e: RedisError) -> CacheError {
+    match e {
+        RedisError.NotFound(k)         => CacheError.NotFound(k),
+        RedisError.Network(reason)     => CacheError.Network(reason),
+        RedisError.Auth(reason)        => CacheError.Backend(f"auth: {reason}"),
+        RedisError.InvalidReply(reason)=> CacheError.Backend(f"invalid reply: {reason}"),
+        RedisError.TypeMismatch { expected, found }
+                                       => CacheError.TypeMismatch { expected, found },
+        RedisError.RedirectLoop { hops }
+                                       => CacheError.Backend(f"cluster redirect loop: {hops} hops"),
+        RedisError.Backend(reason)     => CacheError.Backend(reason),
+    }
+}
