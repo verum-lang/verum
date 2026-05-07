@@ -1,0 +1,41 @@
+// =============================================================================
+// core/cog/mod.vr — cog tooling subsystem
+// =============================================================================
+// Layer: 3 (Cog tooling)
+//
+// Public surface for first-class Verum cog manipulation: manifest
+// parsing, .vbca archive reading, Ed25519 signature envelopes, and
+// pubgrub-style dependency resolution. Composed by:
+//
+//   - `verum-registry` (vcogs.io reference implementation)
+//   - `verum publish` / `verum install` (CLI flows)
+//   - IDEs / LSP (manifest validation, dependency hover)
+//
+// Each sub-module declares its own CVE shape; this re-export layer
+// is a thin Lifecycle.Theorem("v0.1") aggregator.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "cog tooling subsystem facade — manifest, archive, sign, resolve",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cog;
+
+// Re-export the four child modules' public surfaces.
+public mount core.cog.manifest.*;
+public mount core.cog.archive.*;
+public mount core.cog.sign.*;
+public mount core.cog.resolve.*;
