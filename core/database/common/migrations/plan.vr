@@ -1,42 +1,47 @@
 // =============================================================================
-// migrations/plan.vr — MigrationPlan with dependency-DAG topological sort
+// database/common/migrations/plan.vr — MigrationPlan with topo sort
 // =============================================================================
-// Spec: sqlite-native.md operational tooling
+// Layer: 2 (Database — vendor-neutral)
+// Dependencies: core, base, common/migrations/migration
+// =============================================================================
 //
-
-// `MigrationPlan` is the deterministic ordering of `Migration`s the
-// runner will apply. It catches three categories of authoring error
-// at plan-build time:
+// `MigrationPlan` is the deterministic ordering of `Migration`s that the
+// runner will apply. Plan-build catches three categories of authoring error:
 //
-
-//  * `PeDuplicateVersion` — two migrations declare the same version
-//  * `PeUnknownDependency` — depends_on references a missing version
-//  * `PeCycle` — dependency DAG has a cycle
+//   * `PeDuplicateVersion`   — two migrations declare the same version
+//   * `PeUnknownDependency`  — depends_on references a missing version
+//   * `PeCycle`              — dependency DAG has a cycle
 //
-
 // On success the plan exposes:
-//
-
-//  * `ordered` — Migration sequence in apply order
-//  * `min_version` — smallest version (after which a runner
-//  operating on an empty DB starts work)
-//  * `max_version` — largest version (where it ends)
-//  * `is_reversible` — True ⇒ every step has a down_sql
+//   * `ordered`        — Migration sequence in apply order
+//   * `min_version`    — smallest version
+//   * `max_version`    — largest version
+//   * `is_reversible`  — `True` ⇒ every step has a `down_sql`
 // =============================================================================
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral migration plan + dependency-DAG topological sort",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
 )
-module core.database.sqlite.native.migrations.plan;
+module core.database.common.migrations.plan;
 
 mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
-mount core.database.sqlite.native.migrations.migration.{
-    Migration,
-};
+mount core.database.common.migrations.migration.{Migration, clone_migration};
 
 // -----------------------------------------------------------------------------
 // MigrationPlanError
@@ -50,27 +55,18 @@ public type MigrationPlanError is
 implement Display for MigrationPlanError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            PeDuplicateVersion(v)         =>
-                f.write_str(f"sqlite migration duplicate version {v}".as_str()),
+            PeDuplicateVersion(v) =>
+                f.write_str(f"migration plan: duplicate version {v}".as_str()),
             PeUnknownDependency(ver, dep) =>
-                f.write_str(f"sqlite migration {ver} depends on missing version {dep}".as_str()),
-            PeCycle(versions)             =>
-                f.write_str(f"sqlite migration cycle through {versions.len()} versions".as_str()),
+                f.write_str(f"migration plan: version {ver} depends on missing version {dep}".as_str()),
+            PeCycle(versions) =>
+                f.write_str(f"migration plan: cycle through {versions.len()} versions".as_str()),
         }
     }
 }
 
 implement Debug for MigrationPlanError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        match self {
-            PeDuplicateVersion(v)         =>
-                f.write_str(f"PeDuplicateVersion({v})".as_str()),
-            PeUnknownDependency(ver, dep) =>
-                f.write_str(f"PeUnknownDependency({ver}, {dep})".as_str()),
-            PeCycle(versions)             =>
-                f.write_str(f"PeCycle(<{versions.len()} versions>)".as_str()),
-        }
-    }
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
 }
 
 implement Eq for MigrationPlanError {
@@ -93,7 +89,7 @@ public type MigrationPlan is {
     min_version: Int,
     max_version: Int,
     is_reversible: Bool,
-}
+};
 
 public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanError> {
     // 1. Detect duplicate versions.
@@ -121,12 +117,12 @@ public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanEr
         }
         idx = idx + 1;
     }
-    // 3. Topological sort (Kahn's algorithm).
+    // 3. Topological sort.
     let sorted = match toposort(&steps) {
         Ok(s)  => s,
         Err(e) => { return Err(e); }
     };
-    // 4. Compute aggregate fields.
+    // 4. Aggregate fields.
     if sorted.len() == 0 {
         return Ok(MigrationPlan {
             ordered: List.new(),
@@ -173,7 +169,7 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
         in_degree.push(steps[i].depends_on.len());
         i = i + 1;
     }
-    let mut queue: List<Int> = List.new();   // indices into `steps`
+    let mut queue: List<Int> = List.new();
     i = 0;
     while i < steps.len() {
         if in_degree[i] == 0 { queue.push(i); }
@@ -181,14 +177,12 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
     }
     let mut out: List<Migration> = List.new();
     while queue.len() > 0 {
-        // Stable pop — index 0 (oldest enqueued).
         let chosen = queue[0];
         let mut new_q: List<Int> = List.new();
         let mut k: Int = 1;
         while k < queue.len() { new_q.push(queue[k]); k = k + 1; }
         queue = new_q;
         out.push(clone_migration(&steps[chosen]));
-        // Decrement in-degree of every step that depended on `chosen`.
         let chosen_v = steps[chosen].version;
         let mut idx: Int = 0;
         while idx < steps.len() {
@@ -204,7 +198,6 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
         }
     }
     if out.len() != steps.len() {
-        // Cycle detected — collect remaining versions.
         let mut cyc: List<Int> = List.new();
         let mut i: Int = 0;
         while i < steps.len() {
@@ -216,19 +209,57 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
     Ok(out)
 }
 
-fn clone_migration(m: &Migration) -> Migration {
-    let mut deps: List<Int> = List.with_capacity(m.depends_on.len());
-    deps.extend_from_slice(m.depends_on.as_slice());
-    let down = match &m.down_sql {
-        Some(s) => Some(s.clone()),
-        None    => None,
-    };
-    Migration {
-        version: m.version,
-        name: m.name.clone(),
-        up_sql: m.up_sql.clone(),
-        down_sql: down,
-        depends_on: deps,
-        is_idempotent: m.is_idempotent,
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use core.database.common.migrations.migration.{migration_new};
+
+    #[test]
+    fn test_simple_plan() {
+        let mut steps: List<Migration> = List.new();
+        steps.push(migration_new(2, "b".to_text(), "y".to_text()).with_dependency(1));
+        steps.push(migration_new(1, "a".to_text(), "x".to_text()));
+        let plan = build(steps).unwrap();
+        assert_eq(plan.ordered.len(), 2);
+        assert_eq(plan.ordered[0].version, 1);
+        assert_eq(plan.ordered[1].version, 2);
+        assert_eq(plan.min_version, 1);
+        assert_eq(plan.max_version, 2);
+    }
+
+    #[test]
+    fn test_cycle_detection() {
+        let mut steps: List<Migration> = List.new();
+        steps.push(migration_new(1, "a".to_text(), "x".to_text()).with_dependency(2));
+        steps.push(migration_new(2, "b".to_text(), "y".to_text()).with_dependency(1));
+        match build(steps) {
+            Err(PeCycle(_)) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_duplicate_version() {
+        let mut steps: List<Migration> = List.new();
+        steps.push(migration_new(1, "a".to_text(), "x".to_text()));
+        steps.push(migration_new(1, "b".to_text(), "y".to_text()));
+        match build(steps) {
+            Err(PeDuplicateVersion(1)) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_unknown_dependency() {
+        let mut steps: List<Migration> = List.new();
+        steps.push(migration_new(1, "a".to_text(), "x".to_text()).with_dependency(99));
+        match build(steps) {
+            Err(PeUnknownDependency(1, 99)) => {}
+            _ => unreachable(),
+        }
     }
 }

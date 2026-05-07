@@ -1,38 +1,69 @@
 // =============================================================================
-// core/database/sqlite/native/migrations/mod.vr
+// database/sqlite/native/migrations/mod.vr — SQLite migration adapter
 // =============================================================================
-// Layer: 7 (consumer-facing — `Database.migrate(plan)`)
-// Spec: sqlite-native.md operational tooling
+// Layer: 7 (consumer-facing)
 //
-
-// Versioned schema-migration framework. Each `Migration` carries
-// an integer version, an optional human-readable name, an `up`
-// SQL block (+ optional `down` for rollback), and a list of
-// migration versions it depends on (typically `[version - 1]`).
+// SQLite-specific facade over the universal migration subsystem
+// (`core/database/common/migrations/`). Provides:
 //
-
-// `MigrationRunner` walks the dependency graph in topological order
-// and applies each migration whose version is greater than the
-// `user_version` PRAGMA value. On error, optionally rolls back
-// applied migrations (LIFO) before propagating.
+//   * Universal types re-exported (Migration / MigrationStatus /
+//     MigrationJournal / MigrationPlan / MigrationRunner / RunMode /
+//     RunReport / etc.)
+//   * `SqliteMigrationStore` — SQLite implementation of the
+//     `MigrationStore` protocol.
 //
-
-// Submodules:
-//  * `migration` — Migration record + builder
-//  * `plan` — MigrationPlan (sorted by dep DAG)
-//  * `runner` — MigrationRunner state machine
-//  * `journal` — applied-migration log (persisted in
-//  `__loom_migrations` table)
+// **Refactor (no backward compat):** the previously-vendor-specific
+// `migration.vr` / `journal.vr` / `plan.vr` / `runner.vr` files have
+// been **lifted** into `core/database/common/migrations/*.vr` (those
+// algorithms were already vendor-neutral). This module now only
+// contains the SQLite-specific persistence adapter (`store.vr`).
+//
+// Migration of existing tests: replace
+//   `mount core.database.sqlite.native.migrations.migration.{...}`
+// with
+//   `mount core.database.common.migrations.{...}`
+// or simply
+//   `mount core.database.sqlite.native.migrations.{...}`
+// (this module re-exports the common surface alongside the SQLite-
+// specific store).
 // =============================================================================
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "SQLite facade for migration subsystem — store + universal re-exports",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
 )
 module core.database.sqlite.native.migrations;
 
-public module migration;
-public module plan;
-public module runner;
-public module journal;
+// SQLite-specific store
+public mount core.database.sqlite.native.migrations.store.{
+    SqliteMigrationStore, store_new,
+};
+
+// Universal types — re-exported so existing call sites continue to work.
+public mount core.database.common.migrations.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    migration_new, status_name,
+    JournalEntry, MigrationJournal, journal_new, checksum_for_sql,
+    MigrationPlan, MigrationPlanError,
+    PeDuplicateVersion, PeUnknownDependency, PeCycle,
+    build,
+    MigrationRunner, RunMode, RunDecision, RunReport,
+    RmDryRun, RmStrict, RmContinueOnDrift,
+    RdSkip, RdApply, RdSkipDrift, RdAbortDrift,
+    runner_new, run_mode_name, decision_kind_name, report_zero,
+    MigrationStore, MigrationStoreConfig, store_config_default,
+};

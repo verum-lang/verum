@@ -1,0 +1,93 @@
+// =============================================================================
+// database/common/migrations/mod.vr — vendor-neutral migration subsystem
+// =============================================================================
+// Layer: 2 (Database — vendor-neutral)
+// =============================================================================
+//
+// Universal database migration framework. Vendor-neutral algorithms
+// (Migration / Journal / Plan / Runner) compose with vendor-specific
+// `MigrationStore` implementations (sqlite / postgres / mysql / future)
+// to provide a single uniform migration UX across every supported
+// database.
+//
+// **Public API:**
+//
+//   * `Migration`        — schema-evolution step (vendor-neutral data)
+//   * `MigrationStatus`  — Pending / Applied / RolledBack / Failed
+//   * `MigrationJournal` — in-memory aggregate of applied migrations
+//   * `MigrationPlan`    — topo-sorted ordering of migrations
+//   * `MigrationRunner`  — state machine executing the plan
+//   * `MigrationStore`   — vendor adapter protocol
+//
+// **Usage** (Postgres example):
+//
+// ```verum
+// use core.database.common.migrations.*;
+// use core.database.postgres.migrations.PostgresMigrationStore;
+//
+// let conn = postgres.connect(&config).await?;
+// let mut store = PostgresMigrationStore.new(conn, store_config_default());
+// let plan = build(vec![
+//     migration_new(1, "init".to_text(), CREATE_USERS_SQL.to_text()),
+//     migration_new(2, "add_email_index".to_text(), INDEX_SQL.to_text())
+//         .with_dependency(1),
+// ])?;
+// let runner = runner_new(RmStrict);
+// let report = runner.execute(&plan, &mut store, now_ns()).await?;
+// ```
+//
+// **Vendor-specific entry points:**
+//   * `core/database/sqlite/native/migrations/store.vr` — SqliteMigrationStore
+//   * `core/database/postgres/migrations/store.vr`     — PostgresMigrationStore
+//   * `core/database/mysql/migrations/store.vr`        — future
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "vendor-neutral database migration subsystem entry-point",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.common.migrations;
+
+// Re-export public surface so callers `mount core.database.common.migrations.*`
+// have everything in scope.
+public mount core.database.common.migrations.migration.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    migration_new, status_name, clone_status, clone_migration,
+};
+
+public mount core.database.common.migrations.journal.{
+    JournalEntry, MigrationJournal,
+    journal_new, journal_from_entries, checksum_for_sql, clone_entry,
+};
+
+public mount core.database.common.migrations.plan.{
+    MigrationPlan, MigrationPlanError,
+    PeDuplicateVersion, PeUnknownDependency, PeCycle,
+    build,
+};
+
+public mount core.database.common.migrations.runner.{
+    MigrationRunner, RunMode, RunDecision, RunReport,
+    RmDryRun, RmStrict, RmContinueOnDrift,
+    RdSkip, RdApply, RdSkipDrift, RdAbortDrift,
+    runner_new, run_mode_name, decision_kind_name, report_zero,
+};
+
+public mount core.database.common.migrations.store.{
+    MigrationStore, MigrationStoreConfig,
+    store_config_default, canonical_columns_doc, advisory_lock_key_for,
+};
