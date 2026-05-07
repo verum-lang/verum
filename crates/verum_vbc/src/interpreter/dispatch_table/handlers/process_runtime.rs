@@ -55,6 +55,14 @@ pub(in super::super) fn try_intercept_process_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
+    if std::env::var("VERUM_TRACE_PROCESS").is_ok()
+        && (func_name.contains("spawn") || func_name.contains("wait") || func_name.contains("exec.run"))
+    {
+        eprintln!(
+            "[process_runtime] called func_name='{}' bare='{}' arg_count={}",
+            func_name, bare, arg_count
+        );
+    }
     match bare {
         // The Command builder's `output()` / `status()` methods
         // both route through `spawn_child_with_output` after pinning
