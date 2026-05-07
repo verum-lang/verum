@@ -11211,6 +11211,17 @@ impl VbcCodegen {
         // 3. Build name → FunctionInfo map, indexed by id.
         // ctx.functions is HashMap<String, FunctionInfo>; we need
         // to find by id.  Build a side index.
+        //
+        // **Cold-start optimisation**: only collect entries whose id
+        // is actually `referenced` from emitted bytecode.  ctx.functions
+        // grows to ~28K entries on a fully-mounted script (every
+        // archive function loaded in apply_lazy_with_types lives there);
+        // walking the full table to clone names + match-and-modify
+        // the dots-tiebreak HashMap entry was burning ~30ms of
+        // cold-start on hello-world.  Filtering on `referenced` first
+        // collapses the work to O(N_referenced) typical few-tens —
+        // most `ctx.functions` entries never get called by user code
+        // and don't need a stub at all.
         let mut id_to_name: HashMap<u32, String> = HashMap::new();
         for (name, info) in self.ctx.functions.iter() {
             // Skip sentinel-id entries (FFI extern, newtype ctor —
@@ -11220,6 +11231,16 @@ impl VbcCodegen {
             // `import_functions`.
             const SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
             if info.id.0 >= SENTINEL_THRESHOLD {
+                continue;
+            }
+            // Skip ids never referenced by the emitted bytecode.
+            // The `referenced` set was built in step 1 from every
+            // Call/CallG/TailCall/NewClosure/Spawn/GenCreate site,
+            // so this gate's only false-positive risk is a
+            // late-emitted stub that references id X without X
+            // being in `referenced` — which can't happen because
+            // we walk the bytecode AFTER all emission has finished.
+            if !referenced.contains(&info.id.0) {
                 continue;
             }
             // PREFER QUALIFIED NAMES so the stub's simple-name

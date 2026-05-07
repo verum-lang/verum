@@ -41,13 +41,24 @@ pub fn get_runtime_archive() -> Option<&'static VbcArchive> {
                 );
                 return None;
             }
+            let t0 = std::time::Instant::now();
             match decode_archive(EMBEDDED_RUNTIME_VBC) {
                 Ok(archive) => {
+                    let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+                    if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
+                        eprintln!(
+                            "[embedded_stdlib_vbc] decode_archive: {:.2}ms ({} modules, {} KB compressed)",
+                            elapsed,
+                            archive.module_count(),
+                            EMBEDDED_RUNTIME_VBC.len() / 1024,
+                        );
+                    }
                     tracing::info!(
                         target: "embedded_stdlib_vbc",
-                        "loaded precompiled stdlib archive ({} modules, {:.1} KB compressed)",
+                        "loaded precompiled stdlib archive ({} modules, {:.1} KB compressed) in {:.2}ms",
                         archive.module_count(),
-                        EMBEDDED_RUNTIME_VBC.len() as f64 / 1024.0
+                        EMBEDDED_RUNTIME_VBC.len() as f64 / 1024.0,
+                        elapsed,
                     );
                     Some(archive)
                 }
