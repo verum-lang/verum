@@ -19,7 +19,7 @@
 // code so both human reviewers and agents can pattern-match
 // (dual-audience contract).
 //
-// ## 39-pattern roster (full canonical catalog)
+// ## 40-pattern roster (full canonical catalog)
 //
 // **Capability / composition core (AP-001..010):**
 //   AP-001 CapabilityEscalation     undeclared capability used
@@ -59,11 +59,12 @@
 //   AP-031 PhantomEvolution           unsatisfiable trigger
 //   AP-032 YonedaInequivalentRefactor observer-functor changes
 //
-// **CVE articulation-hygiene band (AP-033..039):**
+// **CVE articulation-hygiene band (AP-033..040):**
 //   These operationalise the CVE-architecture spec primitives:
 //   ExecutabilitySense (§2.3.0), CognitiveSubstrate (§1.5),
 //   FormalAnchoring (§4.5), Purpose (§14.6), the [I]/[H]/[✗]
-//   discipline of §3.5, and the L6 register prohibitions of §16.
+//   discipline of §3.5, and the L6 register prohibitions of §16
+//   (articulation hygiene: «никогда «само-X», всегда «оператор + Fix»).
 //
 //   AP-033 RetractedCitationUse       citing a [✗] Retracted artefact
 //   AP-034 HypothesisWithoutMaturationPlan  [H] cog without @plan(...)
@@ -77,15 +78,20 @@
 //                                     CognitiveSubstrate (§1.5 self-disclosure)
 //   AP-039 AnchoringOverextension     formal claim outside CHL domain
 //                                     without declared FormalAnchoring (§4.5)
+//   AP-040 SelfReferenceWithoutOperator   self-referential Shape pattern
+//                                     (self ∈ composes_with / capability target)
+//                                     without declared SelfReferenceWitness
+//                                     (§16 articulation hygiene; closes
+//                                     architectural-revision invariant R4)
 //
-// ## Discharge through 8 base + 4 red-team + 7 CVE-AH kernel intrinsics
+// ## Discharge through 8 base + 4 red-team + 8 CVE-AH kernel intrinsics
 //
 // * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
 // * `kernel_arch_boundary_check` — invariants across boundaries.
 // * `kernel_arch_composition_check` — composition algebra.
 // * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
 // * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
-// * `kernel_arch_anti_pattern_check` — generic dispatcher (39 patterns).
+// * `kernel_arch_anti_pattern_check` — generic dispatcher (40 patterns).
 // * `kernel_arch_cve_closure` — AP-010 CveIncomplete.
 // * `kernel_arch_soundness_v0` — composes the 7 above.
 // * `kernel_arch_capability_ontology_check` — AT-1 attack closure.
@@ -99,6 +105,7 @@
 // * `kernel_arch_boundless_audit_check`              — AP-037.
 // * `kernel_arch_implicit_substrate_check`           — AP-038.
 // * `kernel_arch_anchoring_overextension_check`      — AP-039.
+// * `kernel_arch_self_reference_check`               — AP-040.
 // =============================================================================
 
 module core.architecture.anti_patterns;
@@ -106,18 +113,19 @@ module core.architecture.anti_patterns;
 mount core.prelude.{Bool, Int, Maybe, List, Text};
 
 // =============================================================================
-// AntiPatternCode — stable RFC code, 39-pattern canonical roster
+// AntiPatternCode — stable RFC code, 40-pattern canonical roster
 // =============================================================================
 
 /// Stable RFC error code `ATS-V-AP-NNN` per spec §32.4.
 /// Pattern-matchable by agents; documented on docs site.
 ///
-/// **39 canonical variants**:
+/// **40 canonical variants**:
 ///   * AP-001..010 — capability/composition core
 ///   * AP-011..026 — boundary/lifecycle/capability ontology extensions
 ///   * AP-027..032 — MTAC modal-temporal arms
-///   * AP-033..039 — CVE articulation-hygiene band (cve-architecture
-///                    spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16)
+///   * AP-033..040 — CVE articulation-hygiene band (cve-architecture
+///                    spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16;
+///                    AP-040 closes architectural-revision invariant R4)
 ///
 /// **Stability**: codes never get re-used; removing a pattern
 /// requires deprecation cycle ≥ 2 minor versions per spec §29.5.
@@ -158,14 +166,15 @@ public type AntiPatternCode is
     | UniversalPropertyViolation
     | PhantomEvolution
     | YonedaInequivalentRefactor
-    // ----- CVE articulation-hygiene band (AP-033..039) -----
+    // ----- CVE articulation-hygiene band (AP-033..040) -----
     | RetractedCitationUse
     | HypothesisWithoutMaturationPlan
     | InterpretationInMatureCorpus
     | ObserverImpersonation
     | BoundlessAudit
     | ImplicitSubstrate
-    | AnchoringOverextension;
+    | AnchoringOverextension
+    | SelfReferenceWithoutOperator;
 
 /// Stable error code string `ATS-V-AP-NNN` for agent surfaces.
 /// Mirrors `verum_kernel::arch_anti_pattern::AntiPatternCode::code`.
@@ -210,6 +219,7 @@ public fn anti_pattern_code_str(c: AntiPatternCode) -> Text {
         BoundlessAudit                   => "ATS-V-AP-037",
         ImplicitSubstrate                => "ATS-V-AP-038",
         AnchoringOverextension           => "ATS-V-AP-039",
+        SelfReferenceWithoutOperator     => "ATS-V-AP-040",
     }
 }
 
@@ -255,11 +265,12 @@ public fn anti_pattern_name(c: AntiPatternCode) -> Text {
         BoundlessAudit                   => "BoundlessAudit",
         ImplicitSubstrate                => "ImplicitSubstrate",
         AnchoringOverextension           => "AnchoringOverextension",
+        SelfReferenceWithoutOperator     => "SelfReferenceWithoutOperator",
     }
 }
 
-/// Full canonical roster — exactly 39 entries.  Adding a 40th
-/// requires RFC ATS-V-008 + kernel-side enum bump + pin-test bump.
+/// Full canonical roster — exactly 40 entries.  Adding a 41st
+/// requires RFC ATS-V-009 + kernel-side enum bump + pin-test bump.
 /// Used by `verum audit --bundle` to walk every code at runtime.
 public fn anti_pattern_full_roster() -> List<AntiPatternCode> {
     [
@@ -302,13 +313,14 @@ public fn anti_pattern_full_roster() -> List<AntiPatternCode> {
         AntiPatternCode.BoundlessAudit,
         AntiPatternCode.ImplicitSubstrate,
         AntiPatternCode.AnchoringOverextension,
+        AntiPatternCode.SelfReferenceWithoutOperator,
     ]
 }
 
-/// **Pin**: roster size is exactly 39.  Mirrors kernel-side test
+/// **Pin**: roster size is exactly 40.  Mirrors kernel-side test
 /// `architectural_pin_anti_pattern_count`.
 public fn anti_pattern_roster_size_invariant() -> Bool {
-    anti_pattern_full_roster().len() == 39
+    anti_pattern_full_roster().len() == 40
 }
 
 // =============================================================================
@@ -495,7 +507,7 @@ public axiom kernel_arch_cve_closure() -> Bool
 /// * Foundation consistency
 /// * CVE closure (strict mode)
 /// * Lifecycle integrity
-/// * Anti-pattern absence (39 canonical patterns)
+/// * Anti-pattern absence (40 canonical patterns)
 /// hold.
 @framework(ats_v, "ATS-V end-to-end soundness witness. Composes the 7 base dispatch intrinsics (capability_discipline, boundary_check, composition_check, lifecycle_check, foundation_consistency, anti_pattern_check, cve_closure) into a single discharge. Soundness statement: when `verum check` accepts a cog with arch_type T, all of capability discipline, composition correctness, foundation consistency, CVE closure (strict mode), lifecycle integrity, and absence of the 32 canonical anti-patterns hold simultaneously. Eventually self-hosted as a CVE-closed Verum cog itself.")
 @kernel_discharge("kernel_arch_soundness_v0")
@@ -661,4 +673,19 @@ public axiom kernel_arch_implicit_substrate_check() -> Bool
 @framework(ats_v, "ATS-V anchoring-overextension closure (cve-architecture spec §4.5 formal anchoring boundary). The CHL anchoring is the most-developed; extending the CVE law to other domains (automata theory, control theory, distributed protocols, functional systems, institutional design) requires explicit declaration of the parallel anchoring, otherwise the artefact silently inherits CHL semantics it does not satisfy.")
 @kernel_discharge("kernel_arch_anchoring_overextension_check")
 public axiom kernel_arch_anchoring_overextension_check() -> Bool
+    ensures true;
+
+/// **AP-040 closure**: a self-referential `Shape` pattern (self in
+/// `composes_with`, capability target containing the cog's own
+/// path, or `Capability.Custom` tag mentioning self) without a
+/// declared `SelfReferenceWitness` in its `ShapeDeclarations`.
+/// Per cve-architecture spec §16 articulation hygiene, every
+/// self-X claim must be re-articulated as `(operator T_X, fixed
+/// point Fix(T_X))` with a cited fixpoint-class theorem. The bare
+/// self-X assertion is operationally indistinguishable from a
+/// Russell-paradox construction; this discharge rejects it before
+/// deployment. Closes the architectural-revision open invariant R4.
+@framework(ats_v, "ATS-V self-reference-without-operator closure (cve-architecture spec §16 articulation hygiene). A bare 'self-X' assertion in a cog's Shape (self ∈ composes_with / capability target / requires) admits a Russell-paradox construction unless re-articulated as (operator T_X, fixed point Fix(T_X)) with a cited fixpoint-class theorem (Banach contracting / Tarski monotone / Adamek continuous / custom). AP-040 catches the bare assertion; the SelfReferenceWitness type makes the legitimate articulation first-class.")
+@kernel_discharge("kernel_arch_self_reference_check")
+public axiom kernel_arch_self_reference_check() -> Bool
     ensures true;

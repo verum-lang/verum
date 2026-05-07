@@ -84,6 +84,8 @@ mount super.types.{
     DefectKind,
     Resolution,
     ArchitecturalDefect,
+    FixpointClass,
+    SelfReferenceWitness,
     ShapeDeclarations,
     capability_schema_inferred_default,
     tier_tag,
@@ -114,6 +116,8 @@ mount super.types.{
     purpose_default,
     defect_kind_tag,
     resolution_tag,
+    fixpoint_class_tag,
+    self_reference_witness_unspecified,
     shape_declarations_empty,
     lifecycle_rank_strict_order_holds,
     stratum_l_abs_unique_inadmissible,
@@ -123,6 +127,7 @@ mount super.types.{
     cognitive_substrate_default_is_analytic,
     formal_anchoring_default_is_chl,
     purpose_default_is_complete,
+    fixpoint_class_tags_distinct,
 };
 mount super.anti_patterns.{
     AntiPatternCode,
@@ -154,6 +159,7 @@ mount super.anti_patterns.{
     kernel_arch_boundless_audit_check,
     kernel_arch_implicit_substrate_check,
     kernel_arch_anchoring_overextension_check,
+    kernel_arch_self_reference_check,
 };
 mount super.composition.{
     CompositionResult,
