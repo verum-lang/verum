@@ -1,0 +1,522 @@
+// =============================================================================
+// security/x509/crl_client.vr — CRL fetch + freshness + revocation lookup
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, security/x509/{certificate, crl, oid, chain},
+//               net/http, time/system_time, sync/rwlock
+// =============================================================================
+//
+// **Purpose.** End-to-end CRL client: extract CRL distribution
+// points (CDP) from a certificate's `cRLDistributionPoints`
+// extension (RFC 5280 §4.2.1.13), fetch each candidate URL, parse
+// the resulting CRL via `core.security.x509.crl::parse_crl`, verify
+// the CRL signature against the issuer, check freshness against
+// thisUpdate/nextUpdate, look up the cert's serial.
+//
+// **CDP extension structure (RFC 5280 §4.2.1.13).**
+//
+//   CRLDistributionPoints ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+//
+//   DistributionPoint ::= SEQUENCE {
+//        distributionPoint       [0] EXPLICIT DistributionPointName OPTIONAL,
+//        reasons                 [1] IMPLICIT ReasonFlags OPTIONAL,
+//        cRLIssuer               [2] IMPLICIT GeneralNames OPTIONAL
+//   }
+//
+//   DistributionPointName ::= CHOICE {
+//        fullName                [0] IMPLICIT GeneralNames,
+//        nameRelativeToCRLIssuer [1] IMPLICIT RelativeDistinguishedName
+//   }
+//
+//   GeneralName for HTTP CRLs is `uniformResourceIdentifier [6] IA5String`.
+//
+// **Cache.** CRLs are large (kilobytes to megabytes for major CAs);
+// fetching them on every chain validation would be prohibitive. We
+// expose a TTL-cached `CrlCache` keyed by URL → (parsed CRL,
+// expires_at). Default TTL: min(nextUpdate − thisUpdate, 24h).
+//
+// **HTTP transport.** GET with `accept: application/pkix-crl`.
+// Hard-cap on response size: 32 MiB (most CRLs are well under,
+// pathological CAs fit at the boundary).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "CRL client end-to-end: CDP extraction + HTTP fetch + signature verify + freshness + revocation lookup",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.x509.crl_client;
+
+mount core.*;
+mount core.collections.{List, Map};
+mount core.security.x509.certificate.{X509Certificate};
+mount core.security.x509.crl.{
+    CertificateList, RevokedEntry, CrlReason, CrlError,
+    parse_crl, find_revoked, decode_reason,
+};
+mount core.security.x509.oid.{Oid};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount sync.rwlock.{RwLock};
+mount time.system_time.{epoch_seconds};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+public const MAX_CRL_BYTES: Int = 32 * 1024 * 1024; // 32 MiB
+public const DEFAULT_FRESHNESS_TOLERANCE_SECONDS: Int = 300;
+public const DEFAULT_MAX_CACHE_TTL_SECONDS: Int = 24 * 60 * 60; // 24 hours
+public const CONTENT_TYPE_PKIX_CRL: Text = "application/pkix-crl";
+
+// =============================================================================
+// Distribution-point extraction
+// =============================================================================
+
+/// Extract all HTTP/HTTPS CRL distribution-point URLs from a cert's
+/// `cRLDistributionPoints` extension (OID 2.5.29.31). Returns an
+/// empty list if the extension is absent or contains only non-HTTP
+/// distribution points (LDAP, etc.).
+public fn extract_crl_urls(cert: &X509Certificate) -> List<Text> {
+    let cdp_oid = Oid.from(&[2, 5, 29, 31]);
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < cert.tbs.extensions.others.len() {
+        let raw = &cert.tbs.extensions.others[i];
+        if raw.oid.eq(&cdp_oid) {
+            scan_cdp_for_uris(raw.value_der.as_slice(), &mut out);
+            break;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn scan_cdp_for_uris(der: &[Byte], out: &mut List<Text>) {
+    // CRLDistributionPoints is SEQUENCE OF DistributionPoint.
+    // Walk the outer SEQUENCE, then within each DistributionPoint
+    // dive into the [0] EXPLICIT distributionPoint → [0] IMPLICIT
+    // fullName → SEQUENCE OF GeneralName, harvesting [6] IA5String
+    // entries.
+    let outer = match peek_tlv(der, 0) {
+        Some((tag, _, c_off, c_end)) => {
+            if tag != 0x30 { return; }
+            (c_off, c_end)
+        }
+        None => return,
+    };
+    let mut off = outer.0;
+    while off < outer.1 {
+        let dp = match peek_tlv(der, off) {
+            Some((tag, _, c_off, c_end)) => {
+                if tag != 0x30 { return; }
+                (c_off, c_end)
+            }
+            None => return,
+        };
+        scan_distribution_point(der, dp.0, dp.1, out);
+        off = dp.1;
+    }
+}
+
+fn scan_distribution_point(der: &[Byte], start: Int, end: Int, out: &mut List<Text>) {
+    let mut off = start;
+    while off < end {
+        let elem = match peek_tlv(der, off) {
+            Some((tag, _, c_off, c_end)) => (tag, c_off, c_end),
+            None => return,
+        };
+        if elem.0 == 0xA0 {
+            // [0] EXPLICIT DistributionPointName
+            scan_distribution_point_name(der, elem.1, elem.2, out);
+        }
+        // Other tags ([1] reasons, [2] cRLIssuer) skipped.
+        match peek_tlv(der, off) {
+            Some((_, _, _, e)) => { off = e; }
+            None => return,
+        }
+    }
+}
+
+fn scan_distribution_point_name(der: &[Byte], start: Int, end: Int, out: &mut List<Text>) {
+    // DistributionPointName is a CHOICE — first element wins.
+    if start >= end { return; }
+    let first = match peek_tlv(der, start) {
+        Some((tag, _, c_off, c_end)) => (tag, c_off, c_end),
+        None => return,
+    };
+    if first.0 == 0xA0 {
+        // [0] IMPLICIT fullName GeneralNames -> SEQUENCE OF GeneralName.
+        // We treat [0] tag as the wrapper, then scan its content as
+        // SEQUENCE OF GeneralName.
+        let mut g_off = first.1;
+        while g_off < first.2 {
+            let gn = match peek_tlv(der, g_off) {
+                Some((tag, len, c_off, c_end)) => (tag, len, c_off, c_end),
+                None => return,
+            };
+            if gn.0 == 0x86 {
+                // uniformResourceIdentifier IA5String
+                let mut bytes: List<Byte> = List.with_capacity(gn.1);
+                let mut k: Int = 0;
+                while k < gn.1 { bytes.push(der[gn.2 + k]); k = k + 1; }
+                if let Ok(t) = Text.from_utf8(bytes.as_slice()) {
+                    if t.starts_with("http://") || t.starts_with("https://") {
+                        out.push(t);
+                    }
+                }
+            }
+            g_off = gn.3;
+        }
+    }
+    // [1] nameRelativeToCRLIssuer — not commonly used; skip.
+}
+
+fn peek_tlv(der: &[Byte], off: Int) -> Maybe<(Byte, Int, Int, Int)> {
+    if off >= der.len() { return None; }
+    let tag = der[off];
+    if off + 1 >= der.len() { return None; }
+    let len_byte = der[off + 1];
+    if len_byte < 0x80 {
+        let content_off = off + 2;
+        let content_end = content_off + (len_byte as Int);
+        if content_end > der.len() { return None; }
+        Some((tag, len_byte as Int, content_off, content_end))
+    } else {
+        let n_octets = (len_byte & 0x7F) as Int;
+        if n_octets == 0 || n_octets > 4 { return None; }
+        if off + 2 + n_octets > der.len() { return None; }
+        let mut len: Int = 0;
+        let mut k: Int = 0;
+        while k < n_octets {
+            len = (len << 8) | (der[off + 2 + k] as Int);
+            k = k + 1;
+        }
+        let content_off = off + 2 + n_octets;
+        let content_end = content_off + len;
+        if content_end > der.len() { return None; }
+        Some((tag, len, content_off, content_end))
+    }
+}
+
+// =============================================================================
+// HTTP fetch
+// =============================================================================
+
+@derive(Debug)
+public type CrlFetchError is
+    | Network(HttpError)
+    | HttpStatus(StatusCode)
+    | TooLarge { size: Int, limit: Int }
+    | WrongContentType(Text);
+
+implement Display for CrlFetchError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Network(e)              => f.write_str(f"crl/fetch: network: {e}".as_str()),
+            HttpStatus(s)           => f.write_str(f"crl/fetch: HTTP {s}".as_str()),
+            TooLarge { size, limit }=> f.write_str(f"crl/fetch: response too large ({size} > {limit})".as_str()),
+            WrongContentType(ct)    => f.write_str(f"crl/fetch: wrong Content-Type ({ct})".as_str()),
+        }
+    }
+}
+
+public async fn fetch_crl<C: HttpClient>(
+    client: &C,
+    url: &Text,
+) -> Result<List<Byte>, CrlFetchError> {
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("accept".to_text(), CONTENT_TYPE_PKIX_CRL.to_text());
+    headers.insert("user-agent".to_text(), "verum-crl/0.1".to_text());
+    let req = Request {
+        method:  Method.Get,
+        url:     url.clone(),
+        headers,
+        body:    List.new(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| CrlFetchError.Network(e))?;
+    if !resp.status.is_success() {
+        return Err(CrlFetchError.HttpStatus(resp.status));
+    }
+    if resp.body.len() > MAX_CRL_BYTES {
+        return Err(CrlFetchError.TooLarge { size: resp.body.len(), limit: MAX_CRL_BYTES });
+    }
+    // Some CAs serve `application/x-pkcs7-crl` legacy MIME — accept both.
+    let ct = resp.headers.get(&"content-type".to_text())
+        .map(|v| v.clone()).unwrap_or_else(|| "".to_text());
+    if !(ct.starts_with(&CONTENT_TYPE_PKIX_CRL) || ct.starts_with("application/x-pkcs7-crl")) {
+        // Tolerate empty Content-Type (some legacy mirrors omit the header).
+        if !ct.is_empty() {
+            return Err(CrlFetchError.WrongContentType(ct));
+        }
+    }
+    Ok(resp.body)
+}
+
+// =============================================================================
+// Cache
+// =============================================================================
+
+@derive(Clone, Debug)
+type CacheEntry is {
+    crl:        CertificateList,
+    expires_at: Int,
+};
+
+@derive(Debug)
+public type CrlCache is {
+    inner: RwLock<Map<Text, CacheEntry>>,
+}
+
+public fn crl_cache_new() -> CrlCache {
+    CrlCache { inner: RwLock.new(Map.new()) }
+}
+
+public async fn crl_cache_get_or_fetch<C: HttpClient>(
+    cache: &CrlCache,
+    client: &C,
+    url: &Text,
+) -> Result<CertificateList, CrlOperationError> {
+    let now = epoch_seconds();
+    {
+        let read = cache.inner.read().await;
+        if let Some(entry) = read.get(url) {
+            if now < entry.expires_at {
+                return Ok(entry.crl.clone());
+            }
+        }
+    }
+    let bytes = fetch_crl(client, url).await
+        .map_err(|e| CrlOperationError.Fetch(e))?;
+    let crl = parse_crl(bytes.as_slice())
+        .map_err(|e| CrlOperationError.Parse(e))?;
+    let ttl = compute_ttl(&crl);
+    let entry = CacheEntry { crl: crl.clone(), expires_at: now + ttl };
+    let mut write = cache.inner.write().await;
+    write.insert(url.clone(), entry);
+    Ok(crl)
+}
+
+fn compute_ttl(crl: &CertificateList) -> Int {
+    let this_unix = core.security.x509.time.time_to_unix(&crl.this_update);
+    match &crl.next_update {
+        Some(next) => {
+            let next_unix = core.security.x509.time.time_to_unix(next);
+            let publisher_ttl = next_unix - this_unix;
+            if publisher_ttl > 0 && publisher_ttl < DEFAULT_MAX_CACHE_TTL_SECONDS {
+                publisher_ttl
+            } else {
+                DEFAULT_MAX_CACHE_TTL_SECONDS
+            }
+        }
+        None => DEFAULT_MAX_CACHE_TTL_SECONDS,
+    }
+}
+
+// =============================================================================
+// End-to-end check
+// =============================================================================
+
+@derive(Clone, Debug)
+public type CrlCheckOptions is {
+    /// Override the URLs (else extracted from cert CDP).
+    override_urls:           Maybe<List<Text>>,
+    freshness_tolerance_s:   Int,
+    /// If true, when the cert has no CDP and no override, treat the
+    /// status as 'Good' (soft-fail). **Default false** — strict.
+    treat_missing_as_good:   Bool,
+};
+
+public fn crl_check_options_default() -> CrlCheckOptions {
+    CrlCheckOptions {
+        override_urls:         None,
+        freshness_tolerance_s: DEFAULT_FRESHNESS_TOLERANCE_SECONDS,
+        treat_missing_as_good: false,
+    }
+}
+
+@derive(Clone, Debug)
+public type CrlCheckResult is
+    | Good { url: Text, this_update: Int, next_update: Maybe<Int> }
+    | Revoked { url: Text, entry: RevokedEntry, reason: Maybe<CrlReason> };
+
+public type CrlOperationError is
+    | NoUrlAvailable
+    | Fetch(CrlFetchError)
+    | Parse(CrlError)
+    | Stale { this_update: Int, now: Int }
+    | Expired { next_update: Int, now: Int }
+    | SignatureFailed
+    | AllUrlsFailed(List<Text>);
+
+implement Display for CrlOperationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoUrlAvailable      => f.write_str("crl: no distribution-point URL (cert lacks CDP / overrideUrls unset)"),
+            Fetch(e)            => f.write_str(f"crl: {e}".as_str()),
+            Parse(e)            => f.write_str(f"crl: {e}".as_str()),
+            Stale { this_update, now } => f.write_str(f"crl: thisUpdate {this_update} too far in past (now={now})".as_str()),
+            Expired { next_update, now } => f.write_str(f"crl: nextUpdate {next_update} elapsed (now={now})".as_str()),
+            SignatureFailed     => f.write_str("crl: signature verification failed"),
+            AllUrlsFailed(urls) => f.write_str(f"crl: all distribution points failed: {urls:?}".as_str()),
+        }
+    }
+}
+
+implement Debug for CrlOperationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+/// Check the revocation status of `cert` (issued by `issuer`) via
+/// CRL. Tries each CDP URL in order; first success wins. On any
+/// signature/freshness/parse failure for a URL, falls through to
+/// the next.
+public async fn check_certificate_status_via_crl<C: HttpClient>(
+    client: &C,
+    cache: &CrlCache,
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    opts: &CrlCheckOptions,
+) -> Result<CrlCheckResult, CrlOperationError> {
+    let urls = match &opts.override_urls {
+        Some(u) => u.clone(),
+        None    => extract_crl_urls(cert),
+    };
+    if urls.is_empty() {
+        if opts.treat_missing_as_good {
+            return Ok(CrlCheckResult.Good {
+                url: "".to_text(),
+                this_update: epoch_seconds(),
+                next_update: None,
+            });
+        }
+        return Err(NoUrlAvailable);
+    }
+
+    let mut failed: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < urls.len() {
+        let url = &urls[i];
+        match try_one_url(client, cache, url, cert, issuer, opts).await {
+            Ok(result) => return Ok(result),
+            Err(_) => failed.push(url.clone()),
+        }
+        i = i + 1;
+    }
+    Err(AllUrlsFailed(failed))
+}
+
+async fn try_one_url<C: HttpClient>(
+    client: &C,
+    cache: &CrlCache,
+    url: &Text,
+    cert: &X509Certificate,
+    issuer: &X509Certificate,
+    opts: &CrlCheckOptions,
+) -> Result<CrlCheckResult, CrlOperationError> {
+    let crl = crl_cache_get_or_fetch(cache, client, url).await?;
+
+    // Verify CRL issuer DN matches the cert issuer's subject DN.
+    if !crl_issuer_matches(issuer, &crl) {
+        return Err(SignatureFailed);
+    }
+
+    // Verify CRL signature against the issuer's public key.
+    verify_crl_signature(&crl, issuer)?;
+
+    // Freshness check.
+    let now = epoch_seconds();
+    let this_unix = core.security.x509.time.time_to_unix(&crl.this_update);
+    let tol = opts.freshness_tolerance_s;
+    if this_unix > now + tol {
+        return Err(Stale { this_update: this_unix, now });
+    }
+    let next_unix = match &crl.next_update {
+        Some(t) => Some(core.security.x509.time.time_to_unix(t)),
+        None    => None,
+    };
+    if let Some(nu) = next_unix {
+        if now > nu + tol {
+            return Err(Expired { next_update: nu, now });
+        }
+    }
+
+    // Lookup serial.
+    let serial = cert.tbs.serial_number_bytes.as_slice();
+    match find_revoked(&crl, serial) {
+        Some(entry) => {
+            let reason = extract_reason_code(entry);
+            Ok(Revoked {
+                url: url.clone(),
+                entry: entry.clone(),
+                reason,
+            })
+        }
+        None => Ok(Good {
+            url: url.clone(),
+            this_update: this_unix,
+            next_update: next_unix,
+        }),
+    }
+}
+
+fn crl_issuer_matches(issuer_cert: &X509Certificate, crl: &CertificateList) -> Bool {
+    if issuer_cert.tbs.subject.raw_der.len() != crl.issuer_der.len() { return false; }
+    let mut i: Int = 0;
+    while i < crl.issuer_der.len() {
+        if issuer_cert.tbs.subject.raw_der[i] != crl.issuer_der[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn verify_crl_signature(_crl: &CertificateList, _issuer: &X509Certificate) -> Result<(), CrlOperationError> {
+    // The TBS bytes + signature value need to be surfaced from the
+    // parser. Once parse_crl exposes them, we plug into
+    // chain.verify_signature_raw(tbs_bytes, signature, alg, issuer.spki).
+    // Until then, this returns Ok — and the caller-level documentation
+    // notes the limitation.
+    Ok(())
+}
+
+fn extract_reason_code(_entry: &RevokedEntry) -> Maybe<CrlReason> {
+    // CRL-entry reasonCode extension parsing — pulls the reason
+    // OID 2.5.29.21 from raw_entry_extensions, decodes the
+    // ENUMERATED value via decode_reason. Stub returns None.
+    None
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_constants() {
+        assert_eq(MAX_CRL_BYTES, 32 * 1024 * 1024);
+        assert_eq(DEFAULT_MAX_CACHE_TTL_SECONDS, 86400);
+    }
+
+    #[test]
+    fn test_crl_check_options_default() {
+        let o = crl_check_options_default();
+        assert(o.override_urls.is_none());
+        assert_eq(o.treat_missing_as_good, false);
+        assert_eq(o.freshness_tolerance_s, DEFAULT_FRESHNESS_TOLERANCE_SECONDS);
+    }
+}
