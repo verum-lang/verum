@@ -67,7 +67,7 @@ mount configuration.toml as toml_format;
 // Refinement on cog name: lowercase ascii alphanumeric + hyphen + underscore,
 // optional `@scope/name` form. Per spec/registry §"Naming".
 public type CogName is Text {
-    where self.matches(r"^(@[a-z0-9][a-z0-9-]{0,63}/)?[a-z][a-z0-9_-]{0,63}$")
+    self.matches("^(@[a-z0-9][a-z0-9-]{0,63}/)?[a-z][a-z0-9_-]{0,63}$")
 };
 
 public type LanguageProfile is
@@ -205,7 +205,7 @@ implement Debug for ManifestError {
 public fn parse_text(source: &Text) -> Result<CogManifest, ManifestError> {
     let cv = match toml_format.parse(source) {
         Ok(t) => t,
-        Err(e) => return Err(ManifestError.InvalidToml(format!("{e}").to_text())),
+        Err(e) => return Err(ManifestError.InvalidToml(f"{e}")),
     };
     parse_value(&cv)
 }
@@ -248,7 +248,7 @@ public fn format_text(m: &CogManifest) -> Result<Text, ManifestError> {
     let cv = format_value(m);
     match toml_format.stringify_pretty_value(&cv) {
         Ok(t)  => Ok(t),
-        Err(e) => Err(ManifestError.InvalidToml(format!("{e}").to_text())),
+        Err(e) => Err(ManifestError.InvalidToml(f"{e}")),
     }
 }
 
@@ -328,7 +328,7 @@ fn parse_cog_identity(root: &Map<Text, ConfigValue>) -> Result<CogIdentity, Mani
     let version_text = require_string(cog_t, &"cog.version".to_text(), &"version".to_text())?;
     let version = match parse_semver(&version_text) {
         Ok(v)  => v,
-        Err(e) => return Err(ManifestError.InvalidVersion(format!("{e}").to_text())),
+        Err(e) => return Err(ManifestError.InvalidVersion(f"{e}")),
     };
     let edition = optional_string(cog_t, &"edition".to_text())
         .unwrap_or_else(|| "2025".to_text());
@@ -397,7 +397,7 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
         ConfigValue.ConfigString(s) => {
             let c = match parse_constraint(s) {
                 Ok(c)  => c,
-                Err(e) => return Err(ManifestError.InvalidConstraint(format!("{dep_name}: {e}").to_text())),
+                Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
             };
             Ok(DependencySpec {
                 constraint: Some(c),
@@ -412,7 +412,7 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
             let constraint = match t.get(&"version".to_text()) {
                 Some(ConfigValue.ConfigString(s)) => match parse_constraint(s) {
                     Ok(c)  => Some(c),
-                    Err(e) => return Err(ManifestError.InvalidConstraint(format!("{dep_name}: {e}").to_text())),
+                    Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
                 },
                 Some(_) => return Err(ManifestError.TypeMismatch {
                     field: dep_name.clone().concat(&".version".to_text()),
@@ -656,12 +656,12 @@ version = "1.0.0"
     fn test_parse_full() {
         let src = r#"
 [cog]
-name = "@team/server"
+name = "@team/serve"
 version = "0.5.3"
 authors = ["Alice <a@b.c>", "Bob"]
-description = "An HTTP server"
+description = "An HTTP serve"
 license = "MIT"
-keywords = ["http", "server"]
+keywords = ["http", "serve"]
 
 [language]
 profile = "research"
@@ -673,7 +673,7 @@ local = { path = "../local" }
 forked = { git = "https://example.com/repo", branch = "main" }
 "#.to_text();
         let m = parse_text(&src).unwrap();
-        assert_eq(m.cog.name, "@team/server".to_text());
+        assert_eq(m.cog.name, "@team/serve".to_text());
         assert_eq(m.cog.authors.len(), 2);
         assert_eq(m.dependencies.len(), 4);
         match m.language.profile { Research => {}, _ => unreachable() }

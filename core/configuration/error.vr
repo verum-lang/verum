@@ -47,7 +47,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 // =============================================================================
 
 public type FormatId is Text {
-    where self.matches(r"^[a-z][a-z0-9_-]{0,31}$")
+    self.matches("^[a-z][a-z0-9_-]{0,31}$")
 };
 
 // Canonical IDs for built-in formats. Extensions register new IDs via
@@ -145,9 +145,9 @@ public type ConfigErrorKind is
 public fn config_error_kind_name(k: &ConfigErrorKind) -> Text {
     match k {
         UnexpectedEof          => "UnexpectedEof".clone(),
-        UnexpectedChar         => "UnexpectedChar".clone(),
+        UnexpectedChar         => "UnexpectedCha".clone(),
         InvalidEscape          => "InvalidEscape".clone(),
-        InvalidNumber          => "InvalidNumber".clone(),
+        InvalidNumber          => "InvalidNumbe".clone(),
         InvalidUnicode         => "InvalidUnicode".clone(),
         InvalidDateTime        => "InvalidDateTime".clone(),
         InvalidDuration        => "InvalidDuration".clone(),
@@ -175,7 +175,7 @@ public fn config_error_kind_name(k: &ConfigErrorKind) -> Text {
         UnsupportedFeature     => "UnsupportedFeature".clone(),
         IoFileNotFound         => "IoFileNotFound".clone(),
         IoPermissionDenied     => "IoPermissionDenied".clone(),
-        IoOther                => "IoOther".clone(),
+        IoOther                => "IoOthe".clone(),
     }
 }
 
