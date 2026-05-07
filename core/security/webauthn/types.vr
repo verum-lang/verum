@@ -1,0 +1,548 @@
+// =============================================================================
+// security/webauthn/types.vr — WebAuthn L3 + FIDO2 data model
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/cbor, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** Type-precise data model for the WebAuthn Level 3
+// specification + FIDO2 CTAP2. Used by relying-party servers
+// (passwordless login flows) and by passkey-managers / authenticator
+// emulators.
+//
+// **Two ceremonies.**
+//
+//   - **Registration** (`navigator.credentials.create`): the user's
+//     authenticator generates a fresh public/private key pair, returns
+//     an attestation (an authenticator-signed envelope binding the
+//     public key + an AAGUID + optional metadata). The relying-party
+//     verifies the attestation + stores `(credentialId, publicKey,
+//     signCount)`.
+//
+//   - **Authentication** (`navigator.credentials.get`): the user's
+//     authenticator signs a challenge with the stored private key.
+//     The relying-party verifies the signature + checks the
+//     monotonically-increasing signature counter (cloning detection).
+//
+// **Wire encoding.**
+//
+//   `clientDataJSON` — UTF-8 JSON with type + challenge + origin
+//                       + crossOrigin + tokenBinding. Hashed with
+//                       SHA-256 to form `clientDataHash`.
+//   `attestationObject` — CBOR map with fmt + authData + attStmt.
+//   `authenticatorData` — binary blob, 37+ bytes:
+//       rpIdHash (32) + flags (1) + signCount (4 BE)
+//       + [optional AttestedCredentialData]
+//       + [optional Extensions CBOR map].
+//
+// **Categorical structure.** A passkey is a fibered product:
+// (RPID, AuthenticatorAAGUID, public key) → (credentialId, signCount).
+// Verification is the pullback in the category of authenticated
+// flows: client data + authenticator data + signature project onto
+// a single AuthenticationResult that witnesses (challenge bound to
+// origin) ∧ (RPID confirmed) ∧ (UP/UV flags satisfy policy) ∧
+// (signature valid under stored key) ∧ (signCount strictly increasing).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "WebAuthn L3 + FIDO2 CTAP2 data model — credential / authenticator / attestation types",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.cbor.CborValue;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// AAGUID (16 bytes) — Authenticator Attestation Globally Unique
+/// Identifier. Identifies the authenticator model. The all-zero
+/// AAGUID is reserved for "no attestation" / synthetic
+/// authenticators (per FIDO MDS 3 conventions).
+pub const AAGUID_BYTES: Int = 16;
+
+/// SHA-256 digest length.
+pub const RP_ID_HASH_BYTES: Int = 32;
+
+/// Minimum AuthenticatorData length (without AttestedCredentialData
+/// or Extensions): rpIdHash (32) + flags (1) + signCount (4) = 37.
+pub const MIN_AUTH_DATA_BYTES: Int = 37;
+
+/// Maximum acceptable challenge length per WebAuthn §13.4.3 (32-1024).
+/// Most RPs use 32 bytes (the minimum).
+pub const CHALLENGE_MIN_BYTES: Int = 16;
+pub const CHALLENGE_MAX_BYTES: Int = 1024;
+
+/// Hard cap on credentialId length per WebAuthn §6.5.4 (1023 bytes
+/// theoretical max; FIDO2 CTAP2 caps at 1023; we add safety margin).
+pub const CREDENTIAL_ID_MAX_BYTES: Int = 1023;
+
+// =============================================================================
+// Authenticator-data flags (WebAuthn §6.1)
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type AuthDataFlags is {
+    /// User-present (UP).
+    user_present:           Bool,
+    /// User-verified (UV) — biometric, PIN, etc.
+    user_verified:          Bool,
+    /// Backup-eligible (BE) — credential CAN be backed up.
+    backup_eligible:        Bool,
+    /// Backup-state (BS) — credential IS currently backed up.
+    backup_state:           Bool,
+    /// Attested credential data included (AT).
+    attested_credential_data: Bool,
+    /// Extension data included (ED).
+    extension_data:         Bool,
+};
+
+pub fn parse_flags(b: Byte) -> AuthDataFlags {
+    AuthDataFlags {
+        user_present:           (b & 0x01) != 0,
+        user_verified:          (b & 0x04) != 0,
+        backup_eligible:        (b & 0x08) != 0,
+        backup_state:           (b & 0x10) != 0,
+        attested_credential_data: (b & 0x40) != 0,
+        extension_data:         (b & 0x80) != 0,
+    }
+}
+
+pub fn flags_to_byte(f: &AuthDataFlags) -> Byte {
+    let mut b: Int = 0;
+    if f.user_present                { b = b | 0x01; }
+    if f.user_verified               { b = b | 0x04; }
+    if f.backup_eligible             { b = b | 0x08; }
+    if f.backup_state                { b = b | 0x10; }
+    if f.attested_credential_data    { b = b | 0x40; }
+    if f.extension_data              { b = b | 0x80; }
+    b as Byte
+}
+
+// =============================================================================
+// CollectedClientData (WebAuthn §5.8.1)
+// =============================================================================
+//
+// Wire format: UTF-8 JSON, e.g.:
+//
+//   {
+//     "type": "webauthn.create",
+//     "challenge": "<base64url challenge>",
+//     "origin": "https://example.com",
+//     "crossOrigin": false,
+//     "tokenBinding": { "status": "supported" }
+//   }
+
+@derive(Eq, Clone, Debug)
+pub type ClientDataType is
+    | Create     // "webauthn.create"
+    | Get        // "webauthn.get"
+    | Other(Text);
+
+pub fn client_data_type_to_text(t: &ClientDataType) -> Text {
+    match t {
+        ClientDataType.Create   => "webauthn.create".to_text(),
+        ClientDataType.Get      => "webauthn.get".to_text(),
+        ClientDataType.Other(s) => s.clone(),
+    }
+}
+
+pub fn client_data_type_from_text(s: &Text) -> ClientDataType {
+    match s.as_str() {
+        "webauthn.create" => ClientDataType.Create,
+        "webauthn.get"    => ClientDataType.Get,
+        other             => ClientDataType.Other(other.to_text()),
+    }
+}
+
+@derive(Clone, Debug)
+pub type CollectedClientData is {
+    type_:         ClientDataType,
+    /// Base64url-decoded challenge bytes.
+    challenge:     List<Byte>,
+    /// Origin string (e.g., "https://example.com").
+    origin:        Text,
+    /// Cross-origin flag (defaults to false when absent).
+    cross_origin:  Bool,
+    /// Optional tokenBinding object — kept opaque.
+    token_binding: Maybe<TokenBindingStatus>,
+};
+
+@derive(Eq, Clone, Debug)
+pub type TokenBindingStatus is
+    | Present(Text)        // base64url id
+    | Supported
+    | NotSupported
+    | Unknown(Text);
+
+// =============================================================================
+// AttestedCredentialData (WebAuthn §6.5.1)
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type AttestedCredentialData is {
+    /// 16-byte AAGUID (authenticator model identifier).
+    aaguid:          [Byte; 16],
+    /// Variable-length credential id (1..1023 bytes).
+    credential_id:   List<Byte>,
+    /// COSE_Key — credential's public key. Carried as a CBOR value
+    /// here; the decoder in `cose_key.vr` lifts to a typed
+    /// CredentialPublicKey ADT.
+    credential_public_key: CborValue,
+};
+
+// =============================================================================
+// AuthenticatorData (WebAuthn §6.1)
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type AuthenticatorData is {
+    /// SHA-256 of the RP ID.
+    rp_id_hash:                [Byte; 32],
+    flags:                     AuthDataFlags,
+    /// 32-bit counter, big-endian on the wire.
+    sign_count:                Int { >= 0, <= 4294967295 },
+    attested_credential_data:  Maybe<AttestedCredentialData>,
+    /// Optional CBOR-encoded extensions map.
+    extensions:                Maybe<CborValue>,
+    /// The raw bytes of the authData blob — preserved for signature
+    /// verification (the signed input is `authData || clientDataHash`).
+    raw:                       List<Byte>,
+};
+
+// =============================================================================
+// AttestationObject (WebAuthn §6.5)
+// =============================================================================
+//
+// Wire form: CBOR map { "fmt": <text>, "authData": <bytes>, "attStmt": <map> }
+//
+// fmt values per IANA WebAuthn Attestation Statement Format Identifiers:
+//   - "none"            (no attestation)
+//   - "packed"          (most common — self or x5c-chain)
+//   - "fido-u2f"        (legacy P-256)
+//   - "tpm"             (TPM 2.0)
+//   - "android-key"     (Android Keystore key attestation)
+//   - "android-safetynet"
+//   - "apple"           (Apple anonymous attestation)
+//   - "apple-appattest" (App Attest)
+
+@derive(Clone, Debug)
+pub type AttestationFormat is
+    | None_
+    | Packed
+    | FidoU2f
+    | Tpm
+    | AndroidKey
+    | AndroidSafetynet
+    | Apple
+    | AppleAppAttest
+    | Other(Text);
+
+pub fn attestation_format_to_text(f: &AttestationFormat) -> Text {
+    match f {
+        AttestationFormat.None_           => "none".to_text(),
+        AttestationFormat.Packed          => "packed".to_text(),
+        AttestationFormat.FidoU2f         => "fido-u2f".to_text(),
+        AttestationFormat.Tpm             => "tpm".to_text(),
+        AttestationFormat.AndroidKey      => "android-key".to_text(),
+        AttestationFormat.AndroidSafetynet=> "android-safetynet".to_text(),
+        AttestationFormat.Apple           => "apple".to_text(),
+        AttestationFormat.AppleAppAttest  => "apple-appattest".to_text(),
+        AttestationFormat.Other(s)        => s.clone(),
+    }
+}
+
+pub fn attestation_format_from_text(s: &Text) -> AttestationFormat {
+    match s.as_str() {
+        "none"             => AttestationFormat.None_,
+        "packed"           => AttestationFormat.Packed,
+        "fido-u2f"         => AttestationFormat.FidoU2f,
+        "tpm"              => AttestationFormat.Tpm,
+        "android-key"      => AttestationFormat.AndroidKey,
+        "android-safetynet"=> AttestationFormat.AndroidSafetynet,
+        "apple"            => AttestationFormat.Apple,
+        "apple-appattest"  => AttestationFormat.AppleAppAttest,
+        other              => AttestationFormat.Other(other.to_text()),
+    }
+}
+
+@derive(Clone, Debug)
+pub type AttestationObject is {
+    fmt:       AttestationFormat,
+    /// Decoded AuthenticatorData (the binary blob inside the CBOR map).
+    auth_data: AuthenticatorData,
+    /// Format-specific attestation statement. A CBOR value, decoded
+    /// per fmt by the verifier.
+    att_stmt:  CborValue,
+};
+
+// =============================================================================
+// Authenticator responses (the binary forms received from the client)
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type AuthenticatorAttestationResponse is {
+    /// UTF-8 JSON bytes of CollectedClientData.
+    client_data_json:    List<Byte>,
+    /// CBOR-encoded AttestationObject.
+    attestation_object:  List<Byte>,
+    /// Optional list of transport hints ("usb", "nfc", "ble",
+    /// "internal", "hybrid", "smart-card").
+    transports:          List<Text>,
+};
+
+@derive(Clone, Debug)
+pub type AuthenticatorAssertionResponse is {
+    client_data_json:   List<Byte>,
+    /// Raw authenticatorData (binary).
+    authenticator_data: List<Byte>,
+    /// Raw signature bytes.
+    signature:          List<Byte>,
+    /// Optional user handle (an opaque identifier the RP supplied
+    /// during registration).
+    user_handle:        Maybe<List<Byte>>,
+};
+
+// =============================================================================
+// Credential descriptors + selection criteria
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type AuthenticatorAttachment is
+    | Platform     // built-in (TPM, Apple Secure Enclave, etc.)
+    | CrossPlatform // roaming (USB key, NFC)
+    | AnyAttachment;
+
+@derive(Eq, Clone, Debug)
+pub type UserVerificationRequirement is
+    | Required
+    | Preferred
+    | Discouraged;
+
+@derive(Eq, Clone, Debug)
+pub type ResidentKeyRequirement is
+    | DiscouragedRk
+    | PreferredRk
+    | RequiredRk;
+
+@derive(Eq, Clone, Debug)
+pub type AttestationConveyance is
+    | NoneConveyance      // none — fastest, no chain
+    | Indirect            // privacy-preserving — anonymous attestation
+    | Direct              // request the authenticator's actual cert chain
+    | Enterprise;          // enterprise-controlled attestation
+
+@derive(Clone, Debug)
+pub type CredentialDescriptor is {
+    /// Always "public-key" in WebAuthn L3.
+    type_:        Text,
+    credential_id: List<Byte>,
+    /// Hint to the platform about transports the credential supports.
+    transports:    List<Text>,
+};
+
+// =============================================================================
+// Relying-party / user entities
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type RpEntity is {
+    /// Effective domain or registrable subset (e.g., "example.com").
+    id:    Text,
+    name:  Text,
+};
+
+@derive(Eq, Clone, Debug)
+pub type UserEntity is {
+    /// Opaque byte sequence — at most 64 bytes per spec.
+    id:           List<Byte>,
+    name:         Text,
+    display_name: Text,
+};
+
+// =============================================================================
+// Public-key credential parameter
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type PubKeyCredParam is {
+    /// Always "public-key".
+    type_: Text,
+    /// COSE algorithm identifier (negative-int registry value):
+    ///   -7   ES256  (ECDSA P-256 SHA-256)
+    ///   -8   EdDSA  (Ed25519)
+    ///  -257  RS256  (RSA-PKCS#1 v1.5 SHA-256)
+    ///   -37  PS256  (RSA-PSS SHA-256)
+    ///   -35  ES384  (ECDSA P-384)
+    ///   -36  ES512  (ECDSA P-521)
+    cose_alg: Int,
+};
+
+pub const COSE_ALG_ES256: Int = -7;
+pub const COSE_ALG_EDDSA: Int = -8;
+pub const COSE_ALG_PS256: Int = -37;
+pub const COSE_ALG_RS256: Int = -257;
+pub const COSE_ALG_ES384: Int = -35;
+pub const COSE_ALG_ES512: Int = -36;
+
+pub fn alg_supported(cose_alg: Int) -> Bool {
+    match cose_alg {
+        COSE_ALG_ES256 | COSE_ALG_EDDSA | COSE_ALG_PS256 | COSE_ALG_RS256 |
+        COSE_ALG_ES384 | COSE_ALG_ES512 => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// Verified credential — the persistable record after registration
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type VerifiedCredential is {
+    /// Stable identifier (the authenticator's chosen credentialId).
+    credential_id:        List<Byte>,
+    /// COSE_Key bytes — the credential's public key.
+    public_key_cose:      List<Byte>,
+    /// Negotiated COSE algorithm.
+    cose_alg:             Int,
+    /// Authenticator AAGUID (zeros = no attestation).
+    aaguid:               [Byte; 16],
+    /// Initial counter at registration time.
+    sign_count:           Int { >= 0 },
+    /// Backup-eligible bit at registration.
+    backup_eligible:      Bool,
+    /// Last-known backup state (initial = registration BS bit).
+    backup_state:         Bool,
+    /// Attestation format observed at registration.
+    attestation_format:   AttestationFormat,
+    /// Optional attestation cert chain (DER), leaf-first.
+    /// Empty for fmt='none' / 'packed'-self.
+    attestation_chain:    List<List<Byte>>,
+    /// User handle the RP recorded at registration (optional).
+    user_handle:          Maybe<List<Byte>>,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+pub type WebAuthnError is
+    | InvalidJson(Text)
+    | InvalidCbor(Text)
+    | InvalidClientDataType { expected: ClientDataType, found: ClientDataType }
+    | ChallengeMismatch
+    | OriginMismatch { expected: Text, found: Text }
+    | RpIdHashMismatch
+    | UpFlagMissing
+    | UvFlagMissing
+    | TruncatedAuthData
+    | TruncatedAttestedCredentialData
+    | UnknownCoseKeyType(Int)
+    | UnsupportedAlgorithm(Int)
+    | InvalidAttestation(Text)
+    | InvalidSignature
+    | SignCountNotIncreasing { stored: Int, presented: Int }
+    | CredentialNotAllowed(List<Byte>)
+    | InvalidChallengeLength(Int)
+    | InvalidCredentialIdLength(Int)
+    | OriginScheme(Text);
+
+implement Display for WebAuthnError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidJson(reason)             => f.write_str(f"webauthn: invalid clientDataJSON: {reason}".as_str()),
+            InvalidCbor(reason)             => f.write_str(f"webauthn: invalid CBOR: {reason}".as_str()),
+            InvalidClientDataType { expected, found } => f.write_str(
+                f"webauthn: clientData.type expected {expected:?}, found {found:?}".as_str()),
+            ChallengeMismatch               => f.write_str("webauthn: challenge mismatch"),
+            OriginMismatch { expected, found } => f.write_str(
+                f"webauthn: origin mismatch (expected {expected}, found {found})".as_str()),
+            RpIdHashMismatch                => f.write_str("webauthn: rpIdHash mismatch"),
+            UpFlagMissing                   => f.write_str("webauthn: user-present flag (UP) missing"),
+            UvFlagMissing                   => f.write_str("webauthn: user-verified flag (UV) required but missing"),
+            TruncatedAuthData               => f.write_str("webauthn: authenticatorData truncated"),
+            TruncatedAttestedCredentialData => f.write_str("webauthn: attestedCredentialData truncated"),
+            UnknownCoseKeyType(kty)         => f.write_str(f"webauthn: unknown COSE_Key kty: {kty}".as_str()),
+            UnsupportedAlgorithm(alg)       => f.write_str(f"webauthn: unsupported algorithm: {alg}".as_str()),
+            InvalidAttestation(reason)      => f.write_str(f"webauthn: invalid attestation: {reason}".as_str()),
+            InvalidSignature                => f.write_str("webauthn: signature verification failed"),
+            SignCountNotIncreasing { stored, presented } => f.write_str(
+                f"webauthn: signCount regression (stored={stored}, presented={presented}) — possible cloning".as_str()),
+            CredentialNotAllowed(id)        => f.write_str(f"webauthn: credential id {id:?} not in allow-list".as_str()),
+            InvalidChallengeLength(n)       => f.write_str(f"webauthn: invalid challenge length: {n}".as_str()),
+            InvalidCredentialIdLength(n)    => f.write_str(f"webauthn: invalid credentialId length: {n}".as_str()),
+            OriginScheme(s)                 => f.write_str(f"webauthn: only https:// (or localhost) origins allowed, got: {s}".as_str()),
+        }
+    }
+}
+
+implement Debug for WebAuthnError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_flags_round_trip() {
+        let f = AuthDataFlags {
+            user_present:             true,
+            user_verified:            true,
+            backup_eligible:          false,
+            backup_state:             false,
+            attested_credential_data: true,
+            extension_data:           false,
+        };
+        let b = flags_to_byte(&f);
+        let f2 = parse_flags(b);
+        assert_eq(f.user_present,             f2.user_present);
+        assert_eq(f.user_verified,            f2.user_verified);
+        assert_eq(f.attested_credential_data, f2.attested_credential_data);
+    }
+
+    #[test]
+    fn test_attestation_format_round_trip() {
+        for fmt in [
+            AttestationFormat.None_,
+            AttestationFormat.Packed,
+            AttestationFormat.FidoU2f,
+            AttestationFormat.Tpm,
+            AttestationFormat.Apple,
+        ] {
+            let s = attestation_format_to_text(&fmt);
+            let f2 = attestation_format_from_text(&s);
+            assert_eq(s, attestation_format_to_text(&f2));
+        }
+    }
+
+    #[test]
+    fn test_alg_supported() {
+        assert!(alg_supported(COSE_ALG_ES256));
+        assert!(alg_supported(COSE_ALG_EDDSA));
+        assert!(alg_supported(COSE_ALG_RS256));
+        assert!(!alg_supported(0));
+        assert!(!alg_supported(-100));
+    }
+}
