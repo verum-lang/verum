@@ -830,24 +830,43 @@ impl ArchiveCtxCache {
             .filter(|name| codegen.ctx_mut().lookup_function(name).is_none())
             .collect();
         if !unqualified_wanted.is_empty() {
-            for entry in &archive.index {
-                if wanted_module_prefixes.contains(&entry.name) {
-                    continue;
-                }
-                let module = match archive.load_module(&entry.name) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                let any_match = unqualified_wanted.iter().any(|w| {
-                    module.strings.iter().any(|(s, _)| s == w)
-                });
-                if !any_match {
-                    continue;
-                }
+            // Parallel decode + match filter for the second pass too.
+            // Each archive.load_module(name) is the heaviest CPU step
+            // (decompress + bincode deserialise) and runs cleanly in
+            // parallel across the immutable archive bytes.  The
+            // string-table scan that gates whether the module
+            // contributes to ctx.functions is also pure data work,
+            // so we fold it into the parallel filter — modules with
+            // no matching simple name don't even get returned.
+            let candidate_indices: Vec<(usize, String)> = archive
+                .index
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| !wanted_module_prefixes.contains(&e.name))
+                .map(|(i, e)| (i, e.name.clone()))
+                .collect();
+            let matched_modules: Vec<(String, VbcModule)> = {
+                use rayon::prelude::*;
+                candidate_indices
+                    .par_iter()
+                    .filter_map(|(idx, name)| {
+                        let module = archive.load_module_by_index(*idx).ok()?;
+                        let any_match = unqualified_wanted.iter().any(|w| {
+                            module.strings.iter().any(|(s, _)| s == w)
+                        });
+                        if any_match {
+                            Some((name.clone(), module))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+            for (entry_name, module) in &matched_modules {
                 let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
                 register_module_filtered(
-                    &module,
-                    &entry.name,
+                    module,
+                    entry_name,
                     codegen.ctx_mut(),
                     &unqualified_wanted,
                     next_id_ref,
