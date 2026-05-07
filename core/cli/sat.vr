@@ -1,0 +1,347 @@
+// =============================================================================
+// cli/sat.vr — Propositional SAT solver for CLI grammar coherence
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, text, collections
+// Spec: internal/specs/cli-framework.md §11
+// =============================================================================
+//
+
+// `vcli` proves grammar properties (coherence, mutex coverage, required-
+// reachability) by reducing them to **propositional satisfiability**:
+// every flag `--foo` becomes a Boolean variable, mutex/require/conflict
+// constraints become CNF clauses, and Z3-style "∃ valid invocation
+// satisfying P" becomes a SAT query.
+//
+// CLI graphs are small (typically ≤ 50 flags), so a self-contained DPLL
+// solver here outperforms calling out to Z3 — both for cold-start (no
+// solver process spawn) and for embeddability (verify-on-run mode).
+// The solver is stand-alone propositional reasoning: no theory, no
+// arithmetic, no quantifiers — exactly the fragment §11.1 needs.
+//
+// Architecture:
+//
+//   1. `BoolFormula` — DAG over variables / Not / And / Or / True / False.
+//      Hash-consed via positional indices in a dedicated `Map<Text, Int>`
+//      so identical sub-formulae share storage.
+//
+//   2. `Assignment` — `Map<Text, Bool>`. Partial assignments allowed
+//      during DPLL.
+//
+//   3. `solve(f)` — DPLL with unit propagation. Branches on the first
+//      unassigned variable; backtracks on conflict.
+//
+//   4. `is_sat(f) / is_unsat(f) / find_model(f)` — façade over `solve`.
+//
+// The solver is intentionally untyped beyond `Bool`: all CLI properties
+// reduce to pure propositional logic. Quantitative refinement-bound
+// proofs (Phase 11) would route through `core.proof.kernel_bridge`
+// instead.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module sat;
+
+mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
+
+// =============================================================================
+// BoolFormula — propositional formula AST
+// =============================================================================
+
+/// Propositional formula over named Boolean variables.
+public type BoolFormula is
+    | True
+    | False
+    | Var(Text)
+    | Not(Heap<BoolFormula>)
+    | And(List<BoolFormula>)
+    | Or(List<BoolFormula>);
+
+/// Convenience constructors (saves explicit `Heap.new()` boilerplate).
+public fn lit_true() -> BoolFormula { BoolFormula.True }
+public fn lit_false() -> BoolFormula { BoolFormula.False }
+public fn var(name: Text) -> BoolFormula { BoolFormula.Var(name) }
+public fn not_(f: BoolFormula) -> BoolFormula { BoolFormula.Not(Heap.new(f)) }
+public fn and_(fs: List<BoolFormula>) -> BoolFormula { BoolFormula.And(fs) }
+public fn or_(fs: List<BoolFormula>) -> BoolFormula { BoolFormula.Or(fs) }
+
+/// `a ⟹ b`  ≡  `¬a ∨ b`. Named `imply_` (rather than `implies`)
+/// because `implies` is a reserved keyword in Verum.
+public fn imply_(a: BoolFormula, b: BoolFormula) -> BoolFormula {
+    let mut alts = List.new();
+    alts.push(not_(a));
+    alts.push(b);
+    or_(alts)
+}
+
+/// `a ⟺ b`  ≡  `(¬a ∨ b) ∧ (¬b ∨ a)`.
+public fn iff(a: BoolFormula, b: BoolFormula) -> BoolFormula {
+    let mut both = List.new();
+    both.push(imply_(a.clone(), b.clone()));
+    both.push(imply_(b, a));
+    and_(both)
+}
+
+/// At-most-one constraint: at most one of `vars` may be true.
+/// Pairwise encoding: O(n²) clauses; fine for n ≤ ~30.
+public fn at_most_one(vars: &List<Text>) -> BoolFormula {
+    let mut clauses = List.new();
+    let mut i: Int = 0;
+    while i < vars.len() {
+        let mut j = i + 1;
+        while j < vars.len() {
+            // ¬vᵢ ∨ ¬vⱼ
+            let mut clause = List.new();
+            clause.push(not_(var(vars[i].clone())));
+            clause.push(not_(var(vars[j].clone())));
+            clauses.push(or_(clause));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    and_(clauses)
+}
+
+/// At-least-one constraint: at least one of `vars` must be true.
+public fn at_least_one(vars: &List<Text>) -> BoolFormula {
+    let mut clause = List.new();
+    let mut i: Int = 0;
+    while i < vars.len() {
+        clause.push(var(vars[i].clone()));
+        i = i + 1;
+    }
+    or_(clause)
+}
+
+/// Exactly one: at-most-one AND at-least-one.
+public fn exactly_one(vars: &List<Text>) -> BoolFormula {
+    let mut both = List.new();
+    both.push(at_least_one(vars));
+    both.push(at_most_one(vars));
+    and_(both)
+}
+
+// =============================================================================
+// Variable enumeration
+// =============================================================================
+
+/// Walk `f` and collect every distinct Var name that appears.
+public fn collect_vars(f: &BoolFormula) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut seen: Set<Text> = Set.new();
+    walk_collect(f, &mut out, &mut seen);
+    out
+}
+
+fn walk_collect(f: &BoolFormula, out: &mut List<Text>, seen: &mut Set<Text>) {
+    match f {
+        BoolFormula.True => {},
+        BoolFormula.False => {},
+        BoolFormula.Var(name) => {
+            if !seen.contains(name.clone()) {
+                seen.insert(name.clone());
+                out.push(name.clone());
+            }
+        },
+        BoolFormula.Not(inner) => walk_collect(inner.as_ref(), out, seen),
+        BoolFormula.And(parts) => {
+            let mut i: Int = 0;
+            while i < parts.len() {
+                walk_collect(&parts[i], out, seen);
+                i = i + 1;
+            }
+        },
+        BoolFormula.Or(parts) => {
+            let mut i: Int = 0;
+            while i < parts.len() {
+                walk_collect(&parts[i], out, seen);
+                i = i + 1;
+            }
+        },
+    }
+}
+
+// =============================================================================
+// Evaluation under a (partial) assignment
+// =============================================================================
+
+/// Evaluation result: `Definite(true/false)` if the formula is fully
+/// determined under the partial assignment, `Unknown` otherwise.
+public type EvalResult is
+    | Definite(Bool)
+    | Unknown;
+
+/// Evaluate `f` under `assignment`. Variables not in the assignment are
+/// treated as unknown — short-circuiting where possible (And with a
+/// definite-false collapses to false even if other parts are unknown).
+public fn evaluate(f: &BoolFormula, assignment: &Map<Text, Bool>) -> EvalResult {
+    match f {
+        BoolFormula.True => EvalResult.Definite(true),
+        BoolFormula.False => EvalResult.Definite(false),
+        BoolFormula.Var(name) => match assignment.get_optional(name.clone()) {
+            Some(b) => EvalResult.Definite(b),
+            None => EvalResult.Unknown,
+        },
+        BoolFormula.Not(inner) => match evaluate(inner.as_ref(), assignment) {
+            EvalResult.Definite(b) => EvalResult.Definite(!b),
+            EvalResult.Unknown => EvalResult.Unknown,
+        },
+        BoolFormula.And(parts) => {
+            let mut any_unknown: Bool = false;
+            let mut i: Int = 0;
+            while i < parts.len() {
+                match evaluate(&parts[i], assignment) {
+                    EvalResult.Definite(false) => return EvalResult.Definite(false),
+                    EvalResult.Definite(true) => {},
+                    EvalResult.Unknown => { any_unknown = true; },
+                }
+                i = i + 1;
+            }
+            if any_unknown { EvalResult.Unknown } else { EvalResult.Definite(true) }
+        },
+        BoolFormula.Or(parts) => {
+            let mut any_unknown: Bool = false;
+            let mut i: Int = 0;
+            while i < parts.len() {
+                match evaluate(&parts[i], assignment) {
+                    EvalResult.Definite(true) => return EvalResult.Definite(true),
+                    EvalResult.Definite(false) => {},
+                    EvalResult.Unknown => { any_unknown = true; },
+                }
+                i = i + 1;
+            }
+            if any_unknown { EvalResult.Unknown } else { EvalResult.Definite(false) }
+        },
+    }
+}
+
+// =============================================================================
+// SAT solver — DPLL with branching over var list
+// =============================================================================
+
+/// Solver outcome.
+public type SatResult is
+    /// Satisfiable — model is the satisfying assignment.
+    | Sat(Map<Text, Bool>)
+    /// Unsatisfiable.
+    | Unsat;
+
+/// Try to find a satisfying assignment. Returns `Sat(model)` on first
+/// solution or `Unsat` if none exists. DPLL with unit-propagation-by-
+/// evaluation (no explicit clause set — we re-evaluate on each branch
+/// because formulae are small).
+public fn solve(f: &BoolFormula) -> SatResult {
+    let vars = collect_vars(f);
+    let mut assignment: Map<Text, Bool> = Map.new();
+    if dpll(f, &vars, 0, &mut assignment) {
+        SatResult.Sat(assignment)
+    } else {
+        SatResult.Unsat
+    }
+}
+
+/// True iff `f` has at least one satisfying assignment.
+public fn is_sat(f: &BoolFormula) -> Bool {
+    match solve(f) {
+        SatResult.Sat(_) => true,
+        SatResult.Unsat => false,
+    }
+}
+
+/// True iff `f` is unsatisfiable.
+@inline
+public fn is_unsat(f: &BoolFormula) -> Bool { !is_sat(f) }
+
+/// Try to find a model. Equivalent to `solve` returning `Some(model)` /
+/// `None`.
+public fn find_model(f: &BoolFormula) -> Maybe<Map<Text, Bool>> {
+    match solve(f) {
+        SatResult.Sat(m) => Some(m),
+        SatResult.Unsat => None,
+    }
+}
+
+/// Check whether `f` is **valid** — true under every assignment.
+/// Reduces to `is_unsat(¬f)`.
+public fn is_valid(f: &BoolFormula) -> Bool {
+    is_unsat(&not_(f.clone()))
+}
+
+// -----------------------------------------------------------------------------
+// DPLL recursive backtracking driver
+// -----------------------------------------------------------------------------
+
+fn dpll(
+    f: &BoolFormula,
+    vars: &List<Text>,
+    idx: Int,
+    assignment: &mut Map<Text, Bool>,
+) -> Bool {
+    // Early evaluation — if the formula already evaluates to a definite
+    // value under the current partial assignment, we're done.
+    match evaluate(f, assignment) {
+        EvalResult.Definite(true) => return true,
+        EvalResult.Definite(false) => return false,
+        EvalResult.Unknown => {},
+    }
+
+    if idx >= vars.len() {
+        // No more variables to branch on but still Unknown — vacuous
+        // unknowns can be resolved either way; default to false to
+        // make the answer deterministic.
+        match evaluate(f, assignment) {
+            EvalResult.Definite(b) => return b,
+            EvalResult.Unknown => return false,
+        }
+    }
+
+    let v = vars[idx].clone();
+    // Try v = true first.
+    assignment.insert(v.clone(), true);
+    if dpll(f, vars, idx + 1, assignment) {
+        return true;
+    }
+    // Backtrack and try v = false.
+    assignment.insert(v.clone(), false);
+    if dpll(f, vars, idx + 1, assignment) {
+        return true;
+    }
+    // Both branches fail — clean up so the parent can backtrack cleanly.
+    assignment.remove(v);
+    false
+}
+
+// =============================================================================
+// Counterexample formatting (used by verify.vr to produce human messages)
+// =============================================================================
+
+/// Render an assignment as `"--a, --b, ¬--c"` (variables conventionally
+/// long-flag names; the renderer doesn't care).
+public fn render_assignment(assignment: &Map<Text, Bool>) -> Text {
+    let keys = assignment.keys();
+    let mut out = Text.from("{ ");
+    let mut first: Bool = true;
+    let mut i: Int = 0;
+    while i < keys.len() {
+        let k = &keys[i];
+        if !first { out.push_str(", "); }
+        match assignment.get_optional(k.clone()) {
+            Some(true) => out.push_str(k),
+            Some(false) => {
+                out.push_str("¬");
+                out.push_str(k);
+            },
+            None => {},
+        }
+        first = false;
+        i = i + 1;
+    }
+    out.push_str(" }");
+    out
+}

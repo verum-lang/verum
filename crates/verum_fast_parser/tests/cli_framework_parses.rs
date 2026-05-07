@@ -159,6 +159,23 @@ fn cli_verify_parses() {
 }
 
 #[test]
+fn cli_sat_parses() {
+    parse_one(&project_core_cli().join("sat.vr")).expect("sat.vr should parse");
+}
+
+#[test]
+fn cli_smt_verify_parses() {
+    parse_one(&project_core_cli().join("smt_verify.vr"))
+        .expect("smt_verify.vr should parse");
+}
+
+#[test]
+fn cli_derive_example_parses() {
+    parse_one(&project_core_cli().join("derive_example.vr"))
+        .expect("derive_example.vr should parse");
+}
+
+#[test]
 fn every_cli_vr_parses() {
     let dir = project_core_cli();
     let mut failures = Vec::new();
