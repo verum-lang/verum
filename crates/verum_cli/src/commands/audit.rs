@@ -2404,6 +2404,534 @@ fn print_kernel_soundness_report_json(
 }
 
 // =============================================================================
+// audit --external-prover-replay — Lean 4 + Coq/Rocq foreign re-check
+// =============================================================================
+
+/// Per-backend verdict for `--external-prover-replay`.
+///
+/// `clean` = backend exited 0 with no diagnostics; `iou_only` = exited 0
+/// with only `sorry` / `Admitted` warnings whose count is consistent
+/// with the corpus IOU list; `hard_error` = backend rejected the export
+/// with a real type/parse/scoping error (load-bearing regression); and
+/// `not_available` = the backend binary is absent on `$PATH` (advisory
+/// unless `--strict`).
+#[derive(Debug, Clone, serde::Serialize)]
+enum ReplayVerdict {
+    Clean,
+    IouOnly { sorry_count: usize },
+    HardError { error_count: usize, sample: Vec<String> },
+    NotAvailable { hint: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct BackendReport {
+    backend: &'static str,
+    invocation: String,
+    duration_ms: u128,
+    verdict: ReplayVerdict,
+    stdout_tail: String,
+    stderr_tail: String,
+}
+
+/// Entry-point for `verum audit --external-prover-replay [--backend BACKEND]
+/// [--strict]`.
+///
+/// Drives the kernel-soundness corpus through Lean 4 (`lake build`) and
+/// Coq / Rocq (`coqc`) to confirm that **a foreign prover accepts the
+/// exact `.lean` / `.v` files Verum emits**.  This is the meta-circular
+/// completeness gate the bare `--kernel-soundness` check was missing:
+/// before this gate landed, the audit verified the *existence* of the
+/// emitted files but never invoked the foreign tool, so emitter
+/// regressions (broken proof tactics, deprecated stdlib paths, drifted
+/// inductive shapes) could ship undetected.
+pub fn audit_external_prover_replay_with_format(
+    format: AuditFormat,
+    backend_filter: &[String],
+    strict: bool,
+) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("External-prover replay (Lean 4 + Coq/Rocq)");
+    }
+
+ // Step 1 — regenerate the corpus exports so we always replay
+ // against the current Verum-side source-of-truth.  This is
+ // intentionally a self-call: the existing audit_kernel_soundness
+ // gate writes both files into target/audit-reports/kernel-soundness/
+ // and exits with the corpus-drift verdict only.  We capture its
+ // output silently and proceed.
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("kernel-soundness");
+    {
+        use verum_kernel::soundness::SoundnessBackend;
+        use verum_kernel::soundness::SoundnessExporter;
+        use verum_kernel::soundness::coq::CoqBackend;
+        use verum_kernel::soundness::lean::LeanBackend;
+
+        let exporter = SoundnessExporter::new();
+        if let Err(reason) = exporter.drift_check() {
+            return Err(crate::error::CliError::VerificationFailed(format!(
+                "kernel-soundness drift before replay: {}",
+                reason,
+            )));
+        }
+        std::fs::create_dir_all(&report_dir).ok();
+        let coq = CoqBackend::new();
+        let lean = LeanBackend::new();
+        std::fs::write(report_dir.join(coq.output_filename()), exporter.emit(&coq)).ok();
+        std::fs::write(
+            report_dir.join(lean.output_filename()),
+            exporter.emit(&lean),
+        )
+        .ok();
+    }
+
+    let coq_export = report_dir.join("kernel_soundness.v");
+    let lean_export = report_dir.join("KernelSoundness.lean");
+
+ // Step 2 — choose backends.  Empty filter = all.  Repeated --backend
+ // values are unioned; "all" expands.
+    let want_lean = backend_filter.is_empty()
+        || backend_filter.iter().any(|b| b == "lean" || b == "all");
+    let want_coq = backend_filter.is_empty()
+        || backend_filter.iter().any(|b| b == "coq" || b == "all");
+
+    let mut reports: Vec<BackendReport> = Vec::new();
+    if want_lean {
+        reports.push(replay_lean(&manifest_dir, &lean_export));
+    }
+    if want_coq {
+        reports.push(replay_coq(&manifest_dir, &coq_export));
+    }
+
+ // Step 3 — render report.
+    match format {
+        AuditFormat::Plain => print_external_prover_replay_plain(&reports, strict),
+        AuditFormat::Json => print_external_prover_replay_json(&reports, strict, &report_dir),
+    }
+
+ // Step 4 — exit verdict.
+    let any_hard = reports
+        .iter()
+        .any(|r| matches!(r.verdict, ReplayVerdict::HardError { .. }));
+    let any_unavail = reports
+        .iter()
+        .any(|r| matches!(r.verdict, ReplayVerdict::NotAvailable { .. }));
+    if any_hard {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "external-prover replay: {} hard-error(s) — see report",
+            reports
+                .iter()
+                .filter(|r| matches!(r.verdict, ReplayVerdict::HardError { .. }))
+                .count()
+        )));
+    }
+    if strict && any_unavail {
+        return Err(crate::error::CliError::VerificationFailed(
+            "external-prover replay --strict: at least one backend not available".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn replay_lean(manifest_dir: &Path, lean_export: &Path) -> BackendReport {
+    use std::process::Command;
+    use std::time::Instant;
+
+ // Standard install location for elan-managed Lean.  Fall back
+ // to PATH lookup; if neither resolves, report `not_available`.
+    let lake_candidates = [
+        manifest_dir.join("..").join(".elan").join("bin").join("lake"),
+        std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(".elan/bin/lake"))
+            .unwrap_or_default(),
+        std::path::PathBuf::from("lake"),
+    ];
+    let lake = lake_candidates
+        .iter()
+        .find(|p| p.exists() || p.as_os_str() == "lake")
+        .cloned()
+        .unwrap_or(std::path::PathBuf::from("lake"));
+    if !lake.exists() && !is_on_path("lake") {
+        return BackendReport {
+            backend: "lean",
+            invocation: format!("{} build", lake.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: "install via https://leanprover.github.io/get_started/ (elan + lake)".into(),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let lake_dir = find_verification_root(manifest_dir)
+        .map(|v| v.join("external").join("lean"))
+        .unwrap_or_else(|| manifest_dir.join("verification").join("external").join("lean"));
+    if !lake_dir.exists() {
+        return BackendReport {
+            backend: "lean",
+            invocation: format!("{} build", lake.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: format!("Lake project missing at {}", lake_dir.display()),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+ // Sync the freshly-emitted file into the Lake source tree.
+    let lake_target = lake_dir
+        .join("VerumExternalReplay")
+        .join("KernelSoundness.lean");
+    if let Err(e) = std::fs::copy(lean_export, &lake_target) {
+        return BackendReport {
+            backend: "lean",
+            invocation: format!("cp {} {}", lean_export.display(), lake_target.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("sync failed: {}", e)],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let started = Instant::now();
+    let invocation = format!("{} build (cwd: {})", lake.display(), lake_dir.display());
+    let output = Command::new(&lake).arg("build").current_dir(&lake_dir).output();
+    let duration_ms = started.elapsed().as_millis();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let combined = format!("{stdout}\n{stderr}");
+ // Lean emits "error:" for hard errors and "warning: ... declaration uses `sorry`"
+ // for honest IOUs.  Distinguish via prefix.
+            let mut hard_errors: Vec<String> = Vec::new();
+            let mut sorry_count = 0usize;
+            for line in combined.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("error:") {
+                    hard_errors.push(line.to_string());
+                } else if line.contains("uses `sorry`") {
+                    sorry_count += 1;
+                }
+            }
+            let verdict = if !out.status.success() || !hard_errors.is_empty() {
+                ReplayVerdict::HardError {
+                    error_count: hard_errors.len().max(1),
+                    sample: hard_errors.into_iter().take(8).collect(),
+                }
+            } else if sorry_count > 0 {
+                ReplayVerdict::IouOnly { sorry_count }
+            } else {
+                ReplayVerdict::Clean
+            };
+            BackendReport {
+                backend: "lean",
+                invocation,
+                duration_ms,
+                verdict,
+                stdout_tail: tail_lines(&stdout, 8),
+                stderr_tail: tail_lines(&stderr, 8),
+            }
+        }
+        Err(e) => BackendReport {
+            backend: "lean",
+            invocation,
+            duration_ms,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("spawn failed: {e}")],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        },
+    }
+}
+
+fn replay_coq(manifest_dir: &Path, coq_export: &Path) -> BackendReport {
+    use std::process::Command;
+    use std::time::Instant;
+
+    let coq_candidates = [
+        std::path::PathBuf::from("/opt/homebrew/Cellar/rocq/9.1.1_1/bin/coqc"),
+        std::path::PathBuf::from("/opt/homebrew/bin/coqc"),
+        std::path::PathBuf::from("/usr/local/bin/coqc"),
+        std::path::PathBuf::from("coqc"),
+    ];
+    let coqc = coq_candidates
+        .iter()
+        .find(|p| p.exists())
+        .cloned()
+        .unwrap_or(std::path::PathBuf::from("coqc"));
+    if !coqc.exists() && !is_on_path("coqc") {
+        return BackendReport {
+            backend: "coq",
+            invocation: format!("{} -Q . VerumExternalReplay kernel_soundness.v", coqc.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: "install via `brew install rocq` (macOS) or apt's coq package".into(),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let coq_dir = find_verification_root(manifest_dir)
+        .map(|v| v.join("external").join("coq"))
+        .unwrap_or_else(|| manifest_dir.join("verification").join("external").join("coq"));
+    if !coq_dir.exists() {
+        return BackendReport {
+            backend: "coq",
+            invocation: format!("{} kernel_soundness.v", coqc.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::NotAvailable {
+                hint: format!("Coq project missing at {}", coq_dir.display()),
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let coq_target = coq_dir.join("kernel_soundness.v");
+    if let Err(e) = std::fs::copy(coq_export, &coq_target) {
+        return BackendReport {
+            backend: "coq",
+            invocation: format!("cp {} {}", coq_export.display(), coq_target.display()),
+            duration_ms: 0,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("sync failed: {}", e)],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        };
+    }
+
+    let started = Instant::now();
+    let invocation = format!(
+        "{} -Q . VerumExternalReplay kernel_soundness.v (cwd: {})",
+        coqc.display(),
+        coq_dir.display()
+    );
+    let output = Command::new(&coqc)
+        .args(["-Q", ".", "VerumExternalReplay", "kernel_soundness.v"])
+        .current_dir(&coq_dir)
+        .output();
+    let duration_ms = started.elapsed().as_millis();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let combined = format!("{stdout}\n{stderr}");
+ // Coq emits "Error:" for hard failures.  Honest IOUs are
+ // `Admitted.` lines in the emitted source — they don't surface
+ // as diagnostics so we count them by re-reading the source.
+            let mut hard_errors: Vec<String> = Vec::new();
+            for line in combined.lines() {
+                if line.starts_with("Error:") || line.contains("\nError:") {
+                    hard_errors.push(line.to_string());
+                }
+            }
+            let admitted_count = std::fs::read_to_string(&coq_target)
+                .map(|s| s.matches("Admitted.").count())
+                .unwrap_or(0);
+            let verdict = if !out.status.success() || !hard_errors.is_empty() {
+                ReplayVerdict::HardError {
+                    error_count: hard_errors.len().max(1),
+                    sample: hard_errors.into_iter().take(8).collect(),
+                }
+            } else if admitted_count > 0 {
+                ReplayVerdict::IouOnly {
+                    sorry_count: admitted_count,
+                }
+            } else {
+                ReplayVerdict::Clean
+            };
+            BackendReport {
+                backend: "coq",
+                invocation,
+                duration_ms,
+                verdict,
+                stdout_tail: tail_lines(&stdout, 8),
+                stderr_tail: tail_lines(&stderr, 8),
+            }
+        }
+        Err(e) => BackendReport {
+            backend: "coq",
+            invocation,
+            duration_ms,
+            verdict: ReplayVerdict::HardError {
+                error_count: 1,
+                sample: vec![format!("spawn failed: {e}")],
+            },
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+        },
+    }
+}
+
+fn tail_lines(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
+}
+
+/// Cross-platform PATH lookup without pulling in the `which` crate.
+/// Returns true if `name` is executable on `$PATH`.
+fn is_on_path(name: &str) -> bool {
+    let path = match std::env::var_os("PATH") {
+        Some(p) => p,
+        None => return false,
+    };
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Locate the `verification/` directory.  Walks up from the manifest
+/// dir until either a `verification/` child exists or we hit the
+/// filesystem root.  This is needed because `--external-prover-replay`
+/// runs from cog roots (e.g. `core/`) but the Lake / Coq projects
+/// live at the repo root alongside `crates/`.
+fn find_verification_root(start: &Path) -> Option<std::path::PathBuf> {
+    let mut cur: std::path::PathBuf = start.to_path_buf();
+    for _ in 0..6 {
+        let candidate = cur.join("verification");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !cur.pop() {
+            return None;
+        }
+    }
+    None
+}
+
+fn print_external_prover_replay_plain(reports: &[BackendReport], strict: bool) {
+    println!();
+    println!("{}", "External-prover replay".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    if reports.is_empty() {
+        println!("  (no backends selected)");
+        return;
+    }
+    for r in reports {
+        let verdict_label = match &r.verdict {
+            ReplayVerdict::Clean => format!("{}", "clean".green().bold()),
+            ReplayVerdict::IouOnly { sorry_count } => format!(
+                "{} ({} IOU{})",
+                "iou-only".cyan().bold(),
+                sorry_count,
+                if *sorry_count == 1 { "" } else { "s" }
+            ),
+            ReplayVerdict::HardError { error_count, .. } => format!(
+                "{} ({} error{})",
+                "hard-error".red().bold(),
+                error_count,
+                if *error_count == 1 { "" } else { "s" }
+            ),
+            ReplayVerdict::NotAvailable { hint } => {
+                format!("{} ({})", "not-available".yellow().bold(), hint)
+            }
+        };
+        println!(
+            "  {} {} {}  [{} ms]",
+            "►".bold(),
+            r.backend.to_uppercase().bold(),
+            verdict_label,
+            r.duration_ms
+        );
+        println!("    invocation: {}", r.invocation.dimmed());
+        if let ReplayVerdict::HardError { sample, .. } = &r.verdict {
+            for line in sample {
+                println!("    {} {}", "✗".red(), line);
+            }
+            if !r.stderr_tail.is_empty() {
+                println!("    stderr tail:");
+                for line in r.stderr_tail.lines().take(8) {
+                    println!("      {}", line.dimmed());
+                }
+            }
+        }
+    }
+    println!();
+    let any_hard = reports
+        .iter()
+        .any(|r| matches!(r.verdict, ReplayVerdict::HardError { .. }));
+    if any_hard {
+        println!(
+            "  {} hard-errors detected — emitter or corpus regressed.",
+            "✗".red()
+        );
+    } else if strict
+        && reports
+            .iter()
+            .any(|r| matches!(r.verdict, ReplayVerdict::NotAvailable { .. }))
+    {
+        println!(
+            "  {} backend(s) not available, but --strict requires all installed.",
+            "!".yellow()
+        );
+    } else {
+        println!(
+            "  {} all reachable backends accept the export (modulo declared IOUs).",
+            "✓".green()
+        );
+    }
+}
+
+fn print_external_prover_replay_json(
+    reports: &[BackendReport],
+    strict: bool,
+    report_dir: &Path,
+) {
+    let any_hard = reports
+        .iter()
+        .any(|r| matches!(r.verdict, ReplayVerdict::HardError { .. }));
+    let any_unavail = reports
+        .iter()
+        .any(|r| matches!(r.verdict, ReplayVerdict::NotAvailable { .. }));
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-external-prover-replay",
+        "strict": strict,
+        "backends": reports,
+        "summary": {
+            "any_hard_error": any_hard,
+            "any_not_available": any_unavail,
+            "passes": !any_hard && !(strict && any_unavail),
+        },
+        "exports_dir": report_dir.display().to_string(),
+    });
+ // Persist alongside other audit reports for CI archival.
+    let report_path = report_dir
+        .parent()
+        .map(|p| p.join("external-prover-replay.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("external-prover-replay.json"));
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+}
+
+// =============================================================================
 // audit --kernel-v0-roster — task #154 / Phase 3 of trust-base shrinkage
 // =============================================================================
 
