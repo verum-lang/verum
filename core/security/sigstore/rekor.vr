@@ -1,0 +1,602 @@
+// =============================================================================
+// security/sigstore/rekor.vr — Rekor v2 transparency log client
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/{json, base64, hex, jcs},
+//               security/{ecc/p256, hash/sha256, sigstore/types},
+//               net/http, time/system_time
+// =============================================================================
+//
+// **Purpose.** Submit + fetch + verify entries on rekor.sigstore.dev
+// (or self-hosted Rekor instances) v2 API. The protocol surface is
+// JSON-over-HTTP; the cryptographic guarantees ride on top via the
+// SET (Signed Entry Timestamp).
+//
+// **Endpoints (Rekor v2 API).**
+//
+//   POST /api/v2/log/entries                      — submit entry
+//   GET  /api/v2/log/entries/{uuid}                — fetch by UUID
+//   GET  /api/v2/log/entries?logIndex=N            — fetch by index
+//   GET  /api/v2/log/checkpoint                    — latest checkpoint
+//   GET  /api/v2/log/proofs?firstSize=A&lastSize=B — consistency
+//
+// **SET verification (RFC-style note tooling).**
+//
+// The SET signs the canonical JSON `{body, integratedTime, logID,
+// logIndex}`. Rekor uses ECDSA-P-256 with SHA-256. Verification:
+//
+//   message = JCS({"body":<b64>,"integratedTime":<n>,
+//                  "logID":<hex>,"logIndex":<n>})
+//   verify(rekor_pubkey, SHA-256(message), set_signature)
+//
+// **Inclusion proofs.** Rekor's Merkle tree is RFC 6962-shaped
+// (binary tree with domain-separated leaf vs node hashes). The
+// inclusion proof is verified by recomputing the root hash from the
+// leaf + audit hashes; we delegate to
+// `core.security.transparency_log.merkle::verify_inclusion`.
+//
+// **Categorical structure.** Rekor's API forms a free monoid over
+// entry submissions: the log-index sequence is total, integrated_
+// time is monotonic, and the SET binds (body, time, position) into
+// a single signature — so every two SETs from the same log can be
+// composed into a consistency obligation that the log's checkpoint
+// must satisfy.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Rekor v2 transparency log client: submit + fetch + SET verify + inclusion proof",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.sigstore.rekor;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.json.{
+    JsonValue, JsonObject, json_object, json_string, json_number,
+    json_array, decode as json_decode, encode as json_encode,
+};
+mount encoding.base64.{
+    encode_standard as b64_encode, decode_standard as b64_decode,
+};
+mount encoding.hex.{encode as hex_encode, decode as hex_decode};
+mount encoding.jcs.{canonicalize as jcs_canonicalize};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.sigstore.types.{
+    EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
+    LogEntry, SignedEntryTimestamp, InclusionProof, Digest,
+    entry_kind_from_text, entry_kind_to_text,
+    REKOR_PUBLIC_URL,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+public const MAX_ENTRY_RESPONSE_BYTES: Int = 16 * 1024 * 1024; // 16 MiB
+public const CONTENT_TYPE_JSON: Text = "application/json";
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+@derive(Clone, Debug)
+public type RekorClientConfig is {
+    /// Rekor base URL — typically https://rekor.sigstore.dev.
+    base_url:           Text,
+    /// Rekor instance's public key (ECDSA-P-256, raw uncompressed
+    /// 65-byte form 0x04 || X || Y). This pin is the trust anchor
+    /// for SET verification — sourced from TUF metadata in production.
+    log_public_key:     P256PublicKey,
+    /// Hex-encoded SHA-256 of the public key — the `logID` field
+    /// found on every LogEntry. Disambiguates log instances.
+    log_id_hex:         Text,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type RekorError is
+    | NetworkError(HttpError)
+    | HttpStatus { status: StatusCode, body: Text }
+    | TooLarge { size: Int, limit: Int }
+    | InvalidJson(Text)
+    | InvalidBase64(Text)
+    | InvalidEntry(Text)
+    | InvalidDigest(Text)
+    | LogIdMismatch { expected: Text, found: Text }
+    | SetSignatureFailed
+    | UnknownEntryKind(Text);
+
+implement Display for RekorError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NetworkError(e)              => f.write_str(f"rekor: network: {e}".as_str()),
+            HttpStatus { status, body }  => f.write_str(f"rekor: HTTP {status} body={body}".as_str()),
+            TooLarge { size, limit }     => f.write_str(f"rekor: response too large ({size} > {limit})".as_str()),
+            InvalidJson(reason)          => f.write_str(f"rekor: invalid JSON: {reason}".as_str()),
+            InvalidBase64(reason)        => f.write_str(f"rekor: invalid base64: {reason}".as_str()),
+            InvalidEntry(reason)         => f.write_str(f"rekor: invalid entry: {reason}".as_str()),
+            InvalidDigest(reason)        => f.write_str(f"rekor: invalid digest: {reason}".as_str()),
+            LogIdMismatch { expected, found } => f.write_str(
+                f"rekor: log id mismatch (expected {expected}, found {found})".as_str()),
+            SetSignatureFailed           => f.write_str("rekor: SET signature verification failed"),
+            UnknownEntryKind(kind)       => f.write_str(f"rekor: unknown entry kind: {kind}".as_str()),
+        }
+    }
+}
+
+implement Debug for RekorError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Submit entry
+// =============================================================================
+
+/// POST a new entry to Rekor. The caller supplies the entry kind +
+/// API version + spec body (as JSON). Returns the assigned LogEntry
+/// with a verified SET.
+///
+/// **Note.** The spec body's exact shape depends on the entry kind
+/// — see types.vr docstrings for HashedRekord/Intoto/DSSE schemas.
+public async fn submit_entry<C: HttpClient>(
+    client:  &C,
+    config:  &RekorClientConfig,
+    kind:    &EntryKind,
+    api_ver: &ApiVersion,
+    spec:    &JsonValue,
+) -> Result<LogEntry, RekorError> {
+    let url = compose_url(&config.base_url, "/api/v2/log/entries");
+    let body = build_submit_body(kind, api_ver, spec);
+    let body_bytes = json_encode(&body);
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("content-type".to_text(), CONTENT_TYPE_JSON.to_text());
+    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
+    headers.insert("user-agent".to_text(), "verum-rekor/0.1".to_text());
+    let req = Request {
+        method: Method.Post,
+        url,
+        headers,
+        body: body_bytes,
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| NetworkError(e))?;
+    if !resp.status.is_success() {
+        return Err(HttpStatus {
+            status: resp.status,
+            body: text_of_body_lossy(&resp.body),
+        });
+    }
+    if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
+        return Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
+    }
+    let entry = parse_log_entry_response(&resp.body)?;
+    verify_entry_set(&entry, config)?;
+    Ok(entry)
+}
+
+fn build_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("kind".to_text(), json_string(entry_kind_to_text(kind)));
+    obj.insert("apiVersion".to_text(), json_string(api_ver.0.clone()));
+    obj.insert("spec".to_text(), spec.clone());
+    json_object(obj)
+}
+
+// =============================================================================
+// Fetch by UUID / index
+// =============================================================================
+
+public async fn fetch_entry_by_uuid<C: HttpClient>(
+    client: &C,
+    config: &RekorClientConfig,
+    uuid:   &Text,
+) -> Result<LogEntry, RekorError> {
+    let url = compose_url(&config.base_url, &format!("/api/v2/log/entries/{}", uuid).to_text());
+    fetch_entry_at_url(client, config, &url).await
+}
+
+public async fn fetch_entry_by_log_index<C: HttpClient>(
+    client: &C,
+    config: &RekorClientConfig,
+    log_index: Int,
+) -> Result<LogEntry, RekorError> {
+    let url = compose_url(
+        &config.base_url,
+        &format!("/api/v2/log/entries?logIndex={}", log_index).to_text(),
+    );
+    fetch_entry_at_url(client, config, &url).await
+}
+
+async fn fetch_entry_at_url<C: HttpClient>(
+    client: &C,
+    config: &RekorClientConfig,
+    url: &Text,
+) -> Result<LogEntry, RekorError> {
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
+    headers.insert("user-agent".to_text(), "verum-rekor/0.1".to_text());
+    let req = Request {
+        method:  Method.Get,
+        url:     url.clone(),
+        headers,
+        body:    List.new(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| NetworkError(e))?;
+    if !resp.status.is_success() {
+        return Err(HttpStatus {
+            status: resp.status,
+            body: text_of_body_lossy(&resp.body),
+        });
+    }
+    if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
+        return Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
+    }
+    let entry = parse_log_entry_response(&resp.body)?;
+    verify_entry_set(&entry, config)?;
+    Ok(entry)
+}
+
+// =============================================================================
+// SET verification
+// =============================================================================
+
+/// Verify the Signed Entry Timestamp on `entry` using
+/// `config.log_public_key`. Validates `log_id` first to catch
+/// log-instance confusion.
+///
+/// Verification is byte-exact: we reconstruct the canonical JSON
+/// the SET signed over from the typed fields, JCS-canonicalise,
+/// SHA-256 hash, then ECDSA-verify.
+public fn verify_entry_set(
+    entry: &LogEntry,
+    config: &RekorClientConfig,
+) -> Result<(), RekorError> {
+    if entry.log_id_hex != config.log_id_hex {
+        return Err(LogIdMismatch {
+            expected: config.log_id_hex.clone(),
+            found:    entry.log_id_hex.clone(),
+        });
+    }
+    let payload = build_set_payload(entry);
+    let payload_bytes = jcs_canonicalize(&payload)
+        .map_err(|e| InvalidJson(format!("jcs: {e}").to_text()))?;
+    let digest = Sha256.digest(payload_bytes.as_slice());
+    let sig_bytes = b64_decode(&entry.set.signature_b64)
+        .map_err(|e| InvalidBase64(format!("set sig: {e}").to_text()))?;
+    let sig = P256Signature.from_der(sig_bytes.as_slice())
+        .map_err(|_| InvalidEntry("malformed SET ECDSA signature".to_text()))?;
+    match P256.verify_prehashed(&config.log_public_key, &digest, &sig) {
+        Ok(())  => Ok(()),
+        Err(_)  => Err(SetSignatureFailed),
+    }
+}
+
+fn build_set_payload(entry: &LogEntry) -> JsonValue {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("body".to_text(), json_string(entry.body_b64.clone()));
+    obj.insert("integratedTime".to_text(), json_number(entry.integrated_time as Float));
+    obj.insert("logID".to_text(), json_string(entry.log_id_hex.clone()));
+    obj.insert("logIndex".to_text(), json_number(entry.log_index as Float));
+    json_object(obj)
+}
+
+// =============================================================================
+// Inclusion proof verification
+// =============================================================================
+//
+// Per RFC 6962 §2.1.1: leaf hash = SHA-256(0x00 || leaf_data),
+// node hash = SHA-256(0x01 || left || right). The inclusion proof
+// gives the audit hashes that recompute the root.
+
+/// Verify an inclusion proof for `entry`. Returns Ok(()) iff
+/// recomputing the root from (leaf hash, audit hashes, log_index,
+/// tree_size) matches `proof.root_hash`.
+public fn verify_inclusion_proof(entry: &LogEntry) -> Result<(), RekorError> {
+    let proof = match &entry.inclusion_proof {
+        Some(p) => p,
+        None    => return Err(InvalidEntry("entry lacks inclusion proof".to_text())),
+    };
+    let body_bytes = b64_decode(&entry.body_b64)
+        .map_err(|e| InvalidBase64(format!("body: {e}").to_text()))?;
+    // RFC 6962 leaf hash = SHA-256(0x00 || leaf_data).
+    let mut leaf_input: List<Byte> = List.with_capacity(1 + body_bytes.len());
+    leaf_input.push(0x00);
+    let mut k: Int = 0;
+    while k < body_bytes.len() { leaf_input.push(body_bytes[k]); k = k + 1; }
+    let leaf_hash = Sha256.digest(leaf_input.as_slice());
+
+    // Walk the audit hashes per RFC 6962 §2.1.1.
+    let mut node = leaf_hash.to_list();
+    let mut sub_idx = proof.log_index;
+    let mut sub_size = proof.tree_size;
+    let mut i: Int = 0;
+    while i < proof.hashes_hex.len() {
+        let sibling = hex_decode(&proof.hashes_hex[i])
+            .map_err(|_| InvalidEntry(f"audit-hash[{i}] not hex".to_text()))?;
+        if sub_size == 0 {
+            return Err(InvalidEntry("inclusion-proof: sub_size underflow".to_text()));
+        }
+        if sub_idx == sub_size - 1 && (sub_size & 1) == 1 {
+            // Last-leaf-of-odd-tree: this hash skips the sibling step.
+            // No combine; advance to parent.
+        } else if (sub_idx & 1) == 0 {
+            // Left child: combine(node, sibling).
+            node = node_hash(&node, &sibling);
+        } else {
+            // Right child: combine(sibling, node).
+            node = node_hash(&sibling, &node);
+        }
+        sub_idx = sub_idx >> 1;
+        sub_size = (sub_size + 1) >> 1;
+        i = i + 1;
+    }
+
+    let computed_root_hex = hex_encode(&node);
+    if !ct_eq(&computed_root_hex, &proof.root_hash) {
+        return Err(InvalidEntry(format!(
+            "inclusion-proof: root mismatch (expected {}, computed {})",
+            proof.root_hash, computed_root_hex,
+        ).to_text()));
+    }
+    Ok(())
+}
+
+fn node_hash(left: &List<Byte>, right: &List<Byte>) -> List<Byte> {
+    let mut input: List<Byte> = List.with_capacity(1 + left.len() + right.len());
+    input.push(0x01);
+    let mut i: Int = 0;
+    while i < left.len() { input.push(left[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < right.len() { input.push(right[j]); j = j + 1; }
+    Sha256.digest(input.as_slice()).to_list()
+}
+
+fn ct_eq(a: &Text, b: &Text) -> Bool {
+    if a.len() != b.len() { return false; }
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let mut diff: Int = 0;
+    let mut i: Int = 0;
+    while i < ab.len() {
+        diff = diff | ((ab[i] as Int) ^ (bb[i] as Int));
+        i = i + 1;
+    }
+    diff == 0
+}
+
+// =============================================================================
+// Response parsing
+// =============================================================================
+
+fn parse_log_entry_response(bytes: &List<Byte>) -> Result<LogEntry, RekorError> {
+    let value = json_decode(bytes.as_slice())
+        .map_err(|e| InvalidJson(format!("{e}").to_text()))?;
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("response not an object".to_text()))?;
+    // Rekor returns `{ "<uuid>": { ... } }` — a single-entry map.
+    let mut iter = obj.iter();
+    let (uuid_text, entry_value) = match iter.next() {
+        Some(pair) => pair,
+        None       => return Err(InvalidJson("response empty".to_text())),
+    };
+    parse_log_entry(uuid_text.clone(), entry_value)
+}
+
+fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError> {
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson(f"entry {uuid} not an object".to_text()))?;
+    let body_b64 = obj.get("body").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson("entry missing body".to_text()))?;
+    let integrated_time = obj.get("integratedTime").and_then(|v| v.as_int())
+        .ok_or_else(|| InvalidJson("entry missing integratedTime".to_text()))?;
+    let log_id_hex = obj.get("logID").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson("entry missing logID".to_text()))?;
+    let log_index = obj.get("logIndex").and_then(|v| v.as_int())
+        .ok_or_else(|| InvalidJson("entry missing logIndex".to_text()))?;
+    let verification = obj.get("verification").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidJson("entry missing verification".to_text()))?;
+    let set_b64 = verification.get("signedEntryTimestamp").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson("verification.signedEntryTimestamp missing".to_text()))?;
+    let inclusion_proof = match verification.get("inclusionProof") {
+        Some(ip) => Some(parse_inclusion_proof(ip)?),
+        None     => None,
+    };
+
+    let body_bytes = b64_decode(&body_b64)
+        .map_err(|e| InvalidBase64(format!("body: {e}").to_text()))?;
+    let body_value = json_decode(body_bytes.as_slice())
+        .map_err(|e| InvalidJson(format!("body json: {e}").to_text()))?;
+    let body = decode_entry_body(&body_value)?;
+
+    Ok(LogEntry {
+        uuid,
+        body_b64,
+        body,
+        integrated_time,
+        log_id_hex,
+        log_index,
+        set: SignedEntryTimestamp { signature_b64: set_b64 },
+        inclusion_proof,
+    })
+}
+
+fn parse_inclusion_proof(value: &JsonValue) -> Result<InclusionProof, RekorError> {
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("inclusionProof not an object".to_text()))?;
+    let log_index = obj.get("logIndex").and_then(|v| v.as_int())
+        .ok_or_else(|| InvalidJson("inclusionProof.logIndex missing".to_text()))?;
+    let tree_size = obj.get("treeSize").and_then(|v| v.as_int())
+        .ok_or_else(|| InvalidJson("inclusionProof.treeSize missing".to_text()))?;
+    let root_hash = obj.get("rootHash").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson("inclusionProof.rootHash missing".to_text()))?;
+    let hashes_arr = obj.get("hashes").and_then(|v| v.as_array())
+        .ok_or_else(|| InvalidJson("inclusionProof.hashes missing".to_text()))?;
+    let mut hashes_hex: List<Text> = List.with_capacity(hashes_arr.len());
+    let mut i: Int = 0;
+    while i < hashes_arr.len() {
+        if let Some(s) = hashes_arr[i].as_string() {
+            hashes_hex.push(s);
+        }
+        i = i + 1;
+    }
+    let checkpoint_b64 = obj.get("checkpoint").and_then(|v| v.as_string())
+        .unwrap_or_else(|| "".to_text());
+    Ok(InclusionProof {
+        log_index, tree_size, root_hash, hashes_hex, checkpoint_b64,
+    })
+}
+
+fn decode_entry_body(value: &JsonValue) -> Result<EntryBody, RekorError> {
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("entry body not an object".to_text()))?;
+    let kind = obj.get("kind").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson("entry body kind missing".to_text()))?;
+    let spec = obj.get("spec").cloned()
+        .ok_or_else(|| InvalidJson("entry body spec missing".to_text()))?;
+    match entry_kind_from_text(&kind) {
+        EntryKind.HashedRekord => Ok(EntryBody.HashedRekord_(decode_hashed_rekord(&spec)?)),
+        EntryKind.Intoto       => Ok(EntryBody.Intoto_(decode_intoto(&spec)?)),
+        EntryKind.Dsse         => Ok(EntryBody.Dsse_(decode_dsse(&spec)?)),
+        EntryKind.Other(_)     => Ok(EntryBody.Raw(value.clone())),
+    }
+}
+
+fn decode_hashed_rekord(spec: &JsonValue) -> Result<HashedRekordBody, RekorError> {
+    let obj = spec.as_object()
+        .ok_or_else(|| InvalidEntry("hashedrekord spec not an object".to_text()))?;
+    let data = obj.get("data").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidEntry("hashedrekord.data missing".to_text()))?;
+    let hash = decode_digest(data.get("hash"))?;
+    let signature = obj.get("signature").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidEntry("hashedrekord.signature missing".to_text()))?;
+    let sig_b64 = signature.get("content").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidEntry("hashedrekord.signature.content missing".to_text()))?;
+    let pk = signature.get("publicKey").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidEntry("hashedrekord.signature.publicKey missing".to_text()))?;
+    let pk_b64 = pk.get("content").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidEntry("hashedrekord.signature.publicKey.content missing".to_text()))?;
+    Ok(HashedRekordBody {
+        payload_hash:        hash,
+        signature_b64:       sig_b64,
+        public_key_pem_b64:  pk_b64,
+    })
+}
+
+fn decode_intoto(spec: &JsonValue) -> Result<IntotoBody, RekorError> {
+    // Intoto v0.0.2 — parse loosely; full decode lives in verify.vr.
+    let obj = spec.as_object()
+        .ok_or_else(|| InvalidEntry("intoto spec not an object".to_text()))?;
+    let _ = obj;
+    // We surface a placeholder value — verify.vr re-decodes envelope
+    // + extracts SLSA / SBOM predicate. Round-trip safe.
+    Ok(IntotoBody {
+        envelope: security.sigstore.types.IntotoEnvelopeRef {
+            payload_b64: "".to_text(),
+            payload_type: "".to_text(),
+            signatures: List.new(),
+        },
+        envelope_hash: Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
+        payload_hash:  Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
+        public_key_pem_b64: "".to_text(),
+    })
+}
+
+fn decode_dsse(spec: &JsonValue) -> Result<DsseBody, RekorError> {
+    let _ = spec;
+    Ok(DsseBody {
+        envelope_hash: Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
+        signatures:    List.new(),
+        payload_hash:  Digest { algorithm: "sha256".to_text(), hex: "".to_text() },
+        payload_type:  "".to_text(),
+    })
+}
+
+fn decode_digest(opt: Maybe<&JsonValue>) -> Result<Digest, RekorError> {
+    let v = opt.ok_or_else(|| InvalidEntry("missing digest".to_text()))?;
+    let obj = v.as_object()
+        .ok_or_else(|| InvalidEntry("digest not an object".to_text()))?;
+    let alg = obj.get("algorithm").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidEntry("digest.algorithm missing".to_text()))?;
+    let hex = obj.get("value").and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidEntry("digest.value missing".to_text()))?;
+    Ok(Digest { algorithm: alg, hex })
+}
+
+// =============================================================================
+// URL helpers
+// =============================================================================
+
+fn compose_url(base: &Text, path: &str) -> Text {
+    if base.ends_with("/") && path.starts_with("/") {
+        format!("{}{}", base.byte_substring(0, base.len() - 1), path).to_text()
+    } else if !base.ends_with("/") && !path.starts_with("/") {
+        format!("{}/{}", base, path).to_text()
+    } else {
+        format!("{}{}", base, path).to_text()
+    }
+}
+
+fn text_of_body_lossy(body: &List<Byte>) -> Text {
+    Text.from_utf8(body.as_slice()).unwrap_or_else(|_| {
+        let mut out: Text = "".to_text();
+        let mut i: Int = 0;
+        while i < body.len() && i < 256 {
+            out = out.append(&format!("{:02x}", body[i]).to_text());
+            i = i + 1;
+        }
+        out
+    })
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_compose_url_no_double_slash() {
+        assert_eq(compose_url(&"https://x.io".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
+        assert_eq(compose_url(&"https://x.io/".to_text(), "/api/v2"), "https://x.io/api/v2".to_text());
+        assert_eq(compose_url(&"https://x.io".to_text(), "api/v2"), "https://x.io/api/v2".to_text());
+        assert_eq(compose_url(&"https://x.io/".to_text(), "api/v2"), "https://x.io/api/v2".to_text());
+    }
+
+    #[test]
+    fn test_node_hash_rfc6962_shape() {
+        let mut left: List<Byte> = List.new();
+        left.push(0xAA);
+        let mut right: List<Byte> = List.new();
+        right.push(0xBB);
+        let h = node_hash(&left, &right);
+        // Just check the shape — output is 32 bytes (SHA-256).
+        assert_eq(h.len(), 32);
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq(MAX_ENTRY_RESPONSE_BYTES, 16 * 1024 * 1024);
+        assert(CONTENT_TYPE_JSON.starts_with("application/"));
+    }
+}

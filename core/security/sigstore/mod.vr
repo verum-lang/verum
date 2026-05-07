@@ -1,0 +1,91 @@
+// =============================================================================
+// security/sigstore/mod.vr — Sigstore subsystem facade
+// =============================================================================
+// Layer: 2 (Security primitives)
+//
+// **Purpose.** Public surface for Sigstore — keyless code-signing
+// and supply-chain verification infrastructure built around three
+// public services (rekor.sigstore.dev, fulcio.sigstore.dev, OAuth2
+// at oauth2.sigstore.dev).
+//
+// **Layer composition.**
+//
+//   types.vr   — Rekor entry types + Fulcio response + Bundle
+//   rekor.vr   — Rekor v2 client: submit + fetch + SET verify +
+//                Merkle inclusion proof
+//   fulcio.vr  — Fulcio CSR client: OIDC + proof-of-possession +
+//                ephemeral cert chain
+//   verify.vr  — End-to-end "keyless verify": chain → log → DSSE →
+//                identity binding
+//
+// **Composes against.**
+//   - core.security.x509              — Fulcio chain validation
+//   - core.security.provenance        — DSSE + in-toto + SLSA
+//   - core.security.tuf               — trust-root distribution
+//   - core.security.oidc              — OIDC token verify (if used)
+//   - core.security.transparency_log  — RFC 6962 Merkle primitives
+//   - core.net.http                   — REST clients
+//   - core.encoding.{json, base64, jcs, hex, pem}
+//   - core.security.{ecc.{ed25519, p256}, hash.sha256, sig.rsa}
+//
+// **Used by.** Verum registry's keyless publish flow, `verum
+// publish` CLI, and any cog that wants to verify Sigstore-signed
+// dependencies at install time.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Sigstore subsystem facade — types + Rekor v2 + Fulcio + keyless verify",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.sigstore;
+
+public module types;
+public module rekor;
+public module fulcio;
+public module verify;
+
+// Re-exports — types
+public mount .types.{
+    EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
+    LogEntry, SignedEntryTimestamp, InclusionProof, Digest,
+    FulcioCertResponse, FulcioIdentity, SigstoreBundle,
+    SIGSTORE_BUNDLE_MEDIA_TYPE,
+    REKOR_PUBLIC_URL, FULCIO_PUBLIC_URL, SIGSTORE_PUBLIC_OIDC_ISSUER,
+    digest_sha256_hex, validate_digest, SigstoreTypeError,
+    entry_kind_to_text, entry_kind_from_text,
+};
+
+// Re-exports — Rekor
+public mount .rekor.{
+    RekorClientConfig, RekorError,
+    submit_entry, fetch_entry_by_uuid, fetch_entry_by_log_index,
+    verify_entry_set, verify_inclusion_proof,
+};
+
+// Re-exports — Fulcio
+public mount .fulcio.{
+    FulcioClientConfig, FulcioError, FulcioKey,
+    fulcio_default_config, fulcio_key_algorithm_text,
+    fulcio_key_public_bytes, fulcio_proof_of_possession,
+    request_signing_cert,
+};
+
+// Re-exports — Verify
+public mount .verify.{
+    SigstoreTrustRoot, ExpectedIdentity, IdentityMatcher,
+    ValidationResult, SigstoreVerifyError,
+    verify_bundle, extract_oidc_issuer, extract_oidc_subjects,
+};

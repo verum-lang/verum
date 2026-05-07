@@ -128,6 +128,14 @@ public module provenance;
 // with rollback / freeze / fast-forward / endless-data detection.
 public module tuf;
 
+// Sigstore — keyless code-signing infrastructure built on Rekor
+// (transparency log), Fulcio (ephemeral CSR-based CA), and OIDC
+// (identity provider). End-to-end keyless verification combining
+// cert chain → tlog → DSSE envelope → OIDC identity binding.
+// Composes against tuf (trust root), x509 (chain validation),
+// provenance (DSSE), oidc (token verify).
+public module sigstore;
+
 // OpenID Connect (OIDC) — discovery (.well-known/openid-configuration),
 // JWKS cache with TTL, token validation. For trusted-publishing
 // flows where CI runners (GitHub Actions / GitLab / Sigstore)
