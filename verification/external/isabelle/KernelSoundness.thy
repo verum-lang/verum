@@ -129,11 +129,11 @@ inductive Typing :: "Ctx \<Rightarrow> CoreTerm \<Rightarrow> CoreTerm \<Rightar
 where
   T_var:    "(x, T) \<in> set \<Gamma> \<Longrightarrow> \<Gamma> \<turnstile> Var x : T"
 | T_univ:   "\<Gamma> \<turnstile> Universe i : Universe (Suc i)"
-| T_pi:     "\<lbrakk>\<Gamma> \<turnstile> A : Universe i;\n             ((x, A) # \<Gamma>) \<turnstile> B : Universe i\<rbrakk> \<Longrightarrow>\n        \<Gamma> \<turnstile> Pi x A B : Universe i"
-| T_lam:    "\<lbrakk>\<Gamma> \<turnstile> A : Universe i;\n             ((x, A) # \<Gamma>) \<turnstile> b : B\<rbrakk> \<Longrightarrow>\n        \<Gamma> \<turnstile> Lam x A b : Pi x A B"
-| T_app:    "\<lbrakk>\<Gamma> \<turnstile> f : Pi x A B;\n             \<Gamma> \<turnstile> a : A\<rbrakk> \<Longrightarrow>\n        \<Gamma> \<turnstile> App f a : subst x a B"
-| T_sigma:  "\<lbrakk>\<Gamma> \<turnstile> A : Universe i;\n             ((x, A) # \<Gamma>) \<turnstile> B : Universe i\<rbrakk> \<Longrightarrow>\n        \<Gamma> \<turnstile> Sigma x A B : Universe i"
-| T_pair:   "\<lbrakk>\<Gamma> \<turnstile> a : A;\n             \<Gamma> \<turnstile> b : subst x a B\<rbrakk> \<Longrightarrow>\n        \<Gamma> \<turnstile> Pair a b : Sigma x A B"
+| T_pi:     "\<lbrakk>\<Gamma> \<turnstile> A : Universe i; ((x, A) # \<Gamma>) \<turnstile> B : Universe i\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Pi x A B : Universe i"
+| T_lam:    "\<lbrakk>\<Gamma> \<turnstile> A : Universe i; ((x, A) # \<Gamma>) \<turnstile> b : B\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Lam x A b : Pi x A B"
+| T_app:    "\<lbrakk>\<Gamma> \<turnstile> f : Pi x A B; \<Gamma> \<turnstile> a : A\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> App f a : subst x a B"
+| T_sigma:  "\<lbrakk>\<Gamma> \<turnstile> A : Universe i; ((x, A) # \<Gamma>) \<turnstile> B : Universe i\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Sigma x A B : Universe i"
+| T_pair:   "\<lbrakk>\<Gamma> \<turnstile> a : A; \<Gamma> \<turnstile> b : subst x a B\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Pair a b : Sigma x A B"
 | T_fst:    "\<Gamma> \<turnstile> p : Sigma x A B \<Longrightarrow> \<Gamma> \<turnstile> Fst p : A"
 | T_snd:    "\<Gamma> \<turnstile> p : Sigma x A B \<Longrightarrow> \<Gamma> \<turnstile> Snd p : subst x (Fst p) B"
 
@@ -344,7 +344,7 @@ lemma K_Sharp_sound: "side_conditions_hold \<longrightarrow> True"
 (* statement.  Fully proved by direct rule application *)
 (* on the Typing inductive's introduction rules. *)
 theorem kernel_structural_soundness:
-  "(\<forall>\<Gamma> x T. (x, T) \<in> set \<Gamma> \<longrightarrow> \<Gamma> \<turnstile> Var x : T)\n   \<and> (\<forall>\<Gamma> i. \<Gamma> \<turnstile> Universe i : Universe (Suc i))\n   \<and> (\<forall>\<Gamma> p x A B. \<Gamma> \<turnstile> p : Sigma x A B \<longrightarrow> \<Gamma> \<turnstile> Fst p : A)\n   \<and> (\<forall>\<Gamma> p x A B. \<Gamma> \<turnstile> p : Sigma x A B \<longrightarrow> \<Gamma> \<turnstile> Snd p : subst x (Fst p) B)"
+  "(\<forall>\<Gamma> x T. (x, T) \<in> set \<Gamma> \<longrightarrow> \<Gamma> \<turnstile> Var x : T) \<and> (\<forall>\<Gamma> i. \<Gamma> \<turnstile> Universe i : Universe (Suc i)) \<and> (\<forall>\<Gamma> p x A B. \<Gamma> \<turnstile> p : Sigma x A B \<longrightarrow> \<Gamma> \<turnstile> Fst p : A) \<and> (\<forall>\<Gamma> p x A B. \<Gamma> \<turnstile> p : Sigma x A B \<longrightarrow> \<Gamma> \<turnstile> Snd p : subst x (Fst p) B)"
   by (auto intro: T_var T_univ T_fst T_snd)
 
 (* **Admit roster** — for the 29 non-structural rules whose *)
