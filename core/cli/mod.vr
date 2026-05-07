@@ -65,6 +65,8 @@ public module manpage;
 public module config;
 public module testing;
 public module verify;
+public module sat;
+public module smt_verify;
 public module permissions;
 public module context;
 public module frontmatter;

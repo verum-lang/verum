@@ -1,0 +1,445 @@
+// =============================================================================
+// cli/smt_verify.vr — SMT-style coherence proofs for the command graph
+// =============================================================================
+// Layer: 5 (CLI)
+// Dependencies: core, cli.{spec, sat, verify}
+// Spec: internal/specs/cli-framework.md §11
+// =============================================================================
+//
+
+// Sister of `cli/verify.vr`. The structural module stays cheap (linear
+// pass over the spec); this module turns each §11.1 property into a
+// SAT query and reports counterexamples.
+//
+// Properties (§11.1):
+//
+//   coherent_grammar        — ∃ valid invocation. (constraints_of(cmd))
+//   mutex_coverage          — ∀ valid invocation, group G with kind=Exclusive:
+//                             |invoke ∩ G| ≤ 1   (already part of constraints,
+//                             so this property checks that the constraint set
+//                             is internally consistent with the at-most-one
+//                             encoding)
+//   required_reachable      — ∀ required flag F, ∃ valid invocation. F = true
+//   required_no_conflict    — ¬∃ pair of required flags A, B with A ⊥ B
+//                             (the pure-structural variant lives in
+//                             verify.vr; the SMT path additionally checks
+//                             multi-hop conflict chains via `requires`)
+//
+// Each property maps to a `Property` enum variant; `verify_smt` runs
+// the requested set and returns a `VerificationReport` mirroring the
+// structural pass.
+//
+// Reuses:
+//   * `core.cli.sat`              — propositional SAT solver
+//   * `core.cli.verify`           — `Severity` / `Finding` / `VerificationReport`
+//   * `core.cli.spec`             — `CommandSpec` / `Group` / `GroupKind`
+//
+// All output funnels into the same `VerificationReport` shape so callers
+// can treat structural and SMT findings uniformly.
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+)
+module smt_verify;
+
+mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
+mount core.cli.spec.{CommandSpec, FlagSpec, Group, GroupKind};
+mount core.cli.sat.{
+    BoolFormula, SatResult, EvalResult,
+    var, not_, and_, or_, lit_true, lit_false, imply_, at_most_one,
+    at_least_one, solve, is_sat, is_unsat, find_model, render_assignment,
+    collect_vars,
+};
+mount core.cli.verify.{Severity, Finding, VerificationReport};
+
+// =============================================================================
+// Property — what to verify
+// =============================================================================
+
+public type Property is
+    | CoherentGrammar
+    | MutexCoverage
+    | RequiredReachable
+    | RequiredNoConflict;
+
+implement Property {
+    public fn name(&self) -> Text {
+        match self {
+            Property.CoherentGrammar => "coherent_grammar".to_text(),
+            Property.MutexCoverage => "mutex_coverage".to_text(),
+            Property.RequiredReachable => "required_reachable".to_text(),
+            Property.RequiredNoConflict => "required_no_conflict".to_text(),
+        }
+    }
+}
+
+/// Convenience: every property the SMT layer can check.
+public fn all_properties() -> List<Property> {
+    let mut out = List.new();
+    out.push(Property.CoherentGrammar);
+    out.push(Property.MutexCoverage);
+    out.push(Property.RequiredReachable);
+    out.push(Property.RequiredNoConflict);
+    out
+}
+
+// =============================================================================
+// Top-level driver — runs every requested property over every command
+// in the tree (root + subcommands).
+// =============================================================================
+
+/// Verify `cmd` (recursively) against `properties`. Findings are
+/// appended; the structural-checker layer is not invoked from here —
+/// callers compose the two as needed.
+public fn verify_smt(
+    cmd: &CommandSpec,
+    properties: &List<Property>,
+) -> VerificationReport {
+    let mut report = VerificationReport.empty();
+    verify_smt_recursive(cmd, &cmd.name, properties, &mut report);
+    report
+}
+
+/// Verify against every property (the canonical `@verify(certified)`
+/// shorthand).
+public fn verify_smt_all(cmd: &CommandSpec) -> VerificationReport {
+    let all = all_properties();
+    verify_smt(cmd, &all)
+}
+
+fn verify_smt_recursive(
+    cmd: &CommandSpec,
+    path: &Text,
+    properties: &List<Property>,
+    report: &mut VerificationReport,
+) {
+    let constraints = build_constraints(cmd);
+
+    let mut i: Int = 0;
+    while i < properties.len() {
+        match properties[i] {
+            Property.CoherentGrammar => check_coherent_grammar(cmd, path, &constraints, report),
+            Property.MutexCoverage => check_mutex_coverage(cmd, path, &constraints, report),
+            Property.RequiredReachable => check_required_reachable(cmd, path, &constraints, report),
+            Property.RequiredNoConflict => check_required_no_conflict(cmd, path, &constraints, report),
+        }
+        i = i + 1;
+    }
+
+    let mut j: Int = 0;
+    while j < cmd.subcommands.len() {
+        let sc = &cmd.subcommands[j];
+        let mut child_path = path.clone();
+        child_path.push_str(" > ");
+        child_path.push_str(&sc.name);
+        verify_smt_recursive(sc, &child_path, properties, report);
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// Constraint generation — translate spec into a propositional formula
+// =============================================================================
+//
+// Each flag with a long-name maps to a Boolean variable named after its
+// long-name. The formula encodes:
+//
+//   * Required flags: `var(name) = true` is forced
+//   * Mutex groups: `at_most_one(members)` for Exclusive,
+//                   `exactly_one(members)` for Required-group
+//   * `requires` lists: `var(a) ⟹ var(b)` for each requirement
+//   * `conflicts_with` lists: `¬(var(a) ∧ var(b))` for each conflict
+//
+// Result is the "set of constraints valid invocations must satisfy".
+// Property checks then ask SAT questions about this formula.
+//
+
+fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
+    let mut clauses: List<BoolFormula> = List.new();
+
+    // 1) Required flags must be set.
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if f.arity.is_required() {
+            match &f.long {
+                Some(l) => clauses.push(var(l.clone())),
+                None => {},
+            }
+        }
+        i = i + 1;
+    }
+
+    // 2) Group constraints.
+    let mut g: Int = 0;
+    while g < cmd.groups.len() {
+        let group = &cmd.groups[g];
+        let valid_members = collect_existing_members(cmd, &group.members);
+        if valid_members.len() > 0 {
+            match group.kind {
+                GroupKind.Exclusive => clauses.push(at_most_one(&valid_members)),
+                GroupKind.Required => {
+                    clauses.push(at_least_one(&valid_members));
+                    clauses.push(at_most_one(&valid_members));
+                },
+                GroupKind.RequiredAll => {
+                    let mut k: Int = 0;
+                    while k < valid_members.len() {
+                        clauses.push(var(valid_members[k].clone()));
+                        k = k + 1;
+                    }
+                },
+                GroupKind.OptionalAll => {
+                    // (a ∨ b ∨ ... ) ⟹ (a ∧ b ∧ ...) — i.e.
+                    // ¬(any_present ∧ any_absent).
+                    let mut k1: Int = 0;
+                    while k1 < valid_members.len() {
+                        let mut k2: Int = 0;
+                        while k2 < valid_members.len() {
+                            if k1 != k2 {
+                                clauses.push(imply_(
+                                    var(valid_members[k1].clone()),
+                                    var(valid_members[k2].clone()),
+                                ));
+                            }
+                            k2 = k2 + 1;
+                        }
+                        k1 = k1 + 1;
+                    }
+                },
+            }
+        }
+        g = g + 1;
+    }
+
+    // 3) `requires` lists (per-flag) → implication clauses.
+    let mut j: Int = 0;
+    while j < cmd.flags.len() {
+        let f = &cmd.flags[j];
+        match &f.long {
+            Some(this_long) => {
+                let mut k: Int = 0;
+                while k < f.requires.len() {
+                    let other = &f.requires[k];
+                    match cmd.find_flag_long(other) {
+                        Some(_) => {
+                            clauses.push(imply_(
+                                var(this_long.clone()),
+                                var(other.clone()),
+                            ));
+                        },
+                        None => {},
+                    }
+                    k = k + 1;
+                }
+            },
+            None => {},
+        }
+        j = j + 1;
+    }
+
+    // 4) `conflicts_with` lists → ¬(a ∧ b).
+    let mut p: Int = 0;
+    while p < cmd.flags.len() {
+        let f = &cmd.flags[p];
+        match &f.long {
+            Some(this_long) => {
+                let mut q: Int = 0;
+                while q < f.conflicts_with.len() {
+                    let other = &f.conflicts_with[q];
+                    match cmd.find_flag_long(other) {
+                        Some(_) => {
+                            let conj = and_({
+                                let mut both = List.new();
+                                both.push(var(this_long.clone()));
+                                both.push(var(other.clone()));
+                                both
+                            });
+                            clauses.push(not_(conj));
+                        },
+                        None => {},
+                    }
+                    q = q + 1;
+                }
+            },
+            None => {},
+        }
+        p = p + 1;
+    }
+
+    if clauses.len() == 0 { lit_true() } else { and_(clauses) }
+}
+
+fn collect_existing_members(cmd: &CommandSpec, members: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < members.len() {
+        match cmd.find_flag_long(&members[i]) {
+            Some(_) => out.push(members[i].clone()),
+            None => {},
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Property checks
+// =============================================================================
+
+/// `coherent_grammar` — a satisfying invocation must exist. UNSAT here
+/// means the user's flag constraints are mutually contradictory and no
+/// well-formed argv can ever invoke this command.
+fn check_coherent_grammar(
+    cmd: &CommandSpec,
+    path: &Text,
+    constraints: &BoolFormula,
+    report: &mut VerificationReport,
+) {
+    if is_unsat(constraints) {
+        report.findings.push(Finding {
+            severity: Severity.Error,
+            where_: path.clone(),
+            message: Text.from(
+                f"command '{cmd.name}': flag constraints are unsatisfiable — \
+                  no valid invocation exists (coherent_grammar failed)"
+            ),
+        });
+    }
+}
+
+/// `mutex_coverage` — for every Exclusive group, prove that any
+/// invocation activating two members is unreachable. The SAT layer
+/// asks: `∃ valid invocation with two group members both true?`
+fn check_mutex_coverage(
+    cmd: &CommandSpec,
+    path: &Text,
+    constraints: &BoolFormula,
+    report: &mut VerificationReport,
+) {
+    let mut g: Int = 0;
+    while g < cmd.groups.len() {
+        let group = &cmd.groups[g];
+        match group.kind {
+            GroupKind.Exclusive => {
+                let valid = collect_existing_members(cmd, &group.members);
+                let mut a: Int = 0;
+                while a < valid.len() {
+                    let mut b = a + 1;
+                    while b < valid.len() {
+                        // ∃ assignment satisfying constraints with vᵃ ∧ vᵇ?
+                        let mut conj = List.new();
+                        conj.push(constraints.clone());
+                        conj.push(var(valid[a].clone()));
+                        conj.push(var(valid[b].clone()));
+                        if is_sat(&and_(conj)) {
+                            report.findings.push(Finding {
+                                severity: Severity.Error,
+                                where_: path.clone(),
+                                message: Text.from(
+                                    f"mutex_coverage: group '{group.name}' admits invocation \
+                                      with both '--{valid[a]}' and '--{valid[b]}' set"
+                                ),
+                            });
+                        }
+                        b = b + 1;
+                    }
+                    a = a + 1;
+                }
+            },
+            _ => {},
+        }
+        g = g + 1;
+    }
+}
+
+/// `required_reachable` — every required flag must be settable in at
+/// least one valid invocation. UNSAT for the constraints-and-flag-true
+/// system means the flag, despite being declared required, is in
+/// permanent contradiction with the other constraints.
+fn check_required_reachable(
+    cmd: &CommandSpec,
+    path: &Text,
+    constraints: &BoolFormula,
+    report: &mut VerificationReport,
+) {
+    let mut i: Int = 0;
+    while i < cmd.flags.len() {
+        let f = &cmd.flags[i];
+        if !f.arity.is_required() { i = i + 1; continue; }
+        match &f.long {
+            Some(l) => {
+                let mut conj = List.new();
+                conj.push(constraints.clone());
+                conj.push(var(l.clone()));
+                if is_unsat(&and_(conj)) {
+                    report.findings.push(Finding {
+                        severity: Severity.Error,
+                        where_: path.clone(),
+                        message: Text.from(
+                            f"required_reachable: required flag '--{l}' \
+                              has no satisfying invocation (constraints contradict it)"
+                        ),
+                    });
+                }
+            },
+            None => {},
+        }
+        i = i + 1;
+    }
+}
+
+/// `required_no_conflict` — extends `verify::check_required_not_conflicting`
+/// with the multi-hop transitive case: if A is required, A requires B,
+/// and B conflicts with C, and C is also required → unreachable.
+/// We handle this by running the same SAT query as `required_reachable`
+/// which transitively covers chains; this property becomes a stricter
+/// label for the same checker (added separately so reports can list
+/// the explicit property name).
+fn check_required_no_conflict(
+    cmd: &CommandSpec,
+    path: &Text,
+    constraints: &BoolFormula,
+    report: &mut VerificationReport,
+) {
+    if is_unsat(constraints) {
+        // Already reported by `coherent_grammar`; surface the same
+        // failure under the stricter label so callers that requested
+        // only this property still get a finding.
+        report.findings.push(Finding {
+            severity: Severity.Error,
+            where_: path.clone(),
+            message: Text.from(
+                f"required_no_conflict: command '{cmd.name}' has a chain of required \
+                  flags + conflicts that is jointly unsatisfiable"
+            ),
+        });
+    }
+}
+
+// =============================================================================
+// Composite façade — structural + SMT in one call
+// =============================================================================
+
+/// Run the structural pass first (cheap, catches most bugs) and then
+/// the SMT pass with `properties`. Both report into the same
+/// `VerificationReport`. Findings from structural checks come first,
+/// SMT findings are appended.
+public fn verify_full(
+    cmd: &CommandSpec,
+    properties: &List<Property>,
+) -> VerificationReport {
+    let mut report = core.cli.verify.verify(cmd);
+    let mut smt = verify_smt(cmd, properties);
+    let mut i: Int = 0;
+    while i < smt.findings.len() {
+        report.findings.push(smt.findings[i].clone());
+        i = i + 1;
+    }
+    report
+}
