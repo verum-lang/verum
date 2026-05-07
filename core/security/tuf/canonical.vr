@@ -1,0 +1,204 @@
+// =============================================================================
+// security/tuf/canonical.vr — JCS canonical encoding for TUF signing
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, encoding/{json, jcs}, security/hash/sha256,
+//               encoding/hex, security/tuf/types
+// =============================================================================
+//
+// **Purpose.** TUF signs the JCS-canonicalised `signed` payload —
+// not the wire JSON. Signers and verifiers MUST produce identical
+// bytes for identical metadata, regardless of map insertion order or
+// whitespace. JCS (RFC 8785) gives this property; this module is
+// just the role-aware wrapper.
+//
+// **Two operations.**
+//
+//   1. `canonical_signing_payload(signed_metadata)` — render the
+//      metadata as JSON, JCS-canonicalise, return raw bytes ready
+//      to feed to Ed25519 / ECDSA / RSA signature primitives.
+//
+//   2. `compute_keyid(key)` — TUF spec §4.2.2: keyid = SHA-256-hex
+//      of the JCS-canonical encoding of the key's `keyval` block
+//      together with `keytype` + `scheme`. Stable identifier across
+//      implementations.
+//
+// **Categorical structure.** Canonical encoding is the
+// epi-mono factorisation of metadata serialisation: every metadata
+// value has a unique canonical form, independent of representation.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF JCS-canonical signing payload + keyid computation",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf.canonical;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount collections.List;
+mount encoding.json.{
+    JsonValue, JsonObject, json_object, json_string, json_bool,
+    json_number, json_null, json_array,
+};
+mount encoding.jcs.{canonicalize as jcs_canonicalize, JcsError};
+mount encoding.hex.{encode as hex_encode};
+mount security.hash.sha256.{digest as sha256_digest};
+mount security.tuf.types.{
+    TufKey, TufKeyType, TufKeyScheme, KeyId, Signature,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CanonicalError is
+    | EncodeFailed(Text)
+    | JcsFailed(JcsError);
+
+implement Display for CanonicalError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EncodeFailed(reason) => f.write_str(f"tuf/canonical: encode failed: {reason}".as_str()),
+            JcsFailed(e)         => f.write_str(f"tuf/canonical: JCS failed: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for CanonicalError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Render a JsonValue (the contents of the `signed` field of a
+/// metadata envelope) into the byte string that gets signed.
+///
+/// The caller is responsible for converting the typed metadata
+/// (RootMetadata, TimestampMetadata, …) into a JsonValue first —
+/// this is a thin wrapper around JCS so the signing pipeline has a
+/// single, named choke point.
+public fn canonical_signing_payload(signed: &JsonValue) -> Result<List<Byte>, CanonicalError> {
+    jcs_canonicalize(signed).map_err(|e| JcsFailed(e))
+}
+
+/// TUF spec §4.2.2 keyid computation:
+///
+///   keyid = SHA-256-hex( JCS({
+///       "keytype": <type>,
+///       "scheme":  <scheme>,
+///       "keyval":  <keyval JSON>,
+///   }))
+///
+/// Note that `keyid_hash_algorithms` was removed from the modern TUF
+/// spec (it was an obsolete field). We follow the current spec.
+public fn compute_keyid(key: &TufKey) -> Result<KeyId, CanonicalError> {
+    let mut obj: JsonObject = JsonObject.new();
+    obj.insert("keytype".to_text(), json_string(keytype_to_text(&key.keytype)));
+    obj.insert("scheme".to_text(),  json_string(scheme_to_text(&key.scheme)));
+    obj.insert("keyval".to_text(),  key.keyval.clone());
+    let bytes = canonical_signing_payload(&json_object(obj))?;
+    let digest = sha256_digest(&bytes);
+    Ok(KeyId(hex_encode(&digest)))
+}
+
+// =============================================================================
+// Wire-format helpers (TufKeyType / TufKeyScheme ↔ Text)
+// =============================================================================
+
+public fn keytype_to_text(t: &TufKeyType) -> Text {
+    match t {
+        TufKeyType.Ed25519Key   => "ed25519".to_text(),
+        TufKeyType.EcdsaP256Key => "ecdsa-sha2-nistp256".to_text(),
+        TufKeyType.RsaKey       => "rsa".to_text(),
+        TufKeyType.Other(s)     => s.clone(),
+    }
+}
+
+public fn keytype_from_text(s: &Text) -> TufKeyType {
+    match s.as_str() {
+        "ed25519"             => TufKeyType.Ed25519Key,
+        "ecdsa-sha2-nistp256" => TufKeyType.EcdsaP256Key,
+        "ecdsa"               => TufKeyType.EcdsaP256Key, // legacy alias
+        "rsa"                 => TufKeyType.RsaKey,
+        other                 => TufKeyType.Other(other.to_text()),
+    }
+}
+
+public fn scheme_to_text(s: &TufKeyScheme) -> Text {
+    match s {
+        TufKeyScheme.Ed25519Scheme       => "ed25519".to_text(),
+        TufKeyScheme.EcdsaSha2NistP256   => "ecdsa-sha2-nistp256".to_text(),
+        TufKeyScheme.RsaPkcs1V15Sha256   => "rsassa-pkcs1v15-sha256".to_text(),
+        TufKeyScheme.RsassaPssSha256     => "rsassa-pss-sha256".to_text(),
+        TufKeyScheme.Other(t)            => t.clone(),
+    }
+}
+
+public fn scheme_from_text(s: &Text) -> TufKeyScheme {
+    match s.as_str() {
+        "ed25519"                => TufKeyScheme.Ed25519Scheme,
+        "ecdsa-sha2-nistp256"    => TufKeyScheme.EcdsaSha2NistP256,
+        "ecdsa"                  => TufKeyScheme.EcdsaSha2NistP256, // legacy alias
+        "rsassa-pkcs1v15-sha256" => TufKeyScheme.RsaPkcs1V15Sha256,
+        "rsassa-pss-sha256"      => TufKeyScheme.RsassaPssSha256,
+        other                    => TufKeyScheme.Other(other.to_text()),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_keytype_round_trip() {
+        assert(keytype_from_text(&"ed25519".to_text()) is TufKeyType.Ed25519Key);
+        assert(keytype_from_text(&"rsa".to_text()) is TufKeyType.RsaKey);
+        match keytype_from_text(&"unknown".to_text()) {
+            TufKeyType.Other(s) => assert_eq(s, "unknown".to_text()),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_scheme_round_trip() {
+        assert(scheme_from_text(&"ed25519".to_text()) is TufKeyScheme.Ed25519Scheme);
+        assert(scheme_from_text(&"rsassa-pkcs1v15-sha256".to_text()) is TufKeyScheme.RsaPkcs1V15Sha256);
+    }
+
+    #[test]
+    fn test_compute_keyid_stable() {
+        let key = TufKey {
+            keytype: TufKeyType.Ed25519Key,
+            scheme:  TufKeyScheme.Ed25519Scheme,
+            keyval:  {
+                let mut o: JsonObject = JsonObject.new();
+                o.insert("public".to_text(), json_string("deadbeef".to_text()));
+                json_object(o)
+            },
+        };
+        let kid1 = compute_keyid(&key).unwrap();
+        let kid2 = compute_keyid(&key).unwrap();
+        assert_eq(kid1.0, kid2.0);
+        assert_eq(kid1.0.len(), 64); // SHA-256 hex
+    }
+}

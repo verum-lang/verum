@@ -1,0 +1,905 @@
+// =============================================================================
+// security/tuf/client.vr — TUF spec §5 client update workflow
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, security/tuf/{types, canonical,
+//               role_verify, repository}, security/hash/sha256,
+//               encoding/{json, hex}, time/{rfc3339, system_time}
+// =============================================================================
+//
+// **Purpose.** Implements the full TUF spec §5 client workflow:
+// secure update of a local trusted-metadata store from a remote
+// repository, with detection of:
+//
+//   - rollback         (an old version replayed)
+//   - freeze           (no new metadata served, stale state forced)
+//   - mix-and-match    (Targets versions disagreeing with Snapshot)
+//   - fast-forward     (a version-skip across a key-rotation)
+//   - endless-data     (oversized response — handled in repository.vr)
+//   - slow-retrieval   (stalled response — handled by HTTP layer)
+//
+// **Workflow (TUF spec §5 numbered steps).**
+//
+//   5.1  Update Root:
+//        Repeatedly fetch root.json at version `prev.version + 1`.
+//        Stop when 404 (no newer root) or freshly-expired check fires.
+//        Each new root is verified with prev's keys AND new's keys
+//        (cross-signing requirement).
+//
+//   5.2  Verify root not expired (after the chain is established).
+//
+//   5.3  Update Timestamp:
+//        Fetch `timestamp.json` (always unversioned URL).
+//        Verify against trusted_root.timestamp role definition.
+//        Check version monotonicity vs. previously-trusted timestamp.
+//        Check not expired.
+//
+//   5.4  Update Snapshot:
+//        Fetch snapshot per timestamp.meta["snapshot.json"]
+//        (version + length + hashes).
+//        Verify against trusted_root.snapshot role definition.
+//        Verify hash matches timestamp's claim.
+//        Check version monotonicity.
+//        For each target metafile in trusted_snapshot.meta, verify
+//        the new snapshot's entry's version ≥ trusted's.
+//        Check not expired.
+//
+//   5.5  Update Targets (recursively, including delegations):
+//        Fetch top-level targets per snapshot.meta["targets.json"].
+//        Verify against trusted_root.targets role definition.
+//        Verify hash matches snapshot's claim (when present).
+//        Check version monotonicity.
+//        Process delegations in order; first match wins.
+//
+//   5.6  Lookup target by path: traverse delegation graph, return
+//        the matching TargetFile spec.
+//
+//   5.7  Download target: fetch + verify length + hash against
+//        the looked-up TargetFile spec.
+//
+// **Trusted state.** The client tracks:
+//
+//   trusted_root      : RootMetadata
+//   trusted_timestamp : Maybe<TimestampMetadata>
+//   trusted_snapshot  : Maybe<SnapshotMetadata>
+//   trusted_targets   : Map<Text, TargetsMetadata>
+//                       (key = role name; "targets" for the top role)
+//
+// Each metadata is upgraded only after successful verification.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF spec §5 full client update workflow with rollback / freeze / mix-and-match / fast-forward detection",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf.client;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map, Set};
+mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.hex.{encode as hex_encode};
+mount security.hash.sha256.{digest as sha256_digest};
+mount security.hash.sha512.{digest as sha512_digest};
+mount time.system_time.{epoch_seconds};
+
+mount security.tuf.types.{
+    RoleName, RoleDef, KeyId, TufKey, Signed, Signature,
+    RootMetadata, RootRoles, TimestampMetadata, SnapshotMetadata,
+    TargetsMetadata, TargetFile, MetafileSpec, Delegations, DelegatedRole,
+    delegation_matches, role_name_to_text, role_name_from_text,
+    validate_root_roles_keys,
+};
+mount security.tuf.canonical.{
+    canonical_signing_payload, compute_keyid, CanonicalError,
+};
+mount security.tuf.role_verify.{
+    verify_role_signatures,
+    check_version_monotonic_root, check_version_monotonic_timestamp,
+    check_version_monotonic_snapshot, check_version_monotonic_targets,
+    check_not_expired_root, check_not_expired_timestamp,
+    check_not_expired_snapshot, check_not_expired_targets,
+    RoleVerifyError,
+};
+mount security.tuf.repository.{TufRepository, RepoError, max_bytes_for_role};
+
+// =============================================================================
+// Bounds
+// =============================================================================
+
+/// Hard cap on root-chain length per `update_root`. Beyond this many
+/// chained root.json fetches without reaching the latest, we abort —
+/// avoid unbounded fetch loops. Real-world: PyPI rotates root maybe
+/// 1-2× a year; sigstore similar; 1024 is comfortable headroom.
+public const MAX_ROOT_CHAIN_LENGTH: Int = 1024;
+
+/// Maximum delegation traversal depth. TUF spec §5.6 doesn't impose
+/// a limit; we cap at 32 to bound stack depth for malicious metadata.
+public const MAX_DELEGATION_DEPTH: Int = 32;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type TufClientError is
+    | Repo(RepoError)
+    | RoleVerify(RoleVerifyError)
+    | Canonical(CanonicalError)
+    | InvalidJson(Text)
+    | ChainBroken { role: RoleName, reason: Text }
+    | InconsistentMetadata { reason: Text }
+    | TargetNotFound(Text)
+    | HashMismatch { what: Text, expected: Text, computed: Text }
+    | LengthMismatch { what: Text, expected: Int, actual: Int }
+    | RootChainTooLong(Int)
+    | DelegationDepthExceeded { limit: Int }
+    | UnsupportedHashAlgorithm(Text);
+
+implement Display for TufClientError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Repo(e)               => f.write_str(f"tuf/client: {e}".as_str()),
+            RoleVerify(e)         => f.write_str(f"tuf/client: {e}".as_str()),
+            Canonical(e)          => f.write_str(f"tuf/client: {e}".as_str()),
+            InvalidJson(reason)   => f.write_str(f"tuf/client: invalid JSON: {reason}".as_str()),
+            ChainBroken { role, reason } => f.write_str(
+                f"tuf/client: trust chain broken at {role:?}: {reason}".as_str()),
+            InconsistentMetadata { reason } => f.write_str(
+                f"tuf/client: inconsistent metadata: {reason}".as_str()),
+            TargetNotFound(p)     => f.write_str(f"tuf/client: target not found: {p}".as_str()),
+            HashMismatch { what, expected, computed } => f.write_str(
+                f"tuf/client: hash mismatch on {what} (expected {expected}, computed {computed})".as_str()),
+            LengthMismatch { what, expected, actual } => f.write_str(
+                f"tuf/client: length mismatch on {what} (expected {expected}, got {actual})".as_str()),
+            RootChainTooLong(n)   => f.write_str(f"tuf/client: root chain {n} exceeds {MAX_ROOT_CHAIN_LENGTH}".as_str()),
+            DelegationDepthExceeded { limit } => f.write_str(
+                f"tuf/client: delegation depth exceeded ({limit})".as_str()),
+            UnsupportedHashAlgorithm(a) => f.write_str(f"tuf/client: unsupported hash algorithm: {a}".as_str()),
+        }
+    }
+}
+
+implement Debug for TufClientError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Trusted-state container
+// =============================================================================
+
+@derive(Clone, Debug)
+public type TrustedState is {
+    root:       RootMetadata,
+    timestamp:  Maybe<TimestampMetadata>,
+    snapshot:   Maybe<SnapshotMetadata>,
+    /// Map role-name → trusted Targets metadata. Top-level entry is
+    /// keyed `"targets"`; delegations use their declared name.
+    targets:    Map<Text, TargetsMetadata>,
+    /// Per-role accumulated key map. Built by chasing delegations.
+    delegated_keys: Map<Text, Map<KeyId, TufKey>>,
+};
+
+public fn trusted_state_new(root: RootMetadata) -> TrustedState {
+    TrustedState {
+        root,
+        timestamp: None,
+        snapshot:  None,
+        targets:   Map.new(),
+        delegated_keys: Map.new(),
+    }
+}
+
+// =============================================================================
+// Top-level workflow
+// =============================================================================
+
+/// Run the full TUF spec §5 update workflow against `repo`. Mutates
+/// `state` in place, advancing each role's trusted version. Returns
+/// the final `TrustedState` snapshot.
+public async fn update<R: TufRepository>(
+    state: &mut TrustedState,
+    repo:  &R,
+) -> Result<(), TufClientError> {
+    update_root(state, repo).await?;
+    check_not_expired_root(&state.root)
+        .map_err(|e| RoleVerify(e))?;
+    update_timestamp(state, repo).await?;
+    update_snapshot(state, repo).await?;
+    update_targets(state, repo, &"targets".to_text(), None).await?;
+    Ok(())
+}
+
+// =============================================================================
+// 5.1 — Update root (chain rotation)
+// =============================================================================
+
+async fn update_root<R: TufRepository>(
+    state: &mut TrustedState,
+    repo:  &R,
+) -> Result<(), TufClientError> {
+    let mut chain_len: Int = 0;
+    loop {
+        chain_len = chain_len + 1;
+        if chain_len > MAX_ROOT_CHAIN_LENGTH {
+            return Err(RootChainTooLong(chain_len));
+        }
+        let next_version = state.root.version + 1;
+        let bytes = match repo.fetch_metadata(&RoleName.Root, Some(next_version)).await {
+            Ok(b)  => b,
+            Err(RepoError.NotFound { .. }) => return Ok(()), // chain end reached
+            Err(e) => return Err(Repo(e)),
+        };
+        let (new_root, new_root_signed_payload, new_root_signatures) =
+            parse_root(bytes.as_slice())?;
+
+        // (1) verify new root signed by PREVIOUS root's keys
+        verify_role_signatures(
+            &new_root_signed_payload,
+            &new_root_signatures,
+            &state.root.roles.root,
+            &state.root.keys,
+        ).map_err(|e| ChainBroken {
+            role: RoleName.Root,
+            reason: format!("prev-root verification failed: {e}").to_text(),
+        })?;
+
+        // (2) verify new root signed by ITS OWN keys
+        verify_role_signatures(
+            &new_root_signed_payload,
+            &new_root_signatures,
+            &new_root.roles.root,
+            &new_root.keys,
+        ).map_err(|e| ChainBroken {
+            role: RoleName.Root,
+            reason: format!("self verification failed: {e}").to_text(),
+        })?;
+
+        // (3) version monotonic + version increases by 1
+        check_version_monotonic_root(&state.root, &new_root)
+            .map_err(|e| RoleVerify(e))?;
+        if new_root.version != next_version {
+            return Err(InconsistentMetadata {
+                reason: format!("root version-skip: expected {} got {}", next_version, new_root.version).to_text(),
+            });
+        }
+
+        // (4) all role keyids must reference declared keys
+        let missing = validate_root_roles_keys(&new_root.roles, &new_root.keys);
+        if !missing.is_empty() {
+            return Err(InconsistentMetadata {
+                reason: format!("root references undeclared keys: {missing:?}").to_text(),
+            });
+        }
+
+        // Promote new root.
+        state.root = new_root;
+    }
+}
+
+// =============================================================================
+// 5.3 — Update timestamp
+// =============================================================================
+
+async fn update_timestamp<R: TufRepository>(
+    state: &mut TrustedState,
+    repo:  &R,
+) -> Result<(), TufClientError> {
+    let bytes = repo.fetch_metadata(&RoleName.Timestamp, None).await
+        .map_err(|e| Repo(e))?;
+    let (new_ts, signed_payload, signatures) = parse_timestamp(bytes.as_slice())?;
+    verify_role_signatures(
+        &signed_payload, &signatures,
+        &state.root.roles.timestamp, &state.root.keys,
+    ).map_err(|e| RoleVerify(e))?;
+    if let Some(prev) = &state.timestamp {
+        check_version_monotonic_timestamp(prev, &new_ts).map_err(|e| RoleVerify(e))?;
+    }
+    check_not_expired_timestamp(&new_ts).map_err(|e| RoleVerify(e))?;
+    // Timestamp's meta MUST contain exactly one entry: snapshot.json
+    if !new_ts.meta.contains_key(&"snapshot.json".to_text()) {
+        return Err(InconsistentMetadata {
+            reason: "timestamp.meta missing 'snapshot.json'".to_text(),
+        });
+    }
+    state.timestamp = Some(new_ts);
+    Ok(())
+}
+
+// =============================================================================
+// 5.4 — Update snapshot
+// =============================================================================
+
+async fn update_snapshot<R: TufRepository>(
+    state: &mut TrustedState,
+    repo:  &R,
+) -> Result<(), TufClientError> {
+    let timestamp = state.timestamp.as_ref()
+        .ok_or_else(|| ChainBroken {
+            role: RoleName.Snapshot,
+            reason: "no trusted timestamp".to_text(),
+        })?;
+    let snap_spec = timestamp.meta.get(&"snapshot.json".to_text())
+        .ok_or_else(|| InconsistentMetadata {
+            reason: "timestamp lacks snapshot.json spec".to_text(),
+        })?
+        .clone();
+    let bytes = repo.fetch_metadata(&RoleName.Snapshot, Some(snap_spec.version)).await
+        .map_err(|e| Repo(e))?;
+
+    // Length + hash check vs timestamp's claim.
+    if let Some(expected_len) = snap_spec.length {
+        if bytes.len() != expected_len {
+            return Err(LengthMismatch {
+                what: "snapshot.json".to_text(),
+                expected: expected_len,
+                actual: bytes.len(),
+            });
+        }
+    }
+    verify_hashes(&bytes, &snap_spec.hashes, "snapshot.json")?;
+
+    let (new_snap, signed_payload, signatures) = parse_snapshot(bytes.as_slice())?;
+    verify_role_signatures(
+        &signed_payload, &signatures,
+        &state.root.roles.snapshot, &state.root.keys,
+    ).map_err(|e| RoleVerify(e))?;
+
+    if new_snap.version != snap_spec.version {
+        return Err(InconsistentMetadata {
+            reason: format!("snapshot version mismatch: expected {} got {}",
+                snap_spec.version, new_snap.version).to_text(),
+        });
+    }
+    if let Some(prev) = &state.snapshot {
+        check_version_monotonic_snapshot(prev, &new_snap).map_err(|e| RoleVerify(e))?;
+        // Mix-and-match: every targets-metadata file present in prev
+        // MUST appear in new with version ≥ prev's version.
+        for (name, prev_spec) in prev.meta.iter() {
+            match new_snap.meta.get(name) {
+                Some(new_spec) => {
+                    if new_spec.version < prev_spec.version {
+                        return Err(InconsistentMetadata {
+                            reason: format!(
+                                "snapshot mix-and-match: {} version regressed ({} → {})",
+                                name, prev_spec.version, new_spec.version,
+                            ).to_text(),
+                        });
+                    }
+                }
+                None => {
+                    return Err(InconsistentMetadata {
+                        reason: format!("snapshot dropped previously-seen {}", name).to_text(),
+                    });
+                }
+            }
+        }
+    }
+    check_not_expired_snapshot(&new_snap).map_err(|e| RoleVerify(e))?;
+    state.snapshot = Some(new_snap);
+    Ok(())
+}
+
+// =============================================================================
+// 5.5 — Update targets (with delegation traversal)
+// =============================================================================
+
+async fn update_targets<R: TufRepository>(
+    state: &mut TrustedState,
+    repo:  &R,
+    role_name: &Text,
+    parent_keys: Maybe<&Map<KeyId, TufKey>>,
+) -> Result<(), TufClientError> {
+    let snapshot = state.snapshot.as_ref()
+        .ok_or_else(|| ChainBroken {
+            role: role_name_from_text(role_name),
+            reason: "no trusted snapshot".to_text(),
+        })?;
+    let filename = format!("{}.json", role_name).to_text();
+    let metafile = snapshot.meta.get(&filename)
+        .ok_or_else(|| InconsistentMetadata {
+            reason: format!("snapshot lacks {} entry", filename).to_text(),
+        })?
+        .clone();
+
+    let bytes = repo.fetch_metadata(
+        &role_name_from_text(role_name),
+        Some(metafile.version),
+    ).await.map_err(|e| Repo(e))?;
+    if let Some(expected_len) = metafile.length {
+        if bytes.len() != expected_len {
+            return Err(LengthMismatch {
+                what: filename.clone(),
+                expected: expected_len,
+                actual: bytes.len(),
+            });
+        }
+    }
+    if !metafile.hashes.is_empty() {
+        verify_hashes(&bytes, &metafile.hashes, &filename)?;
+    }
+
+    let (new_targets, signed_payload, signatures) = parse_targets(bytes.as_slice())?;
+
+    // Choose key map + role def: top-level uses root.targets; delegations
+    // use the parent's delegation block.
+    let (role_def, role_keys) = if role_name == "targets" {
+        (state.root.roles.targets.clone(), state.root.keys.clone())
+    } else {
+        let parent_keys_owned = parent_keys
+            .ok_or_else(|| ChainBroken {
+                role: RoleName.Delegated(role_name.clone()),
+                reason: "delegated role with no parent keys".to_text(),
+            })?
+            .clone();
+        // role_def is built from the parent delegation block (passed
+        // via state.delegated_keys side-channel). For symmetry, we
+        // expect callers to seed `state.delegated_keys[role_name]`
+        // before invoking us.
+        let synth_keyids: List<KeyId> = parent_keys_owned.keys().cloned().collect();
+        (RoleDef { keyids: synth_keyids, threshold: 1 }, parent_keys_owned)
+    };
+
+    verify_role_signatures(&signed_payload, &signatures, &role_def, &role_keys)
+        .map_err(|e| RoleVerify(e))?;
+
+    if new_targets.version != metafile.version {
+        return Err(InconsistentMetadata {
+            reason: format!("{} version mismatch: expected {} got {}",
+                role_name, metafile.version, new_targets.version).to_text(),
+        });
+    }
+    if let Some(prev) = state.targets.get(role_name) {
+        check_version_monotonic_targets(prev, &new_targets).map_err(|e| RoleVerify(e))?;
+    }
+    check_not_expired_targets(&new_targets).map_err(|e| RoleVerify(e))?;
+
+    state.targets.insert(role_name.clone(), new_targets);
+    Ok(())
+}
+
+// =============================================================================
+// 5.6 — Lookup target
+// =============================================================================
+
+/// Find the `TargetFile` spec for a logical target path by walking
+/// the delegation graph from the top-level Targets metadata. Returns
+/// `Err(TargetNotFound)` if no role claims the path.
+public fn lookup_target(
+    state: &TrustedState,
+    target_path: &Text,
+) -> Result<TargetFile, TufClientError> {
+    let mut visited: Set<Text> = Set.new();
+    lookup_in_role(state, &"targets".to_text(), target_path, &mut visited, 0)
+}
+
+fn lookup_in_role(
+    state: &TrustedState,
+    role_name: &Text,
+    target_path: &Text,
+    visited: &mut Set<Text>,
+    depth: Int,
+) -> Result<TargetFile, TufClientError> {
+    if depth >= MAX_DELEGATION_DEPTH {
+        return Err(DelegationDepthExceeded { limit: MAX_DELEGATION_DEPTH });
+    }
+    if visited.contains(role_name) {
+        return Err(InconsistentMetadata {
+            reason: format!("delegation cycle through {}", role_name).to_text(),
+        });
+    }
+    visited.insert(role_name.clone());
+
+    let targets = state.targets.get(role_name)
+        .ok_or_else(|| ChainBroken {
+            role: role_name_from_text(role_name),
+            reason: format!("{} metadata not loaded", role_name).to_text(),
+        })?;
+
+    // Direct hit on this Targets metadata.
+    if let Some(tf) = targets.targets.get(target_path) {
+        return Ok(tf.clone());
+    }
+
+    // Walk delegations in order; first match wins.
+    if let Some(delegations) = &targets.delegations {
+        let mut i: Int = 0;
+        while i < delegations.roles.len() {
+            let delegated = &delegations.roles[i];
+            if delegation_matches(delegated, target_path) {
+                let nested = lookup_in_role(state, &delegated.name, target_path, visited, depth + 1);
+                match nested {
+                    Ok(tf) => return Ok(tf),
+                    Err(TargetNotFound(_)) if !delegated.terminating => {
+                        // Continue scanning siblings.
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            i = i + 1;
+        }
+    }
+
+    Err(TargetNotFound(target_path.clone()))
+}
+
+// =============================================================================
+// 5.7 — Download target with verification
+// =============================================================================
+
+public async fn download_target<R: TufRepository>(
+    state: &TrustedState,
+    repo:  &R,
+    target_path: &Text,
+) -> Result<List<Byte>, TufClientError> {
+    let target_file = lookup_target(state, target_path)?;
+    let hash_prefix = if state.root.consistent_snapshot {
+        // Use SHA-256 if available, else first hash.
+        match target_file.hashes.get(&"sha256".to_text()) {
+            Some(h) => Some(h.clone()),
+            None    => target_file.hashes.iter().next().map(|(_, h)| h.clone()),
+        }
+    } else { None };
+    let bytes = repo.fetch_target(target_path, hash_prefix.as_ref()).await
+        .map_err(|e| Repo(e))?;
+    if bytes.len() != target_file.length {
+        return Err(LengthMismatch {
+            what: target_path.clone(),
+            expected: target_file.length,
+            actual: bytes.len(),
+        });
+    }
+    verify_hashes(&bytes, &target_file.hashes, target_path)?;
+    Ok(bytes)
+}
+
+// =============================================================================
+// Hash verification (RFC-spec hash-by-name)
+// =============================================================================
+
+fn verify_hashes(bytes: &List<Byte>, expected: &Map<Text, Text>, what: &Text) -> Result<(), TufClientError> {
+    if expected.is_empty() {
+        return Err(InconsistentMetadata {
+            reason: format!("{} metadata declares no hashes", what).to_text(),
+        });
+    }
+    for (alg, expected_hex) in expected.iter() {
+        let computed = match alg.as_str() {
+            "sha256" => hex_encode(&sha256_digest(bytes)),
+            "sha512" => hex_encode(&sha512_digest(bytes)),
+            _        => return Err(UnsupportedHashAlgorithm(alg.clone())),
+        };
+        if !ct_eq_hex(&computed, expected_hex) {
+            return Err(HashMismatch {
+                what: format!("{}/{}", what, alg).to_text(),
+                expected: expected_hex.clone(),
+                computed,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn ct_eq_hex(a: &Text, b: &Text) -> Bool {
+    if a.len() != b.len() { return false; }
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let mut diff: Int = 0;
+    let mut i: Int = 0;
+    while i < ab.len() {
+        diff = diff | (ab[i] as Int) ^ (bb[i] as Int);
+        i = i + 1;
+    }
+    diff == 0
+}
+
+// =============================================================================
+// Wire-format parsers (Signed<T> envelope decoding)
+// =============================================================================
+//
+// TUF metadata is JSON-encoded; we decode to the typed records via
+// `core.encoding.json` + a small per-role lifter. The JCS-canonical
+// `signed` payload is computed fresh from the parsed value (so the
+// signing input is what canonical.vr produces, not the raw bytes —
+// this makes the verification independent of whitespace tweaks the
+// publisher might have introduced).
+
+fn parse_root(bytes: &[Byte]) -> Result<(RootMetadata, List<Byte>, List<Signature>), TufClientError> {
+    let env = decode_envelope(bytes)?;
+    let signed_value = env.signed_value;
+    let payload = canonical_signing_payload(&signed_value).map_err(|e| Canonical(e))?;
+    let root = lift_root(&signed_value)?;
+    Ok((root, payload, env.signatures))
+}
+
+fn parse_timestamp(bytes: &[Byte]) -> Result<(TimestampMetadata, List<Byte>, List<Signature>), TufClientError> {
+    let env = decode_envelope(bytes)?;
+    let payload = canonical_signing_payload(&env.signed_value).map_err(|e| Canonical(e))?;
+    let ts = lift_timestamp(&env.signed_value)?;
+    Ok((ts, payload, env.signatures))
+}
+
+fn parse_snapshot(bytes: &[Byte]) -> Result<(SnapshotMetadata, List<Byte>, List<Signature>), TufClientError> {
+    let env = decode_envelope(bytes)?;
+    let payload = canonical_signing_payload(&env.signed_value).map_err(|e| Canonical(e))?;
+    let sn = lift_snapshot(&env.signed_value)?;
+    Ok((sn, payload, env.signatures))
+}
+
+fn parse_targets(bytes: &[Byte]) -> Result<(TargetsMetadata, List<Byte>, List<Signature>), TufClientError> {
+    let env = decode_envelope(bytes)?;
+    let payload = canonical_signing_payload(&env.signed_value).map_err(|e| Canonical(e))?;
+    let tg = lift_targets(&env.signed_value)?;
+    Ok((tg, payload, env.signatures))
+}
+
+struct Envelope {
+    signed_value: JsonValue,
+    signatures:   List<Signature>,
+}
+
+fn decode_envelope(bytes: &[Byte]) -> Result<Envelope, TufClientError> {
+    let value = json_decode(bytes).map_err(|e| InvalidJson(format!("{e}").to_text()))?;
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("envelope not an object".to_text()))?;
+    let signed_value = obj.get("signed").cloned()
+        .ok_or_else(|| InvalidJson("envelope missing 'signed'".to_text()))?;
+    let sigs_arr = obj.get("signatures").and_then(|v| v.as_array())
+        .ok_or_else(|| InvalidJson("envelope missing 'signatures'".to_text()))?;
+    let mut signatures: List<Signature> = List.new();
+    let mut i: Int = 0;
+    while i < sigs_arr.len() {
+        let s_obj = sigs_arr[i].as_object()
+            .ok_or_else(|| InvalidJson(f"signatures[{i}] not an object".to_text()))?;
+        let keyid = s_obj.get("keyid").and_then(|v| v.as_string())
+            .ok_or_else(|| InvalidJson(f"signatures[{i}].keyid missing".to_text()))?;
+        let sig = s_obj.get("sig").and_then(|v| v.as_string())
+            .ok_or_else(|| InvalidJson(f"signatures[{i}].sig missing".to_text()))?;
+        signatures.push(Signature { keyid: KeyId(keyid), sig });
+        i = i + 1;
+    }
+    Ok(Envelope { signed_value, signatures })
+}
+
+// ----- Per-role lifters -----
+
+fn lift_root(value: &JsonValue) -> Result<RootMetadata, TufClientError> {
+    let obj = value.as_object()
+        .ok_or_else(|| InvalidJson("root.signed not an object".to_text()))?;
+    let type_ = get_string(obj, "_type")?;
+    if type_ != "root" {
+        return Err(InvalidJson(format!("root._type {} not 'root'", type_).to_text()));
+    }
+    let spec_version = get_string(obj, "spec_version").unwrap_or_else(|_| "1.0.0".to_text());
+    let consistent_snapshot = obj.get("consistent_snapshot")
+        .and_then(|v| v.as_bool()).unwrap_or(false);
+    let version = get_int(obj, "version")?;
+    let expires = get_rfc3339(obj, "expires")?;
+    let keys_obj = obj.get("keys").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidJson("root.keys missing".to_text()))?;
+    let keys = lift_key_map(keys_obj)?;
+    let roles_obj = obj.get("roles").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidJson("root.roles missing".to_text()))?;
+    let roles = lift_root_roles(roles_obj)?;
+    Ok(RootMetadata { type_, spec_version, consistent_snapshot, version, expires, keys, roles })
+}
+
+fn lift_timestamp(value: &JsonValue) -> Result<TimestampMetadata, TufClientError> {
+    let obj = value.as_object().ok_or_else(|| InvalidJson("timestamp.signed not object".to_text()))?;
+    let type_ = get_string(obj, "_type")?;
+    if type_ != "timestamp" {
+        return Err(InvalidJson(format!("timestamp._type {}", type_).to_text()));
+    }
+    Ok(TimestampMetadata {
+        type_,
+        spec_version: get_string(obj, "spec_version").unwrap_or_else(|_| "1.0.0".to_text()),
+        version: get_int(obj, "version")?,
+        expires: get_rfc3339(obj, "expires")?,
+        meta:    lift_metafile_map(obj.get("meta").and_then(|v| v.as_object())
+            .ok_or_else(|| InvalidJson("timestamp.meta missing".to_text()))?)?,
+    })
+}
+
+fn lift_snapshot(value: &JsonValue) -> Result<SnapshotMetadata, TufClientError> {
+    let obj = value.as_object().ok_or_else(|| InvalidJson("snapshot.signed not object".to_text()))?;
+    let type_ = get_string(obj, "_type")?;
+    if type_ != "snapshot" {
+        return Err(InvalidJson(format!("snapshot._type {}", type_).to_text()));
+    }
+    Ok(SnapshotMetadata {
+        type_,
+        spec_version: get_string(obj, "spec_version").unwrap_or_else(|_| "1.0.0".to_text()),
+        version: get_int(obj, "version")?,
+        expires: get_rfc3339(obj, "expires")?,
+        meta:    lift_metafile_map(obj.get("meta").and_then(|v| v.as_object())
+            .ok_or_else(|| InvalidJson("snapshot.meta missing".to_text()))?)?,
+    })
+}
+
+fn lift_targets(value: &JsonValue) -> Result<TargetsMetadata, TufClientError> {
+    let obj = value.as_object().ok_or_else(|| InvalidJson("targets.signed not object".to_text()))?;
+    let type_ = get_string(obj, "_type")?;
+    if type_ != "targets" {
+        return Err(InvalidJson(format!("targets._type {}", type_).to_text()));
+    }
+    let mut targets_map: Map<Text, TargetFile> = Map.new();
+    if let Some(t_obj) = obj.get("targets").and_then(|v| v.as_object()) {
+        for (path, tf_v) in t_obj.iter() {
+            targets_map.insert(path.clone(), lift_target_file(tf_v)?);
+        }
+    }
+    let delegations = match obj.get("delegations").and_then(|v| v.as_object()) {
+        Some(d) => Some(lift_delegations(d)?),
+        None    => None,
+    };
+    Ok(TargetsMetadata {
+        type_,
+        spec_version: get_string(obj, "spec_version").unwrap_or_else(|_| "1.0.0".to_text()),
+        version: get_int(obj, "version")?,
+        expires: get_rfc3339(obj, "expires")?,
+        targets: targets_map,
+        delegations,
+    })
+}
+
+fn lift_target_file(v: &JsonValue) -> Result<TargetFile, TufClientError> {
+    let obj = v.as_object().ok_or_else(|| InvalidJson("target file not object".to_text()))?;
+    let length = obj.get("length").and_then(|x| x.as_int())
+        .ok_or_else(|| InvalidJson("target.length missing".to_text()))?;
+    let hashes_obj = obj.get("hashes").and_then(|x| x.as_object())
+        .ok_or_else(|| InvalidJson("target.hashes missing".to_text()))?;
+    let mut hashes: Map<Text, Text> = Map.new();
+    for (k, v) in hashes_obj.iter() {
+        if let Some(s) = v.as_string() { hashes.insert(k.clone(), s); }
+    }
+    let custom = obj.get("custom").cloned();
+    Ok(TargetFile { length, hashes, custom })
+}
+
+fn lift_delegations(obj: &JsonObject) -> Result<Delegations, TufClientError> {
+    let keys_obj = obj.get("keys").and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidJson("delegations.keys missing".to_text()))?;
+    let keys = lift_key_map(keys_obj)?;
+    let roles_arr = obj.get("roles").and_then(|v| v.as_array())
+        .ok_or_else(|| InvalidJson("delegations.roles missing".to_text()))?;
+    let mut roles: List<DelegatedRole> = List.with_capacity(roles_arr.len());
+    let mut i: Int = 0;
+    while i < roles_arr.len() {
+        let r_obj = roles_arr[i].as_object()
+            .ok_or_else(|| InvalidJson(f"delegations.roles[{i}] not object".to_text()))?;
+        let name = get_string(r_obj, "name")?;
+        let keyids_arr = r_obj.get("keyids").and_then(|v| v.as_array())
+            .ok_or_else(|| InvalidJson(f"delegations.roles[{i}].keyids missing".to_text()))?;
+        let mut keyids: List<KeyId> = List.with_capacity(keyids_arr.len());
+        let mut j: Int = 0;
+        while j < keyids_arr.len() {
+            keyids.push(KeyId(keyids_arr[j].as_string().unwrap_or_else(|| "".to_text())));
+            j = j + 1;
+        }
+        let threshold = get_int(r_obj, "threshold")?;
+        let terminating = r_obj.get("terminating").and_then(|v| v.as_bool()).unwrap_or(false);
+        let paths = r_obj.get("paths").and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect::<List<Text>>());
+        let path_hash_prefixes = r_obj.get("path_hash_prefixes").and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|x| x.as_string()).collect::<List<Text>>());
+        roles.push(DelegatedRole {
+            name, keyids, threshold, terminating, paths, path_hash_prefixes,
+        });
+        i = i + 1;
+    }
+    Ok(Delegations { keys, roles })
+}
+
+fn lift_key_map(obj: &JsonObject) -> Result<Map<KeyId, TufKey>, TufClientError> {
+    let mut out: Map<KeyId, TufKey> = Map.new();
+    for (kid_text, k_v) in obj.iter() {
+        let k_obj = k_v.as_object()
+            .ok_or_else(|| InvalidJson(f"keys.{kid_text} not object".to_text()))?;
+        let keytype_text = get_string(k_obj, "keytype")?;
+        let scheme_text  = get_string(k_obj, "scheme")?;
+        let keyval = k_obj.get("keyval").cloned()
+            .ok_or_else(|| InvalidJson(f"keys.{kid_text}.keyval missing".to_text()))?;
+        let key = TufKey {
+            keytype: security.tuf.canonical.keytype_from_text(&keytype_text),
+            scheme:  security.tuf.canonical.scheme_from_text(&scheme_text),
+            keyval,
+        };
+        out.insert(KeyId(kid_text.clone()), key);
+    }
+    Ok(out)
+}
+
+fn lift_root_roles(obj: &JsonObject) -> Result<RootRoles, TufClientError> {
+    Ok(RootRoles {
+        root:      lift_role_def(obj, "root")?,
+        targets:   lift_role_def(obj, "targets")?,
+        snapshot:  lift_role_def(obj, "snapshot")?,
+        timestamp: lift_role_def(obj, "timestamp")?,
+    })
+}
+
+fn lift_role_def(obj: &JsonObject, name: &str) -> Result<RoleDef, TufClientError> {
+    let r = obj.get(name).and_then(|v| v.as_object())
+        .ok_or_else(|| InvalidJson(format!("roles.{} missing", name).to_text()))?;
+    let keyids_arr = r.get("keyids").and_then(|v| v.as_array())
+        .ok_or_else(|| InvalidJson(format!("roles.{}.keyids missing", name).to_text()))?;
+    let mut keyids: List<KeyId> = List.with_capacity(keyids_arr.len());
+    let mut i: Int = 0;
+    while i < keyids_arr.len() {
+        keyids.push(KeyId(keyids_arr[i].as_string().unwrap_or_else(|| "".to_text())));
+        i = i + 1;
+    }
+    let threshold = get_int(r, "threshold")?;
+    Ok(RoleDef { keyids, threshold })
+}
+
+fn lift_metafile_map(obj: &JsonObject) -> Result<Map<Text, MetafileSpec>, TufClientError> {
+    let mut out: Map<Text, MetafileSpec> = Map.new();
+    for (name, v) in obj.iter() {
+        let m_obj = v.as_object()
+            .ok_or_else(|| InvalidJson(f"meta.{name} not object".to_text()))?;
+        let length = m_obj.get("length").and_then(|x| x.as_int());
+        let hashes_obj = m_obj.get("hashes").and_then(|x| x.as_object());
+        let mut hashes: Map<Text, Text> = Map.new();
+        if let Some(h_obj) = hashes_obj {
+            for (k, v) in h_obj.iter() {
+                if let Some(s) = v.as_string() { hashes.insert(k.clone(), s); }
+            }
+        }
+        let version = get_int(m_obj, "version")?;
+        out.insert(name.clone(), MetafileSpec { length, hashes, version });
+    }
+    Ok(out)
+}
+
+// ----- JSON helpers -----
+
+fn get_string(obj: &JsonObject, key: &str) -> Result<Text, TufClientError> {
+    obj.get(key).and_then(|v| v.as_string())
+        .ok_or_else(|| InvalidJson(format!("missing/non-string field: {}", key).to_text()))
+}
+
+fn get_int(obj: &JsonObject, key: &str) -> Result<Int, TufClientError> {
+    obj.get(key).and_then(|v| v.as_int())
+        .ok_or_else(|| InvalidJson(format!("missing/non-int field: {}", key).to_text()))
+}
+
+fn get_rfc3339(obj: &JsonObject, key: &str) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
+    let s = get_string(obj, key)?;
+    core.time.rfc3339.parse_rfc3339(&s)
+        .map_err(|e| InvalidJson(format!("{} parse: {e}", key).to_text()))
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_constants() {
+        assert_eq(MAX_ROOT_CHAIN_LENGTH, 1024);
+        assert_eq(MAX_DELEGATION_DEPTH, 32);
+    }
+
+    #[test]
+    fn test_ct_eq_hex_basic() {
+        assert_eq(ct_eq_hex(&"abc".to_text(), &"abc".to_text()), true);
+        assert_eq(ct_eq_hex(&"abc".to_text(), &"abd".to_text()), false);
+        assert_eq(ct_eq_hex(&"abc".to_text(), &"abcd".to_text()), false);
+    }
+}

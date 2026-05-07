@@ -1,0 +1,488 @@
+// =============================================================================
+// security/tuf/repository.vr — TUF repository abstraction + cache
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, sync/rwlock, time/system_time,
+//               net/http, io/path, security/tuf/types
+// =============================================================================
+//
+// **Purpose.** Abstract interface to a TUF repository — the source
+// of role metadata files (`root.json`, `timestamp.json`, etc.) and
+// target files. Two concrete implementations:
+//
+//   - `HttpRepository`  — fetches over HTTP/HTTPS. Standard for
+//     PyPI, sigstore root, Docker Notary, the Verum registry.
+//   - `LocalRepository` — reads from a filesystem directory.
+//     Used for offline mirrors, tests, embedded use.
+//
+// **Consistent snapshot mode.** Per TUF spec §6.2, when the Root
+// metadata's `consistent_snapshot=true`, role metadata files are
+// version-prefixed (`<version>.<role>.json`) and target files are
+// hash-prefixed (`<hash>.<targetpath>`). This lets the repository
+// keep all historical metadata visible — clients can fetch arbitrary
+// past versions for audit. This module exposes the URL composition
+// helpers; the client.vr module decides which form to fetch.
+//
+// **Bounds.** Each role has its own size cap to prevent endless-data
+// attacks (TUF spec §6.0):
+//   - root:      512 KiB  (small, keys + role defs)
+//   - timestamp: 16 KiB   (a single MetafileSpec)
+//   - snapshot:  16 MiB   (one entry per Targets file)
+//   - targets:   16 MiB   (large registries fit comfortably)
+//   - any other: 16 MiB   (delegated targets)
+//
+// **Cache.** TTL-based with conservative defaults. Callers usually
+// invalidate explicitly via the client.vr workflow's `expires`
+// checks; the cache is just an optimisation for repeated calls
+// within an update cycle.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF repository abstraction + bounded fetch + consistent-snapshot URL composition",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf.repository;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
+mount io.path.{Path, PathBuf};
+mount sync.rwlock.{RwLock};
+mount time.system_time.{epoch_seconds};
+mount security.tuf.types.{RoleName, role_name_to_text};
+
+// =============================================================================
+// Size caps (per role, in bytes)
+// =============================================================================
+
+public const MAX_ROOT_BYTES:      Int = 512 * 1024;       // 512 KiB
+public const MAX_TIMESTAMP_BYTES: Int = 16 * 1024;        // 16 KiB
+public const MAX_SNAPSHOT_BYTES:  Int = 16 * 1024 * 1024; // 16 MiB
+public const MAX_TARGETS_BYTES:   Int = 16 * 1024 * 1024; // 16 MiB
+public const MAX_TARGET_FILE_BYTES: Int = 1024 * 1024 * 1024; // 1 GiB hard cap
+
+public fn max_bytes_for_role(role: &RoleName) -> Int {
+    match role {
+        RoleName.Root         => MAX_ROOT_BYTES,
+        RoleName.Timestamp    => MAX_TIMESTAMP_BYTES,
+        RoleName.Snapshot     => MAX_SNAPSHOT_BYTES,
+        RoleName.Targets      => MAX_TARGETS_BYTES,
+        RoleName.Delegated(_) => MAX_TARGETS_BYTES,
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type RepoError is
+    | NotFound { role: RoleName, version: Maybe<Int> }
+    | TargetNotFound(Text)
+    | TooLarge { role: Text, size: Int, limit: Int }
+    | NetworkError(HttpError)
+    | IoError(Text)
+    | InvalidUrl(Text)
+    | InvalidStatus(StatusCode);
+
+implement Display for RepoError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound { role, version } => f.write_str(
+                f"tuf/repo: {role:?} (v{version:?}) not found".as_str()),
+            TargetNotFound(p)          => f.write_str(f"tuf/repo: target not found: {p}".as_str()),
+            TooLarge { role, size, limit } => f.write_str(
+                f"tuf/repo: {role} too large ({size} > {limit})".as_str()),
+            NetworkError(e)            => f.write_str(f"tuf/repo: network error: {e}".as_str()),
+            IoError(reason)            => f.write_str(f"tuf/repo: io error: {reason}".as_str()),
+            InvalidUrl(reason)         => f.write_str(f"tuf/repo: invalid url: {reason}".as_str()),
+            InvalidStatus(s)           => f.write_str(f"tuf/repo: HTTP {s}".as_str()),
+        }
+    }
+}
+
+implement Debug for RepoError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+/// Abstract repository.
+public type TufRepository is protocol {
+    /// Fetch a role's metadata file. When `version` is `Some(n)` and
+    /// the repository is in consistent-snapshot mode, the implementor
+    /// SHOULD compose `<n>.<role>.json`. When `version` is `None`,
+    /// fetch `<role>.json` (latest, for the timestamp role typically).
+    async fn fetch_metadata(
+        &self,
+        role:    &RoleName,
+        version: Maybe<Int>,
+    ) -> Result<List<Byte>, RepoError>;
+
+    /// Fetch a target file. `path` is the logical target path (e.g.,
+    /// `"my-cog/1.0.0.vbca"`). When in consistent-snapshot mode,
+    /// `hash_prefix` is the hash that gets prepended to the path's
+    /// last component (`<hash>.<basename>`).
+    async fn fetch_target(
+        &self,
+        path:        &Text,
+        hash_prefix: Maybe<&Text>,
+    ) -> Result<List<Byte>, RepoError>;
+};
+
+// =============================================================================
+// HTTP repository
+// =============================================================================
+
+@derive(Debug)
+public type HttpRepository<C: HttpClient> is {
+    client:           C,
+    /// Base URL for metadata files (typically `"https://repo/metadata/"`).
+    metadata_base_url: Text,
+    /// Base URL for target files (typically `"https://repo/targets/"`).
+    /// May be the same as `metadata_base_url` for some deployments.
+    targets_base_url:  Text,
+    /// True iff the repository serves version-prefixed metadata +
+    /// hash-prefixed targets per TUF spec §6.2.
+    consistent_snapshot: Bool,
+};
+
+public fn http_repository_new<C: HttpClient>(
+    client: C,
+    metadata_base_url: Text,
+    targets_base_url:  Text,
+    consistent_snapshot: Bool,
+) -> HttpRepository<C> {
+    HttpRepository {
+        client,
+        metadata_base_url,
+        targets_base_url,
+        consistent_snapshot,
+    }
+}
+
+implement<C: HttpClient> TufRepository for HttpRepository<C> {
+    async fn fetch_metadata(
+        &self,
+        role:    &RoleName,
+        version: Maybe<Int>,
+    ) -> Result<List<Byte>, RepoError> {
+        let url = compose_metadata_url(
+            &self.metadata_base_url,
+            role,
+            version,
+            self.consistent_snapshot,
+        );
+        let bytes = http_get(&self.client, &url, max_bytes_for_role(role), &role_name_to_text(role)).await?;
+        Ok(bytes)
+    }
+
+    async fn fetch_target(
+        &self,
+        path:        &Text,
+        hash_prefix: Maybe<&Text>,
+    ) -> Result<List<Byte>, RepoError> {
+        let url = compose_target_url(
+            &self.targets_base_url,
+            path,
+            hash_prefix,
+            self.consistent_snapshot,
+        );
+        let bytes = http_get(&self.client, &url, MAX_TARGET_FILE_BYTES, "target").await?;
+        Ok(bytes)
+    }
+}
+
+async fn http_get<C: HttpClient>(
+    client: &C,
+    url: &Text,
+    max_size: Int,
+    label: &str,
+) -> Result<List<Byte>, RepoError> {
+    let mut headers: Map<Text, Text> = Map.new();
+    headers.insert("user-agent".to_text(), "verum-tuf/0.1".to_text());
+    let req = Request {
+        method:  Method.Get,
+        url:     url.clone(),
+        headers,
+        body:    List.new(),
+    };
+    let resp = client.send(&req).await
+        .map_err(|e| NetworkError(e))?;
+    if resp.status.is_404() {
+        return Err(NotFound {
+            role: RoleName.Delegated(format!("@url={}", url).to_text()),
+            version: None,
+        });
+    }
+    if !resp.status.is_success() {
+        return Err(InvalidStatus(resp.status));
+    }
+    if resp.body.len() > max_size {
+        return Err(TooLarge { role: label.to_text(), size: resp.body.len(), limit: max_size });
+    }
+    Ok(resp.body)
+}
+
+// =============================================================================
+// URL composition
+// =============================================================================
+
+/// Compose the metadata URL.
+///
+///   consistent_snapshot=true,  version=Some(N)  → `<base>/N.<role>.json`
+///   consistent_snapshot=true,  version=None     → `<base>/<role>.json`
+///   consistent_snapshot=false                   → `<base>/<role>.json`
+public fn compose_metadata_url(
+    base: &Text,
+    role: &RoleName,
+    version: Maybe<Int>,
+    consistent_snapshot: Bool,
+) -> Text {
+    let role_text = role_name_to_text(role);
+    let prefix = if consistent_snapshot {
+        match version {
+            Some(v) => format!("{}.", v).to_text(),
+            None    => "".to_text(),
+        }
+    } else { "".to_text() };
+    let separator = if base.ends_with("/") { "".to_text() } else { "/".to_text() };
+    format!("{}{}{}{}.json", base, separator, prefix, role_text).to_text()
+}
+
+/// Compose the target URL.
+///
+///   consistent_snapshot=true   → `<base>/<dirname>/<hash>.<basename>`
+///   consistent_snapshot=false  → `<base>/<path>`
+public fn compose_target_url(
+    base: &Text,
+    path: &Text,
+    hash_prefix: Maybe<&Text>,
+    consistent_snapshot: Bool,
+) -> Text {
+    let separator = if base.ends_with("/") { "".to_text() } else { "/".to_text() };
+    if !consistent_snapshot {
+        return format!("{}{}{}", base, separator, path).to_text();
+    }
+    match hash_prefix {
+        Some(h) => {
+            // Insert <h>. before the last path component's basename.
+            let last_slash = path.rfind_byte(b'/').unwrap_or_else(|| -1);
+            if last_slash < 0 {
+                format!("{}{}{}.{}", base, separator, h, path).to_text()
+            } else {
+                let dir = path.byte_substring(0, last_slash + 1);
+                let basename = path.byte_substring(last_slash + 1, path.len());
+                format!("{}{}{}{}.{}", base, separator, dir, h, basename).to_text()
+            }
+        }
+        None => format!("{}{}{}", base, separator, path).to_text(),
+    }
+}
+
+// =============================================================================
+// Local repository
+// =============================================================================
+
+@derive(Debug)
+public type LocalRepository is {
+    /// Filesystem directory containing `metadata/` + `targets/`.
+    root:                Path,
+    consistent_snapshot: Bool,
+}
+
+public fn local_repository_new(root: Path, consistent_snapshot: Bool) -> LocalRepository {
+    LocalRepository { root, consistent_snapshot }
+}
+
+implement TufRepository for LocalRepository {
+    async fn fetch_metadata(
+        &self,
+        role:    &RoleName,
+        version: Maybe<Int>,
+    ) -> Result<List<Byte>, RepoError>
+        using [Filesystem]
+    {
+        let role_text = role_name_to_text(role);
+        let filename = if self.consistent_snapshot {
+            match version {
+                Some(v) => format!("{}.{}.json", v, role_text).to_text(),
+                None    => format!("{}.json", role_text).to_text(),
+            }
+        } else {
+            format!("{}.json", role_text).to_text()
+        };
+        let path = self.root.join("metadata").join(&filename);
+        match Filesystem.read_file_bytes(&path).await {
+            Ok(bytes) => {
+                let limit = max_bytes_for_role(role);
+                if bytes.len() > limit {
+                    Err(TooLarge { role: role_text, size: bytes.len(), limit })
+                } else {
+                    Ok(bytes)
+                }
+            }
+            Err(_) => Err(NotFound { role: role.clone(), version }),
+        }
+    }
+
+    async fn fetch_target(
+        &self,
+        path:        &Text,
+        hash_prefix: Maybe<&Text>,
+    ) -> Result<List<Byte>, RepoError>
+        using [Filesystem]
+    {
+        let _ = hash_prefix; // local mode optionally honours, omitted for v0.1
+        let target_path = self.root.join("targets").join(path);
+        match Filesystem.read_file_bytes(&target_path).await {
+            Ok(bytes) => {
+                if bytes.len() > MAX_TARGET_FILE_BYTES {
+                    Err(TooLarge { role: "target".to_text(), size: bytes.len(), limit: MAX_TARGET_FILE_BYTES })
+                } else {
+                    Ok(bytes)
+                }
+            }
+            Err(_) => Err(TargetNotFound(path.clone())),
+        }
+    }
+}
+
+// =============================================================================
+// In-process cache
+// =============================================================================
+
+@derive(Debug)
+type CacheEntry is {
+    bytes:      List<Byte>,
+    fetched_at: Int,
+};
+
+@derive(Debug)
+public type RepoCache is {
+    inner:        RwLock<Map<Text, CacheEntry>>,
+    ttl_seconds:  Int,
+};
+
+public fn repo_cache_new(ttl_seconds: Int) -> RepoCache {
+    RepoCache { inner: RwLock.new(Map.new()), ttl_seconds }
+}
+
+public async fn repo_cache_lookup(cache: &RepoCache, key: &Text) -> Maybe<List<Byte>> {
+    let now = epoch_seconds();
+    let read = cache.inner.read().await;
+    match read.get(key) {
+        Some(entry) => {
+            if now - entry.fetched_at <= cache.ttl_seconds {
+                Some(entry.bytes.clone())
+            } else { None }
+        }
+        None => None,
+    }
+}
+
+public async fn repo_cache_insert(cache: &RepoCache, key: Text, bytes: List<Byte>) {
+    let entry = CacheEntry { bytes, fetched_at: epoch_seconds() };
+    let mut write = cache.inner.write().await;
+    write.insert(key, entry);
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_compose_metadata_url_no_consistent() {
+        let u = compose_metadata_url(
+            &"https://repo/metadata".to_text(),
+            &RoleName.Root,
+            Some(3),
+            false,
+        );
+        assert_eq(u, "https://repo/metadata/root.json".to_text());
+    }
+
+    #[test]
+    fn test_compose_metadata_url_consistent_versioned() {
+        let u = compose_metadata_url(
+            &"https://repo/metadata/".to_text(),
+            &RoleName.Snapshot,
+            Some(7),
+            true,
+        );
+        assert_eq(u, "https://repo/metadata/7.snapshot.json".to_text());
+    }
+
+    #[test]
+    fn test_compose_metadata_url_consistent_no_version() {
+        // Timestamp is fetched without version even in consistent mode.
+        let u = compose_metadata_url(
+            &"https://repo/metadata".to_text(),
+            &RoleName.Timestamp,
+            None,
+            true,
+        );
+        assert_eq(u, "https://repo/metadata/timestamp.json".to_text());
+    }
+
+    #[test]
+    fn test_compose_target_url_no_consistent() {
+        let u = compose_target_url(
+            &"https://repo/targets".to_text(),
+            &"my-cog/1.0.0.vbca".to_text(),
+            None,
+            false,
+        );
+        assert_eq(u, "https://repo/targets/my-cog/1.0.0.vbca".to_text());
+    }
+
+    #[test]
+    fn test_compose_target_url_consistent_with_hash() {
+        let u = compose_target_url(
+            &"https://repo/targets".to_text(),
+            &"my-cog/1.0.0.vbca".to_text(),
+            Some(&"deadbeef".to_text()),
+            true,
+        );
+        assert_eq(u, "https://repo/targets/my-cog/deadbeef.1.0.0.vbca".to_text());
+    }
+
+    #[test]
+    fn test_compose_target_url_consistent_root_level() {
+        let u = compose_target_url(
+            &"https://repo/targets/".to_text(),
+            &"file.txt".to_text(),
+            Some(&"abc123".to_text()),
+            true,
+        );
+        assert_eq(u, "https://repo/targets/abc123.file.txt".to_text());
+    }
+
+    #[test]
+    fn test_max_bytes_per_role() {
+        assert_eq(max_bytes_for_role(&RoleName.Root),      MAX_ROOT_BYTES);
+        assert_eq(max_bytes_for_role(&RoleName.Timestamp), MAX_TIMESTAMP_BYTES);
+        assert_eq(max_bytes_for_role(&RoleName.Snapshot),  MAX_SNAPSHOT_BYTES);
+        assert_eq(max_bytes_for_role(&RoleName.Targets),   MAX_TARGETS_BYTES);
+        assert_eq(max_bytes_for_role(&RoleName.Delegated("foo".to_text())), MAX_TARGETS_BYTES);
+    }
+}

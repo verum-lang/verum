@@ -1,0 +1,81 @@
+// =============================================================================
+// security/tuf/mod.vr — TUF (The Update Framework) facade
+// =============================================================================
+// Layer: 2 (Security primitives)
+//
+// **Purpose.** Public surface aggregator for TUF spec v1.0+ (tuf.io)
+// implementation. Compromise-resilient software-distribution
+// framework: Root anchors trust, Timestamp + Snapshot detect freeze
+// + mix-and-match attacks, Targets resolve paths to verified files,
+// delegations partition authority, threshold signing tolerates
+// individual key compromise.
+//
+// **Layer composition.**
+//
+//   types.vr        — metadata data model (4 roles + delegations)
+//   canonical.vr    — JCS-canonical signing payload + keyid hash
+//   role_verify.vr  — threshold verify + rollback / freeze checks
+//   repository.vr   — TufRepository protocol + HTTP/Local concrete
+//   client.vr       — full §5 update workflow
+//
+// **Used by.** Verum registry's trusted-root distribution, sigstore
+// trust-root rotation, IDE / CLI's `verum publish/install` flows.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF (The Update Framework) subsystem facade — types + canonical + verify + repo + client",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf;
+
+public module types;
+public module canonical;
+public module role_verify;
+public module repository;
+public module client;
+
+// Re-exports — types
+public mount .types.{
+    RoleName, KeyId, TufKey, TufKeyType, TufKeyScheme, Signature, Signed,
+    RoleDef, RootMetadata, RootRoles, TimestampMetadata, SnapshotMetadata,
+    TargetsMetadata, TargetFile, MetafileSpec, Delegations, DelegatedRole,
+};
+
+// Re-exports — canonical
+public mount .canonical.{canonical_signing_payload, compute_keyid, CanonicalError};
+
+// Re-exports — role verify
+public mount .role_verify.{
+    RoleVerifyError, verify_role_signatures, verify_one_signature,
+    check_version_monotonic_root, check_version_monotonic_timestamp,
+    check_version_monotonic_snapshot, check_version_monotonic_targets,
+    check_not_expired_root, check_not_expired_timestamp,
+    check_not_expired_snapshot, check_not_expired_targets,
+};
+
+// Re-exports — repository
+public mount .repository.{
+    TufRepository, RepoError, HttpRepository, LocalRepository,
+    http_repository_new, local_repository_new,
+    RepoCache, repo_cache_new, repo_cache_lookup, repo_cache_insert,
+    compose_metadata_url, compose_target_url,
+};
+
+// Re-exports — client
+public mount .client.{
+    TufClientError, TrustedState, trusted_state_new,
+    update, lookup_target, download_target,
+};

@@ -1,0 +1,461 @@
+// =============================================================================
+// security/tuf/role_verify.vr — TUF threshold signature verification
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, security/tuf/{types, canonical},
+//               security/{ecc/ed25519, ecc/p256, sig/rsa, hash/sha256},
+//               encoding/{json, hex, der}, time/{rfc3339, system_time}
+// =============================================================================
+//
+// **Purpose.** Threshold-aware verification of TUF Signed<T>
+// envelopes. Given a metadata blob + a role definition (keyids +
+// threshold) + a key map, decide whether enough valid signatures
+// are present.
+//
+// **Algorithm (TUF spec §5.1).**
+//
+//   1. Build set of trusted keys for the role (keyids ∩ key map).
+//   2. For each signature in the envelope:
+//        a. lookup the signer's key by keyid; skip if not trusted.
+//        b. dispatch on key.scheme to the correct cryptographic verify.
+//        c. add keyid to `valid_keyids` set on success.
+//   3. Verification passes iff |valid_keyids| ≥ threshold.
+//
+// **Replay / freeze / expiry.** This module also carries the
+// per-role business-logic checks:
+//   - `check_version_monotonic(prev, curr)` — rollback detection.
+//   - `check_not_expired(metadata, now)` — freeze detection.
+//
+// **Categorical structure.** Verification is the discrete fibration
+// over RoleDef: each role's verification function factors through
+// the role's keyids → keys map and threshold. Composition with
+// multi-role checks (Root → Targets → Snapshot → Timestamp) yields
+// the trust-flow chain.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TUF threshold signature verification + rollback/freeze detection",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.tuf.role_verify;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map, Set};
+mount encoding.json.{JsonValue, JsonObject};
+mount encoding.hex.{decode as hex_decode};
+mount encoding.der.{DerError};
+mount time.rfc3339.{Rfc3339Time, parse_rfc3339};
+mount time.system_time.{epoch_seconds};
+mount security.ecc.ed25519.{
+    Ed25519PublicKey, Ed25519Signature,
+    verify as ed25519_verify,
+};
+mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.hash.sha256.{Sha256};
+mount security.sig.rsa.{
+    RsaPublicKey as RsaVerifyKey, RsaHash,
+    verify_pkcs1_v15_prehashed, verify_pss_prehashed,
+};
+mount security.tuf.types.{
+    Signed, Signature, RoleDef, TufKey, TufKeyType, TufKeyScheme, KeyId,
+    RootMetadata, TimestampMetadata, SnapshotMetadata, TargetsMetadata,
+};
+mount security.tuf.canonical.{canonical_signing_payload, CanonicalError};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type RoleVerifyError is
+    | CanonicalFailed(CanonicalError)
+    | InsufficientSignatures { valid: Int, threshold: Int }
+    | UnknownKeyId(KeyId)
+    | UnsupportedScheme(Text)
+    | MalformedSignature(Text)
+    | MalformedKey(Text)
+    | DuplicateKeyId(KeyId)
+    | RollbackDetected { previous_version: Int, current_version: Int }
+    | Expired { expires: Rfc3339Time, now: Int }
+    | InvalidExpiresField(Text);
+
+implement Display for RoleVerifyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CanonicalFailed(e)              => f.write_str(f"tuf/verify: {e}".as_str()),
+            InsufficientSignatures { valid, threshold } => f.write_str(
+                f"tuf/verify: {valid} valid signatures < threshold {threshold}".as_str()),
+            UnknownKeyId(k)                 => f.write_str(f"tuf/verify: unknown keyid {k.0}".as_str()),
+            UnsupportedScheme(s)            => f.write_str(f"tuf/verify: unsupported scheme {s}".as_str()),
+            MalformedSignature(reason)      => f.write_str(f"tuf/verify: malformed signature: {reason}".as_str()),
+            MalformedKey(reason)            => f.write_str(f"tuf/verify: malformed key: {reason}".as_str()),
+            DuplicateKeyId(k)               => f.write_str(f"tuf/verify: duplicate keyid in role: {k.0}".as_str()),
+            RollbackDetected { previous_version, current_version } => f.write_str(
+                f"tuf/verify: rollback detected (previous={previous_version}, current={current_version})".as_str()),
+            Expired { expires, now }        => f.write_str(f"tuf/verify: metadata expired (expires={expires:?}, now={now})".as_str()),
+            InvalidExpiresField(reason)     => f.write_str(f"tuf/verify: invalid 'expires' field: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for RoleVerifyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Verify a `Signed<T>` envelope against a role definition.
+///
+/// **Inputs.**
+///   - `signed_payload` — JCS-canonicalised bytes of the `signed`
+///     field (NOT the full envelope). Caller is responsible for
+///     extracting + canonicalising via canonical.vr.
+///   - `signatures`     — the envelope's `signatures` field.
+///   - `role_def`       — keyids + threshold for this role.
+///   - `keys`           — global keyid → key map (typically from
+///                        the trusted Root).
+///
+/// Returns `Ok(())` iff at least `role_def.threshold` distinct
+/// trusted signatures verify.
+public fn verify_role_signatures(
+    signed_payload: &List<Byte>,
+    signatures:     &List<Signature>,
+    role_def:       &RoleDef,
+    keys:           &Map<KeyId, TufKey>,
+) -> Result<(), RoleVerifyError> {
+    // Build trusted keyid set for this role (intersection with
+    // key map; missing keys are silently dropped — they cannot
+    // produce a valid signature in any case).
+    let mut trusted: Set<KeyId> = Set.new();
+    let mut i: Int = 0;
+    while i < role_def.keyids.len() {
+        let k = &role_def.keyids[i];
+        if keys.contains_key(k) { trusted.insert(k.clone()); }
+        i = i + 1;
+    }
+
+    let mut valid: Set<KeyId> = Set.new();
+    let mut j: Int = 0;
+    while j < signatures.len() {
+        let sig = &signatures[j];
+        // Per spec §5.1: a keyid not in the trusted set is silently
+        // ignored (a valid sig from an untrusted key counts for nothing).
+        if !trusted.contains(&sig.keyid) {
+            j = j + 1;
+            continue;
+        }
+        let key = match keys.get(&sig.keyid) {
+            Some(k) => k.clone(),
+            None    => { j = j + 1; continue; }
+        };
+        match verify_one_signature(signed_payload, sig, &key) {
+            Ok(()) => { valid.insert(sig.keyid.clone()); }
+            Err(_) => {} // bad signature does NOT fail the whole verify; just doesn't count
+        }
+        j = j + 1;
+    }
+
+    if valid.len() < role_def.threshold {
+        return Err(InsufficientSignatures { valid: valid.len(), threshold: role_def.threshold });
+    }
+    Ok(())
+}
+
+/// Verify a single signature against a key. Public for callers that
+/// want fine-grained per-signature diagnostics.
+public fn verify_one_signature(
+    payload: &List<Byte>,
+    sig:     &Signature,
+    key:     &TufKey,
+) -> Result<(), RoleVerifyError> {
+    let sig_bytes = hex_decode(&sig.sig)
+        .map_err(|e| MalformedSignature(format!("hex decode: {e}").to_text()))?;
+    match &key.scheme {
+        TufKeyScheme.Ed25519Scheme       => verify_ed25519_sig(payload, &sig_bytes, key),
+        TufKeyScheme.EcdsaSha2NistP256   => verify_ecdsa_p256_sig(payload, &sig_bytes, key),
+        TufKeyScheme.RsaPkcs1V15Sha256   => verify_rsa_pkcs1_sig(payload, &sig_bytes, key),
+        TufKeyScheme.RsassaPssSha256     => verify_rsa_pss_sig(payload, &sig_bytes, key),
+        TufKeyScheme.Other(s)            => Err(UnsupportedScheme(s.clone())),
+    }
+}
+
+// =============================================================================
+// Per-scheme verifiers
+// =============================================================================
+
+fn verify_ed25519_sig(
+    payload: &List<Byte>,
+    sig_bytes: &List<Byte>,
+    key: &TufKey,
+) -> Result<(), RoleVerifyError> {
+    if sig_bytes.len() != 64 {
+        return Err(MalformedSignature(format!("ed25519: expected 64 bytes, got {}", sig_bytes.len()).to_text()));
+    }
+    let pk_hex = extract_keyval_public_hex(key)?;
+    let pk_bytes = hex_decode(&pk_hex)
+        .map_err(|e| MalformedKey(format!("ed25519 public hex: {e}").to_text()))?;
+    if pk_bytes.len() != 32 {
+        return Err(MalformedKey(format!("ed25519: expected 32-byte public key, got {}", pk_bytes.len()).to_text()));
+    }
+    let mut pk: Ed25519PublicKey = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { pk[i] = pk_bytes[i]; i = i + 1; }
+    let mut sig: Ed25519Signature = [0_u8; 64];
+    let mut k: Int = 0;
+    while k < 64 { sig[k] = sig_bytes[k]; k = k + 1; }
+    match ed25519_verify(&pk, payload.as_slice(), &sig) {
+        Ok(())  => Ok(()),
+        Err(_)  => Err(MalformedSignature("ed25519: verification failed".to_text())),
+    }
+}
+
+fn verify_ecdsa_p256_sig(
+    payload: &List<Byte>,
+    sig_bytes: &List<Byte>,
+    key: &TufKey,
+) -> Result<(), RoleVerifyError> {
+    let pk_pem_or_hex = extract_keyval_public_hex(key)?;
+    // TUF allows either PEM (PKIX SubjectPublicKeyInfo) or raw
+    // uncompressed point; we support raw uncompressed (0x04 || X || Y).
+    let pk_bytes = hex_decode(&pk_pem_or_hex)
+        .map_err(|e| MalformedKey(format!("p256 public hex: {e}").to_text()))?;
+    let pk = P256PublicKey.from_uncompressed(pk_bytes.as_slice())
+        .map_err(|_| MalformedKey("p256: invalid uncompressed point".to_text()))?;
+    let sig = P256Signature.from_der(sig_bytes.as_slice())
+        .map_err(|_| MalformedSignature("p256: invalid DER signature".to_text()))?;
+    let digest = Sha256.digest(payload.as_slice());
+    match P256.verify_prehashed(&pk, &digest, &sig) {
+        Ok(())  => Ok(()),
+        Err(_)  => Err(MalformedSignature("p256: verification failed".to_text())),
+    }
+}
+
+fn verify_rsa_pkcs1_sig(
+    payload: &List<Byte>,
+    sig_bytes: &List<Byte>,
+    key: &TufKey,
+) -> Result<(), RoleVerifyError> {
+    let vk = extract_rsa_public_key(key)?;
+    let digest = Sha256.digest(payload.as_slice()).to_list();
+    match verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig_bytes.as_slice()) {
+        Ok(())  => Ok(()),
+        Err(_)  => Err(MalformedSignature("rsa-pkcs1v15: verification failed".to_text())),
+    }
+}
+
+fn verify_rsa_pss_sig(
+    payload: &List<Byte>,
+    sig_bytes: &List<Byte>,
+    key: &TufKey,
+) -> Result<(), RoleVerifyError> {
+    let vk = extract_rsa_public_key(key)?;
+    let digest = Sha256.digest(payload.as_slice()).to_list();
+    match verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig_bytes.as_slice()) {
+        Ok(())  => Ok(()),
+        Err(_)  => Err(MalformedSignature("rsa-pss: verification failed".to_text())),
+    }
+}
+
+// =============================================================================
+// Key extraction helpers
+// =============================================================================
+
+fn extract_keyval_public_hex(key: &TufKey) -> Result<Text, RoleVerifyError> {
+    let obj = key.keyval.as_object()
+        .ok_or_else(|| MalformedKey("keyval not an object".to_text()))?;
+    let pub_v = obj.get("public")
+        .ok_or_else(|| MalformedKey("keyval.public missing".to_text()))?;
+    pub_v.as_string()
+        .ok_or_else(|| MalformedKey("keyval.public not a string".to_text()))
+}
+
+fn extract_rsa_public_key(key: &TufKey) -> Result<RsaVerifyKey, RoleVerifyError> {
+    let obj = key.keyval.as_object()
+        .ok_or_else(|| MalformedKey("keyval not an object".to_text()))?;
+    // TUF stores RSA keys as PEM-encoded SubjectPublicKeyInfo —
+    // we delegate parsing to core.security.x509 helpers in a
+    // follow-up; for now expose the failure cleanly.
+    let _ = obj;
+    Err(MalformedKey("rsa key extraction: PEM PKCS#1 parser pending (delegate to x509.spki)".to_text()))
+}
+
+// =============================================================================
+// Version + expires checks (TUF spec §5.x rollback / freeze detection)
+// =============================================================================
+
+public fn check_version_monotonic_root(prev: &RootMetadata, curr: &RootMetadata) -> Result<(), RoleVerifyError> {
+    if curr.version < prev.version {
+        return Err(RollbackDetected {
+            previous_version: prev.version,
+            current_version:  curr.version,
+        });
+    }
+    Ok(())
+}
+
+public fn check_version_monotonic_timestamp(prev: &TimestampMetadata, curr: &TimestampMetadata) -> Result<(), RoleVerifyError> {
+    if curr.version < prev.version {
+        return Err(RollbackDetected {
+            previous_version: prev.version,
+            current_version:  curr.version,
+        });
+    }
+    Ok(())
+}
+
+public fn check_version_monotonic_snapshot(prev: &SnapshotMetadata, curr: &SnapshotMetadata) -> Result<(), RoleVerifyError> {
+    if curr.version < prev.version {
+        return Err(RollbackDetected {
+            previous_version: prev.version,
+            current_version:  curr.version,
+        });
+    }
+    Ok(())
+}
+
+public fn check_version_monotonic_targets(prev: &TargetsMetadata, curr: &TargetsMetadata) -> Result<(), RoleVerifyError> {
+    if curr.version < prev.version {
+        return Err(RollbackDetected {
+            previous_version: prev.version,
+            current_version:  curr.version,
+        });
+    }
+    Ok(())
+}
+
+/// Check `expires` field against current time. Returns `Err(Expired)`
+/// when now ≥ expires.
+public fn check_not_expired_root(meta: &RootMetadata) -> Result<(), RoleVerifyError> {
+    check_not_expired_at(&meta.expires, epoch_seconds())
+}
+
+public fn check_not_expired_timestamp(meta: &TimestampMetadata) -> Result<(), RoleVerifyError> {
+    check_not_expired_at(&meta.expires, epoch_seconds())
+}
+
+public fn check_not_expired_snapshot(meta: &SnapshotMetadata) -> Result<(), RoleVerifyError> {
+    check_not_expired_at(&meta.expires, epoch_seconds())
+}
+
+public fn check_not_expired_targets(meta: &TargetsMetadata) -> Result<(), RoleVerifyError> {
+    check_not_expired_at(&meta.expires, epoch_seconds())
+}
+
+fn check_not_expired_at(expires: &Rfc3339Time, now: Int) -> Result<(), RoleVerifyError> {
+    let expires_unix = time.rfc3339.to_epoch(expires);
+    if now >= expires_unix {
+        return Err(Expired { expires: expires.clone(), now });
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use security.ecc.ed25519.{generate_seed, sign as ed_sign, public_key as ed_pubkey};
+    use encoding.hex.{encode as hex_encode};
+    use encoding.json.{json_object, json_string};
+
+    fn bytes_of(s: &str) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let bs = s.as_bytes();
+        let mut i: Int = 0;
+        while i < bs.len() { out.push(bs[i]); i = i + 1; }
+        out
+    }
+
+    #[test]
+    fn test_ed25519_one_of_one_threshold() {
+        let seed = generate_seed();
+        let pk = ed_pubkey(&seed);
+        let mut pk_list: List<Byte> = List.with_capacity(32);
+        let mut i: Int = 0;
+        while i < 32 { pk_list.push(pk[i]); i = i + 1; }
+        let pk_hex = hex_encode(&pk_list);
+
+        let mut keyval_obj: JsonObject = JsonObject.new();
+        keyval_obj.insert("public".to_text(), json_string(pk_hex));
+        let key = TufKey {
+            keytype: TufKeyType.Ed25519Key,
+            scheme:  TufKeyScheme.Ed25519Scheme,
+            keyval:  json_object(keyval_obj),
+        };
+
+        let kid = security.tuf.canonical.compute_keyid(&key).unwrap();
+        let mut keys: Map<KeyId, TufKey> = Map.new();
+        keys.insert(kid.clone(), key);
+
+        let payload = bytes_of("hello tuf");
+        let sig_bytes = ed_sign(&seed, payload.as_slice());
+        let mut sig_list: List<Byte> = List.with_capacity(64);
+        let mut j: Int = 0;
+        while j < 64 { sig_list.push(sig_bytes[j]); j = j + 1; }
+        let sig_hex = hex_encode(&sig_list);
+
+        let mut sigs: List<Signature> = List.new();
+        sigs.push(Signature { keyid: kid.clone(), sig: sig_hex });
+
+        let mut role_keyids: List<KeyId> = List.new();
+        role_keyids.push(kid);
+        let role = RoleDef { keyids: role_keyids, threshold: 1 };
+
+        verify_role_signatures(&payload, &sigs, &role, &keys).unwrap();
+    }
+
+    #[test]
+    fn test_threshold_not_met() {
+        let seed = generate_seed();
+        let pk = ed_pubkey(&seed);
+        let mut pk_list: List<Byte> = List.with_capacity(32);
+        let mut i: Int = 0;
+        while i < 32 { pk_list.push(pk[i]); i = i + 1; }
+        let pk_hex = hex_encode(&pk_list);
+        let mut keyval_obj: JsonObject = JsonObject.new();
+        keyval_obj.insert("public".to_text(), json_string(pk_hex));
+        let key = TufKey {
+            keytype: TufKeyType.Ed25519Key,
+            scheme:  TufKeyScheme.Ed25519Scheme,
+            keyval:  json_object(keyval_obj),
+        };
+        let kid = security.tuf.canonical.compute_keyid(&key).unwrap();
+        let mut keys: Map<KeyId, TufKey> = Map.new();
+        keys.insert(kid.clone(), key);
+
+        let mut role_keyids: List<KeyId> = List.new();
+        role_keyids.push(kid);
+        let role = RoleDef { keyids: role_keyids, threshold: 2 };
+
+        let payload = bytes_of("hello");
+        let sig_bytes = ed_sign(&seed, payload.as_slice());
+        let mut sig_list: List<Byte> = List.with_capacity(64);
+        let mut j: Int = 0;
+        while j < 64 { sig_list.push(sig_bytes[j]); j = j + 1; }
+        let sig_hex = hex_encode(&sig_list);
+        let mut sigs: List<Signature> = List.new();
+        sigs.push(Signature { keyid: kid, sig: sig_hex });
+
+        match verify_role_signatures(&payload, &sigs, &role, &keys) {
+            Err(InsufficientSignatures { valid: 1, threshold: 2 }) => {}
+            _ => unreachable(),
+        }
+    }
+}

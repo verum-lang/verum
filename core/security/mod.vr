@@ -120,6 +120,14 @@ public module transparency_log;
 // (DSSE / in-toto / SLSA / Bundle) is independently composable.
 public module provenance;
 
+// TUF (The Update Framework) — compromise-resilient software-
+// distribution framework used by PyPI, Docker Notary, Sigstore
+// root, the Verum registry. Threshold-signed Root anchors trust;
+// Timestamp + Snapshot detect freeze + mix-and-match; Targets
+// resolve paths via delegation graph; full §5 client workflow
+// with rollback / freeze / fast-forward / endless-data detection.
+public module tuf;
+
 // OpenID Connect (OIDC) — discovery (.well-known/openid-configuration),
 // JWKS cache with TTL, token validation. For trusted-publishing
 // flows where CI runners (GitHub Actions / GitLab / Sigstore)
