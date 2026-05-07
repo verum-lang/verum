@@ -144,7 +144,20 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     // once via bincode and feeds the typechecker directly via
     // `pipeline.set_stdlib_metadata`.  Replaces the slow
     // `load_stdlib_modules` parse + walk path entirely.
-    write_core_metadata_alongside_archive(&result.output_path, cfg.verbose)?;
+    //
+    // **Cold-start fix**: also extract `public context Name { … }`
+    // declarations from the stdlib source tree.  Without this the
+    // bincode-serialised `CoreMetadata` carries an empty
+    // `context_declarations` list, and the runtime fallback at
+    // `phases_orchestration.rs::phase_type_check` re-parses every
+    // stdlib `.vr` (568 files) with the full parser to recover
+    // them.  That fallback alone was burning ~250ms of cold-start
+    // typecheck time on hello-world.
+    write_core_metadata_alongside_archive(
+        &result.output_path,
+        Some(&cfg.stdlib_path),
+        cfg.verbose,
+    )?;
 
     Ok(result)
 }
@@ -160,6 +173,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
 /// requires this sidecar to land on disk.
 fn write_core_metadata_alongside_archive(
     archive_path: &Path,
+    stdlib_source_root: Option<&Path>,
     verbose: bool,
 ) -> Result<()> {
     // Archive uses the verum_vbc custom binary format (with `write_archive`
@@ -172,7 +186,20 @@ fn write_core_metadata_alongside_archive(
             )
         })?;
 
-    let metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    let mut metadata = crate::archive_metadata::archive_to_core_metadata(&archive);
+    if let Some(root) = stdlib_source_root {
+        let (names, decl_nodes) = scan_context_declarations(root);
+        metadata.context_declarations = names;
+        metadata.context_decl_nodes = decl_nodes;
+        if verbose {
+            eprintln!(
+                "verum stdlib precompile: extracted {} context decls ({} with full AST) from {}",
+                metadata.context_declarations.len(),
+                metadata.context_decl_nodes.len(),
+                root.display(),
+            );
+        }
+    }
     let bytes = bincode::serialize(&metadata)
         .context("bincode serialise CoreMetadata for sidecar emit")?;
 
@@ -191,6 +218,86 @@ fn write_core_metadata_alongside_archive(
         );
     }
     Ok(())
+}
+
+/// Walks the stdlib source tree (recursive) for `.vr` files and
+/// extracts every public `context Name { ... }` /
+/// `context protocol Name { ... }` declaration.  Returns BOTH the
+/// names list AND the full `ContextDecl` AST nodes, so the runtime
+/// fast-path can register full method signatures via
+/// `register_stdlib_context_full` without re-parsing source.
+///
+/// Cheap quick-filter (`.contains("public context ")`) gates the
+/// expensive full parse — only files with at least one stdlib
+/// context get parsed.  Spans are preserved as-emitted (parser
+/// produces FileId(0) + dummy ranges in this isolated context),
+/// which keeps the bincode payload reproducible across precompile
+/// invocations.
+///
+/// Result names ordered via BTreeSet for deterministic output;
+/// AST nodes follow the same key ordering via `OrderedMap`.
+fn scan_context_declarations(
+    root: &Path,
+) -> (
+    verum_common::List<verum_common::Text>,
+    verum_common::OrderedMap<verum_common::Text, verum_ast::decl::ContextDecl>,
+) {
+    use std::collections::BTreeMap;
+    use verum_ast::decl::Visibility;
+    let mut found_decls: BTreeMap<String, verum_ast::decl::ContextDecl> = BTreeMap::new();
+    fn walk(dir: &Path, found: &mut BTreeMap<String, verum_ast::decl::ContextDecl>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Quick gate: most stdlib files don't declare contexts.
+            if !content.contains("public context ") {
+                continue;
+            }
+            // Full parse — needed to capture method signatures.
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for item in &module.items {
+                if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
+                    if matches!(ctx_decl.visibility, Visibility::Public) {
+                        let name = ctx_decl.name.name.as_str().to_string();
+                        // First-wins under name collision so the
+                        // BTreeSet-ordered iteration is reproducible.
+                        found.entry(name).or_insert_with(|| (*ctx_decl).clone());
+                    }
+                }
+            }
+        }
+    }
+    walk(root, &mut found_decls);
+    let names: verum_common::List<verum_common::Text> = found_decls
+        .keys()
+        .map(|k| verum_common::Text::from(k.as_str()))
+        .collect();
+    let mut decl_map: verum_common::OrderedMap<
+        verum_common::Text,
+        verum_ast::decl::ContextDecl,
+    > = verum_common::OrderedMap::new();
+    for (k, v) in found_decls {
+        decl_map.insert(verum_common::Text::from(k.as_str()), v);
+    }
+    (names, decl_map)
 }
 
 // ============================================================================

@@ -190,11 +190,32 @@ fn main() {
             println!(
                 "cargo:warning=Refreshing stdlib precompile artefacts (blake3 changed or archive missing)"
             );
+            // **Cargo deadlock avoidance**: the outer cargo holds the
+            // target directory's `.cargo-lock` while running build.rs.
+            // If the nested `cargo run` shared the same target dir,
+            // it would block forever waiting for the same lock.
+            // Direct it at a sibling target dir
+            // (`target/precompile-bootstrap/`) so the two cargos
+            // operate on disjoint locks.  The precompiler binary is
+            // tiny (one bin crate) — the ~30s extra build cost on
+            // first run pays for itself by eliminating the multi-
+            // hour stalls we hit when the outer build invalidates
+            // the precompile checksum.
+            let nested_target = project_root.join("target").join("precompile-bootstrap");
             let status = std::process::Command::new("cargo")
-                .args(["run", "--release", "-p", "verum_stdlib_precompiler", "--"])
+                .args([
+                    "run",
+                    "--release",
+                    "-p",
+                    "verum_stdlib_precompiler",
+                    "--target-dir",
+                ])
+                .arg(&nested_target)
+                .arg("--")
                 .arg(&project_root)
                 .current_dir(&project_root)
                 .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
+                .env("CARGO_TARGET_DIR", &nested_target) // belt-and-braces
                 .status();
             match status {
                 Ok(s) if s.success() => {
