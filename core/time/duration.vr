@@ -168,6 +168,30 @@ implement Duration {
         Duration { nanos: n.max(0) * NANOS_PER_HOUR }
     }
 
+    /// Create a duration from minutes (alias for `Duration.mins`).
+    @inline(always)
+    public fn from_minutes(n: Int) -> Duration {
+        Duration.mins(n)
+    }
+
+    /// Create a duration from hours (alias for `Duration.hours`).
+    @inline(always)
+    public fn from_hours(n: Int) -> Duration {
+        Duration.hours(n)
+    }
+
+    /// Create a duration from days.
+    @inline(always)
+    public fn from_days(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_HOUR * 24 }
+    }
+
+    /// Create a duration from weeks.
+    @inline(always)
+    public fn from_weeks(n: Int) -> Duration {
+        Duration { nanos: n.max(0) * NANOS_PER_HOUR * 24 * 7 }
+    }
+
     // =========================================================================
     // Accessors
     // =========================================================================
