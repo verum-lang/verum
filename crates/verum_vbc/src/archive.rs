@@ -495,19 +495,23 @@ impl VbcArchive {
         let entry_idx = self
             .get_entry_index(name)
             .ok_or_else(|| VbcError::ArchiveError(format!("Module not found: {}", name)))?;
+        self.load_module_by_index(entry_idx)
+    }
 
-        let data = self
-            .get_module_data(entry_idx)
-            .ok_or_else(|| VbcError::ArchiveError(format!("Module data not found: {}", name)))?;
-
-        // Decompress if archive is compressed
+    /// Decompresses and deserializes a module already located by
+    /// index (skipping the O(N) name→index scan that `load_module`
+    /// pays per call).  Used by callers that walk the archive index
+    /// once and dispatch decoded modules in parallel.
+    pub fn load_module_by_index(&self, entry_idx: usize) -> VbcResult<VbcModule> {
+        let data = self.get_module_data(entry_idx).ok_or_else(|| {
+            VbcError::ArchiveError(format!("Module data not found: idx={}", entry_idx))
+        })?;
         let decompressed = if self.header.flags.contains(ArchiveFlags::COMPRESSED) {
             decompress_data(data)
                 .map_err(|e| VbcError::ArchiveError(format!("Decompression error: {}", e)))?
         } else {
             data.to_vec()
         };
-
         deserialize_module(&decompressed)
     }
 

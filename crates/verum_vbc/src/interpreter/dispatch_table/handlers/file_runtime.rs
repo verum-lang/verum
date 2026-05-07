@@ -314,7 +314,11 @@ fn intercept_exists(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
-    Ok(Some(Value::from_bool(std::path::Path::new(&path).exists())))
+    let exists = std::path::Path::new(&path).exists();
+    if std::env::var("VERUM_DEBUG_FS").is_ok() {
+        eprintln!("[path_exists] path='{}' exists={}", path, exists);
+    }
+    Ok(Some(Value::from_bool(exists)))
 }
 
 fn intercept_metadata_pred(
