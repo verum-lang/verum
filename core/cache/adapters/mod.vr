@@ -1,0 +1,31 @@
+// =============================================================================
+// cache/adapters/mod.vr — concrete cache backends
+// =============================================================================
+// Re-exports adapters that implement `core.cache.types::CacheBackend`
+// over concrete data stores. Each adapter is a thin wrapper —
+// the heavy lifting lives in the underlying subsystem
+// (`core.redis`, `core.memcached`, future in-memory LRU).
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "cache adapters facade".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cache.adapters;
+
+public module redis;
+
+public mount .redis.{RedisCacheAdapter, from_client, connect_url};

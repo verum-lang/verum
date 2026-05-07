@@ -1,0 +1,90 @@
+// =============================================================================
+// redis/pubsub.vr — Redis pub/sub
+// =============================================================================
+// Layer: 4 (Redis subsystem)
+//
+// **Purpose.** Channel-based publish-subscribe over Redis. A
+// `Subscriber` holds a dedicated connection (pub/sub uses a
+// connection-mode switch — once SUBSCRIBE is issued, only
+// SUBSCRIBE / UNSUBSCRIBE / PSUBSCRIBE / PUNSUBSCRIBE / PING /
+// QUIT can be sent on it). Messages are delivered as RESP push
+// frames via `next_message().await`.
+//
+// **Pattern matching.** `psubscribe` accepts glob-style patterns
+// (`news.*`, `events.????`) per Redis semantics.
+//
+// **Reconnect-on-disconnect.** If the underlying connection drops,
+// `next_message()` returns `Err(Network)`; callers wrap the
+// subscriber in their own retry loop. We deliberately don't
+// auto-reconnect because subscribers are stateful (channel set)
+// and silent re-subscription can mask deployment errors.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Redis pub/sub — channel + pattern subscriber".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.pubsub;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+
+mount core.redis.client.{RedisClient, RedisError, exec};
+mount core.redis.protocol.RespValue;
+
+// =============================================================================
+// Message
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type PubSubMessage is
+    /// Ordinary message on a subscribed channel.
+    | Message { channel: Text, payload: List<Byte> }
+    /// Pattern-matched message — `pattern` is the matching subscription pattern.
+    | PMessage { pattern: Text, channel: Text, payload: List<Byte> }
+    /// Subscription confirmation — server reply to SUBSCRIBE / UNSUBSCRIBE.
+    | Subscribed { channel: Text, total_subscriptions: Int }
+    | Unsubscribed { channel: Text, total_subscriptions: Int }
+    | PSubscribed { pattern: Text, total_subscriptions: Int }
+    | PUnsubscribed { pattern: Text, total_subscriptions: Int };
+
+// =============================================================================
+// Publisher
+// =============================================================================
+
+/// Publish a message on a channel. Returns the number of subscribers
+/// that received it.
+pub async fn publish(
+    client:  &RedisClient,
+    channel: &Text,
+    payload: &[Byte],
+) -> Result<Int, RedisError> {
+    let mut a: List<List<Byte>> = List.new();
+    a.push("PUBLISH".to_text().as_bytes().to_list());
+    a.push(channel.as_bytes().to_list());
+    a.push(payload.to_list());
+    match core.redis.client.exec_bytes(client, &a).await? {
+        RespValue.Integer(n) => Ok(n),
+        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"PUBLISH unexpected: {other:?}")),
+    }
+}
+
+// =============================================================================
+// Subscriber — see pubsub_subscriber.vr for the dedicated-connection
+// implementation; this module surfaces the public types only.
+// =============================================================================

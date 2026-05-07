@@ -1,0 +1,48 @@
+// =============================================================================
+// cache/mod.vr — abstract cache subsystem
+// =============================================================================
+// Layer: 4 (Caching)
+//
+// Universal cache abstraction. Concrete adapters live in
+// `core.cache.adapters.*`; consumers compose against
+// `CacheBackend` (the abstract protocol) and pick a backend at
+// construction.
+//
+// Layered design:
+//   - `types.vr`           — `CacheBackend` protocol + value/error model
+//   - `adapters/redis.vr`  — adapter over `core.redis`
+//   - `adapters/<other>.vr` — future: memcached, in-memory LRU, etc.
+//
+// Composition discipline: adapters NEVER re-implement protocol-level
+// concerns; they delegate to the underlying multi-purpose
+// subsystem (`core.redis` for Redis, etc.) and just expose the
+// CacheBackend-shaped surface.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract cache subsystem — CacheBackend protocol + concrete adapters".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cache;
+
+public module types;
+public module adapters;
+
+public mount .types.{
+    CacheBackend, CacheError, CacheValue, CacheTtl,
+    get_text, get_bytes, set_text, set_bytes, get_and_delete,
+    cache_value_kind, ttl_to_seconds, ttl_to_millis,
+};

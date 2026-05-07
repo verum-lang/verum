@@ -1,0 +1,619 @@
+// =============================================================================
+// cache/redis/protocol.vr — RESP2 / RESP3 wire-format codec
+// =============================================================================
+// Layer: 4 (Redis client internals)
+// Dependencies: core, base, collections
+// =============================================================================
+//
+// **Purpose.** Serialise + deserialise Redis Serialization Protocol
+// frames. Supports RESP2 (the legacy protocol used by Redis 5 and
+// earlier) and RESP3 (Redis 6+, with native Map/Set/Boolean/etc.).
+// We default to RESP3 — strictly more expressive — and downgrade to
+// RESP2 only when the server reports `HELLO 3` is unsupported.
+//
+// **RESP frame types (RESP3):**
+//
+//   `+` Simple String       e.g. `+OK\r\n`
+//   `-` Simple Error        e.g. `-ERR unknown command\r\n`
+//   `:` Integer             e.g. `:42\r\n`
+//   `$` Bulk String         e.g. `$5\r\nhello\r\n` ; `$-1\r\n` = nil (RESP2)
+//   `*` Array               e.g. `*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n`
+//   `_` Null                e.g. `_\r\n` (RESP3 only)
+//   `#` Boolean             e.g. `#t\r\n` / `#f\r\n` (RESP3)
+//   `,` Double              e.g. `,3.14\r\n` (RESP3)
+//   `(` Big number          e.g. `(3492890328409238509324850943850943825024385\r\n`
+//   `!` Bulk error          e.g. `!21\r\nSYNTAX invalid syntax\r\n`
+//   `=` Verbatim string     e.g. `=15\r\ntxt:Some string\r\n`
+//   `%` Map                 e.g. `%2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$3\r\nkey\r\n$5\r\nvalue\r\n`
+//   `~` Set                 e.g. `~3\r\n$3\r\nfoo\r\n$3\r\nbar\r\n$3\r\nbaz\r\n`
+//   `>` Push                — out-of-band push (pub/sub)
+//
+// All clients MUST handle the RESP2 nil-bulk-string `$-1\r\n` and
+// nil-array `*-1\r\n` even when speaking RESP3, because servers
+// often emit RESP2 nils for legacy compatibility.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LFnd,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "RESP2/RESP3 wire-format codec for Redis client".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.protocol;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+
+// =============================================================================
+// RESP value
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type RespValue is
+    | SimpleString(Text)
+    | Error_(Text)
+    | Integer(Int)
+    | BulkString(List<Byte>)
+    | NullBulk
+    | NullArray
+    | Array(List<RespValue>)
+    | Boolean(Bool)
+    | Double(Float)
+    | BigNumber(Text)
+    | BulkError { code: Text, message: Text }
+    | VerbatimString { format: Text, content: Text }
+    | MapValue(List<(RespValue, RespValue)>)
+    | SetValue(List<RespValue>)
+    | Push(List<RespValue>)
+    | Nil_;
+
+public type RespError is
+    | UnexpectedEof
+    | InvalidPrefix(Byte)
+    | InvalidUtf8(Text)
+    | InvalidInteger(Text)
+    | InvalidBulkLength(Int)
+    | InvalidArrayLength(Int)
+    | TooDeep { depth: Int, limit: Int }
+    | TooLarge { size: Int, limit: Int };
+
+implement Display for RespError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RespError.UnexpectedEof          => f.write_str("resp: unexpected EOF"),
+            RespError.InvalidPrefix(b)       => f.write_str(f"resp: invalid prefix byte 0x{b:02x}".as_str()),
+            RespError.InvalidUtf8(reason)    => f.write_str(f"resp: invalid UTF-8: {reason}".as_str()),
+            RespError.InvalidInteger(s)      => f.write_str(f"resp: invalid integer: {s}".as_str()),
+            RespError.InvalidBulkLength(n)   => f.write_str(f"resp: invalid bulk length: {n}".as_str()),
+            RespError.InvalidArrayLength(n)  => f.write_str(f"resp: invalid array length: {n}".as_str()),
+            RespError.TooDeep { depth, limit } => f.write_str(f"resp: nesting depth {depth} exceeds {limit}".as_str()),
+            RespError.TooLarge { size, limit } => f.write_str(f"resp: frame size {size} exceeds {limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for RespError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Bounds
+// =============================================================================
+
+const MAX_NESTING_DEPTH: Int = 64;
+const MAX_BULK_BYTES:    Int = 512 * 1024 * 1024; // 512 MiB Redis hard cap
+
+// =============================================================================
+// Encoder
+// =============================================================================
+
+public fn encode(v: &RespValue) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_into(v, &mut out);
+    out
+}
+
+fn encode_into(v: &RespValue, out: &mut List<Byte>) {
+    match v {
+        RespValue.SimpleString(s) => {
+            out.push(b'+');
+            push_text(out, s);
+            push_crlf(out);
+        }
+        RespValue.Error_(s) => {
+            out.push(b'-');
+            push_text(out, s);
+            push_crlf(out);
+        }
+        RespValue.Integer(n) => {
+            out.push(b':');
+            push_text(out, &integer_to_text(*n));
+            push_crlf(out);
+        }
+        RespValue.BulkString(bytes) => {
+            out.push(b'$');
+            push_text(out, &integer_to_text(bytes.len()));
+            push_crlf(out);
+            let mut i: Int = 0;
+            while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+            push_crlf(out);
+        }
+        RespValue.NullBulk => {
+            push_ascii(out, "$-1\r\n");
+        }
+        RespValue.NullArray => {
+            push_ascii(out, "*-1\r\n");
+        }
+        RespValue.Array(elems) => {
+            out.push(b'*');
+            push_text(out, &integer_to_text(elems.len()));
+            push_crlf(out);
+            let mut i: Int = 0;
+            while i < elems.len() {
+                encode_into(&elems[i], out);
+                i = i + 1;
+            }
+        }
+        RespValue.Boolean(b) => {
+            push_ascii(out, if *b { "#t\r\n" } else { "#f\r\n" });
+        }
+        RespValue.Double(d) => {
+            out.push(b',');
+            push_text(out, &double_to_text(*d));
+            push_crlf(out);
+        }
+        RespValue.BigNumber(s) => {
+            out.push(b'(');
+            push_text(out, s);
+            push_crlf(out);
+        }
+        RespValue.BulkError { code, message } => {
+            out.push(b'!');
+            let body = f"{code} {message}";
+            push_text(out, &integer_to_text(body.len()));
+            push_crlf(out);
+            push_text(out, &body);
+            push_crlf(out);
+        }
+        RespValue.VerbatimString { format, content } => {
+            out.push(b'=');
+            let body_len = format.len() + 1 + content.len();
+            push_text(out, &integer_to_text(body_len));
+            push_crlf(out);
+            push_text(out, format);
+            out.push(b':');
+            push_text(out, content);
+            push_crlf(out);
+        }
+        RespValue.MapValue(pairs) => {
+            out.push(b'%');
+            push_text(out, &integer_to_text(pairs.len()));
+            push_crlf(out);
+            let mut i: Int = 0;
+            while i < pairs.len() {
+                let (k, val) = &pairs[i];
+                encode_into(k, out);
+                encode_into(val, out);
+                i = i + 1;
+            }
+        }
+        RespValue.SetValue(elems) => {
+            out.push(b'~');
+            push_text(out, &integer_to_text(elems.len()));
+            push_crlf(out);
+            let mut i: Int = 0;
+            while i < elems.len() { encode_into(&elems[i], out); i = i + 1; }
+        }
+        RespValue.Push(elems) => {
+            out.push(b'>');
+            push_text(out, &integer_to_text(elems.len()));
+            push_crlf(out);
+            let mut i: Int = 0;
+            while i < elems.len() { encode_into(&elems[i], out); i = i + 1; }
+        }
+        RespValue.Nil_ => { push_ascii(out, "_\r\n"); }
+    }
+}
+
+fn push_ascii(out: &mut List<Byte>, s: &str) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push(bs[i]); i = i + 1; }
+}
+
+fn push_text(out: &mut List<Byte>, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push(bs[i]); i = i + 1; }
+}
+
+fn push_crlf(out: &mut List<Byte>) {
+    out.push(b'\r');
+    out.push(b'\n');
+}
+
+fn integer_to_text(n: Int) -> Text { f"{n}" }
+fn double_to_text(d: Float) -> Text { f"{d}" }
+
+// =============================================================================
+// Pipelined command encoder
+// =============================================================================
+
+/// Encode a Redis command — the command is itself a RESP Array of
+/// BulkStrings. This is the canonical form every command uses.
+pub fn encode_command(args: &List<List<Byte>>) -> List<Byte> {
+    let mut elems: List<RespValue> = List.with_capacity(args.len());
+    let mut i: Int = 0;
+    while i < args.len() {
+        elems.push(RespValue.BulkString(args[i].clone()));
+        i = i + 1;
+    }
+    encode(&RespValue.Array(elems))
+}
+
+/// Convenience — encode from text args.
+pub fn encode_command_text(args: &[Text]) -> List<Byte> {
+    let mut as_bytes: List<List<Byte>> = List.with_capacity(args.len());
+    let mut i: Int = 0;
+    while i < args.len() { as_bytes.push(args[i].as_bytes().to_list()); i = i + 1; }
+    encode_command(&as_bytes)
+}
+
+// =============================================================================
+// Decoder
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Cursor is {
+    bytes:  List<Byte>,
+    offset: Int,
+}
+
+pub fn cursor_new(bytes: List<Byte>) -> Cursor { Cursor { bytes, offset: 0 } }
+
+/// Decode a single RESP frame. Returns the parsed value + the new
+/// cursor position. Returns `Err(UnexpectedEof)` if more input is
+/// needed — caller should refill the buffer and retry.
+pub fn decode(cur: &Cursor) -> Result<(RespValue, Cursor), RespError> {
+    decode_at(cur, 0)
+}
+
+fn decode_at(cur: &Cursor, depth: Int) -> Result<(RespValue, Cursor), RespError> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(RespError.TooDeep { depth, limit: MAX_NESTING_DEPTH });
+    }
+    if cur.offset >= cur.bytes.len() {
+        return Err(RespError.UnexpectedEof);
+    }
+    let prefix = cur.bytes[cur.offset];
+    let after_prefix = advance(cur, 1);
+    match prefix {
+        b'+' => {
+            let (line, c) = read_line(&after_prefix)?;
+            Ok((RespValue.SimpleString(line), c))
+        }
+        b'-' => {
+            let (line, c) = read_line(&after_prefix)?;
+            Ok((RespValue.Error_(line), c))
+        }
+        b':' => {
+            let (line, c) = read_line(&after_prefix)?;
+            let n = parse_integer(&line)?;
+            Ok((RespValue.Integer(n), c))
+        }
+        b'$' => decode_bulk(&after_prefix),
+        b'*' => decode_array(&after_prefix, depth + 1),
+        b'_' => {
+            let (_, c) = read_line(&after_prefix)?;
+            Ok((RespValue.Nil_, c))
+        }
+        b'#' => {
+            let (line, c) = read_line(&after_prefix)?;
+            match line.as_str() {
+                "t" => Ok((RespValue.Boolean(true), c)),
+                "f" => Ok((RespValue.Boolean(false), c)),
+                _   => Err(RespError.InvalidInteger(line)),
+            }
+        }
+        b',' => {
+            let (line, c) = read_line(&after_prefix)?;
+            let d: Float = match Float.parse(&line) {
+                Ok(x) => x,
+                Err(_) => return Err(RespError.InvalidInteger(line)),
+            };
+            Ok((RespValue.Double(d), c))
+        }
+        b'(' => {
+            let (line, c) = read_line(&after_prefix)?;
+            Ok((RespValue.BigNumber(line), c))
+        }
+        b'!' => decode_bulk_error(&after_prefix),
+        b'=' => decode_verbatim(&after_prefix),
+        b'%' => decode_map(&after_prefix, depth + 1),
+        b'~' => decode_set(&after_prefix, depth + 1),
+        b'>' => {
+            // Reuse array-decode shape, return as Push.
+            let (v, c) = decode_array(&after_prefix, depth + 1)?;
+            match v {
+                RespValue.Array(elems) => Ok((RespValue.Push(elems), c)),
+                other => Ok((other, c)),
+            }
+        }
+        other => Err(RespError.InvalidPrefix(other)),
+    }
+}
+
+fn decode_bulk(cur: &Cursor) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let len = parse_integer(&line)?;
+    if len == -1 { return Ok((RespValue.NullBulk, c)); }
+    if len < 0 || len > MAX_BULK_BYTES {
+        return Err(RespError.InvalidBulkLength(len));
+    }
+    if c.offset + len + 2 > c.bytes.len() {
+        return Err(RespError.UnexpectedEof);
+    }
+    let mut payload: List<Byte> = List.with_capacity(len);
+    let mut i: Int = 0;
+    while i < len {
+        payload.push(c.bytes[c.offset + i]);
+        i = i + 1;
+    }
+    let after = advance(&c, len + 2); // skip CRLF
+    Ok((RespValue.BulkString(payload), after))
+}
+
+fn decode_bulk_error(cur: &Cursor) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let len = parse_integer(&line)?;
+    if len < 0 || len > MAX_BULK_BYTES {
+        return Err(RespError.InvalidBulkLength(len));
+    }
+    if c.offset + len + 2 > c.bytes.len() {
+        return Err(RespError.UnexpectedEof);
+    }
+    let mut payload_bytes: List<Byte> = List.with_capacity(len);
+    let mut i: Int = 0;
+    while i < len { payload_bytes.push(c.bytes[c.offset + i]); i = i + 1; }
+    let payload_text = match Text.from_utf8(payload_bytes.as_slice()) {
+        Ok(t) => t,
+        Err(e) => return Err(RespError.InvalidUtf8(f"{e}")),
+    };
+    let (code, message) = split_first_space(&payload_text);
+    let after = advance(&c, len + 2);
+    Ok((RespValue.BulkError { code, message }, after))
+}
+
+fn decode_verbatim(cur: &Cursor) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let len = parse_integer(&line)?;
+    if len < 4 { return Err(RespError.InvalidBulkLength(len)); }
+    if c.offset + len + 2 > c.bytes.len() {
+        return Err(RespError.UnexpectedEof);
+    }
+    let mut buf: List<Byte> = List.with_capacity(len);
+    let mut i: Int = 0;
+    while i < len { buf.push(c.bytes[c.offset + i]); i = i + 1; }
+    let s = match Text.from_utf8(buf.as_slice()) {
+        Ok(t) => t,
+        Err(e) => return Err(RespError.InvalidUtf8(f"{e}")),
+    };
+    let format = s.byte_substring(0, 3);
+    let content = s.byte_substring(4, s.len());
+    let after = advance(&c, len + 2);
+    Ok((RespValue.VerbatimString { format, content }, after))
+}
+
+fn decode_array(cur: &Cursor, depth: Int) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let n = parse_integer(&line)?;
+    if n == -1 { return Ok((RespValue.NullArray, c)); }
+    if n < 0 { return Err(RespError.InvalidArrayLength(n)); }
+    let mut elems: List<RespValue> = List.with_capacity(n);
+    let mut cursor = c;
+    let mut i: Int = 0;
+    while i < n {
+        let (v, c2) = decode_at(&cursor, depth)?;
+        elems.push(v);
+        cursor = c2;
+        i = i + 1;
+    }
+    Ok((RespValue.Array(elems), cursor))
+}
+
+fn decode_map(cur: &Cursor, depth: Int) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let n = parse_integer(&line)?;
+    if n < 0 { return Err(RespError.InvalidArrayLength(n)); }
+    let mut pairs: List<(RespValue, RespValue)> = List.with_capacity(n);
+    let mut cursor = c;
+    let mut i: Int = 0;
+    while i < n {
+        let (k, c1) = decode_at(&cursor, depth)?;
+        let (v, c2) = decode_at(&c1, depth)?;
+        pairs.push((k, v));
+        cursor = c2;
+        i = i + 1;
+    }
+    Ok((RespValue.MapValue(pairs), cursor))
+}
+
+fn decode_set(cur: &Cursor, depth: Int) -> Result<(RespValue, Cursor), RespError> {
+    let (line, c) = read_line(cur)?;
+    let n = parse_integer(&line)?;
+    if n < 0 { return Err(RespError.InvalidArrayLength(n)); }
+    let mut elems: List<RespValue> = List.with_capacity(n);
+    let mut cursor = c;
+    let mut i: Int = 0;
+    while i < n {
+        let (v, c2) = decode_at(&cursor, depth)?;
+        elems.push(v);
+        cursor = c2;
+        i = i + 1;
+    }
+    Ok((RespValue.SetValue(elems), cursor))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn advance(cur: &Cursor, n: Int) -> Cursor {
+    Cursor { bytes: cur.bytes.clone(), offset: cur.offset + n }
+}
+
+fn read_line(cur: &Cursor) -> Result<(Text, Cursor), RespError> {
+    let mut i: Int = cur.offset;
+    while i + 1 < cur.bytes.len() {
+        if cur.bytes[i] == b'\r' && cur.bytes[i + 1] == b'\n' {
+            let mut buf: List<Byte> = List.with_capacity(i - cur.offset);
+            let mut k: Int = cur.offset;
+            while k < i { buf.push(cur.bytes[k]); k = k + 1; }
+            let line = match Text.from_utf8(buf.as_slice()) {
+                Ok(t) => t,
+                Err(e) => return Err(RespError.InvalidUtf8(f"{e}")),
+            };
+            return Ok((line, advance(cur, i + 2 - cur.offset)));
+        }
+        i = i + 1;
+    }
+    Err(RespError.UnexpectedEof)
+}
+
+fn parse_integer(s: &Text) -> Result<Int, RespError> {
+    Int.parse(s).map_err(|_| RespError.InvalidInteger(s.clone()))
+}
+
+fn split_first_space(s: &Text) -> (Text, Text) {
+    match s.find_byte(b' ') {
+        Some(idx) => (
+            s.byte_substring(0, idx),
+            s.byte_substring(idx + 1, s.len()),
+        ),
+        None => (s.clone(), "".to_text()),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    fn bytes(s: &str) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let bs = s.as_bytes();
+        let mut i: Int = 0;
+        while i < bs.len() { out.push(bs[i]); i = i + 1; }
+        out
+    }
+
+    #[test]
+    fn test_encode_simple_string() {
+        let bs = encode(&RespValue.SimpleString("OK".to_text()));
+        let expected = bytes("+OK\r\n");
+        assert_eq(bs.len(), expected.len());
+        let mut i: Int = 0;
+        while i < bs.len() { assert_eq(bs[i], expected[i]); i = i + 1; }
+    }
+
+    #[test]
+    fn test_decode_integer() {
+        let cur = cursor_new(bytes(":42\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.Integer(42) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_decode_null_bulk() {
+        let cur = cursor_new(bytes("$-1\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.NullBulk => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_decode_bulk_string() {
+        let cur = cursor_new(bytes("$5\r\nhello\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.BulkString(b) => {
+                assert_eq(b.len(), 5);
+                assert_eq(b[0], b'h');
+                assert_eq(b[4], b'o');
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_decode_array_of_two() {
+        let cur = cursor_new(bytes("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.Array(arr) => {
+                assert_eq(arr.len(), 2);
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_encode_command_set() {
+        let mut args: List<List<Byte>> = List.new();
+        args.push(bytes("SET"));
+        args.push(bytes("k"));
+        args.push(bytes("v"));
+        let encoded = encode_command(&args);
+        let expected = bytes("*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n");
+        assert_eq(encoded.len(), expected.len());
+    }
+
+    #[test]
+    fn test_decode_resp3_null() {
+        let cur = cursor_new(bytes("_\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.Nil_ => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_decode_resp3_boolean() {
+        let cur = cursor_new(bytes("#t\r\n"));
+        let (v, _) = decode(&cur).unwrap();
+        match v {
+            RespValue.Boolean(true) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_decode_unexpected_eof() {
+        let cur = cursor_new(bytes("$5\r\nhel"));
+        match decode(&cur) {
+            Err(RespError.UnexpectedEof) => {}
+            _ => unreachable(),
+        }
+    }
+}

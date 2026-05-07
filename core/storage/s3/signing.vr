@@ -1,0 +1,456 @@
+// =============================================================================
+// storage/s3/signing.vr — AWS Signature Version 4 (SigV4)
+// =============================================================================
+// Layer: 4 (Storage / AWS auth)
+// Dependencies: core, base, collections, security/{hash/sha256, mac/hmac},
+//               encoding/hex, time/rfc3339
+// =============================================================================
+//
+// **Purpose.** Implement AWS Signature Version 4 — the canonical
+// authentication scheme for AWS REST APIs. Every signed request
+// carries an `Authorization` header (or query-string presigned URL)
+// derived from the request method + URL + headers + body hash +
+// the requester's credentials, scoped by date + region + service.
+//
+// **The four canonical steps (per
+// https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html):**
+//
+//   1. **Canonical request** =
+//          method + LF
+//        + canonical_uri + LF
+//        + canonical_query_string + LF
+//        + canonical_headers + LF
+//        + signed_headers + LF
+//        + hex(sha256(payload))
+//
+//   2. **String-to-sign** =
+//          "AWS4-HMAC-SHA256" + LF
+//        + amz_date + LF
+//        + credential_scope + LF
+//        + hex(sha256(canonical_request))
+//      where credential_scope = "<date>/<region>/<service>/aws4_request"
+//
+//   3. **Signing key derivation** (chained HMAC-SHA-256):
+//        kDate    = HMAC("AWS4" + secret_key, date)
+//        kRegion  = HMAC(kDate, region)
+//        kService = HMAC(kRegion, service)
+//        kSigning = HMAC(kService, "aws4_request")
+//
+//   4. **Signature** = hex(HMAC(kSigning, string-to-sign))
+//
+// **Composition.** Signing reuses the existing crypto stack:
+// `core.security.hash.sha256` + `core.security.mac.hmac` +
+// `core.encoding.hex`. No bespoke crypto.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "AWS Signature V4 canonical-request + signing-key derivation + signature".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.storage.s3.signing;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.hex.{encode as hex_encode};
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.mac.hmac.{hmac_sha256};
+
+// =============================================================================
+// Credentials
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type AwsCredentials is {
+    access_key_id:     Text,
+    secret_access_key: Text,
+    /// IAM-role / STS session token. None for permanent IAM-user keys.
+    session_token:     Maybe<Text>,
+};
+
+// =============================================================================
+// Signed-request output
+// =============================================================================
+
+@derive(Clone, Debug)
+public type SignedHeaders is {
+    /// Headers to attach to the outgoing request — always includes
+    /// `authorization`, `x-amz-date`, `x-amz-content-sha256`, and
+    /// optionally `x-amz-security-token` for STS sessions.
+    headers: Map<Text, Text>,
+};
+
+// =============================================================================
+// Public entry — sign an HTTP request
+// =============================================================================
+
+/// Compute the SigV4 signature for a request and return the headers
+/// the caller MUST attach (replacing any conflicting existing
+/// values).
+///
+/// Inputs:
+///   - `method` / `url_path` / `query_pairs` / `req_headers` /
+///     `body` — the request being signed. Header keys MUST be
+///     lowercase already (we don't lowercase to avoid hidden
+///     mutation; the caller's request builder should normalise).
+///   - `region` — AWS region (e.g., `"us-east-1"`).
+///   - `service` — AWS service identifier (e.g., `"s3"`).
+///   - `now_iso8601_basic` — the request timestamp in
+///     `YYYYMMDDTHHMMSSZ` form (UTC, no separators). This is the
+///     `x-amz-date` value.
+pub fn sign_request(
+    method:           &Text,
+    url_path:         &Text,
+    query_pairs:      &List<(Text, Text)>,
+    req_headers:      &Map<Text, Text>,
+    body:             &List<Byte>,
+    creds:            &AwsCredentials,
+    region:           &Text,
+    service:          &Text,
+    now_iso8601_basic: &Text,
+) -> Result<SignedHeaders, Text> {
+    // Step 0 — payload hash.
+    let body_hash = hex_encode(&sha256_digest(body.as_slice()));
+
+    // Step 1 — canonical request.
+    let canonical_uri = canonical_path(url_path);
+    let canonical_query = canonical_query_string(query_pairs);
+    // Always-signed headers
+    let mut signing_headers: Map<Text, Text> = req_headers.clone();
+    signing_headers.insert("x-amz-date".to_text(), now_iso8601_basic.clone());
+    signing_headers.insert("x-amz-content-sha256".to_text(), body_hash.clone());
+    if let Some(tok) = &creds.session_token {
+        signing_headers.insert("x-amz-security-token".to_text(), tok.clone());
+    }
+    let (canonical_headers, signed_headers) = canonical_headers_and_signed(&signing_headers);
+
+    let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}",
+        method.to_upper(),
+        canonical_uri,
+        canonical_query,
+        canonical_headers,
+        signed_headers,
+        body_hash,
+    ).to_text();
+
+    // Step 2 — string-to-sign.
+    let date_8 = now_iso8601_basic.byte_substring(0, 8); // YYYYMMDD
+    let credential_scope = format!("{}/{}/{}/aws4_request", date_8, region, service).to_text();
+    let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        now_iso8601_basic, credential_scope, canonical_request_hash,
+    ).to_text();
+
+    // Step 3 — signing key.
+    let signing_key = derive_signing_key(&creds.secret_access_key, &date_8, region, service);
+
+    // Step 4 — signature.
+    let signature = hex_encode(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+
+    // Authorization header.
+    let authz = format!(
+        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+        creds.access_key_id, credential_scope, signed_headers, signature,
+    ).to_text();
+
+    let mut out: Map<Text, Text> = Map.new();
+    out.insert("authorization".to_text(),         authz);
+    out.insert("x-amz-date".to_text(),            now_iso8601_basic.clone());
+    out.insert("x-amz-content-sha256".to_text(),  body_hash);
+    if let Some(tok) = &creds.session_token {
+        out.insert("x-amz-security-token".to_text(), tok.clone());
+    }
+    Ok(SignedHeaders { headers: out })
+}
+
+// =============================================================================
+// Presigned URL (query-string SigV4)
+// =============================================================================
+
+/// Generate a presigned URL — credentials embedded in the query
+/// string, no Authorization header needed. Used for time-limited
+/// public access (download / upload tickets).
+pub fn presign(
+    method:            &Text,
+    url_path:          &Text,
+    base_query_pairs:  &List<(Text, Text)>,
+    host:              &Text,
+    creds:             &AwsCredentials,
+    region:            &Text,
+    service:           &Text,
+    now_iso8601_basic: &Text,
+    expires_seconds:   Int,
+) -> Result<List<(Text, Text)>, Text> {
+    if expires_seconds < 1 || expires_seconds > 604800 {
+        return Err(format!("presign: expires_seconds {} out of range [1, 604800]", expires_seconds).to_text());
+    }
+    let date_8 = now_iso8601_basic.byte_substring(0, 8);
+    let credential_scope = format!("{}/{}/{}/aws4_request", date_8, region, service).to_text();
+
+    // Build the canonical query, including the SigV4 query params.
+    // These params are part of the signed input so must be added
+    // BEFORE computing the canonical request.
+    let mut q: List<(Text, Text)> = List.with_capacity(base_query_pairs.len() + 6);
+    let mut i: Int = 0;
+    while i < base_query_pairs.len() { q.push(base_query_pairs[i].clone()); i = i + 1; }
+    q.push(("X-Amz-Algorithm".to_text(), "AWS4-HMAC-SHA256".to_text()));
+    q.push(("X-Amz-Credential".to_text(),
+        format!("{}/{}", creds.access_key_id, credential_scope).to_text()));
+    q.push(("X-Amz-Date".to_text(), now_iso8601_basic.clone()));
+    q.push(("X-Amz-Expires".to_text(), f"{expires_seconds}"));
+    q.push(("X-Amz-SignedHeaders".to_text(), "host".to_text()));
+    if let Some(tok) = &creds.session_token {
+        q.push(("X-Amz-Security-Token".to_text(), tok.clone()));
+    }
+
+    // Presigned hash uses literal "UNSIGNED-PAYLOAD" — the body is
+    // not signed (the signature attests only to URL + headers).
+    let body_hash = "UNSIGNED-PAYLOAD".to_text();
+
+    let canonical_uri = canonical_path(url_path);
+    let canonical_query = canonical_query_string(&q);
+    let canonical_headers = format!("host:{}\n", host).to_text();
+    let signed_headers = "host".to_text();
+
+    let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}",
+        method.to_upper(),
+        canonical_uri,
+        canonical_query,
+        canonical_headers,
+        signed_headers,
+        body_hash,
+    ).to_text();
+    let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
+
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        now_iso8601_basic, credential_scope, canonical_request_hash,
+    ).to_text();
+
+    let signing_key = derive_signing_key(&creds.secret_access_key, &date_8, region, service);
+    let signature = hex_encode(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+
+    q.push(("X-Amz-Signature".to_text(), signature));
+    Ok(q)
+}
+
+// =============================================================================
+// SigV4 helpers — canonicalisation
+// =============================================================================
+
+/// Canonical URI per SigV4 §3.2: percent-encode each path segment
+/// with the AWS-specific reserved set (we keep `/` between segments
+/// + don't double-encode already-percent-encoded sequences).
+fn canonical_path(path: &Text) -> Text {
+    if path.is_empty() { return "/".to_text(); }
+    if !path.starts_with("/") { return format!("/{}", percent_encode_path(path)).to_text(); }
+    percent_encode_path(path)
+}
+
+fn percent_encode_path(path: &Text) -> Text {
+    let mut out: Text = "".to_text();
+    let bs = path.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == b'/' {
+            out = out.append("/");
+        } else if is_unreserved(b) {
+            out = out.append(&Text.from_byte(b));
+        } else {
+            out = out.append(&format!("%{:02X}", b).to_text());
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// SigV4 §3.3 — `&`-separated, lexicographic by (key, value);
+/// each component percent-encoded with AWS rules (unreserved chars
+/// preserved; everything else encoded).
+fn canonical_query_string(pairs: &List<(Text, Text)>) -> Text {
+    if pairs.is_empty() { return "".to_text(); }
+    let mut sorted: List<(Text, Text)> = List.with_capacity(pairs.len());
+    let mut i: Int = 0;
+    while i < pairs.len() {
+        sorted.push((
+            percent_encode_strict(&pairs[i].0),
+            percent_encode_strict(&pairs[i].1),
+        ));
+        i = i + 1;
+    }
+    sort_pairs(&mut sorted);
+    let mut out: Text = "".to_text();
+    let mut k: Int = 0;
+    while k < sorted.len() {
+        if k > 0 { out = out.append("&"); }
+        out = out.append(&sorted[k].0);
+        out = out.append("=");
+        out = out.append(&sorted[k].1);
+        k = k + 1;
+    }
+    out
+}
+
+fn percent_encode_strict(s: &Text) -> Text {
+    let mut out: Text = "".to_text();
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if is_unreserved(b) {
+            out = out.append(&Text.from_byte(b));
+        } else {
+            out = out.append(&format!("%{:02X}", b).to_text());
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn is_unreserved(b: Byte) -> Bool {
+    (b >= b'A' && b <= b'Z') ||
+    (b >= b'a' && b <= b'z') ||
+    (b >= b'0' && b <= b'9') ||
+    b == b'-' || b == b'_' || b == b'.' || b == b'~'
+}
+
+fn sort_pairs(pairs: &mut List<(Text, Text)>) {
+    let n = pairs.len();
+    let mut i: Int = 1;
+    while i < n {
+        let mut j: Int = i;
+        while j > 0 && pair_less(&pairs[j], &pairs[j - 1]) {
+            pairs.swap(j, j - 1);
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn pair_less(a: &(Text, Text), b: &(Text, Text)) -> Bool {
+    if a.0 != b.0 { a.0 < b.0 } else { a.1 < b.1 }
+}
+
+/// SigV4 §3.4: signed-headers = lower-cased keys, semicolon-joined,
+/// sorted lexicographically. Canonical-headers = each `key:value`
+/// line, value trimmed + sequential whitespace collapsed.
+fn canonical_headers_and_signed(headers: &Map<Text, Text>) -> (Text, Text) {
+    let mut keys: List<Text> = headers.keys().cloned().collect();
+    sort_keys(&mut keys);
+    let mut canon: Text = "".to_text();
+    let mut signed: Text = "".to_text();
+    let mut i: Int = 0;
+    while i < keys.len() {
+        let k = &keys[i];
+        let v = headers.get(k).cloned().unwrap_or_else(|| "".to_text());
+        let trimmed = collapse_whitespace(&v.trim().to_text());
+        canon = canon.append(k);
+        canon = canon.append(":");
+        canon = canon.append(&trimmed);
+        canon = canon.append("\n");
+        if i > 0 { signed = signed.append(";"); }
+        signed = signed.append(k);
+        i = i + 1;
+    }
+    (canon, signed)
+}
+
+fn sort_keys(keys: &mut List<Text>) {
+    let n = keys.len();
+    let mut i: Int = 1;
+    while i < n {
+        let mut j: Int = i;
+        while j > 0 && keys[j] < keys[j - 1] {
+            keys.swap(j, j - 1);
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn collapse_whitespace(s: &Text) -> Text {
+    let mut out: Text = "".to_text();
+    let bs = s.as_bytes();
+    let mut prev_ws: Bool = false;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == b' ' || b == b'\t' {
+            if !prev_ws {
+                out = out.append(" ");
+                prev_ws = true;
+            }
+        } else {
+            out = out.append(&Text.from_byte(b));
+            prev_ws = false;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Signing-key derivation
+// =============================================================================
+
+fn derive_signing_key(
+    secret_access_key: &Text,
+    date_8:            &Text,
+    region:            &Text,
+    service:           &Text,
+) -> List<Byte> {
+    let initial = format!("AWS4{}", secret_access_key).as_bytes().to_list();
+    let k_date    = hmac_sha256(&initial, date_8.as_bytes()).to_list();
+    let k_region  = hmac_sha256(&k_date,  region.as_bytes()).to_list();
+    let k_service = hmac_sha256(&k_region, service.as_bytes()).to_list();
+    hmac_sha256(&k_service, "aws4_request".as_bytes()).to_list()
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_canonical_path_root() {
+        assert_eq(canonical_path(&"".to_text()), "/".to_text());
+        assert_eq(canonical_path(&"/".to_text()), "/".to_text());
+    }
+
+    #[test]
+    fn test_percent_encode_strict_preserves_unreserved() {
+        let s = "abc-DEF_123.~".to_text();
+        assert_eq(percent_encode_strict(&s), s);
+    }
+
+    #[test]
+    fn test_percent_encode_strict_escapes_space() {
+        let s = "hello world".to_text();
+        assert_eq(percent_encode_strict(&s), "hello%20world".to_text());
+    }
+
+    #[test]
+    fn test_canonical_query_string_sorted() {
+        let mut pairs: List<(Text, Text)> = List.new();
+        pairs.push(("b".to_text(), "2".to_text()));
+        pairs.push(("a".to_text(), "1".to_text()));
+        let s = canonical_query_string(&pairs);
+        assert_eq(s, "a=1&b=2".to_text());
+    }
+}

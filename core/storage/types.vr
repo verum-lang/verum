@@ -1,0 +1,239 @@
+// =============================================================================
+// storage/types.vr — abstract object-store protocol
+// =============================================================================
+// Layer: 4 (Object storage)
+// Dependencies: core, base, collections, time/rfc3339, encoding/hex
+// =============================================================================
+//
+// **Purpose.** Universal abstraction over content-addressable
+// blob stores. Concrete adapters: AWS S3, MinIO, Google Cloud
+// Storage, Azure Blob, local filesystem. The protocol exposes
+// put / get / head / delete / list + presigned URL generation.
+//
+// **Categorical structure.** An ObjectStore is a contravariant
+// functor from "object key" to "byte sequence + metadata"; immutable
+// upserts (with versioning) make it a *poset under override*. The
+// presigned-URL operation is the right adjoint of authentication —
+// it factors a credential-bearing access into a time-limited public
+// link without rebuilding the credential each time.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract object-store protocol — ObjectStore + ObjectMetadata + presigned URL".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.storage.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount time.rfc3339.Rfc3339Time;
+
+// =============================================================================
+// Object metadata
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type ObjectMetadata is {
+    /// Storage-side stable identifier (the key under which the
+    /// object lives in the bucket / container).
+    key:           Text,
+    /// Object content length in bytes.
+    content_length: Int { >= 0 },
+    /// MIME type (defaults to `application/octet-stream`).
+    content_type:  Text,
+    /// Hex-encoded ETag — typically MD5(content) for single-part
+    /// uploads or `MD5(MD5(part1) || MD5(part2) || ...)` for
+    /// multipart. Verifies content integrity on round-trip.
+    etag:          Text,
+    /// Last-modified timestamp.
+    last_modified: Rfc3339Time,
+    /// User-supplied metadata key-value pairs (`x-amz-meta-*` for S3,
+    /// equivalent for other backends). Keys lowercase.
+    user_metadata: Map<Text, Text>,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type StorageError is
+    | NotFound(Text)
+    | AccessDenied(Text)
+    | Network(Text)
+    | InvalidKey(Text)
+    | TooLarge { size: Int, limit: Int }
+    | Conflict(Text)
+    | ChecksumMismatch { expected: Text, computed: Text }
+    | Backend(Text);
+
+implement Display for StorageError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            StorageError.NotFound(k)             => f.write_str(f"storage: not found: {k}".as_str()),
+            StorageError.AccessDenied(reason)    => f.write_str(f"storage: access denied: {reason}".as_str()),
+            StorageError.Network(reason)         => f.write_str(f"storage: network: {reason}".as_str()),
+            StorageError.InvalidKey(reason)      => f.write_str(f"storage: invalid key: {reason}".as_str()),
+            StorageError.TooLarge { size, limit } => f.write_str(f"storage: object too large ({size} > {limit})".as_str()),
+            StorageError.Conflict(reason)        => f.write_str(f"storage: conflict: {reason}".as_str()),
+            StorageError.ChecksumMismatch { expected, computed } => f.write_str(
+                f"storage: checksum mismatch (expected {expected}, computed {computed})".as_str()),
+            StorageError.Backend(reason)         => f.write_str(f"storage: backend: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for StorageError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// Put / get options
+// =============================================================================
+
+@derive(Clone, Debug)
+public type PutOptions is {
+    content_type:  Text,
+    user_metadata: Map<Text, Text>,
+    /// If set, server-side enforces "key must not exist" and
+    /// returns `Conflict` if it does — atomic upload-once semantics.
+    if_none_match: Bool,
+    /// If set, server-side enforces matching ETag — used for
+    /// optimistic-concurrency overwrites.
+    if_match_etag: Maybe<Text>,
+};
+
+pub fn put_options_default() -> PutOptions {
+    PutOptions {
+        content_type:  "application/octet-stream".to_text(),
+        user_metadata: Map.new(),
+        if_none_match: false,
+        if_match_etag: None,
+    }
+}
+
+@derive(Clone, Debug)
+public type GetOptions is {
+    /// Byte-range request (RFC 7233): `Some((start, end_inclusive))`.
+    range:        Maybe<(Int, Int)>,
+    /// Conditional GET — return 304-equivalent if the object ETag
+    /// matches.
+    if_none_match: Maybe<Text>,
+};
+
+pub fn get_options_default() -> GetOptions {
+    GetOptions { range: None, if_none_match: None }
+}
+
+// =============================================================================
+// Listing
+// =============================================================================
+
+@derive(Clone, Debug)
+public type ListOptions is {
+    prefix:     Maybe<Text>,
+    /// Hierarchy delimiter for "directory-style" listing (typically `/`).
+    /// When set, common prefixes are returned separately from object keys.
+    delimiter:  Maybe<Text>,
+    /// Pagination — opaque token from a previous `list` call.
+    continuation_token: Maybe<Text>,
+    /// Cap on the number of objects returned in this page.
+    max_keys:   Int { >= 1, <= 1000 },
+};
+
+@derive(Clone, Debug)
+public type ListPage is {
+    objects:        List<ObjectMetadata>,
+    /// "Directory-style" prefixes when a delimiter was supplied.
+    common_prefixes: List<Text>,
+    /// Token to pass back as `continuation_token` for the next page.
+    /// `None` when the listing is complete.
+    next_token:     Maybe<Text>,
+};
+
+// =============================================================================
+// Presigned URLs
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+public type PresignMethod is
+    | Get
+    | Put
+    | Head
+    | Delete;
+
+@derive(Clone, Debug)
+public type PresignOptions is {
+    method:           PresignMethod,
+    /// Validity duration in seconds (1 ≤ N ≤ 7 days for AWS S3).
+    expires_seconds:  Int { >= 1, <= 604800 },
+    /// Optional overrides — Content-Type for PUT, response-Content-
+    /// Disposition for GET, etc.
+    extra_query:      Map<Text, Text>,
+};
+
+pub fn presign_options_get(expires_seconds: Int) -> PresignOptions {
+    PresignOptions {
+        method:          PresignMethod.Get,
+        expires_seconds,
+        extra_query:     Map.new(),
+    }
+}
+
+// =============================================================================
+// ObjectStore protocol
+// =============================================================================
+
+public type ObjectStore is protocol {
+    /// Single-shot upload — the entire payload is buffered into one
+    /// request. For very large objects (≥ 5 MiB on S3), use the
+    /// multipart upload helpers in concrete adapters.
+    async fn put(
+        &self,
+        key:     &Text,
+        data:    &List<Byte>,
+        options: &PutOptions,
+    ) -> Result<ObjectMetadata, StorageError>;
+
+    /// Fetch object content.
+    async fn get(
+        &self,
+        key:     &Text,
+        options: &GetOptions,
+    ) -> Result<(ObjectMetadata, List<Byte>), StorageError>;
+
+    /// HEAD — fetch metadata only (no body).
+    async fn head(&self, key: &Text) -> Result<ObjectMetadata, StorageError>;
+
+    /// Delete an object. Idempotent — succeeds even if the object
+    /// does not exist (matching S3 / GCS semantics).
+    async fn delete(&self, key: &Text) -> Result<(), StorageError>;
+
+    /// List objects.
+    async fn list(&self, options: &ListOptions) -> Result<ListPage, StorageError>;
+
+    /// Generate a presigned URL the caller can hand to a third party
+    /// for time-limited access.
+    fn presign(
+        &self,
+        key:     &Text,
+        options: &PresignOptions,
+    ) -> Result<Text, StorageError>;
+
+    /// Probe the bucket (HEAD on the bucket itself). Used for
+    /// readiness checks — surfaces auth + region errors at boot.
+    async fn head_bucket(&self) -> Result<(), StorageError>;
+};

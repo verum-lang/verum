@@ -1,0 +1,28 @@
+// =============================================================================
+// storage/s3/mod.vr — S3 adapter facade
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "S3 / S3-compatible object-store adapter facade".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.storage.s3;
+
+public module signing;
+public module client;
+
+public mount .signing.{AwsCredentials, sign_request, presign as sigv4_presign};
+public mount .client.{S3Config, S3Client, s3_config, s3_client};

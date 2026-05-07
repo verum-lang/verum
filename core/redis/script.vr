@@ -1,0 +1,115 @@
+// =============================================================================
+// redis/script.vr — Lua scripting (EVAL / EVALSHA / SCRIPT LOAD)
+// =============================================================================
+// Layer: 4 (Redis subsystem)
+//
+// Redis Lua scripting executes server-side, allowing complex
+// multi-key atomic operations (e.g., test-and-swap, distributed
+// rate limiting, leaderboard atomic update). EVALSHA + caching
+// the SHA gives O(1) bandwidth on subsequent calls.
+//
+// API:
+//   - `script_load(client, source)` → SHA-1 hex of the loaded script
+//   - `evalsha(client, sha, keys, args)` → RespValue
+//   - `eval(client, source, keys, args)` → RespValue
+//   - `script_exists(client, sha)` → Bool
+//   - `script_flush(client)` → ()
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Redis EVAL/EVALSHA/SCRIPT — server-side Lua scripting".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.script;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+
+mount core.redis.client.{RedisClient, RedisError, exec, exec_bytes};
+mount core.redis.protocol.RespValue;
+
+pub async fn script_load(client: &RedisClient, source: &Text) -> Result<Text, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("SCRIPT".to_text()); a.push("LOAD".to_text()); a.push(source.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.SimpleString(s) => Ok(s),
+        RespValue.BulkString(b)   => Text.from_utf8(b.as_slice())
+            .map_err(|e| RedisError.InvalidReply(f"utf8: {e}")),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SCRIPT LOAD unexpected: {other:?}")),
+    }
+}
+
+pub async fn evalsha(
+    client: &RedisClient,
+    sha:    &Text,
+    keys:   &[Text],
+    args:   &[List<Byte>],
+) -> Result<RespValue, RedisError> {
+    let total = 3 + keys.len() + args.len();
+    let mut a: List<List<Byte>> = List.with_capacity(total);
+    a.push("EVALSHA".to_text().as_bytes().to_list());
+    a.push(sha.as_bytes().to_list());
+    a.push(f"{keys.len()}".as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].as_bytes().to_list()); i = i + 1; }
+    let mut j: Int = 0;
+    while j < args.len() { a.push(args[j].clone()); j = j + 1; }
+    exec_bytes(client, &a).await
+}
+
+pub async fn eval(
+    client: &RedisClient,
+    source: &Text,
+    keys:   &[Text],
+    args:   &[List<Byte>],
+) -> Result<RespValue, RedisError> {
+    let total = 3 + keys.len() + args.len();
+    let mut a: List<List<Byte>> = List.with_capacity(total);
+    a.push("EVAL".to_text().as_bytes().to_list());
+    a.push(source.as_bytes().to_list());
+    a.push(f"{keys.len()}".as_bytes().to_list());
+    let mut i: Int = 0;
+    while i < keys.len() { a.push(keys[i].as_bytes().to_list()); i = i + 1; }
+    let mut j: Int = 0;
+    while j < args.len() { a.push(args[j].clone()); j = j + 1; }
+    exec_bytes(client, &a).await
+}
+
+/// Check whether a script is cached server-side.
+pub async fn script_exists(client: &RedisClient, sha: &Text) -> Result<Bool, RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("SCRIPT".to_text()); a.push("EXISTS".to_text()); a.push(sha.clone());
+    match exec(client, a.as_slice()).await? {
+        RespValue.Array(arr) if !arr.is_empty() => match &arr[0] {
+            RespValue.Integer(n) => Ok(*n == 1),
+            _ => Err(RedisError.InvalidReply("SCRIPT EXISTS: bad inner".to_text())),
+        },
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SCRIPT EXISTS unexpected: {other:?}")),
+    }
+}
+
+pub async fn script_flush(client: &RedisClient) -> Result<(), RedisError> {
+    let mut a: List<Text> = List.new();
+    a.push("SCRIPT".to_text()); a.push("FLUSH".to_text());
+    match exec(client, a.as_slice()).await? {
+        RespValue.SimpleString(_) => Ok(()),
+        RespValue.Error_(m) => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"SCRIPT FLUSH unexpected: {other:?}")),
+    }
+}

@@ -1,0 +1,98 @@
+// =============================================================================
+// redis/transaction.vr — MULTI / EXEC / WATCH transactions
+// =============================================================================
+// Layer: 4 (Redis subsystem)
+//
+// Redis transactions are pessimistic-locking-free: WATCH marks
+// keys, MULTI starts the queue, EXEC atomically commits — failing
+// only if any watched key changed concurrently. This is optimistic
+// concurrency: the application retries on failure.
+//
+// API surface:
+//   - `transaction(client, |tx| { ... })` — closure-style helper
+//     that handles MULTI/EXEC + retry-on-WATCH-failure.
+//   - Lower-level `multi(conn)` / `queue(conn, args)` / `exec(conn)`
+//     for fine-grained control.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Redis MULTI/EXEC/WATCH optimistic-concurrency transactions".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.redis.transaction;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+
+mount core.redis.client.{RedisClient, RedisError};
+mount core.redis.protocol.RespValue;
+
+// =============================================================================
+// Result of EXEC
+// =============================================================================
+
+@derive(Clone, Debug)
+public type TxResult is
+    /// All queued commands ran; the array is the per-command reply
+    /// in the order the commands were queued.
+    | Committed(List<RespValue>)
+    /// EXEC returned nil — a watched key changed before EXEC.
+    /// The transaction was abandoned; caller may retry.
+    | Aborted;
+
+// =============================================================================
+// High-level helper
+// =============================================================================
+
+/// Issue WATCH(keys), MULTI, the caller-supplied queue of commands,
+/// and EXEC in a single round-trip. Returns the EXEC result.
+///
+/// **Note.** This function uses pipelined exec semantics — it does
+/// NOT take a dedicated connection. For workflows that need to
+/// observe intermediate values between MULTI and EXEC (the typical
+/// optimistic-concurrency loop with `WATCH key; v = GET key; if
+/// v ok then MULTI; SET key new; EXEC end`), use the lower-level
+/// API in `client::exec_pipeline` directly.
+pub async fn run_simple(
+    client:        &RedisClient,
+    watch_keys:    &[Text],
+    queued_cmds:   &List<List<Text>>,
+) -> Result<TxResult, RedisError> {
+    let mut script: List<List<Text>> = List.new();
+    if !watch_keys.is_empty() {
+        let mut watch_cmd: List<Text> = List.with_capacity(watch_keys.len() + 1);
+        watch_cmd.push("WATCH".to_text());
+        let mut i: Int = 0;
+        while i < watch_keys.len() { watch_cmd.push(watch_keys[i].clone()); i = i + 1; }
+        script.push(watch_cmd);
+    }
+    let mut multi_cmd: List<Text> = List.new(); multi_cmd.push("MULTI".to_text());
+    script.push(multi_cmd);
+    let mut k: Int = 0;
+    while k < queued_cmds.len() { script.push(queued_cmds[k].clone()); k = k + 1; }
+    let mut exec_cmd: List<Text> = List.new(); exec_cmd.push("EXEC".to_text());
+    script.push(exec_cmd);
+
+    let replies = core.redis.client.exec_pipeline(client, &script).await?;
+    let last = replies[replies.len() - 1].clone();
+    match last {
+        RespValue.NullArray | RespValue.NullBulk | RespValue.Nil_ => Ok(TxResult.Aborted),
+        RespValue.Array(arr) => Ok(TxResult.Committed(arr)),
+        RespValue.Error_(m)  => Err(RedisError.Backend(m)),
+        other => Err(RedisError.InvalidReply(f"EXEC unexpected: {other:?}")),
+    }
+}

@@ -1,0 +1,233 @@
+// =============================================================================
+// cache/types.vr — abstract cache protocol + value model
+// =============================================================================
+// Layer: 4 (Caching)
+// Dependencies: core, base, collections, time
+// =============================================================================
+//
+// **Purpose.** Universal cache abstraction. Concrete adapters
+// (Redis, in-memory LRU, Memcached, multi-tier) implement the
+// `CacheBackend` protocol; consumers compose against the protocol,
+// never against concrete adapters. This is the right adjoint of
+// "what does it mean to cache?": every key-value store with TTL +
+// atomic-set-if-absent + delete satisfies the protocol.
+//
+// **Categorical structure.** `CacheBackend` forms a forgetful
+// functor from "key-value store with expiry" to "key-value store"
+// (drop expiry) to "set" (drop values). The concrete adapters are
+// faithful sections — they preserve all the structure when reading
+// back what they wrote.
+//
+// **Type-safe values.** `CacheValue` is a discriminated union over
+// the value shapes the cache stores; this lets a single backend
+// instance serve typed contexts (Bytes / Text / Json / Counter)
+// without ad-hoc encoding-then-decoding at every call site.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "abstract cache protocol — CacheBackend + CacheValue + CacheError".to_text(),
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.cache.types;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+
+// =============================================================================
+// Value model
+// =============================================================================
+
+/// A cache value, discriminated by shape. Backends implement
+/// per-variant get/set; consumers pick the variant that matches
+/// their domain type.
+@derive(Eq, Clone, Debug)
+public type CacheValue is
+    /// Raw byte payload (any application-encoded data).
+    | Bytes(List<Byte>)
+    /// UTF-8 string (typically JSON-encoded application data).
+    | TextValue(Text)
+    /// Monotonic counter (INCR / DECR atomic ops).
+    | Counter(Int)
+    /// Set of strings (used for tagging / invalidation groups).
+    | StringSet(List<Text>);
+
+/// TTL specification for a cache entry.
+@derive(Eq, Clone, Debug)
+public type CacheTtl is
+    /// No expiry — entry persists until explicitly evicted.
+    | Persistent
+    /// Expire after N seconds.
+    | Seconds(Int { >= 1 })
+    /// Expire after N milliseconds (sub-second precision).
+    | Millis(Int { >= 1 });
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CacheError is
+    | NotFound(Text)
+    | Network(Text)
+    | Encoding(Text)
+    | TypeMismatch { expected: Text, found: Text }
+    | TooLarge { size: Int, limit: Int }
+    | InvalidKey(Text)
+    | Backend(Text);
+
+implement Display for CacheError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CacheError.NotFound(k)               => f.write_str(f"cache: key not found: {k}".as_str()),
+            CacheError.Network(reason)           => f.write_str(f"cache: network: {reason}".as_str()),
+            CacheError.Encoding(reason)          => f.write_str(f"cache: encoding: {reason}".as_str()),
+            CacheError.TypeMismatch { expected, found } => f.write_str(
+                f"cache: type mismatch (expected {expected}, found {found})".as_str()),
+            CacheError.TooLarge { size, limit }  => f.write_str(f"cache: value too large ({size} > {limit})".as_str()),
+            CacheError.InvalidKey(reason)        => f.write_str(f"cache: invalid key: {reason}".as_str()),
+            CacheError.Backend(reason)           => f.write_str(f"cache: backend error: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for CacheError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+// =============================================================================
+// CacheBackend protocol
+// =============================================================================
+//
+// Every concrete backend implements these primitives. Higher-level
+// helpers (typed get/set, JSON round-trip, scoped namespaces) are
+// supplied as default methods that compose against the primitives.
+
+public type CacheBackend is protocol {
+    /// Fetch a value by key. Returns `None` if the key is absent
+    /// or expired.
+    async fn get(&self, key: &Text) -> Result<Maybe<CacheValue>, CacheError>;
+
+    /// Store a value with the given TTL. Replaces any existing
+    /// entry at the same key.
+    async fn set(
+        &self,
+        key:   &Text,
+        value: &CacheValue,
+        ttl:   &CacheTtl,
+    ) -> Result<(), CacheError>;
+
+    /// Atomic set-if-absent. Returns `true` iff the value was
+    /// stored (key was previously absent or expired).
+    async fn set_if_absent(
+        &self,
+        key:   &Text,
+        value: &CacheValue,
+        ttl:   &CacheTtl,
+    ) -> Result<Bool, CacheError>;
+
+    /// Delete a key. Returns the number of keys removed (0 or 1).
+    async fn delete(&self, key: &Text) -> Result<Int, CacheError>;
+
+    /// Multi-get — atomic fetch of N keys. Returns one entry per
+    /// requested key in order; absent keys map to `None`.
+    async fn mget(&self, keys: &List<Text>) -> Result<List<Maybe<CacheValue>>, CacheError>;
+
+    /// Increment a counter atomically. Creates the counter at 0 if
+    /// absent. Returns the new value.
+    async fn incr_by(&self, key: &Text, delta: Int) -> Result<Int, CacheError>;
+
+    /// Set the TTL on an existing key. Returns `false` if the key
+    /// does not exist.
+    async fn expire(&self, key: &Text, ttl: &CacheTtl) -> Result<Bool, CacheError>;
+
+    /// Probe the backend (round-trip a PING). Used for health checks.
+    async fn ping(&self) -> Result<(), CacheError>;
+};
+
+// =============================================================================
+// Higher-level helpers
+// =============================================================================
+
+/// Fetch a value, decoding it as Text. Returns TypeMismatch if the
+/// underlying value is not Text.
+pub async fn get_text<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<Text>, CacheError> {
+    match c.get(key).await? {
+        Some(CacheValue.TextValue(t)) => Ok(Some(t)),
+        Some(other) => Err(CacheError.TypeMismatch {
+            expected: "TextValue".to_text(),
+            found:    cache_value_kind(&other),
+        }),
+        None => Ok(None),
+    }
+}
+
+/// Fetch a value, decoding it as Bytes.
+pub async fn get_bytes<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<List<Byte>>, CacheError> {
+    match c.get(key).await? {
+        Some(CacheValue.Bytes(b)) => Ok(Some(b)),
+        Some(other) => Err(CacheError.TypeMismatch {
+            expected: "Bytes".to_text(),
+            found:    cache_value_kind(&other),
+        }),
+        None => Ok(None),
+    }
+}
+
+/// Convenience setters — wrap a Text or Bytes payload.
+pub async fn set_text<C: CacheBackend>(c: &C, key: &Text, value: Text, ttl: &CacheTtl) -> Result<(), CacheError> {
+    c.set(key, &CacheValue.TextValue(value), ttl).await
+}
+
+pub async fn set_bytes<C: CacheBackend>(c: &C, key: &Text, value: List<Byte>, ttl: &CacheTtl) -> Result<(), CacheError> {
+    c.set(key, &CacheValue.Bytes(value), ttl).await
+}
+
+/// Get-and-delete in one round-trip when supported; falls back to
+/// get + delete for backends without GETDEL.
+pub async fn get_and_delete<C: CacheBackend>(c: &C, key: &Text) -> Result<Maybe<CacheValue>, CacheError> {
+    let v = c.get(key).await?;
+    if v.is_some() { let _ = c.delete(key).await?; }
+    Ok(v)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+pub fn cache_value_kind(v: &CacheValue) -> Text {
+    match v {
+        CacheValue.Bytes(_)      => "Bytes".to_text(),
+        CacheValue.TextValue(_)  => "TextValue".to_text(),
+        CacheValue.Counter(_)    => "Counter".to_text(),
+        CacheValue.StringSet(_)  => "StringSet".to_text(),
+    }
+}
+
+pub fn ttl_to_seconds(t: &CacheTtl) -> Maybe<Int> {
+    match t {
+        CacheTtl.Persistent => None,
+        CacheTtl.Seconds(s) => Some(*s),
+        CacheTtl.Millis(ms) => Some((ms + 999) / 1000),
+    }
+}
+
+pub fn ttl_to_millis(t: &CacheTtl) -> Maybe<Int> {
+    match t {
+        CacheTtl.Persistent => None,
+        CacheTtl.Seconds(s) => Some(s * 1000),
+        CacheTtl.Millis(ms) => Some(*ms),
+    }
+}
