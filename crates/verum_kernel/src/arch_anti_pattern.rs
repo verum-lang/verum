@@ -33,7 +33,7 @@
 //! Removing a pattern requires a deprecation cycle ≥ 2 minor
 //! versions — codes never get re-used.
 
-use crate::arch::{BoundaryInvariant, Capability, Foundation, Lifecycle, Shape, Tier};
+use crate::arch::{BoundaryInvariant, Capability, Foundation, Lifecycle, ResourceTag, Shape, Tier};
 
 // =============================================================================
 // AntiPatternCode — stable RFC code
@@ -132,6 +132,11 @@ pub enum AntiPatternCode {
     /// `ATS-V-AP-039` — formal claim outside CHL anchoring without
     /// declared `FormalAnchoring` tradition (spec §4.5).
     AnchoringOverextension,
+    /// `ATS-V-AP-040` — self-referential `Shape` pattern without
+    /// declared `SelfReferenceWitness` (spec §16 articulation
+    /// hygiene: «никогда «само-X», всегда «оператор + неподвижная
+    /// точка»).  Closes CVE-architecture open invariant R4.
+    SelfReferenceWithoutOperator,
 }
 
 impl AntiPatternCode {
@@ -177,6 +182,7 @@ impl AntiPatternCode {
             AntiPatternCode::BoundlessAudit => "ATS-V-AP-037",
             AntiPatternCode::ImplicitSubstrate => "ATS-V-AP-038",
             AntiPatternCode::AnchoringOverextension => "ATS-V-AP-039",
+            AntiPatternCode::SelfReferenceWithoutOperator => "ATS-V-AP-040",
         }
     }
 
@@ -222,6 +228,7 @@ impl AntiPatternCode {
             AntiPatternCode::BoundlessAudit => "BoundlessAudit",
             AntiPatternCode::ImplicitSubstrate => "ImplicitSubstrate",
             AntiPatternCode::AnchoringOverextension => "AnchoringOverextension",
+            AntiPatternCode::SelfReferenceWithoutOperator => "SelfReferenceWithoutOperator",
         }
     }
 
@@ -268,6 +275,7 @@ impl AntiPatternCode {
             AntiPatternCode::BoundlessAudit => 37,
             AntiPatternCode::ImplicitSubstrate => 38,
             AntiPatternCode::AnchoringOverextension => 39,
+            AntiPatternCode::SelfReferenceWithoutOperator => 40,
         };
         format!("https://verum.lang/docs/ats-v/ap-{:03}", n)
     }
@@ -318,12 +326,14 @@ impl AntiPatternCode {
             | AntiPatternCode::ObserverImpersonation
             | AntiPatternCode::BoundlessAudit
             | AntiPatternCode::ImplicitSubstrate
-            | AntiPatternCode::AnchoringOverextension => 3,
+            | AntiPatternCode::AnchoringOverextension
+            | AntiPatternCode::SelfReferenceWithoutOperator => 3,
         }
     }
 
  /// True iff the pattern belongs to the CVE-AH band — operationalises
- /// the cve-architecture spec primitives.
+ /// the cve-architecture spec primitives (§§1.5, 2.3.0, 3.5, 4.5,
+ /// 14.6, 16).
     pub fn is_cve_ah(&self) -> bool {
         matches!(
             self,
@@ -334,6 +344,7 @@ impl AntiPatternCode {
                 | AntiPatternCode::BoundlessAudit
                 | AntiPatternCode::ImplicitSubstrate
                 | AntiPatternCode::AnchoringOverextension
+                | AntiPatternCode::SelfReferenceWithoutOperator
         )
     }
 
@@ -351,8 +362,8 @@ impl AntiPatternCode {
         )
     }
 
- /// Full canonical list — = 39 patterns total.
-    pub fn full_list() -> [AntiPatternCode; 39] {
+ /// Full canonical list — = 40 patterns total.
+    pub fn full_list() -> [AntiPatternCode; 40] {
         [
  // capability/composition core (10)
             AntiPatternCode::CapabilityEscalation,
@@ -389,7 +400,7 @@ impl AntiPatternCode {
             AntiPatternCode::UniversalPropertyViolation,
             AntiPatternCode::PhantomEvolution,
             AntiPatternCode::YonedaInequivalentRefactor,
- // CVE articulation-hygiene band (7) — operationalises
+ // CVE articulation-hygiene band (8) — operationalises
  // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16
             AntiPatternCode::RetractedCitationUse,
             AntiPatternCode::HypothesisWithoutMaturationPlan,
@@ -398,6 +409,7 @@ impl AntiPatternCode {
             AntiPatternCode::BoundlessAudit,
             AntiPatternCode::ImplicitSubstrate,
             AntiPatternCode::AnchoringOverextension,
+            AntiPatternCode::SelfReferenceWithoutOperator,
         ]
     }
 }
@@ -1088,7 +1100,7 @@ pub struct DiagnosticContext {
     /// list claims `equivalent: true` (AT-3 input).  Each entry:
     /// `(verdict_label, observer_tags_in_agreement)`.
     pub yoneda_verdicts_claimed: Vec<(String, Vec<String>)>,
-    // ----- CVE articulation-hygiene band inputs (AP-033..039) -----
+    // ----- CVE articulation-hygiene band inputs (AP-033..040) -----
     /// True iff the parser found a `@plan(...)` attribute on the cog
     /// (AP-034 input). Default `false` is the conservative choice:
     /// without explicit detection, every `[H]` triggers AP-034.
@@ -1101,6 +1113,13 @@ pub struct DiagnosticContext {
     /// prose attached to the cog (AP-036 input). Each entry is
     /// `(observer_role, conflicting_register)`.
     pub observer_role_register_mismatches: Vec<(String, String)>,
+    /// Fully-qualified module path of the cog under audit, used by
+    /// the AP-040 self-reference detector to recognise self-X
+    /// patterns in `composes_with` and capability-target text.
+    /// Default empty string means "self-reference detection disabled
+    /// for this audit pass" (used in unit tests where the cog name
+    /// is irrelevant).
+    pub self_module_path: String,
 }
 
 /// Structured description of how the inferred Shape diverges from
@@ -2325,6 +2344,133 @@ pub fn check_anchoring_overextension(shape: &Shape) -> Option<AntiPatternViolati
     })
 }
 
+/// AP-040 SelfReferenceWithoutOperator — self-referential `Shape`
+/// pattern without declared `SelfReferenceWitness`.  Closes
+/// open invariant R4 from cve/architectural-revisions.md §7.
+///
+/// Detection rule: a self-X pattern is present iff at least one of
+/// the following holds, where `self_path` is the cog's fully-
+/// qualified module path:
+///
+/// 1. `self_path ∈ shape.composes_with` — the cog cites itself
+///    in its composition graph (the most common self-X variant).
+/// 2. Any capability in `shape.exposes` or `shape.requires` whose
+///    target tag string contains the substring `self_path` —
+///    the cog exposes/requires a capability targeting its own
+///    holon, namespace, or registered resource.
+/// 3. `self_path` appears textually in any `Capability::Custom { tag }`
+///    declared on `shape.exposes` or `shape.requires` — chain-domain
+///    self-reference via `synarc:holon/<self>` or similar
+///    `CustomResource(...)` patterns.
+///
+/// When self-X is present, the check passes iff
+/// `shape.declarations.self_reference: Some(witness)`.
+/// Absence triggers AP-040 with a remediation pointing at the
+/// canonical operator+fixed-point declaration.
+///
+/// In soft mode the violation is `Warning`; in `shape.strict ==
+/// true` it is `Error` and blocks deployment.  Skipped entirely
+/// when `self_path` is empty (unit-test mode).
+pub fn check_self_reference_without_operator(
+    shape: &Shape,
+    self_path: &str,
+) -> Option<AntiPatternViolation> {
+    if self_path.is_empty() {
+        return None;
+    }
+
+    // (1) Self in composes_with — most common self-X variant.
+    let self_in_composes = shape.composes_with.iter().any(|p| p == self_path);
+
+    // (2)+(3) Self mentioned in any capability target.  We pattern-
+    // match on the canonical capability variants whose target
+    // strings can contain a self-referential path.  The check is
+    // intentionally string-level; AP-040 catches bare assertions,
+    // not nuanced semantic self-reference.
+    let cap_mentions_self = |c: &Capability| -> bool {
+        match c {
+            Capability::Custom { tag, .. } => tag.contains(self_path),
+            Capability::Read { resource } | Capability::Write { resource } => {
+                resource_tag_text(resource).contains(self_path)
+            }
+            _ => false,
+        }
+    };
+    let self_in_exposes = shape.exposes.iter().any(cap_mentions_self);
+    let self_in_requires = shape.requires.iter().any(cap_mentions_self);
+
+    let has_self_x = self_in_composes || self_in_exposes || self_in_requires;
+    if !has_self_x {
+        return None;
+    }
+
+    // Self-X present.  Check for declared witness.
+    let has_witness = shape
+        .declarations
+        .as_ref()
+        .and_then(|d| d.self_reference.as_ref())
+        .is_some();
+    if has_witness {
+        return None;
+    }
+
+    let trigger_text = if self_in_composes {
+        "self path appears in `composes_with`"
+    } else if self_in_exposes {
+        "self path appears in an exposed capability target"
+    } else {
+        "self path appears in a required capability target"
+    };
+
+    Some(AntiPatternViolation {
+        code: AntiPatternCode::SelfReferenceWithoutOperator,
+        severity: if shape.strict {
+            Severity::Error
+        } else {
+            Severity::Warning
+        },
+        summary: "AP-040 self-reference-without-operator".to_string(),
+        human_message: format!(
+            "Cog `{}` exhibits a self-referential `Shape` pattern \
+             ({}) but does not declare a `SelfReferenceWitness`. Per \
+             cve-architecture spec §16 articulation hygiene, every \
+             self-X assertion must be re-articulated as `(operator \
+             T_X, fixed point Fix(T_X))` with a cited fixpoint-class \
+             theorem (Banach / Tarski / Adamek / custom). A bare \
+             self-X assertion is operationally indistinguishable \
+             from a Russell-paradox construction.",
+            self_path, trigger_text
+        ),
+        auto_fix_suggestion: Some(
+            "Add to `@arch_module(...)`: \
+             `declarations: ShapeDeclarations { \
+             self_reference: Some(SelfReferenceWitness { \
+             operator: \"path.to.operator_cog\", \
+             fixed_point: \"path.to.fixed_point_cog\", \
+             fixpoint_class: FixpointClass.Banach \
+             /* or Tarski / Adamek / CustomFixpoint(\"...\") */ \
+             }), .. }`. The operator cog must have lifecycle ≥ \
+             Conditional and discharge the cited fixpoint-class \
+             obligation."
+                .to_string(),
+        ),
+    })
+}
+
+// Helper: extract the textual tag from a `ResourceTag` for AP-040
+// substring scanning.
+fn resource_tag_text(tag: &ResourceTag) -> &str {
+    match tag {
+        ResourceTag::Database { name } => name,
+        ResourceTag::File { path_pattern } => path_pattern,
+        ResourceTag::Memory { region } => region,
+        ResourceTag::Config { namespace } => namespace,
+        ResourceTag::Logger => "logger",
+        ResourceTag::Random => "random",
+        ResourceTag::Custom(t) => t.as_str(),
+    }
+}
+
 /// Walk every canonical anti-pattern check; return all violations.
 /// Used by ATS-V phase + audit gate.
 pub fn check_all_anti_patterns(
@@ -2471,6 +2617,9 @@ pub fn check_all_anti_patterns(
         violations.push(v);
     }
     if let Some(v) = check_anchoring_overextension(shape) {
+        violations.push(v);
+    }
+    if let Some(v) = check_self_reference_without_operator(shape, &ctx.self_module_path) {
         violations.push(v);
     }
     violations
@@ -2692,23 +2841,26 @@ mod tests {
     }
 
     #[test]
-    fn architectural_pin_39_total_codes_reserved() {
- // catalog completion: 39 canonical patterns total.
- // 32 base + MTAC + 7 CVE-articulation-hygiene patterns
- // (AP-033..AP-039) operationalising cve-architecture spec
- // §1.5, §2.3.0, §3.5, §4.5, §14.6, §16. Adding more requires
- // RFC ATS-V-008 + kernel-side enum bump + pin-test bump.
+    fn architectural_pin_40_total_codes_reserved() {
+ // catalog completion: 40 canonical patterns total.
+ // 32 base + MTAC + 8 CVE-articulation-hygiene patterns
+ // (AP-033..AP-040) operationalising cve-architecture spec
+ // §1.5, §2.3.0, §3.5, §4.5, §14.6, §16. AP-040 closes
+ // open invariant R4 (self-reference without operator+fixed-point).
+ // Adding more requires RFC ATS-V-009 + kernel-side enum bump +
+ // pin-test bump.
         let codes = AntiPatternCode::full_list();
-        assert_eq!(codes.len(), 39);
+        assert_eq!(codes.len(), 40);
         assert_eq!(codes[0].code(), "ATS-V-AP-001");
         assert_eq!(codes[31].code(), "ATS-V-AP-032");
         assert_eq!(codes[38].code(), "ATS-V-AP-039");
+        assert_eq!(codes[39].code(), "ATS-V-AP-040");
     }
 
     #[test]
     fn season_attribution_correct() {
  // Pin: AP-001..010 are Season 1; AP-011..032 are Season 2;
- // AP-033..039 are Season 3 (CVE articulation-hygiene band).
+ // AP-033..040 are Season 3 (CVE articulation-hygiene band).
         for (i, code) in AntiPatternCode::full_list().iter().enumerate() {
             let expected = if i < 10 {
                 1
@@ -2746,13 +2898,13 @@ mod tests {
     #[test]
     fn all_codes_have_distinct_docs_urls() {
  // Pin: every code's docs_url() is distinct. Catches off-by-one
- // bugs in the URL generation (AP-NNN format). 32 base + 7
- // CVE-AH band = 39 total.
+ // bugs in the URL generation (AP-NNN format). 32 base + 8
+ // CVE-AH band = 40 total.
         let urls: std::collections::BTreeSet<_> = AntiPatternCode::full_list()
             .iter()
             .map(|c| c.docs_url())
             .collect();
-        assert_eq!(urls.len(), 39);
+        assert_eq!(urls.len(), 40);
  // Spot-check format.
         assert_eq!(
             AntiPatternCode::CapabilityEscalation.docs_url(),

@@ -400,7 +400,7 @@ fn pin_verify_strategy_aligned() {
 }
 
 // =============================================================================
-// 7. AntiPatternCode — 39 canonical codes (32 base + 7 CVE-AH band)
+// 7. AntiPatternCode — 40 canonical codes (32 base + 8 CVE-AH band)
 // =============================================================================
 
 #[test]
@@ -408,15 +408,15 @@ fn pin_anti_pattern_code_count_canonical() {
     let all = AntiPatternCode::full_list();
     assert_eq!(
         all.len(),
-        39,
-        "Kernel-side AntiPatternCode roster size drifted from canonical 39"
+        40,
+        "Kernel-side AntiPatternCode roster size drifted from canonical 40"
     );
 
     let codes: BTreeSet<&'static str> = all.iter().map(|c| c.code()).collect();
-    assert_eq!(codes.len(), 39, "AntiPatternCode codes not unique");
+    assert_eq!(codes.len(), 40, "AntiPatternCode codes not unique");
 
-    // Verify the AP-001..AP-039 pattern is fully covered.
-    for n in 1..=39 {
+    // Verify the AP-001..AP-040 pattern is fully covered.
+    for n in 1..=40 {
         let expected = format!("ATS-V-AP-{:03}", n);
         assert!(
             codes.contains(expected.as_str()),
@@ -462,9 +462,10 @@ fn pin_anti_pattern_code_count_canonical() {
         "UniversalPropertyViolation",
         "PhantomEvolution",
         "YonedaInequivalentRefactor",
-        // CVE articulation-hygiene band (AP-033..039) —
+        // CVE articulation-hygiene band (AP-033..040) —
         // operationalises cve-architecture spec §1.5, §2.3.0, §3.5,
-        // §4.5, §14.6, §16.
+        // §4.5, §14.6, §16. AP-040 closes architectural-revision
+        // open invariant R4 (self-reference without operator+Fix).
         "RetractedCitationUse",
         "HypothesisWithoutMaturationPlan",
         "InterpretationInMatureCorpus",
@@ -472,6 +473,7 @@ fn pin_anti_pattern_code_count_canonical() {
         "BoundlessAudit",
         "ImplicitSubstrate",
         "AnchoringOverextension",
+        "SelfReferenceWithoutOperator",
     ];
     for n in &names {
         assert_variant_in(&vr, n, "core/architecture/anti_patterns.vr (AntiPatternCode)");
@@ -642,8 +644,56 @@ fn pin_shape_declarations_extension() {
     assert!(empty.substrate.is_none());
     assert!(empty.anchoring.is_none());
     assert!(empty.e_sense.is_none());
+    assert!(empty.self_reference.is_none());
     let vr = read_vr("types.vr");
     assert_helper_in(&vr, "shape_declarations_empty", "types.vr");
+}
+
+#[test]
+fn pin_fixpoint_class_four_canonical() {
+    use verum_kernel::arch::FixpointClass;
+    let canonical = [
+        FixpointClass::Banach,
+        FixpointClass::Tarski,
+        FixpointClass::Adamek,
+        FixpointClass::CustomFixpoint("any".to_string()),
+    ];
+    let tags: BTreeSet<&'static str> = canonical.iter().map(|f| f.tag()).collect();
+    assert_eq!(
+        tags.len(),
+        4,
+        "FixpointClass tags must be 4 distinct (Banach + Tarski + Adamek + Custom)"
+    );
+
+    let vr = read_vr("types.vr");
+    for v in &["Banach", "Tarski", "Adamek", "CustomFixpoint"] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (FixpointClass)");
+    }
+    assert_helper_in(&vr, "fixpoint_class_tag", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_tags_distinct", "types.vr");
+}
+
+#[test]
+fn pin_self_reference_witness_format() {
+    use verum_kernel::arch::{FixpointClass, SelfReferenceWitness};
+    let w = SelfReferenceWitness::unspecified();
+    assert_eq!(w.operator, "unspecified");
+    assert_eq!(w.fixed_point, "unspecified");
+    assert!(matches!(
+        w.fixpoint_class,
+        FixpointClass::CustomFixpoint(_)
+    ));
+
+    // Concrete witness construction roundtrip.
+    let w2 = SelfReferenceWitness {
+        operator: "synarc.governance.amendment_operator".to_string(),
+        fixed_point: "synarc.governance.constitution_v1".to_string(),
+        fixpoint_class: FixpointClass::Banach,
+    };
+    assert_eq!(w2.fixpoint_class.tag(), "banach");
+
+    let vr = read_vr("types.vr");
+    assert_helper_in(&vr, "self_reference_witness_unspecified", "types.vr");
 }
 
 #[test]
@@ -1013,11 +1063,15 @@ fn pin_all_canonical_codes_have_check_function() {
             AntiPatternCode::AnchoringOverextension,
             "check_anchoring_overextension",
         ),
+        (
+            AntiPatternCode::SelfReferenceWithoutOperator,
+            "check_self_reference_without_operator",
+        ),
     ];
     assert_eq!(
         expected_fns.len(),
-        39,
-        "Expected mapping must cover all 39 AntiPatternCode variants"
+        40,
+        "Expected mapping must cover all 40 AntiPatternCode variants"
     );
 
     for (code, fn_name) in expected_fns {

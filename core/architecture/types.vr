@@ -846,28 +846,108 @@ public type ArchitecturalDefect is {
     proposed_resolution: Resolution,
 };
 
+// ----- SelfReferenceWitness + FixpointClass (§16 articulation hygiene) -----
+
+/// Class of fixed-point theorem under which a self-referential
+/// construct admits a unique fixed point. Per cve-architecture spec
+/// §16: «никогда «само-X», всегда «оператор `T_X` + неподвижная
+/// точка `Fix(T_X)`».  A cog that asserts a self-referential
+/// property MUST cite which fixed-point theorem discharges the
+/// existence and (where applicable) uniqueness of `Fix(T_X)`.
+///
+///   * `Banach`           — Banach fixed-point theorem (contracting
+///                          operator on complete metric space). The
+///                          witness must ship a contraction-
+///                          coefficient bound `k ∈ [0, 1)`.
+///   * `Tarski`           — Tarski-Knaster theorem (monotone operator
+///                          on complete lattice). The witness must
+///                          ship a monotonicity proof.
+///   * `Adamek`           — Adamek's theorem on initial algebras
+///                          (continuous functor on cocomplete
+///                          category). The witness must ship a
+///                          continuity proof.
+///   * `CustomFixpoint`   — user-cited theorem; the citation MUST
+///                          appear in the cog's `@framework(...)`
+///                          attribute and be enumerable by
+///                          `verum audit --framework-axioms`.
+public type FixpointClass is
+    | Banach
+    | Tarski
+    | Adamek
+    | CustomFixpoint(Text);
+
+/// Stable diagnostic tag for `FixpointClass`.
+public fn fixpoint_class_tag(f: FixpointClass) -> Text {
+    match f {
+        Banach              => "banach",
+        Tarski              => "tarski",
+        Adamek              => "adamek",
+        CustomFixpoint(_)   => "custom_fixpoint",
+    }
+}
+
+/// Self-reference witness, per cve-architecture spec §16. A cog
+/// whose `Shape` exhibits a self-referential pattern (self in
+/// `composes_with`, capability targeting the cog's own holon,
+/// requires citing the cog itself) MUST declare this witness.
+/// Absence triggers AP-040 `SelfReferenceWithoutOperator`.
+///
+///   * `operator`        — path to the cog implementing the
+///                         operator `T_X` whose fixed point the
+///                         self-referential cog inhabits. The
+///                         operator cog MUST have lifecycle
+///                         ≥ `Conditional`.
+///   * `fixed_point`     — path to the cog implementing the fixed
+///                         point `Fix(T_X)`. May coincide with the
+///                         self-referential cog itself when the
+///                         self-reference is constructive (the cog
+///                         IS its own fixed point under `T_X`).
+///   * `fixpoint_class`  — fixed-point theorem class discharging
+///                         existence (and where applicable
+///                         uniqueness) of `Fix(T_X)`.
+public type SelfReferenceWitness is {
+    operator: Text,
+    fixed_point: Text,
+    fixpoint_class: FixpointClass,
+};
+
+/// Default-constructor for SelfReferenceWitness. Used in tests
+/// only; production cogs MUST supply a non-default witness with
+/// concrete operator and fixed-point paths.
+public fn self_reference_witness_unspecified() -> SelfReferenceWitness {
+    SelfReferenceWitness {
+        operator: "unspecified",
+        fixed_point: "unspecified",
+        fixpoint_class: FixpointClass.CustomFixpoint("unspecified"),
+    }
+}
+
 // ----- ShapeDeclarations — spec-load-bearing optional declarations -----
 
-/// Optional declarations packaged into a `Shape`. Carries the four
+/// Optional declarations packaged into a `Shape`. Carries the
 /// CVE-architecture spec concepts that are not yet load-bearing in
 /// the canonical primitives but ARE load-bearing in the
 /// architectural law: declared purpose (terminates audit), declared
 /// cognitive substrate (CVE's mode of operation, defaults to
 /// `AnalyticDecompositional`), declared formal anchoring (CHL by
 /// default), declared executability sense (`StructuralReadiness`
-/// by default).
+/// by default), declared self-reference witness (operator + fixed
+/// point + fixpoint class, per spec §16; required when the cog's
+/// `Shape` exhibits self-referential patterns).
 ///
-/// All four are `Maybe<...>` so `@arch_module(...)` need not declare
+/// All five are `Maybe<...>` so `@arch_module(...)` need not declare
 /// them explicitly; absent declarations default per the helpers
 /// `cognitive_substrate_default`, `formal_anchoring_default`,
-/// canonical `ExecutabilitySense.StructuralReadiness`, and
-/// `purpose_default()`. In strict mode, absence triggers the
-/// CVE-AH band anti-patterns (AP-037..AP-039).
+/// canonical `ExecutabilitySense.StructuralReadiness`,
+/// `purpose_default()`, and `self_reference == None` (no
+/// self-reference). In strict mode, absence triggers the CVE-AH
+/// band anti-patterns (AP-037..AP-040).
 public type ShapeDeclarations is {
     purpose: Maybe<Purpose>,
     substrate: Maybe<CognitiveSubstrate>,
     anchoring: Maybe<FormalAnchoring>,
     e_sense: Maybe<ExecutabilitySense>,
+    self_reference: Maybe<SelfReferenceWitness>,
 };
 
 /// Empty declarations record — every field unspecified, the
@@ -878,6 +958,7 @@ public fn shape_declarations_empty() -> ShapeDeclarations {
         substrate: None,
         anchoring: None,
         e_sense: None,
+        self_reference: None,
     }
 }
 
@@ -1322,4 +1403,15 @@ public fn purpose_default_is_complete() -> Bool {
     match p.e_min {
         StructurallyReady | DeployedInOneEnv | FunctorialOnly  => true,
     }
+}
+
+/// **Soundness pin** (spec §16 articulation hygiene): the four
+/// `FixpointClass` variants are exhaustive and pairwise distinct
+/// in their diagnostic tags.  Pin guards the AP-040 dispatch table
+/// from silent collision on tag rendering.
+public fn fixpoint_class_tags_distinct() -> Bool {
+    fixpoint_class_tag(FixpointClass.Banach) != fixpoint_class_tag(FixpointClass.Tarski) &&
+    fixpoint_class_tag(FixpointClass.Tarski) != fixpoint_class_tag(FixpointClass.Adamek) &&
+    fixpoint_class_tag(FixpointClass.Adamek) != fixpoint_class_tag(FixpointClass.CustomFixpoint("any")) &&
+    fixpoint_class_tag(FixpointClass.Banach) != fixpoint_class_tag(FixpointClass.CustomFixpoint("any"))
 }

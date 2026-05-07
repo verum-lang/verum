@@ -1146,8 +1146,77 @@ pub struct ArchitecturalDefect {
     pub proposed_resolution: Resolution,
 }
 
-/// Optional declarations packaged into a `Shape`. Carries the four
-/// CVE-architecture spec concepts.
+/// Class of fixed-point theorem under which a self-referential
+/// construct admits a unique fixed point. Per cve-architecture spec
+/// §16: every self-referential claim must be re-articulated as
+/// `(operator T_X, fixed point Fix(T_X))`; this enum names the
+/// theorem class discharging existence (and uniqueness where
+/// applicable) of `Fix(T_X)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FixpointClass {
+    /// Banach fixed-point theorem — contracting operator on complete
+    /// metric space; gives unique fixed point.
+    Banach,
+    /// Tarski-Knaster — monotone operator on complete lattice; gives
+    /// existence of fixed point (may be non-unique).
+    Tarski,
+    /// Adamek's theorem — continuous functor on cocomplete category;
+    /// gives initial-algebra fixed point.
+    Adamek,
+    /// User-cited fixed-point theorem; the citation MUST appear in the
+    /// cog's `@framework(...)` attribute and be enumerable by
+    /// `verum audit --framework-axioms`.
+    CustomFixpoint(String),
+}
+
+impl FixpointClass {
+    /// Stable diagnostic tag for `FixpointClass`.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            FixpointClass::Banach => "banach",
+            FixpointClass::Tarski => "tarski",
+            FixpointClass::Adamek => "adamek",
+            FixpointClass::CustomFixpoint(_) => "custom_fixpoint",
+        }
+    }
+}
+
+/// Self-reference witness, per cve-architecture spec §16. A cog
+/// whose `Shape` exhibits a self-referential pattern (self in
+/// `composes_with`, capability targeting the cog's own holon,
+/// requires citing the cog itself) MUST declare this witness.
+/// Absence triggers AP-040 `SelfReferenceWithoutOperator`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelfReferenceWitness {
+    /// Path to the cog implementing the operator `T_X` whose fixed
+    /// point the self-referential cog inhabits.  Must have lifecycle
+    /// ≥ Conditional.
+    pub operator: String,
+    /// Path to the cog implementing the fixed point `Fix(T_X)`.  May
+    /// coincide with the self-referential cog itself when the
+    /// self-reference is constructive.
+    pub fixed_point: String,
+    /// Fixed-point theorem class discharging the witness.
+    pub fixpoint_class: FixpointClass,
+}
+
+impl SelfReferenceWitness {
+    /// Default-constructor for tests only.  Production cogs MUST
+    /// supply a non-default witness with concrete operator + fixed-
+    /// point paths.
+    pub fn unspecified() -> Self {
+        SelfReferenceWitness {
+            operator: "unspecified".to_string(),
+            fixed_point: "unspecified".to_string(),
+            fixpoint_class: FixpointClass::CustomFixpoint("unspecified".to_string()),
+        }
+    }
+}
+
+/// Optional declarations packaged into a `Shape`. Carries the
+/// CVE-architecture spec concepts that are not yet load-bearing in
+/// the canonical primitives but ARE load-bearing in the architectural
+/// law.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShapeDeclarations {
     /// Declared purpose terminating the audit (spec §14.6).
@@ -1158,6 +1227,11 @@ pub struct ShapeDeclarations {
     pub anchoring: Option<FormalAnchoring>,
     /// Declared executability sense (spec §2.3.0).
     pub e_sense: Option<ExecutabilitySense>,
+    /// Declared self-reference witness (spec §16).  Required when the
+    /// cog's `Shape` exhibits self-referential patterns; absence
+    /// triggers AP-040 `SelfReferenceWithoutOperator`.
+    #[serde(default)]
+    pub self_reference: Option<SelfReferenceWitness>,
 }
 
 impl ShapeDeclarations {
@@ -1169,6 +1243,7 @@ impl ShapeDeclarations {
             substrate: None,
             anchoring: None,
             e_sense: None,
+            self_reference: None,
         }
     }
 }
