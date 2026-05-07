@@ -1,0 +1,414 @@
+// =============================================================================
+// configuration/convert.vr — cross-format conversion via the ConfigValue hub
+// =============================================================================
+// Layer: 3 (Cross-cutting)
+// Dependencies: core, configuration/{value, error, format}
+// =============================================================================
+//
+// **The conversion theorem.** For every pair of formats `(F_src, F_dst)`,
+// there exists a partial function
+//
+//   convert : F_src.Text → F_dst.Text
+//
+// computed by `F_src.parse` then `F_dst.stringify`. The conversion is total
+// when `F_dst.capabilities() ⊇ used_features(F_src.parse(text))`. When this
+// fails, the conversion returns `ConfigError.UnsupportedFeature` or
+// `ConfigError.LossyConversion` depending on whether the missing feature
+// can be inlined / coerced (lossy) or is structurally inexpressible
+// (unsupported).
+//
+// **Pre-validation.** `validate_conversion` walks the source `ConfigValue`
+// tree against the destination's `FormatCapabilities`, returning the list
+// of features that would be lost. Callers may inspect this list before
+// committing to the conversion; pass `LossPolicy.Reject` to fail on any
+// loss, `LossPolicy.Accept` to silently coerce.
+//
+// **Categorical structure.** `convert.vr` realises the universal property
+// of the ConfigValue hub — every format's parse-functor and every format's
+// stringify-functor compose, and conversions factor through ConfigValue
+// canonically.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "cross-format configuration conversion via the universal hub",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.configuration.convert;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount configuration.value.{ConfigValue, type_name};
+mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
+mount configuration.format.{ConfigFormat, FormatCapabilities};
+
+// =============================================================================
+// LossPolicy — how to handle features unsupported by the destination
+// =============================================================================
+
+public type LossPolicy is
+    /// Fail with `LossyConversion` if any feature of the source is not
+    /// representable in the destination.
+    | Reject
+    /// Coerce features (datetime → string, bytes → base64-string, etc.)
+    /// silently. Returns successfully even if information is lost.
+    | Accept
+    /// Coerce features but emit warnings via the provided collector.
+    | AcceptWithWarnings;
+
+// =============================================================================
+// ConversionWarning — emitted in AcceptWithWarnings mode
+// =============================================================================
+
+public type ConversionWarning is {
+    feature: Text,         // e.g., "offset-datetime"
+    coerced_to: Text,      // e.g., "string"
+    path: Text,            // path into the document
+};
+
+// =============================================================================
+// Conversion entry points
+// =============================================================================
+
+/// Convert a `ConfigValue` from one format's representation to another.
+/// Validates that the destination supports the source's features under
+/// the chosen `LossPolicy`. Returns the destination format's text and an
+/// optional list of warnings.
+public fn convert_value_to_text(
+    value: &ConfigValue,
+    dst: &dyn ConfigFormat,
+    policy: LossPolicy,
+) -> Result<ConvertedDocument, ConfigError> {
+    let caps = dst.capabilities();
+    let mut warnings: List<ConversionWarning> = List.new();
+    let coerced = coerce_for_capabilities(value, &caps, policy.clone(), &"".to_text(), &mut warnings, dst.format_id())?;
+    let text = dst.stringify(&coerced)?;
+    Ok(ConvertedDocument { text: text, warnings: warnings })
+}
+
+/// Convert source text from one format directly to another.
+/// Composition: src.parse |> coerce |> dst.stringify.
+public fn convert_text(
+    source: &Text,
+    src: &dyn ConfigFormat,
+    dst: &dyn ConfigFormat,
+    policy: LossPolicy,
+) -> Result<ConvertedDocument, ConfigError> {
+    let value = src.parse(source)?;
+    convert_value_to_text(&value, dst, policy)
+}
+
+public type ConvertedDocument is {
+    text: Text,
+    warnings: List<ConversionWarning>,
+};
+
+// =============================================================================
+// Pre-validation — walk a value against destination capabilities
+// =============================================================================
+
+/// Walk `value` against `dst_caps`, collecting features that would be
+/// lost in conversion. Returns the empty list if conversion is lossless.
+public fn validate_conversion(
+    value: &ConfigValue,
+    dst_caps: &FormatCapabilities,
+) -> List<Text> {
+    let mut report: List<Text> = List.new();
+    walk_for_loss(value, dst_caps, &"".to_text(), &mut report);
+    report
+}
+
+fn walk_for_loss(v: &ConfigValue, caps: &FormatCapabilities, path: &Text, report: &mut List<Text>) {
+    match v {
+        ConfigValue.ConfigNull => {
+            if !caps.has_null {
+                report.push(path_with_kind(path, "null"));
+            }
+        }
+        ConfigValue.ConfigBytes(_) => {
+            if !caps.has_bytes {
+                report.push(path_with_kind(path, "bytes"));
+            }
+        }
+        ConfigValue.ConfigOffsetDateTime(_) => {
+            if !caps.has_offset_datetime {
+                report.push(path_with_kind(path, "offset-datetime"));
+            }
+        }
+        ConfigValue.ConfigLocalDateTime(_) => {
+            if !caps.has_local_datetime {
+                report.push(path_with_kind(path, "local-datetime"));
+            }
+        }
+        ConfigValue.ConfigLocalDate(_) | ConfigValue.ConfigLocalTime(_) => {
+            if !caps.has_local_datetime {
+                report.push(path_with_kind(path, "local-date-or-time"));
+            }
+        }
+        ConfigValue.ConfigDuration(_) => {
+            if !caps.has_duration {
+                report.push(path_with_kind(path, "duration"));
+            }
+        }
+        ConfigValue.ConfigArray(items) => {
+            // Heterogeneous-arrays check
+            if !caps.has_heterogeneous_arrays && items.len() >= 2 {
+                let first_type = type_name(items.get(0).unwrap());
+                let mut i = 1;
+                while i < items.len() {
+                    if type_name(items.get(i).unwrap()) != first_type {
+                        report.push(path_with_kind(path, "heterogeneous-array"));
+                        break;
+                    }
+                    i = i + 1;
+                }
+            }
+            // Recurse
+            let mut i = 0;
+            while i < items.len() {
+                let sub = path_index(path, i);
+                walk_for_loss(items.get(i).unwrap(), caps, &sub, report);
+                i = i + 1;
+            }
+        }
+        ConfigValue.ConfigTable(t) => {
+            let keys = t.keys();
+            let mut i = 0;
+            while i < keys.len() {
+                let k = keys.get(i).unwrap();
+                let sub = path_field(path, k);
+                walk_for_loss(t.get(k).unwrap(), caps, &sub, report);
+                i = i + 1;
+            }
+        }
+        ConfigValue.ConfigTagged(_, _) => {
+            report.push(path_with_kind(path, "tagged"));
+        }
+        _ => {}
+    }
+}
+
+fn path_with_kind(path: &Text, kind: &str) -> Text {
+    let mut out = path.clone();
+    if out.is_empty() { out.push_text(&"<root>".to_text()); }
+    out.push_text(&": ".to_text());
+    out.push_text(&kind.to_text());
+    out
+}
+
+fn path_index(path: &Text, i: Int) -> Text {
+    let mut out = path.clone();
+    out.push_byte(0x5B_u8);
+    out.push_text(&i.to_text());
+    out.push_byte(0x5D_u8);
+    out
+}
+
+fn path_field(path: &Text, key: &Text) -> Text {
+    let mut out = path.clone();
+    if !out.is_empty() { out.push_byte(0x2E_u8); }
+    out.push_text(key);
+    out
+}
+
+// =============================================================================
+// Coercion — when destination cannot represent a feature, lossy-coerce
+// =============================================================================
+
+fn coerce_for_capabilities(
+    v: &ConfigValue,
+    caps: &FormatCapabilities,
+    policy: LossPolicy,
+    path: &Text,
+    warnings: &mut List<ConversionWarning>,
+    dst_id: FormatId,
+) -> Result<ConfigValue, ConfigError> {
+    match v {
+        ConfigValue.ConfigNull => {
+            if caps.has_null { Ok(v.clone()) }
+            else {
+                require_lossy_ok(&policy, &"null".to_text(), &"empty-string".to_text(), path, warnings, &dst_id)?;
+                Ok(ConfigValue.ConfigString("".to_text()))
+            }
+        }
+        ConfigValue.ConfigBytes(b) => {
+            if caps.has_bytes { Ok(v.clone()) }
+            else {
+                require_lossy_ok(&policy, &"bytes".to_text(), &"base64-string".to_text(), path, warnings, &dst_id)?;
+                Ok(ConfigValue.ConfigString(encode_base64(b)))
+            }
+        }
+        ConfigValue.ConfigOffsetDateTime(t) => {
+            if caps.has_offset_datetime { Ok(v.clone()) }
+            else {
+                require_lossy_ok(&policy, &"offset-datetime".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
+                Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
+            }
+        }
+        ConfigValue.ConfigLocalDateTime(t) | ConfigValue.ConfigLocalDate(t) | ConfigValue.ConfigLocalTime(t) => {
+            if caps.has_local_datetime { Ok(v.clone()) }
+            else {
+                require_lossy_ok(&policy, &"local-datetime".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
+                Ok(ConfigValue.ConfigString(rfc3339_to_text(t)))
+            }
+        }
+        ConfigValue.ConfigDuration(d) => {
+            if caps.has_duration { Ok(v.clone()) }
+            else {
+                require_lossy_ok(&policy, &"duration".to_text(), &"string".to_text(), path, warnings, &dst_id)?;
+                Ok(ConfigValue.ConfigString(duration_to_text(d)))
+            }
+        }
+        ConfigValue.ConfigTagged(tag, payload) => {
+            require_lossy_ok(&policy, &("tagged:".to_text().concat(tag)), &"untagged-payload".to_text(), path, warnings, &dst_id)?;
+            // Strip tag, recurse on payload
+            coerce_for_capabilities(&**payload, caps, policy, path, warnings, dst_id)
+        }
+        ConfigValue.ConfigArray(items) => {
+            // Heterogeneous coercion: if dst lacks heterogeneous arrays
+            // and elements differ in type, coerce all to string.
+            let needs_homogenise = if !caps.has_heterogeneous_arrays && items.len() >= 2 {
+                let first_t = type_name(items.get(0).unwrap());
+                let mut hetero = false;
+                let mut i = 1;
+                while i < items.len() {
+                    if type_name(items.get(i).unwrap()) != first_t { hetero = true; break; }
+                    i = i + 1;
+                }
+                hetero
+            } else { false };
+            if needs_homogenise {
+                require_lossy_ok(&policy, &"heterogeneous-array".to_text(), &"string-array".to_text(), path, warnings, &dst_id)?;
+                let mut out: List<ConfigValue> = List.new();
+                let mut i = 0;
+                while i < items.len() {
+                    out.push(ConfigValue.ConfigString(type_name(items.get(i).unwrap())));
+                    i = i + 1;
+                }
+                Ok(ConfigValue.ConfigArray(out))
+            } else {
+                let mut out: List<ConfigValue> = List.new();
+                let mut i = 0;
+                while i < items.len() {
+                    let sub = path_index(path, i);
+                    out.push(coerce_for_capabilities(items.get(i).unwrap(), caps, policy.clone(), &sub, warnings, dst_id.clone())?);
+                    i = i + 1;
+                }
+                Ok(ConfigValue.ConfigArray(out))
+            }
+        }
+        ConfigValue.ConfigTable(t) => {
+            let mut out: Map<Text, ConfigValue> = Map.new();
+            let keys = t.keys();
+            let mut i = 0;
+            while i < keys.len() {
+                let k = keys.get(i).unwrap();
+                let sub = path_field(path, k);
+                out.insert(k.clone(), coerce_for_capabilities(t.get(k).unwrap(), caps, policy.clone(), &sub, warnings, dst_id.clone())?);
+                i = i + 1;
+            }
+            Ok(ConfigValue.ConfigTable(out))
+        }
+        _ => Ok(v.clone()),
+    }
+}
+
+fn require_lossy_ok(
+    policy: &LossPolicy,
+    feature: &Text,
+    coerced_to: &Text,
+    path: &Text,
+    warnings: &mut List<ConversionWarning>,
+    dst_id: &FormatId,
+) -> Result<(), ConfigError> {
+    match policy {
+        LossPolicy.Reject => {
+            Err(config_err(
+                dst_id.clone(),
+                ConfigErrorKind.LossyConversion,
+                0, 0, 0,
+                "feature ".to_text().concat(feature)
+                    .concat(&" not representable in destination (path=".to_text())
+                    .concat(path).concat(&")".to_text()),
+            ))
+        }
+        LossPolicy.Accept => Ok(()),
+        LossPolicy.AcceptWithWarnings => {
+            warnings.push(ConversionWarning {
+                feature: feature.clone(),
+                coerced_to: coerced_to.clone(),
+                path: path.clone(),
+            });
+            Ok(())
+        }
+    }
+}
+
+// =============================================================================
+// Helper coercions (delegated to format-specific stdlib facilities)
+// =============================================================================
+
+fn encode_base64(bytes: &List<Byte>) -> Text {
+    // Defer to stdlib base64; ConfigValue carries List<Byte>.
+    encoding.base64.encode(bytes)
+}
+
+fn rfc3339_to_text(t: &time.rfc3339.Rfc3339Time) -> Text {
+    time.rfc3339.format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes)
+}
+
+fn duration_to_text(d: &time.duration.Duration) -> Text {
+    // Compact representation: "Xms" / "Xs" / "Xm" / "Xh".
+    let nanos = d.as_nanos();
+    if nanos == 0 { return "0s".to_text(); }
+    let abs = if nanos < 0 { -nanos } else { nanos };
+    let prefix = if nanos < 0 { "-".to_text() } else { Text.new() };
+    if abs < 1_000_000 { prefix.concat(&abs.to_text()).concat(&"ns".to_text()) }
+    else if abs < 1_000_000_000 { prefix.concat(&(abs / 1_000_000).to_text()).concat(&"ms".to_text()) }
+    else if abs < 60_000_000_000 { prefix.concat(&(abs / 1_000_000_000).to_text()).concat(&"s".to_text()) }
+    else if abs < 3_600_000_000_000 { prefix.concat(&(abs / 60_000_000_000).to_text()).concat(&"m".to_text()) }
+    else { prefix.concat(&(abs / 3_600_000_000_000).to_text()).concat(&"h".to_text()) }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+    use configuration.format.{default_capabilities};
+
+    #[test]
+    fn test_validate_no_loss() {
+        let mut t = Map.new();
+        t.insert("x".to_text(), ConfigValue.ConfigInt(1));
+        let v = ConfigValue.ConfigTable(t);
+        let mut caps = default_capabilities();
+        caps.has_null = true;
+        let report = validate_conversion(&v, &caps);
+        assert_eq(report.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_bytes_loss() {
+        let mut bs: List<Byte> = List.new(); bs.push(0x01_u8);
+        let v = ConfigValue.ConfigBytes(bs);
+        let caps = default_capabilities(); // has_bytes: false
+        let report = validate_conversion(&v, &caps);
+        assert(report.len() > 0);
+    }
+}

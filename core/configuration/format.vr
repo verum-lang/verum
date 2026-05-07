@@ -1,0 +1,311 @@
+// =============================================================================
+// configuration/format.vr — ConfigFormat protocol + format registry
+// =============================================================================
+// Layer: 2 (Configuration languages)
+// Dependencies: core, base, collections, configuration/{value, error}
+// =============================================================================
+//
+// **The architectural pivot.** Every configuration format implements
+// `ConfigFormat` — a protocol exposing `parse`, `stringify`, `extensions`,
+// `mime_types`, and `format_id`. The `FormatRegistry` indexes implementations
+// by `format_id` and supports auto-detection by file extension or MIME type.
+//
+// **Open category.** Adding a new configuration format is a purely additive
+// change: implement `ConfigFormat` for the new module's adapter type and
+// register it via `register_format`. Existing code consuming `ConfigValue`
+// continues to work without modification (Yoneda invariance under the
+// universal `ConfigValue` characterisation).
+//
+// **Format-specific options.** Each format may carry options (e.g.,
+// TomlOptions, YamlOptions). The protocol's `parse_with_options` /
+// `stringify_with_options` accept an opaque `FormatOptions` type that
+// each format adapter down-casts.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "format protocol + open registry for all configuration languages",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.configuration.format;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount configuration.value.{ConfigValue};
+mount configuration.error.{ConfigError, FormatId};
+
+// =============================================================================
+// FormatOptions — opaque format-specific options
+// =============================================================================
+//
+// Each format's adapter encodes its options as a tagged variant over
+// `ConfigValue` (typically a small ConfigTable with documented keys). This
+// avoids per-format generic parameter pollution while preserving a typed
+// surface at the call site (`TomlOptions::default().with_strict(true)`).
+public type FormatOptions is {
+    payload: ConfigValue,
+};
+
+public fn empty_options() -> FormatOptions {
+    FormatOptions { payload: ConfigValue.ConfigTable(Map.new()) }
+}
+
+// =============================================================================
+// FormatCapabilities — what does this format support?
+// =============================================================================
+//
+// Each format declares its capability surface for cross-format conversion
+// validation. When converting `src → dst`, `convert.vr` consults the
+// destination's capabilities; if a feature is absent (e.g., YAML anchors
+// → TOML), the conversion either inlines (resolving the feature) or fails
+// with `ConfigError.UnsupportedFeature`.
+public type FormatCapabilities is {
+    /// Format supports comments preserved through round-trip.
+    preserves_comments: Bool,
+    /// Format supports null values explicitly.
+    has_null: Bool,
+    /// Format supports binary blobs natively (else: must be base64).
+    has_bytes: Bool,
+    /// Format supports timezone-aware datetimes.
+    has_offset_datetime: Bool,
+    /// Format supports timezone-naive datetimes.
+    has_local_datetime: Bool,
+    /// Format supports duration values natively.
+    has_duration: Bool,
+    /// Format supports cross-references / anchors / inheritance.
+    has_references: Bool,
+    /// Format supports heterogeneous arrays.
+    has_heterogeneous_arrays: Bool,
+    /// Format supports key ordering preservation.
+    preserves_key_order: Bool,
+    /// Format requires a single root value (vs. multi-document).
+    single_root: Bool,
+};
+
+public fn default_capabilities() -> FormatCapabilities {
+    FormatCapabilities {
+        preserves_comments:       false,
+        has_null:                 true,
+        has_bytes:                false,
+        has_offset_datetime:      false,
+        has_local_datetime:       false,
+        has_duration:             false,
+        has_references:           false,
+        has_heterogeneous_arrays: true,
+        preserves_key_order:      true,
+        single_root:              true,
+    }
+}
+
+// =============================================================================
+// ConfigFormat protocol
+// =============================================================================
+//
+// The universal interface for every configuration format. Implementations
+// live in `core/configuration/<format>.vr`.
+public protocol ConfigFormat {
+    /// Stable identifier. Must match `format_id_<name>()` in error.vr if
+    /// the format is built-in.
+    fn format_id(&self) -> FormatId;
+
+    /// Human-readable name (e.g., "TOML 1.0.0").
+    fn display_name(&self) -> Text;
+
+    /// File extensions (without leading dot) for auto-detect.
+    fn extensions(&self) -> List<Text>;
+
+    /// MIME types (e.g., "application/toml").
+    fn mime_types(&self) -> List<Text>;
+
+    /// Capability surface for cross-format conversion validation.
+    fn capabilities(&self) -> FormatCapabilities;
+
+    /// Parse a UTF-8 source text into a ConfigValue.
+    fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError>;
+
+    /// Parse with format-specific options.
+    fn parse_with_options(
+        &self,
+        source: &Text,
+        options: &FormatOptions,
+    ) -> Result<ConfigValue, ConfigError>;
+
+    /// Render a ConfigValue back to format-text.
+    fn stringify(&self, value: &ConfigValue) -> Result<Text, ConfigError>;
+
+    /// Render with format-specific options.
+    fn stringify_with_options(
+        &self,
+        value: &ConfigValue,
+        options: &FormatOptions,
+    ) -> Result<Text, ConfigError>;
+}
+
+// =============================================================================
+// FormatRegistry — runtime registry of format implementations
+// =============================================================================
+//
+// Singleton-managed map from `FormatId` to `&ConfigFormat`. Built-in
+// formats register on first access; user code may register custom
+// formats via `register_format`.
+//
+// **Thread safety.** The registry is held in a `Shared<RwLock<...>>` —
+// reads are lock-free in the common case (after warmup), writes acquire
+// a write lock. New format registration is rare (usually once at startup).
+public type FormatRegistry is {
+    formats: Shared<RwLock<Map<FormatId, Heap<dyn ConfigFormat>>>>,
+};
+
+public fn registry_new() -> FormatRegistry {
+    FormatRegistry {
+        formats: Shared.new(RwLock.new(Map.new())),
+    }
+}
+
+/// Register a format adapter. If a format with the same `format_id`
+/// is already registered, returns `Err` with a duplicate-id message.
+public fn register_format(
+    reg: &FormatRegistry,
+    fmt: Heap<dyn ConfigFormat>,
+) -> Result<(), Text> {
+    let id = fmt.format_id();
+    let mut guard = reg.formats.write();
+    if guard.contains_key(&id) {
+        return Err("format already registered: ".to_text().concat(&id));
+    }
+    guard.insert(id, fmt);
+    Ok(())
+}
+
+/// Look up a format by id.
+public fn get_format(
+    reg: &FormatRegistry,
+    id: &FormatId,
+) -> Maybe<Heap<dyn ConfigFormat>> {
+    let guard = reg.formats.read();
+    match guard.get(id) {
+        Some(f) => Some(f.clone()),
+        None    => None,
+    }
+}
+
+/// Detect format by file extension. Returns the first registered format
+/// whose `extensions()` list contains `ext` (case-insensitive, no dot).
+public fn detect_by_extension(
+    reg: &FormatRegistry,
+    ext: &Text,
+) -> Maybe<Heap<dyn ConfigFormat>> {
+    let ext_lower = ext.to_lowercase();
+    let guard = reg.formats.read();
+    let keys = guard.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let f = guard.get(keys.get(i).unwrap()).unwrap();
+        let exts = f.extensions();
+        let mut j = 0;
+        while j < exts.len() {
+            if exts.get(j).unwrap().to_lowercase() == ext_lower {
+                return Some(f.clone());
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// Detect format by file path (uses extension).
+public fn detect_by_path(
+    reg: &FormatRegistry,
+    path: &Text,
+) -> Maybe<Heap<dyn ConfigFormat>> {
+    let bs = path.as_bytes();
+    let mut last_dot: Int = -1;
+    let mut i = 0;
+    while i < bs.len() {
+        if bs[i] == 0x2E_u8 { last_dot = i; }
+        else if bs[i] == 0x2F_u8 || bs[i] == 0x5C_u8 { last_dot = -1; } // reset on /\
+        i = i + 1;
+    }
+    if last_dot < 0 || last_dot >= bs.len() - 1 { return None; }
+    let mut ext = Text.new();
+    let mut j = last_dot + 1;
+    while j < bs.len() { ext.push_byte(bs[j]); j = j + 1; }
+    detect_by_extension(reg, &ext)
+}
+
+/// Detect format by MIME type.
+public fn detect_by_mime(
+    reg: &FormatRegistry,
+    mime: &Text,
+) -> Maybe<Heap<dyn ConfigFormat>> {
+    let mime_lower = mime.to_lowercase();
+    let guard = reg.formats.read();
+    let keys = guard.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let f = guard.get(keys.get(i).unwrap()).unwrap();
+        let mimes = f.mime_types();
+        let mut j = 0;
+        while j < mimes.len() {
+            if mimes.get(j).unwrap().to_lowercase() == mime_lower {
+                return Some(f.clone());
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// List all registered format ids.
+public fn registered_ids(reg: &FormatRegistry) -> List<FormatId> {
+    let guard = reg.formats.read();
+    let mut ids: List<FormatId> = List.new();
+    let keys = guard.keys();
+    let mut i = 0;
+    while i < keys.len() { ids.push(keys.get(i).unwrap().clone()); i = i + 1; }
+    ids
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_default_capabilities() {
+        let c = default_capabilities();
+        assert(c.has_null);
+        assert(c.has_heterogeneous_arrays);
+        assert(c.preserves_key_order);
+        assert(c.single_root);
+        assert(!c.preserves_comments);
+        assert(!c.has_bytes);
+    }
+
+    #[test]
+    fn test_empty_options() {
+        let o = empty_options();
+        match o.payload {
+            ConfigValue.ConfigTable(t) => assert_eq(t.len(), 0),
+            _ => unreachable(),
+        }
+    }
+}

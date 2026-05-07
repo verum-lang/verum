@@ -1,0 +1,367 @@
+// =============================================================================
+// configuration/value.vr — universal ConfigValue ADT
+// =============================================================================
+// Layer: 2 (Configuration languages)
+// Dependencies: core, collections, text, time/rfc3339, time/duration
+// =============================================================================
+//
+// **Universal value model.** All `core/configuration/*` format parsers
+// produce `ConfigValue` — the rich superset of every supported format's
+// value taxonomy. This enables:
+//
+//   * **Format-agnostic consumption** — code that works with configuration
+//     does not need to know whether the source was TOML, YAML, INI, etc.
+//   * **Cross-format conversion** — `toml.stringify(yaml.parse(yaml_text)?)`
+//     is a sensible round-trip (lossy only where formats differ in
+//     expressive power; explicitly flagged via `ConfigError.LossyConversion`).
+//   * **Schema-driven loading** — `core/configuration/schema.vr` walks
+//     `ConfigValue` against a typed record schema and lifts to typed
+//     values with refinement-type validation.
+//
+// **Categorical structure.** The collection of configuration formats
+// forms a small category in which each parser is a functor
+// `Format-Text → ConfigValue` and each stringifier is its right-inverse.
+// `ConfigValue` is the **canonical limit object** — every format embeds
+// into it; lossless inter-format transport routes through this hub.
+//
+// **Format-specific AST.** Each format module retains its own precise
+// AST (TomlValue, YamlValue, IniValue, ...). The hub conversion is
+// `to_config_value / from_config_value` per format. Format-specific
+// features that exceed `ConfigValue`'s vocabulary are encoded via
+// `ConfigTagged(tag, payload)` with format-namespaced tags
+// (e.g., `"yaml:tag:!!binary"`).
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "universal value model for all configuration formats",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.configuration.value;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount time.rfc3339.{Rfc3339Time};
+mount time.duration.{Duration};
+
+// =============================================================================
+// ConfigValue — the universal value taxonomy
+// =============================================================================
+//
+// Variants:
+//   ConfigNull          — explicit null / nil / unit value
+//   ConfigBool          — true / false
+//   ConfigInt           — signed 64-bit integer (TOML/INI/HCL/...)
+//   ConfigFloat         — IEEE 754 double (TOML/YAML/JSON5/...)
+//   ConfigString        — UTF-8 text (universal)
+//   ConfigBytes         — binary blob (YAML !!binary, base64-decoded)
+//   ConfigOffsetDateTime — TOML offset-datetime (RFC 3339 with offset)
+//   ConfigLocalDateTime — TOML local-datetime (no timezone)
+//   ConfigLocalDate     — TOML local-date (date only)
+//   ConfigLocalTime     — TOML local-time (time only)
+//   ConfigDuration      — HCL/HOCON duration ("30s", "5m", ...) parsed
+//   ConfigArray         — ordered list of values (TOML array, YAML seq, ...)
+//   ConfigTable         — keyed table (TOML table, YAML map, INI section, ...)
+//   ConfigTagged        — format-specific tag + payload (YAML tags, etc.)
+//
+// **Key ordering.** `ConfigTable` is a `Map<Text, ConfigValue>` whose
+// iteration order is **insertion order** by Verum stdlib convention — this
+// preserves the source-text key order for round-trip fidelity.
+public type ConfigValue is
+      ConfigNull
+    | ConfigBool(Bool)
+    | ConfigInt(Int)
+    | ConfigFloat(Float)
+    | ConfigString(Text)
+    | ConfigBytes(List<Byte>)
+    | ConfigOffsetDateTime(Rfc3339Time)
+    | ConfigLocalDateTime(Rfc3339Time)
+    | ConfigLocalDate(Rfc3339Time)
+    | ConfigLocalTime(Rfc3339Time)
+    | ConfigDuration(Duration)
+    | ConfigArray(List<ConfigValue>)
+    | ConfigTable(Map<Text, ConfigValue>)
+    | ConfigTagged(Text, Heap<ConfigValue>);
+
+// =============================================================================
+// Type predicates
+// =============================================================================
+
+public fn is_null(v: &ConfigValue) -> Bool {
+    match v { ConfigNull => true, _ => false }
+}
+
+public fn is_bool(v: &ConfigValue) -> Bool {
+    match v { ConfigBool(_) => true, _ => false }
+}
+
+public fn is_int(v: &ConfigValue) -> Bool {
+    match v { ConfigInt(_) => true, _ => false }
+}
+
+public fn is_float(v: &ConfigValue) -> Bool {
+    match v { ConfigFloat(_) => true, _ => false }
+}
+
+public fn is_number(v: &ConfigValue) -> Bool {
+    match v { ConfigInt(_) | ConfigFloat(_) => true, _ => false }
+}
+
+public fn is_string(v: &ConfigValue) -> Bool {
+    match v { ConfigString(_) => true, _ => false }
+}
+
+public fn is_bytes(v: &ConfigValue) -> Bool {
+    match v { ConfigBytes(_) => true, _ => false }
+}
+
+public fn is_datetime(v: &ConfigValue) -> Bool {
+    match v {
+        ConfigOffsetDateTime(_) | ConfigLocalDateTime(_)
+        | ConfigLocalDate(_) | ConfigLocalTime(_) => true,
+        _ => false,
+    }
+}
+
+public fn is_duration(v: &ConfigValue) -> Bool {
+    match v { ConfigDuration(_) => true, _ => false }
+}
+
+public fn is_array(v: &ConfigValue) -> Bool {
+    match v { ConfigArray(_) => true, _ => false }
+}
+
+public fn is_table(v: &ConfigValue) -> Bool {
+    match v { ConfigTable(_) => true, _ => false }
+}
+
+public fn is_tagged(v: &ConfigValue) -> Bool {
+    match v { ConfigTagged(_, _) => true, _ => false }
+}
+
+// =============================================================================
+// Type accessors — explicit Maybe-typed lookups
+// =============================================================================
+
+public fn as_bool(v: &ConfigValue) -> Maybe<Bool> {
+    match v { ConfigBool(b) => Some(*b), _ => None }
+}
+
+public fn as_int(v: &ConfigValue) -> Maybe<Int> {
+    match v { ConfigInt(i) => Some(*i), _ => None }
+}
+
+public fn as_float(v: &ConfigValue) -> Maybe<Float> {
+    match v {
+        ConfigFloat(f) => Some(*f),
+        ConfigInt(i)   => Some(*i as Float),  // numeric coercion
+        _              => None,
+    }
+}
+
+public fn as_string(v: &ConfigValue) -> Maybe<&Text> {
+    match v { ConfigString(s) => Some(s), _ => None }
+}
+
+public fn as_bytes(v: &ConfigValue) -> Maybe<&List<Byte>> {
+    match v { ConfigBytes(b) => Some(b), _ => None }
+}
+
+public fn as_array(v: &ConfigValue) -> Maybe<&List<ConfigValue>> {
+    match v { ConfigArray(a) => Some(a), _ => None }
+}
+
+public fn as_table(v: &ConfigValue) -> Maybe<&Map<Text, ConfigValue>> {
+    match v { ConfigTable(t) => Some(t), _ => None }
+}
+
+// =============================================================================
+// Type-name surface — diagnostics
+// =============================================================================
+
+// Stable variant tag, useful for ConfigError messages.
+public fn type_name(v: &ConfigValue) -> Text {
+    match v {
+        ConfigNull              => "null".clone(),
+        ConfigBool(_)           => "bool".clone(),
+        ConfigInt(_)            => "int".clone(),
+        ConfigFloat(_)          => "float".clone(),
+        ConfigString(_)         => "string".clone(),
+        ConfigBytes(_)          => "bytes".clone(),
+        ConfigOffsetDateTime(_) => "offset-datetime".clone(),
+        ConfigLocalDateTime(_)  => "local-datetime".clone(),
+        ConfigLocalDate(_)      => "local-date".clone(),
+        ConfigLocalTime(_)      => "local-time".clone(),
+        ConfigDuration(_)       => "duration".clone(),
+        ConfigArray(_)          => "array".clone(),
+        ConfigTable(_)          => "table".clone(),
+        ConfigTagged(t, _)      => "tagged:".to_text().concat(t),
+    }
+}
+
+// =============================================================================
+// Structural equality
+// =============================================================================
+
+implement Eq for ConfigValue {
+    fn eq(&self, other: &Self) -> Bool {
+        match (self, other) {
+            (ConfigNull, ConfigNull)                 => true,
+            (ConfigBool(a), ConfigBool(b))           => a == b,
+            (ConfigInt(a), ConfigInt(b))             => a == b,
+            (ConfigFloat(a), ConfigFloat(b))         => a == b,
+            (ConfigString(a), ConfigString(b))       => a == b,
+            (ConfigBytes(a), ConfigBytes(b))         => list_eq_byte(a, b),
+            (ConfigOffsetDateTime(a), ConfigOffsetDateTime(b)) => rfc3339_eq(a, b),
+            (ConfigLocalDateTime(a), ConfigLocalDateTime(b))   => rfc3339_eq(a, b),
+            (ConfigLocalDate(a), ConfigLocalDate(b))           => rfc3339_eq(a, b),
+            (ConfigLocalTime(a), ConfigLocalTime(b))           => rfc3339_eq(a, b),
+            (ConfigDuration(a), ConfigDuration(b))   => duration_eq(a, b),
+            (ConfigArray(a), ConfigArray(b))         => list_eq_value(a, b),
+            (ConfigTable(a), ConfigTable(b))         => map_eq_value(a, b),
+            (ConfigTagged(t1, p1), ConfigTagged(t2, p2)) => t1 == t2 && (**p1).eq(&**p2),
+            _ => false,
+        }
+    }
+}
+
+fn list_eq_byte(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a.get(i).unwrap() != b.get(i).unwrap() { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn list_eq_value(a: &List<ConfigValue>, b: &List<ConfigValue>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if !a.get(i).unwrap().eq(b.get(i).unwrap()) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn map_eq_value(a: &Map<Text, ConfigValue>, b: &Map<Text, ConfigValue>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let keys = a.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        match b.get(k) {
+            Some(bv) => if !a.get(k).unwrap().eq(bv) { return false; },
+            None     => return false,
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn rfc3339_eq(a: &Rfc3339Time, b: &Rfc3339Time) -> Bool {
+    a.unix_seconds == b.unix_seconds
+        && a.nanos == b.nanos
+        && a.offset_minutes == b.offset_minutes
+}
+
+fn duration_eq(a: &Duration, b: &Duration) -> Bool {
+    a.as_nanos() == b.as_nanos()
+}
+
+// =============================================================================
+// Constructor helpers (ergonomic shortcuts)
+// =============================================================================
+
+public fn null() -> ConfigValue { ConfigValue.ConfigNull }
+public fn bool_v(b: Bool) -> ConfigValue { ConfigValue.ConfigBool(b) }
+public fn int_v(i: Int) -> ConfigValue { ConfigValue.ConfigInt(i) }
+public fn float_v(f: Float) -> ConfigValue { ConfigValue.ConfigFloat(f) }
+public fn string_v(s: Text) -> ConfigValue { ConfigValue.ConfigString(s) }
+
+public fn array_v(items: List<ConfigValue>) -> ConfigValue {
+    ConfigValue.ConfigArray(items)
+}
+
+public fn table_v(fields: Map<Text, ConfigValue>) -> ConfigValue {
+    ConfigValue.ConfigTable(fields)
+}
+
+public fn empty_table() -> ConfigValue {
+    ConfigValue.ConfigTable(Map.new())
+}
+
+public fn empty_array() -> ConfigValue {
+    ConfigValue.ConfigArray(List.new())
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_type_predicates() {
+        assert(is_null(&null()));
+        assert(is_bool(&bool_v(true)));
+        assert(is_int(&int_v(42)));
+        assert(is_float(&float_v(3.14)));
+        assert(is_number(&int_v(0)));
+        assert(is_number(&float_v(0.0)));
+        assert(is_string(&string_v("x".to_text())));
+        assert(is_array(&empty_array()));
+        assert(is_table(&empty_table()));
+    }
+
+    #[test]
+    fn test_type_name() {
+        assert_eq(type_name(&null()), "null".to_text());
+        assert_eq(type_name(&bool_v(false)), "bool".to_text());
+        assert_eq(type_name(&int_v(0)), "int".to_text());
+        assert_eq(type_name(&float_v(0.0)), "float".to_text());
+        assert_eq(type_name(&string_v("".to_text())), "string".to_text());
+    }
+
+    #[test]
+    fn test_eq_nested() {
+        let mut a = Map.new();
+        a.insert("x".to_text(), int_v(1));
+        let mut b = Map.new();
+        b.insert("x".to_text(), int_v(1));
+        assert(table_v(a).eq(&table_v(b)));
+    }
+
+    #[test]
+    fn test_eq_different_keys() {
+        let mut a = Map.new();
+        a.insert("x".to_text(), int_v(1));
+        let mut b = Map.new();
+        b.insert("y".to_text(), int_v(1));
+        assert(!table_v(a).eq(&table_v(b)));
+    }
+
+    #[test]
+    fn test_as_float_coerces_int() {
+        match as_float(&int_v(7)) {
+            Some(f) => assert_eq(f, 7.0),
+            None    => unreachable(),
+        }
+    }
+}

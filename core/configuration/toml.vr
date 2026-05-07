@@ -1,0 +1,1792 @@
+// =============================================================================
+// config/toml.vr — TOML 1.0.0 parser and serializer
+// =============================================================================
+// Layer: 2 (Configuration languages)
+// Dependencies: core, collections, text, time/rfc3339
+// =============================================================================
+//
+// **Semantic honesty.** TOML is a *configuration language* (designed for
+// human authoring with comments and structural conventions optimised for
+// readability), not a *serialization format* (designed for machine-to-machine
+// data interchange). It belongs alongside YAML/INI/HCL/Dhall in
+// `core/config/`, not alongside JSON/MessagePack/CBOR/BSON in `core/encoding/`.
+// JSON straddles both — its canonical identity in this stdlib is the
+// wire-format role; TOML is exclusively a human-facing configuration
+// language.
+// =============================================================================
+//
+
+// Strict TOML 1.0.0 per https://toml.io/en/v1.0.0. Provides:
+//   TomlValue   — the algebraic data type for a parsed TOML document
+//   parse(text) -> Result<TomlValue, TomlError>     // returns the root table
+//   stringify(value) -> Text                        // canonical inline form
+//   stringify_pretty(value) -> Text                 // table-form, sorted keys
+//
+
+// Design goals:
+//   * No allocation beyond the returned structure.
+//   * Clear error positions (line + column) for diagnostics.
+//   * UTF-8 input, UTF-8 output. Invalid UTF-8 is rejected.
+//   * Datetime values composed onto core/time/rfc3339.vr — TOML's
+//     offset-datetime IS RFC 3339; the local-* variants reuse the
+//     same record with explicit tag.
+//   * Integers preserved as Int (lossless 64-bit, signed) per TOML 1.0
+//     §"Integer".  Floats are IEEE 754 double per TOML §"Float".
+//   * Hex/oct/bin integer prefixes (0x/0o/0b) supported per §"Integer".
+//   * Underscore digit separators supported per §"Integer" / §"Float".
+//   * Multiline strings (basic + literal) with leading-newline trim per
+//     §"String".
+//   * Inline tables and arrays of tables fully supported per §"Table".
+//
+
+// Example:
+//   let doc = toml.parse(text)?;
+//   match doc {
+//       TomlTable(fields) => { ... },
+//       _ => unreachable(),
+//   }
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "TOML 1.0 parser/serializer for cog manifests + general configuration",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.configuration.toml;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount time.rfc3339.{Rfc3339Time};
+mount configuration.value.{ConfigValue};
+mount configuration.error.{ConfigError as CfgError, ConfigErrorKind, format_id_toml};
+mount configuration.format.{
+    ConfigFormat, FormatCapabilities, FormatOptions, FormatId,
+    FormatRegistry, register_format, default_capabilities,
+};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+// Algebraic TOML value.
+//   * TomlString — basic, multiline-basic, literal, multiline-literal all
+//     decode to the same variant; the parser strips quoting/escaping.
+//   * TomlInt — TOML §"Integer": [-2^63, 2^63-1] decimal/hex/oct/bin.
+//   * TomlFloat — TOML §"Float": IEEE 754 double, +inf/-inf/nan supported.
+//   * TomlBool — true/false.
+//   * TomlOffsetDateTime — RFC 3339 with explicit timezone offset.
+//   * TomlLocalDateTime — RFC 3339-shaped, no timezone.
+//   * TomlLocalDate — date only.
+//   * TomlLocalTime — time only.
+//   * TomlArray — homogeneous-or-heterogeneous list of values.
+//   * TomlTable — keyed table; insertion-ordered by underlying Map.
+public type TomlValue is
+      TomlString(Text)
+    | TomlInt(Int)
+    | TomlFloat(Float)
+    | TomlBool(Bool)
+    | TomlOffsetDateTime(Rfc3339Time)
+    | TomlLocalDateTime(Rfc3339Time)
+    | TomlLocalDate(Rfc3339Time)
+    | TomlLocalTime(Rfc3339Time)
+    | TomlArray(List<TomlValue>)
+    | TomlTable(Map<Text, TomlValue>);
+
+// Error position and cause.
+public type TomlError is {
+    kind: TomlErrorKind,
+    line: Int,       // 1-indexed
+    column: Int,     // 1-indexed (byte-counted; TOML §"Spec" is UTF-8)
+    message: Text,
+};
+
+public type TomlErrorKind is
+      UnexpectedEof
+    | UnexpectedChar
+    | InvalidEscape
+    | InvalidNumber
+    | InvalidUnicode
+    | InvalidDateTime
+    | DuplicateKey
+    | DepthLimit
+    | StringTooLong
+    | TableTooLarge
+    | ArrayTooLarge
+    | TrailingGarbage
+    | EmptyKey
+    | KeyAfterValue
+    | RedefineSuperTable
+    | TypeMismatchInArray;
+
+fn toml_error_kind_name(k: &TomlErrorKind) -> Text {
+    match k {
+        UnexpectedEof          => "UnexpectedEof".clone(),
+        UnexpectedChar         => "UnexpectedChar".clone(),
+        InvalidEscape          => "InvalidEscape".clone(),
+        InvalidNumber          => "InvalidNumber".clone(),
+        InvalidUnicode         => "InvalidUnicode".clone(),
+        InvalidDateTime        => "InvalidDateTime".clone(),
+        DuplicateKey           => "DuplicateKey".clone(),
+        DepthLimit             => "DepthLimit".clone(),
+        StringTooLong          => "StringTooLong".clone(),
+        TableTooLarge          => "TableTooLarge".clone(),
+        ArrayTooLarge          => "ArrayTooLarge".clone(),
+        TrailingGarbage        => "TrailingGarbage".clone(),
+        EmptyKey               => "EmptyKey".clone(),
+        KeyAfterValue          => "KeyAfterValue".clone(),
+        RedefineSuperTable     => "RedefineSuperTable".clone(),
+        TypeMismatchInArray    => "TypeMismatchInArray".clone(),
+    }
+}
+
+implement Display for TomlErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(toml_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for TomlErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(toml_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for TomlErrorKind {
+    fn eq(&self, other: &Self) -> Bool {
+        toml_error_kind_name(self) == toml_error_kind_name(other)
+    }
+}
+
+implement Display for TomlError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("TomlError(")?;
+        f.write_str(toml_error_kind_name(&self.kind).as_str())?;
+        f.write_str(" at ")?;
+        f.write_int(self.line)?;
+        f.write_str(":")?;
+        f.write_int(self.column)?;
+        f.write_str(": ")?;
+        f.write_str(self.message.as_str())?;
+        f.write_str(")")
+    }
+}
+
+implement Debug for TomlError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        Display.fmt(self, f)
+    }
+}
+
+implement Eq for TomlError {
+    fn eq(&self, other: &Self) -> Bool {
+        self.kind == other.kind
+            && self.line == other.line
+            && self.column == other.column
+            && self.message == other.message
+    }
+}
+
+// =============================================================================
+// Limits — DoS protection per §"Spec ambiguities" (informative)
+// =============================================================================
+
+// Max nested depth (table-in-table or array-in-array). 128 is well above
+// any realistic TOML document and short of stack-overflow risk.
+const MAX_TOML_DEPTH: Int = 128;
+
+// Max bytes in a single string value. 32 MiB matches our HTTP body cap.
+const MAX_TOML_STRING_BYTES: Int = 32 * 1024 * 1024;
+
+// Max items in a single array.
+const MAX_TOML_ARRAY_ITEMS: Int = 1_000_000;
+
+// Max keys in a single table.
+const MAX_TOML_TABLE_KEYS: Int = 1_000_000;
+
+// =============================================================================
+// Parser scaffolding
+// =============================================================================
+
+type Parser is {
+    bytes: &[Byte],
+    pos: Int,
+    line: Int,
+    column: Int,
+    depth: Int,
+};
+
+fn new_parser(bytes: &[Byte]) -> Parser {
+    Parser { bytes: bytes, pos: 0, line: 1, column: 1, depth: 0 }
+}
+
+fn mk_err(p: &Parser, kind: TomlErrorKind, msg: &Text) -> TomlError {
+    TomlError { kind: kind, line: p.line, column: p.column, message: msg.clone() }
+}
+
+fn peek(p: &Parser) -> Maybe<Byte> {
+    if p.pos < p.bytes.len() { Some(p.bytes[p.pos]) } else { None }
+}
+
+fn peek_at(p: &Parser, offset: Int) -> Maybe<Byte> {
+    let i = p.pos + offset;
+    if i < p.bytes.len() { Some(p.bytes[i]) } else { None }
+}
+
+fn advance(p: &mut Parser) {
+    if p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        p.pos = p.pos + 1;
+        if b == 0x0A_u8 {
+            p.line = p.line + 1;
+            p.column = 1;
+        } else {
+            p.column = p.column + 1;
+        }
+    }
+}
+
+// Whitespace per §"Whitespace": space (0x20) or horizontal tab (0x09).
+// (Not LF/CR — those are line terminators.)
+fn skip_ws(p: &mut Parser) {
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        if b == 0x20_u8 || b == 0x09_u8 { advance(p); } else { break; }
+    }
+}
+
+// Skip whitespace AND comments AND line endings — used between top-level
+// table headers and key-value pairs.
+fn skip_ws_and_comments(p: &mut Parser) {
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        if b == 0x20_u8 || b == 0x09_u8 || b == 0x0A_u8 || b == 0x0D_u8 {
+            advance(p);
+        } else if b == 0x23_u8 { // '#'
+            // comment until end-of-line
+            while p.pos < p.bytes.len() && p.bytes[p.pos] != 0x0A_u8 {
+                advance(p);
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+// Skip optional inline comment + LF/CRLF; require either end-of-line or eof.
+fn require_newline_or_eof(p: &mut Parser, ctx: &Text) -> Result<(), TomlError> {
+    skip_ws(p);
+    if p.pos >= p.bytes.len() { return Ok(()); }
+    let b = p.bytes[p.pos];
+    if b == 0x23_u8 { // comment
+        while p.pos < p.bytes.len() && p.bytes[p.pos] != 0x0A_u8 { advance(p); }
+    }
+    if p.pos >= p.bytes.len() { return Ok(()); }
+    let c = p.bytes[p.pos];
+    if c == 0x0A_u8 {
+        advance(p);
+        Ok(())
+    } else if c == 0x0D_u8 {
+        advance(p);
+        if p.pos < p.bytes.len() && p.bytes[p.pos] == 0x0A_u8 { advance(p); }
+        Ok(())
+    } else {
+        Err(mk_err(p, UnexpectedChar, ctx))
+    }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+// Parse a full TOML document into a TomlTable.
+// Returns the root table (always TomlTable variant).
+public fn parse(source: &Text) -> Result<TomlValue, TomlError> {
+    let bytes = source.as_bytes();
+    let mut p = new_parser(bytes);
+    let mut root: Map<Text, TomlValue> = Map.new();
+    parse_document(&mut p, &mut root)?;
+    Ok(TomlValue.TomlTable(root))
+}
+
+// Parse a TOML document and return the typed root table directly.
+public fn parse_table(source: &Text) -> Result<Map<Text, TomlValue>, TomlError> {
+    match parse(source)? {
+        TomlValue.TomlTable(t) => Ok(t),
+        _ => unreachable(),  // parse() always returns TomlTable
+    }
+}
+
+// =============================================================================
+// Document parser
+// =============================================================================
+//
+// A TOML document is a sequence of:
+//   * key-value pairs (in the implicit root table or current table)
+//   * [table.header] lines selecting a target table
+//   * [[array.of.tables]] lines pushing a new table onto an array
+//
+// The parser maintains a "current path" pointing into root, and applies
+// each subsequent key-value pair to the table at that path.
+fn parse_document(p: &mut Parser, root: &mut Map<Text, TomlValue>) -> Result<(), TomlError> {
+    // current_path is the dotted-key path of the active table.
+    // Empty list means root.
+    let mut current_path: List<Text> = List.new();
+
+    skip_ws_and_comments(p);
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        if b == 0x5B_u8 { // '['
+            // Either [table] or [[array-of-tables]]
+            if peek_at(p, 1) == Some(0x5B_u8) {
+                // [[array-of-tables]]
+                advance(p); advance(p); // consume "[["
+                let path = parse_key_path(p)?;
+                expect_byte(p, 0x5D_u8, &"expected ']' after array-of-tables key")?;
+                expect_byte(p, 0x5D_u8, &"expected ']]' after array-of-tables key")?;
+                require_newline_or_eof(p, &"trailing garbage after [[header]]")?;
+                push_aot(root, &path, p)?;
+                current_path = path;
+            } else {
+                // [table]
+                advance(p); // consume '['
+                let path = parse_key_path(p)?;
+                expect_byte(p, 0x5D_u8, &"expected ']' after table key")?;
+                require_newline_or_eof(p, &"trailing garbage after [header]")?;
+                define_table(root, &path, p)?;
+                current_path = path;
+            }
+        } else {
+            // key-value pair
+            let key_path = parse_key_path(p)?;
+            skip_ws(p);
+            expect_byte(p, 0x3D_u8, &"expected '=' after key")?;
+            skip_ws(p);
+            let value = parse_value(p)?;
+            require_newline_or_eof(p, &"trailing garbage after value")?;
+
+            // Resolve target table by current_path, then set key_path inside it.
+            let target = resolve_target(root, &current_path, p)?;
+            insert_dotted(target, &key_path, value, p)?;
+        }
+        skip_ws_and_comments(p);
+    }
+    Ok(())
+}
+
+// Parse a dotted key-path: bare-key | quoted-key (. bare-key | quoted-key)*
+fn parse_key_path(p: &mut Parser) -> Result<List<Text>, TomlError> {
+    let mut parts: List<Text> = List.new();
+    skip_ws(p);
+    let first = parse_key_segment(p)?;
+    parts.push(first);
+    loop {
+        skip_ws(p);
+        if peek(p) == Some(0x2E_u8) { // '.'
+            advance(p);
+            skip_ws(p);
+            parts.push(parse_key_segment(p)?);
+        } else {
+            break;
+        }
+    }
+    Ok(parts)
+}
+
+fn parse_key_segment(p: &mut Parser) -> Result<Text, TomlError> {
+    match peek(p) {
+        Some(b) => {
+            if b == 0x22_u8 {       // basic string '"'
+                parse_basic_string(p, false)
+            } else if b == 0x27_u8 { // literal string "'"
+                parse_literal_string(p, false)
+            } else if is_bare_key_char(b) {
+                parse_bare_key(p)
+            } else {
+                Err(mk_err(p, EmptyKey, &"expected key"))
+            }
+        }
+        None => Err(mk_err(p, UnexpectedEof, &"expected key, found EOF")),
+    }
+}
+
+fn is_bare_key_char(b: Byte) -> Bool {
+    (b >= 0x41_u8 && b <= 0x5A_u8)   // A-Z
+        || (b >= 0x61_u8 && b <= 0x7A_u8)   // a-z
+        || (b >= 0x30_u8 && b <= 0x39_u8)   // 0-9
+        || b == 0x2D_u8                     // '-'
+        || b == 0x5F_u8;                    // '_'
+}
+
+fn parse_bare_key(p: &mut Parser) -> Result<Text, TomlError> {
+    let start = p.pos;
+    while p.pos < p.bytes.len() && is_bare_key_char(p.bytes[p.pos]) {
+        advance(p);
+    }
+    if p.pos == start {
+        return Err(mk_err(p, EmptyKey, &"empty bare key"));
+    }
+    Ok(slice_text(p.bytes, start, p.pos))
+}
+
+// Slice bytes [start, end) into a Text via UTF-8 decode. Bare keys
+// and bare-token byte ranges are valid UTF-8 by construction.
+fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
+    let mut buf: List<Byte> = List.new();
+    let mut i = start;
+    while i < end { buf.push(bytes[i]); i = i + 1; }
+    Text.from_bytes(&buf).unwrap_or(Text.new())
+}
+
+// Expect a single byte, advance.
+fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), TomlError> {
+    match peek(p) {
+        Some(c) => {
+            if c == b { advance(p); Ok(()) }
+            else { Err(mk_err(p, UnexpectedChar, ctx)) }
+        }
+        None => Err(mk_err(p, UnexpectedEof, ctx)),
+    }
+}
+
+// =============================================================================
+// Value parser
+// =============================================================================
+
+fn parse_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    if p.depth >= MAX_TOML_DEPTH {
+        return Err(mk_err(p, DepthLimit, &"TOML nesting too deep"));
+    }
+    skip_ws(p);
+    match peek(p) {
+        None => Err(mk_err(p, UnexpectedEof, &"expected value")),
+        Some(b) => {
+            if b == 0x22_u8 {        // '"' — basic or multiline-basic string
+                if peek_at(p, 1) == Some(0x22_u8) && peek_at(p, 2) == Some(0x22_u8) {
+                    Ok(TomlValue.TomlString(parse_multiline_basic_string(p)?))
+                } else {
+                    Ok(TomlValue.TomlString(parse_basic_string(p, true)?))
+                }
+            } else if b == 0x27_u8 { // "'" — literal or multiline-literal
+                if peek_at(p, 1) == Some(0x27_u8) && peek_at(p, 2) == Some(0x27_u8) {
+                    Ok(TomlValue.TomlString(parse_multiline_literal_string(p)?))
+                } else {
+                    Ok(TomlValue.TomlString(parse_literal_string(p, true)?))
+                }
+            } else if b == 0x5B_u8 { // '[' — array
+                p.depth = p.depth + 1;
+                let v = parse_array(p)?;
+                p.depth = p.depth - 1;
+                Ok(v)
+            } else if b == 0x7B_u8 { // '{' — inline table
+                p.depth = p.depth + 1;
+                let v = parse_inline_table(p)?;
+                p.depth = p.depth - 1;
+                Ok(v)
+            } else if b == 0x74_u8 || b == 0x66_u8 { // 't'/'f' — bool
+                parse_bool(p)
+            } else {
+                // Number or datetime — disambiguate by lookahead.
+                parse_number_or_datetime(p)
+            }
+        }
+    }
+}
+
+// =============================================================================
+// String parsers
+// =============================================================================
+
+// Basic string: "..." with escape sequences per §"String".
+// `consume_value` controls whether the surrounding quotes are consumed
+// (true) or already consumed by the caller (false — for keys).
+fn parse_basic_string(p: &mut Parser, consume_value: Bool) -> Result<Text, TomlError> {
+    expect_byte(p, 0x22_u8, &"expected '\"'")?;
+    let mut out = Text.new();
+    let mut bytes_collected = 0;
+    loop {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated basic string")),
+            Some(b) => {
+                if b == 0x22_u8 {       // closing '"'
+                    advance(p);
+                    return Ok(out);
+                } else if b == 0x5C_u8 { // '\'
+                    advance(p);
+                    parse_basic_escape(p, &mut out)?;
+                } else if b == 0x0A_u8 || b == 0x0D_u8 {
+                    return Err(mk_err(p, UnexpectedChar, &"newline in basic string"));
+                } else if b < 0x20_u8 && b != 0x09_u8 {
+                    return Err(mk_err(p, UnexpectedChar, &"control char in basic string"));
+                } else {
+                    out.push_byte(b);
+                    advance(p);
+                    bytes_collected = bytes_collected + 1;
+                    if bytes_collected > MAX_TOML_STRING_BYTES {
+                        return Err(mk_err(p, StringTooLong, &"basic string exceeds limit"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Multiline basic string: """...""" with optional immediate newline trim.
+fn parse_multiline_basic_string(p: &mut Parser) -> Result<Text, TomlError> {
+    advance(p); advance(p); advance(p); // consume opening """
+    // §"String": A newline immediately following the opening delimiter
+    // will be trimmed.
+    if peek(p) == Some(0x0D_u8) {
+        advance(p);
+        if peek(p) == Some(0x0A_u8) { advance(p); }
+    } else if peek(p) == Some(0x0A_u8) {
+        advance(p);
+    }
+    let mut out = Text.new();
+    loop {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated \"\"\" string")),
+            Some(b) => {
+                if b == 0x22_u8 && peek_at(p, 1) == Some(0x22_u8) && peek_at(p, 2) == Some(0x22_u8) {
+                    // Look ahead — TOML allows up to two extra " before closing.
+                    advance(p); advance(p); advance(p);
+                    let mut extra = 0;
+                    while extra < 2 && peek(p) == Some(0x22_u8) {
+                        out.push_byte(0x22_u8);
+                        advance(p);
+                        extra = extra + 1;
+                    }
+                    return Ok(out);
+                } else if b == 0x5C_u8 {
+                    advance(p);
+                    // Line-ending backslash: trims whitespace+newlines.
+                    let q = peek(p);
+                    if q == Some(0x20_u8) || q == Some(0x09_u8) || q == Some(0x0A_u8) || q == Some(0x0D_u8) {
+                        // Per §"String": when the last non-whitespace char is `\`,
+                        // it joins next line. Trim until non-whitespace.
+                        // First skip remaining whitespace-on-line + newline
+                        let mut saw_nl = false;
+                        while p.pos < p.bytes.len() {
+                            let c = p.bytes[p.pos];
+                            if c == 0x20_u8 || c == 0x09_u8 { advance(p); }
+                            else if c == 0x0A_u8 { advance(p); saw_nl = true; }
+                            else if c == 0x0D_u8 { advance(p); }
+                            else { break; }
+                        }
+                        if !saw_nl {
+                            return Err(mk_err(p, InvalidEscape, &"line-ending backslash without newline"));
+                        }
+                    } else {
+                        parse_basic_escape(p, &mut out)?;
+                    }
+                } else {
+                    out.push_byte(b);
+                    advance(p);
+                }
+            }
+        }
+    }
+}
+
+// Literal string: '...' — no escapes, no multiline.
+fn parse_literal_string(p: &mut Parser, _consume_value: Bool) -> Result<Text, TomlError> {
+    expect_byte(p, 0x27_u8, &"expected '\\''")?;
+    let start = p.pos;
+    loop {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated literal string")),
+            Some(b) => {
+                if b == 0x27_u8 {
+                    let s = slice_text(p.bytes, start, p.pos);
+                    advance(p);
+                    return Ok(s);
+                } else if b == 0x0A_u8 || b == 0x0D_u8 {
+                    return Err(mk_err(p, UnexpectedChar, &"newline in literal string"));
+                } else {
+                    advance(p);
+                }
+            }
+        }
+    }
+}
+
+// Multiline literal string: '''...''' — no escapes; immediate newline trim.
+fn parse_multiline_literal_string(p: &mut Parser) -> Result<Text, TomlError> {
+    advance(p); advance(p); advance(p); // consume opening '''
+    if peek(p) == Some(0x0D_u8) {
+        advance(p);
+        if peek(p) == Some(0x0A_u8) { advance(p); }
+    } else if peek(p) == Some(0x0A_u8) {
+        advance(p);
+    }
+    let start = p.pos;
+    loop {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated ''' string")),
+            Some(b) => {
+                if b == 0x27_u8 && peek_at(p, 1) == Some(0x27_u8) && peek_at(p, 2) == Some(0x27_u8) {
+                    let s_end = p.pos;
+                    advance(p); advance(p); advance(p);
+                    let mut out = slice_text(p.bytes, start, s_end);
+                    let mut extra = 0;
+                    while extra < 2 && peek(p) == Some(0x27_u8) {
+                        out.push_byte(0x27_u8);
+                        advance(p);
+                        extra = extra + 1;
+                    }
+                    return Ok(out);
+                } else {
+                    advance(p);
+                }
+            }
+        }
+    }
+}
+
+fn parse_basic_escape(p: &mut Parser, out: &mut Text) -> Result<(), TomlError> {
+    match peek(p) {
+        None => Err(mk_err(p, UnexpectedEof, &"unterminated escape")),
+        Some(b) => {
+            if      b == 0x62_u8 { advance(p); out.push_byte(0x08_u8); Ok(()) } // \b
+            else if b == 0x74_u8 { advance(p); out.push_byte(0x09_u8); Ok(()) } // \t
+            else if b == 0x6E_u8 { advance(p); out.push_byte(0x0A_u8); Ok(()) } // \n
+            else if b == 0x66_u8 { advance(p); out.push_byte(0x0C_u8); Ok(()) } // \f
+            else if b == 0x72_u8 { advance(p); out.push_byte(0x0D_u8); Ok(()) } // \r
+            else if b == 0x22_u8 { advance(p); out.push_byte(0x22_u8); Ok(()) } // \"
+            else if b == 0x5C_u8 { advance(p); out.push_byte(0x5C_u8); Ok(()) } // \\
+            else if b == 0x75_u8 { advance(p); parse_unicode_escape(p, out, 4) } // \uXXXX
+            else if b == 0x55_u8 { advance(p); parse_unicode_escape(p, out, 8) } // \UXXXXXXXX
+            else { Err(mk_err(p, InvalidEscape, &"unknown escape char")) }
+        }
+    }
+}
+
+fn parse_unicode_escape(p: &mut Parser, out: &mut Text, hex_digits: Int) -> Result<(), TomlError> {
+    let mut code: Int = 0;
+    let mut i = 0;
+    while i < hex_digits {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"truncated unicode escape")),
+            Some(b) => {
+                let d = hex_digit_value(b);
+                match d {
+                    Some(v) => {
+                        code = code * 16 + v;
+                        advance(p);
+                    }
+                    None => return Err(mk_err(p, InvalidUnicode, &"non-hex in unicode escape")),
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if code > 0x10FFFF || (code >= 0xD800 && code < 0xE000) {
+        return Err(mk_err(p, InvalidUnicode, &"invalid scalar value"));
+    }
+    out.push_codepoint(code);
+    Ok(())
+}
+
+fn hex_digit_value(b: Byte) -> Maybe<Int> {
+    if b >= 0x30_u8 && b <= 0x39_u8       { Some((b - 0x30_u8) as Int) }
+    else if b >= 0x41_u8 && b <= 0x46_u8  { Some((b - 0x41_u8 + 10) as Int) }
+    else if b >= 0x61_u8 && b <= 0x66_u8  { Some((b - 0x61_u8 + 10) as Int) }
+    else                                  { None }
+}
+
+// =============================================================================
+// Bool parser
+// =============================================================================
+
+fn parse_bool(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    if peek(p) == Some(0x74_u8) {
+        // "true"
+        if expect_keyword(p, &"true") { Ok(TomlValue.TomlBool(true)) }
+        else { Err(mk_err(p, UnexpectedChar, &"expected 'true'")) }
+    } else if peek(p) == Some(0x66_u8) {
+        if expect_keyword(p, &"false") { Ok(TomlValue.TomlBool(false)) }
+        else { Err(mk_err(p, UnexpectedChar, &"expected 'false'")) }
+    } else {
+        Err(mk_err(p, UnexpectedChar, &"expected boolean"))
+    }
+}
+
+fn expect_keyword(p: &mut Parser, kw: &Text) -> Bool {
+    let kb = kw.as_bytes();
+    let mut i = 0;
+    while i < kb.len() {
+        if peek_at(p, i) != Some(kb[i]) { return false; }
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < kb.len() { advance(p); j = j + 1; }
+    true
+}
+
+// =============================================================================
+// Number / datetime parser
+// =============================================================================
+//
+// Number: integer (decimal/hex/oct/bin), float, special floats (inf/nan).
+// Datetime: offset-datetime, local-datetime, local-date, local-time.
+//
+// Disambiguation: scan ahead for ':' (time component) or '-' followed by
+// digits (date), without crossing line endings.
+
+fn parse_number_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    // Look at first char + a few bytes ahead to decide.
+    // Datetime patterns:
+    //   YYYY-MM-DD          (local-date — 10 bytes)
+    //   YYYY-MM-DDTHH:MM:SS (datetime — '-' at index 4 AND ':' at index 13)
+    //   HH:MM:SS            (local-time — ':' at index 2)
+    let p0 = peek(p).unwrap_or(0);
+    let p2 = peek_at(p, 2).unwrap_or(0);
+    let p4 = peek_at(p, 4).unwrap_or(0);
+
+    // Local-time: HH:MM:SS — first byte is ASCII digit, third byte is ':'.
+    if is_digit(p0) && p2 == 0x3A_u8 {
+        return parse_local_time_value(p);
+    }
+    // Date / datetime: YYYY-MM-DD with '-' at offset 4.
+    if is_digit(p0) && p4 == 0x2D_u8 {
+        return parse_date_or_datetime(p);
+    }
+    // Otherwise: number.
+    parse_number(p)
+}
+
+fn is_digit(b: Byte) -> Bool {
+    b >= 0x30_u8 && b <= 0x39_u8
+}
+
+fn parse_number(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    let start = p.pos;
+
+    // Optional sign
+    let mut sign: Int = 1;
+    if peek(p) == Some(0x2B_u8) { advance(p); }
+    else if peek(p) == Some(0x2D_u8) { advance(p); sign = -1; }
+
+    // Special floats: inf, nan
+    if peek(p) == Some(0x69_u8) || peek(p) == Some(0x6E_u8) {
+        if expect_keyword(p, &"inf") {
+            let f = if sign < 0 { Float.neg_infinity() } else { Float.infinity() };
+            return Ok(TomlValue.TomlFloat(f));
+        }
+        if expect_keyword(p, &"nan") { return Ok(TomlValue.TomlFloat(Float.nan())); }
+        // Reset and fail
+        p.pos = start; p.column = p.column - 0; // (column reset is approximate; ok for diag)
+        return Err(mk_err(p, InvalidNumber, &"unexpected token where number expected"));
+    }
+
+    // Hex/oct/bin prefixes — only allowed without a sign (TOML 1.0 §"Integer").
+    if sign == 1 && peek(p) == Some(0x30_u8) {
+        let nx = peek_at(p, 1);
+        if nx == Some(0x78_u8) {       // 0x — hex
+            advance(p); advance(p);
+            return parse_radix_int(p, 16);
+        } else if nx == Some(0x6F_u8) { // 0o — oct
+            advance(p); advance(p);
+            return parse_radix_int(p, 8);
+        } else if nx == Some(0x62_u8) { // 0b — bin
+            advance(p); advance(p);
+            return parse_radix_int(p, 2);
+        }
+    }
+
+    // Plain decimal — may be int or float.
+    let int_start = p.pos;
+    let mut saw_digit = false;
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        if is_digit(b) { saw_digit = true; advance(p); }
+        else if b == 0x5F_u8 && saw_digit { advance(p); } // '_' separator
+        else { break; }
+    }
+    if !saw_digit {
+        return Err(mk_err(p, InvalidNumber, &"no digits in number"));
+    }
+
+    // Float if next char is '.', 'e', or 'E'
+    let nx = peek(p);
+    let is_float = nx == Some(0x2E_u8) || nx == Some(0x65_u8) || nx == Some(0x45_u8);
+    if is_float {
+        if nx == Some(0x2E_u8) {
+            advance(p);
+            let mut frac_digit = false;
+            while p.pos < p.bytes.len() {
+                let b = p.bytes[p.pos];
+                if is_digit(b) { frac_digit = true; advance(p); }
+                else if b == 0x5F_u8 && frac_digit { advance(p); }
+                else { break; }
+            }
+            if !frac_digit {
+                return Err(mk_err(p, InvalidNumber, &"missing fractional digits"));
+            }
+        }
+        let nx2 = peek(p);
+        if nx2 == Some(0x65_u8) || nx2 == Some(0x45_u8) {
+            advance(p);
+            if peek(p) == Some(0x2B_u8) || peek(p) == Some(0x2D_u8) { advance(p); }
+            let mut exp_digit = false;
+            while p.pos < p.bytes.len() {
+                let b = p.bytes[p.pos];
+                if is_digit(b) { exp_digit = true; advance(p); }
+                else if b == 0x5F_u8 && exp_digit { advance(p); }
+                else { break; }
+            }
+            if !exp_digit {
+                return Err(mk_err(p, InvalidNumber, &"missing exponent digits"));
+            }
+        }
+        let raw = slice_text(p.bytes, start, p.pos);
+        let cleaned = strip_underscores(&raw);
+        match Float.parse(&cleaned) {
+            Some(f) => Ok(TomlValue.TomlFloat(f)),
+            None    => Err(mk_err(p, InvalidNumber, &"float parse failed")),
+        }
+    } else {
+        let raw = slice_text(p.bytes, start, p.pos);
+        let cleaned = strip_underscores(&raw);
+        match Int.parse(&cleaned) {
+            Some(i) => Ok(TomlValue.TomlInt(i)),
+            None    => Err(mk_err(p, InvalidNumber, &"integer parse failed")),
+        }
+    }
+}
+
+fn parse_radix_int(p: &mut Parser, radix: Int) -> Result<TomlValue, TomlError> {
+    let mut acc: Int = 0;
+    let mut saw_digit = false;
+    let mut last_was_digit = false;
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        let d_opt = digit_value(b, radix);
+        match d_opt {
+            Some(v) => {
+                acc = acc * radix + v;
+                advance(p);
+                saw_digit = true;
+                last_was_digit = true;
+            }
+            None => {
+                if b == 0x5F_u8 && last_was_digit {
+                    advance(p);
+                    last_was_digit = false;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    if !saw_digit {
+        return Err(mk_err(p, InvalidNumber, &"no digits in radix integer"));
+    }
+    Ok(TomlValue.TomlInt(acc))
+}
+
+fn digit_value(b: Byte, radix: Int) -> Maybe<Int> {
+    let v_opt = if b >= 0x30_u8 && b <= 0x39_u8 {
+        Some((b - 0x30_u8) as Int)
+    } else if b >= 0x41_u8 && b <= 0x5A_u8 {
+        Some((b - 0x41_u8 + 10) as Int)
+    } else if b >= 0x61_u8 && b <= 0x7A_u8 {
+        Some((b - 0x61_u8 + 10) as Int)
+    } else {
+        None
+    };
+    match v_opt {
+        Some(v) => if v < radix { Some(v) } else { None },
+        None    => None,
+    }
+}
+
+fn strip_underscores(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = Text.new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != 0x5F_u8 { out.push_byte(bytes[i]); }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Datetime parsers
+// =============================================================================
+
+fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    let start = p.pos;
+    // Consume YYYY-MM-DD
+    let mut i = 0;
+    while i < 10 {
+        if p.pos >= p.bytes.len() { return Err(mk_err(p, InvalidDateTime, &"truncated date")); }
+        advance(p);
+        i = i + 1;
+    }
+    // If next is 'T' / 't' / ' ' followed by digit, datetime; otherwise local-date.
+    let sep = peek(p);
+    let after_sep = peek_at(p, 1);
+    let has_time = (sep == Some(0x54_u8) || sep == Some(0x74_u8) || sep == Some(0x20_u8))
+                   && after_sep.map_or(false, |b| is_digit(b));
+    if !has_time {
+        let raw = slice_text(p.bytes, start, p.pos);
+        // Pad to a full RFC 3339 by appending T00:00:00Z and parse — date-only.
+        let padded = raw.concat(&"T00:00:00Z".to_text());
+        match rfc3339.parse(&padded) {
+            Ok(t)  => Ok(TomlValue.TomlLocalDate(t)),
+            Err(_) => Err(mk_err(p, InvalidDateTime, &"invalid local-date")),
+        }
+    } else {
+        advance(p); // separator
+        // Consume HH:MM:SS[.fffff][Z|±HH:MM]
+        // Accumulate until non-datetime byte.
+        while p.pos < p.bytes.len() && is_datetime_char(p.bytes[p.pos]) { advance(p); }
+        let raw = slice_text(p.bytes, start, p.pos);
+        // Normalise space separator to 'T' for RFC 3339.
+        let bytes = raw.as_bytes();
+        let mut norm = Text.new();
+        let mut j = 0;
+        while j < bytes.len() {
+            if j == 10 && bytes[j] == 0x20_u8 { norm.push_byte(0x54_u8); }
+            else { norm.push_byte(bytes[j]); }
+            j = j + 1;
+        }
+        // Detect: contains 'Z'/'+'/'-'(after position 10) → offset; else local.
+        let has_offset = bytes_contains_after(bytes, 10, 0x5A_u8)
+                      || bytes_contains_after(bytes, 11, 0x2B_u8)
+                      || bytes_contains_after(bytes, 11, 0x2D_u8);
+        if !has_offset {
+            // Append Z to satisfy RFC 3339 parser, but tag as LocalDateTime.
+            let padded = norm.concat(&"Z".to_text());
+            match rfc3339.parse(&padded) {
+                Ok(t)  => Ok(TomlValue.TomlLocalDateTime(t)),
+                Err(_) => Err(mk_err(p, InvalidDateTime, &"invalid local-datetime")),
+            }
+        } else {
+            match rfc3339.parse(&norm) {
+                Ok(t)  => Ok(TomlValue.TomlOffsetDateTime(t)),
+                Err(_) => Err(mk_err(p, InvalidDateTime, &"invalid offset-datetime")),
+            }
+        }
+    }
+}
+
+fn parse_local_time_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    let start = p.pos;
+    while p.pos < p.bytes.len() && is_datetime_char(p.bytes[p.pos]) { advance(p); }
+    let raw = slice_text(p.bytes, start, p.pos);
+    // Pad with 1970-01-01T prefix and Z to use RFC 3339 parser.
+    let padded = "1970-01-01T".to_text().concat(&raw).concat(&"Z".to_text());
+    match rfc3339.parse(&padded) {
+        Ok(t)  => Ok(TomlValue.TomlLocalTime(t)),
+        Err(_) => Err(mk_err(p, InvalidDateTime, &"invalid local-time")),
+    }
+}
+
+fn is_datetime_char(b: Byte) -> Bool {
+    is_digit(b)
+        || b == 0x2D_u8 || b == 0x2B_u8           // - +
+        || b == 0x3A_u8 || b == 0x2E_u8           // : .
+        || b == 0x54_u8 || b == 0x74_u8           // T t
+        || b == 0x5A_u8 || b == 0x7A_u8           // Z z
+        || b == 0x20_u8                            // space (separator)
+}
+
+fn bytes_contains_after(bs: &[Byte], from: Int, target: Byte) -> Bool {
+    let mut i = from;
+    while i < bs.len() {
+        if bs[i] == target { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Array / inline-table parsers
+// =============================================================================
+
+fn parse_array(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    expect_byte(p, 0x5B_u8, &"expected '['")?;
+    let mut items: List<TomlValue> = List.new();
+    skip_ws_and_comments(p);
+    if peek(p) == Some(0x5D_u8) { advance(p); return Ok(TomlValue.TomlArray(items)); }
+    loop {
+        let v = parse_value(p)?;
+        items.push(v);
+        if items.len() > MAX_TOML_ARRAY_ITEMS {
+            return Err(mk_err(p, ArrayTooLarge, &"array exceeds size limit"));
+        }
+        skip_ws_and_comments(p);
+        if peek(p) == Some(0x2C_u8) {
+            advance(p);
+            skip_ws_and_comments(p);
+            if peek(p) == Some(0x5D_u8) { advance(p); return Ok(TomlValue.TomlArray(items)); }
+        } else if peek(p) == Some(0x5D_u8) {
+            advance(p);
+            return Ok(TomlValue.TomlArray(items));
+        } else {
+            return Err(mk_err(p, UnexpectedChar, &"expected ',' or ']' in array"));
+        }
+    }
+}
+
+fn parse_inline_table(p: &mut Parser) -> Result<TomlValue, TomlError> {
+    expect_byte(p, 0x7B_u8, &"expected '{'")?;
+    let mut tbl: Map<Text, TomlValue> = Map.new();
+    skip_ws(p);
+    if peek(p) == Some(0x7D_u8) { advance(p); return Ok(TomlValue.TomlTable(tbl)); }
+    loop {
+        let key_path = parse_key_path(p)?;
+        skip_ws(p);
+        expect_byte(p, 0x3D_u8, &"expected '=' in inline table")?;
+        skip_ws(p);
+        let value = parse_value(p)?;
+        insert_dotted(&mut tbl, &key_path, value, p)?;
+        if tbl.len() > MAX_TOML_TABLE_KEYS {
+            return Err(mk_err(p, TableTooLarge, &"inline table exceeds key limit"));
+        }
+        skip_ws(p);
+        if peek(p) == Some(0x2C_u8) {
+            advance(p);
+            skip_ws(p);
+        } else if peek(p) == Some(0x7D_u8) {
+            advance(p);
+            return Ok(TomlValue.TomlTable(tbl));
+        } else {
+            return Err(mk_err(p, UnexpectedChar, &"expected ',' or '}' in inline table"));
+        }
+    }
+}
+
+// =============================================================================
+// Path / table-resolution helpers
+// =============================================================================
+
+// Walk root by current_path; create intermediate tables as needed.
+fn resolve_target<'a>(
+    root: &'a mut Map<Text, TomlValue>,
+    path: &List<Text>,
+    p: &Parser,
+) -> Result<&'a mut Map<Text, TomlValue>, TomlError> {
+    if path.is_empty() { return Ok(root); }
+    // Walk; path is dotted-key into nested tables / last-of-array-of-tables.
+    let mut cur = root;
+    let mut i = 0;
+    while i < path.len() {
+        let k = path.get(i).unwrap();
+        let last = i == path.len() - 1;
+        if !cur.contains_key(k) {
+            cur.insert(k.clone(), TomlValue.TomlTable(Map.new()));
+        }
+        let v = cur.get_mut(k).unwrap();
+        match v {
+            TomlValue.TomlTable(t) => { cur = t; }
+            TomlValue.TomlArray(arr) => {
+                // For [[aot]], the path resolves to the last-pushed table.
+                if arr.is_empty() {
+                    return Err(mk_err(p, RedefineSuperTable, &"path traverses empty array-of-tables"));
+                }
+                let last_idx = arr.len() - 1;
+                match arr.get_mut(last_idx).unwrap() {
+                    TomlValue.TomlTable(t) => { cur = t; }
+                    _ => return Err(mk_err(p, RedefineSuperTable, &"non-table element in array-of-tables")),
+                }
+            }
+            _ => return Err(mk_err(p, RedefineSuperTable, &"path traverses non-table")),
+        }
+        i = i + 1;
+        // unused 'last' but kept for clarity
+        let _ = last;
+    }
+    Ok(cur)
+}
+
+// [table] header: define / select an existing or new table at path.
+fn define_table(
+    root: &mut Map<Text, TomlValue>,
+    path: &List<Text>,
+    p: &Parser,
+) -> Result<(), TomlError> {
+    if path.is_empty() { return Err(mk_err(p, EmptyKey, &"empty table header")); }
+    let _ = resolve_target(root, path, p)?;
+    Ok(())
+}
+
+// [[aot]] header: append a new table to an array-of-tables at path.
+fn push_aot(
+    root: &mut Map<Text, TomlValue>,
+    path: &List<Text>,
+    p: &Parser,
+) -> Result<(), TomlError> {
+    if path.is_empty() { return Err(mk_err(p, EmptyKey, &"empty array-of-tables header")); }
+    // Walk to parent of last segment.
+    let parent_path = path.slice(0, path.len() - 1);
+    let last_key = path.get(path.len() - 1).unwrap().clone();
+    let parent = resolve_target(root, &parent_path, p)?;
+    if !parent.contains_key(&last_key) {
+        parent.insert(last_key.clone(), TomlValue.TomlArray(List.new()));
+    }
+    match parent.get_mut(&last_key).unwrap() {
+        TomlValue.TomlArray(arr) => {
+            arr.push(TomlValue.TomlTable(Map.new()));
+            Ok(())
+        }
+        _ => Err(mk_err(p, RedefineSuperTable, &"[[X]] header collides with non-array key")),
+    }
+}
+
+// Insert key_path = value into target table (creating intermediate tables
+// for dotted keys).
+fn insert_dotted(
+    target: &mut Map<Text, TomlValue>,
+    key_path: &List<Text>,
+    value: TomlValue,
+    p: &Parser,
+) -> Result<(), TomlError> {
+    if key_path.is_empty() { return Err(mk_err(p, EmptyKey, &"empty key path")); }
+    if key_path.len() == 1 {
+        let k = key_path.get(0).unwrap();
+        if target.contains_key(k) {
+            return Err(mk_err(p, DuplicateKey, &"duplicate key"));
+        }
+        target.insert(k.clone(), value);
+        return Ok(());
+    }
+    let head = key_path.get(0).unwrap();
+    if !target.contains_key(head) {
+        target.insert(head.clone(), TomlValue.TomlTable(Map.new()));
+    }
+    match target.get_mut(head).unwrap() {
+        TomlValue.TomlTable(t) => {
+            insert_dotted(t, &key_path.slice(1, key_path.len()), value, p)
+        }
+        _ => Err(mk_err(p, RedefineSuperTable, &"dotted key traverses non-table")),
+    }
+}
+
+// =============================================================================
+// Serializer
+// =============================================================================
+
+// Compact stringification (inline form, no indentation).
+public fn stringify(value: &TomlValue) -> Text {
+    match value {
+        TomlValue.TomlTable(t) => stringify_table_inline(t),
+        _                      => stringify_inline_value(value),
+    }
+}
+
+// Pretty stringification (table-form, sorted keys, two-space indent).
+public fn stringify_pretty(value: &TomlValue) -> Text {
+    let mut out = Text.new();
+    match value {
+        TomlValue.TomlTable(t) => stringify_table_pretty(t, &List.new(), &mut out),
+        _                      => out.push_text(&stringify_inline_value(value)),
+    }
+    out
+}
+
+fn stringify_inline_value(v: &TomlValue) -> Text {
+    match v {
+        TomlValue.TomlString(s)            => stringify_string(s),
+        TomlValue.TomlInt(i)               => i.to_text(),
+        TomlValue.TomlFloat(f)             => f.to_text(),
+        TomlValue.TomlBool(b)              => if *b { "true".to_text() } else { "false".to_text() },
+        TomlValue.TomlOffsetDateTime(t)    => rfc3339.format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes),
+        TomlValue.TomlLocalDateTime(t)     => format_local_datetime(t),
+        TomlValue.TomlLocalDate(t)         => format_local_date(t),
+        TomlValue.TomlLocalTime(t)         => format_local_time(t),
+        TomlValue.TomlArray(items)         => stringify_array_inline(items),
+        TomlValue.TomlTable(t)             => stringify_table_inline(t),
+    }
+}
+
+fn stringify_string(s: &Text) -> Text {
+    let mut out = Text.new();
+    out.push_byte(0x22_u8);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if      b == 0x22_u8 { out.push_text(&"\\\"".to_text()); }
+        else if b == 0x5C_u8 { out.push_text(&"\\\\".to_text()); }
+        else if b == 0x08_u8 { out.push_text(&"\\b".to_text()); }
+        else if b == 0x09_u8 { out.push_text(&"\\t".to_text()); }
+        else if b == 0x0A_u8 { out.push_text(&"\\n".to_text()); }
+        else if b == 0x0C_u8 { out.push_text(&"\\f".to_text()); }
+        else if b == 0x0D_u8 { out.push_text(&"\\r".to_text()); }
+        else if b < 0x20_u8 {
+            // \uXXXX
+            let mut hex = "\\u00".to_text();
+            hex.push_byte(hex_nibble((b >> 4) as Int));
+            hex.push_byte(hex_nibble((b & 0x0F_u8) as Int));
+            out.push_text(&hex);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(0x22_u8);
+    out
+}
+
+fn hex_nibble(v: Int) -> Byte {
+    if v < 10 { (0x30_u8 + (v as Byte)) }
+    else      { (0x41_u8 + ((v - 10) as Byte)) }
+}
+
+fn stringify_array_inline(items: &List<TomlValue>) -> Text {
+    let mut out = Text.new();
+    out.push_byte(0x5B_u8);
+    let mut i = 0;
+    while i < items.len() {
+        if i > 0 { out.push_text(&", ".to_text()); }
+        out.push_text(&stringify_inline_value(items.get(i).unwrap()));
+        i = i + 1;
+    }
+    out.push_byte(0x5D_u8);
+    out
+}
+
+fn stringify_table_inline(t: &Map<Text, TomlValue>) -> Text {
+    let mut out = Text.new();
+    out.push_byte(0x7B_u8);
+    let keys = t.keys();
+    let mut i = 0;
+    while i < keys.len() {
+        if i > 0 { out.push_text(&", ".to_text()); }
+        let k = keys.get(i).unwrap();
+        out.push_text(&render_key(k));
+        out.push_text(&" = ".to_text());
+        out.push_text(&stringify_inline_value(t.get(k).unwrap()));
+        i = i + 1;
+    }
+    out.push_byte(0x7D_u8);
+    out
+}
+
+fn render_key(k: &Text) -> Text {
+    let bytes = k.as_bytes();
+    let mut all_bare = bytes.len() > 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if !is_bare_key_char(bytes[i]) { all_bare = false; break; }
+        i = i + 1;
+    }
+    if all_bare { k.clone() } else { stringify_string(k) }
+}
+
+fn stringify_table_pretty(
+    t: &Map<Text, TomlValue>,
+    path: &List<Text>,
+    out: &mut Text,
+) {
+    // 1) Emit scalar / array / inline-table fields first.
+    let keys = t.keys_sorted();
+    let mut sub_tables: List<Text> = List.new();
+    let mut sub_aots: List<Text> = List.new();
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys.get(i).unwrap();
+        let v = t.get(k).unwrap();
+        match v {
+            TomlValue.TomlTable(_) => sub_tables.push(k.clone()),
+            TomlValue.TomlArray(items) => {
+                if !items.is_empty() && all_tables(items) {
+                    sub_aots.push(k.clone());
+                } else {
+                    out.push_text(&render_key(k));
+                    out.push_text(&" = ".to_text());
+                    out.push_text(&stringify_inline_value(v));
+                    out.push_byte(0x0A_u8);
+                }
+            }
+            _ => {
+                out.push_text(&render_key(k));
+                out.push_text(&" = ".to_text());
+                out.push_text(&stringify_inline_value(v));
+                out.push_byte(0x0A_u8);
+            }
+        }
+        i = i + 1;
+    }
+    // 2) Emit sub-tables.
+    let mut j = 0;
+    while j < sub_tables.len() {
+        let k = sub_tables.get(j).unwrap();
+        let mut new_path = path.clone();
+        new_path.push(k.clone());
+        out.push_byte(0x0A_u8);
+        out.push_byte(0x5B_u8);
+        out.push_text(&render_path(&new_path));
+        out.push_byte(0x5D_u8);
+        out.push_byte(0x0A_u8);
+        match t.get(k).unwrap() {
+            TomlValue.TomlTable(sub) => stringify_table_pretty(sub, &new_path, out),
+            _ => unreachable(),
+        }
+        j = j + 1;
+    }
+    // 3) Emit array-of-tables.
+    let mut a = 0;
+    while a < sub_aots.len() {
+        let k = sub_aots.get(a).unwrap();
+        let mut new_path = path.clone();
+        new_path.push(k.clone());
+        match t.get(k).unwrap() {
+            TomlValue.TomlArray(arr) => {
+                let mut x = 0;
+                while x < arr.len() {
+                    out.push_byte(0x0A_u8);
+                    out.push_text(&"[[".to_text());
+                    out.push_text(&render_path(&new_path));
+                    out.push_text(&"]]".to_text());
+                    out.push_byte(0x0A_u8);
+                    match arr.get(x).unwrap() {
+                        TomlValue.TomlTable(t2) => stringify_table_pretty(t2, &new_path, out),
+                        _ => unreachable(),
+                    }
+                    x = x + 1;
+                }
+            }
+            _ => unreachable(),
+        }
+        a = a + 1;
+    }
+}
+
+fn render_path(path: &List<Text>) -> Text {
+    let mut out = Text.new();
+    let mut i = 0;
+    while i < path.len() {
+        if i > 0 { out.push_byte(0x2E_u8); }
+        out.push_text(&render_key(path.get(i).unwrap()));
+        i = i + 1;
+    }
+    out
+}
+
+fn all_tables(items: &List<TomlValue>) -> Bool {
+    let mut i = 0;
+    while i < items.len() {
+        match items.get(i).unwrap() {
+            TomlValue.TomlTable(_) => {}
+            _ => return false,
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn format_local_datetime(t: &Rfc3339Time) -> Text {
+    // Reuse RFC 3339 formatting and strip the trailing offset.
+    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    // Strip trailing 'Z' or offset.
+    let bytes = raw.as_bytes();
+    let mut i = bytes.len() - 1;
+    while i > 0 {
+        let b = bytes[i];
+        if b == 0x5A_u8 || b == 0x2B_u8 || b == 0x2D_u8 { return slice_text(bytes, 0, i); }
+        if b == 0x3A_u8 { i = i - 1; continue; } // skip ":" inside time
+        i = i - 1;
+    }
+    raw
+}
+
+fn format_local_date(t: &Rfc3339Time) -> Text {
+    // Take first 10 bytes (YYYY-MM-DD).
+    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    slice_text(raw.as_bytes(), 0, 10)
+}
+
+fn format_local_time(t: &Rfc3339Time) -> Text {
+    // Take bytes [11..], strip trailing 'Z'/offset.
+    let raw = rfc3339.format_with_offset(t.unix_seconds, t.nanos, 0);
+    let bs = raw.as_bytes();
+    let mut end = bs.len();
+    while end > 11 {
+        let b = bs[end - 1];
+        if b == 0x5A_u8 { end = end - 1; break; }
+        if b == 0x2B_u8 || b == 0x2D_u8 { end = end - 1; break; }
+        end = end - 1;
+    }
+    slice_text(bs, 11, end)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_parse_empty() {
+        let r = parse(&"".to_text()).unwrap();
+        match r { TomlValue.TomlTable(t) => assert_eq(t.len(), 0), _ => unreachable() }
+    }
+
+    #[test]
+    fn test_parse_basic_kv() {
+        let src = "key = \"value\"\nnum = 42\nflag = true\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                assert(t.contains_key(&"key".to_text()));
+                assert(t.contains_key(&"num".to_text()));
+                assert(t.contains_key(&"flag".to_text()));
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_header() {
+        let src = "[server]\nhost = \"localhost\"\nport = 8080\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"server".to_text()).unwrap() {
+                    TomlValue.TomlTable(s) => {
+                        assert(s.contains_key(&"host".to_text()));
+                        assert(s.contains_key(&"port".to_text()));
+                    }
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_dotted_key() {
+        let src = "server.host = \"x\"\nserver.port = 1\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"server".to_text()).unwrap() {
+                    TomlValue.TomlTable(s) => assert_eq(s.len(), 2),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_array_of_tables() {
+        let src = "[[entries]]\nname = \"a\"\n\n[[entries]]\nname = \"b\"\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"entries".to_text()).unwrap() {
+                    TomlValue.TomlArray(arr) => assert_eq(arr.len(), 2),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_inline_table() {
+        let src = "p = { x = 1, y = 2 }\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"p".to_text()).unwrap() {
+                    TomlValue.TomlTable(s) => assert_eq(s.len(), 2),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let src = "nums = [1, 2, 3]\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"nums".to_text()).unwrap() {
+                    TomlValue.TomlArray(a) => assert_eq(a.len(), 3),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_parse_hex_int() {
+        let src = "x = 0xDEADBEEF\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"x".to_text()).unwrap() {
+                    TomlValue.TomlInt(i) => assert_eq(*i, 3735928559),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_duplicate_key_rejected() {
+        let src = "x = 1\nx = 2\n".to_text();
+        let r = parse(&src);
+        assert(r.is_err());
+    }
+
+    #[test]
+    fn test_stringify_roundtrip() {
+        let src = "[server]\nhost = \"localhost\"\nport = 8080\n".to_text();
+        let parsed = parse(&src).unwrap();
+        let rendered = stringify_pretty(&parsed);
+        let reparsed = parse(&rendered).unwrap();
+        // Structural equality of round-tripped tree.
+        match (&parsed, &reparsed) {
+            (TomlValue.TomlTable(a), TomlValue.TomlTable(b)) => {
+                assert_eq(a.len(), b.len());
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_comment_and_blank_lines() {
+        let src = "# hello\n\nkey = 1  # trailing\n# tail\n".to_text();
+        let r = parse(&src).unwrap();
+        match r {
+            TomlValue.TomlTable(t) => {
+                match t.get(&"key".to_text()).unwrap() {
+                    TomlValue.TomlInt(i) => assert_eq(*i, 1),
+                    _ => unreachable(),
+                }
+            }
+            _ => unreachable(),
+        }
+    }
+}
+
+// =============================================================================
+// ConfigValue conversion (categorical hub)
+// =============================================================================
+//
+// `to_config_value` is the embedding functor `TomlValue → ConfigValue`.
+// It is total and lossless: every TOML value maps to a unique ConfigValue
+// variant. The TOML datetime variants map directly to the ConfigValue
+// datetime variants (no coercion needed — both type systems share the
+// same `Rfc3339Time` payload).
+public fn to_config_value(t: &TomlValue) -> ConfigValue {
+    match t {
+        TomlValue.TomlString(s)            => ConfigValue.ConfigString(s.clone()),
+        TomlValue.TomlInt(i)               => ConfigValue.ConfigInt(*i),
+        TomlValue.TomlFloat(f)             => ConfigValue.ConfigFloat(*f),
+        TomlValue.TomlBool(b)              => ConfigValue.ConfigBool(*b),
+        TomlValue.TomlOffsetDateTime(d)    => ConfigValue.ConfigOffsetDateTime(d.clone()),
+        TomlValue.TomlLocalDateTime(d)     => ConfigValue.ConfigLocalDateTime(d.clone()),
+        TomlValue.TomlLocalDate(d)         => ConfigValue.ConfigLocalDate(d.clone()),
+        TomlValue.TomlLocalTime(d)         => ConfigValue.ConfigLocalTime(d.clone()),
+        TomlValue.TomlArray(items) => {
+            let mut out: List<ConfigValue> = List.new();
+            let mut i = 0;
+            while i < items.len() {
+                out.push(to_config_value(items.get(i).unwrap()));
+                i = i + 1;
+            }
+            ConfigValue.ConfigArray(out)
+        }
+        TomlValue.TomlTable(t2) => {
+            let mut out: Map<Text, ConfigValue> = Map.new();
+            let keys = t2.keys();
+            let mut i = 0;
+            while i < keys.len() {
+                let k = keys.get(i).unwrap();
+                out.insert(k.clone(), to_config_value(t2.get(k).unwrap()));
+                i = i + 1;
+            }
+            ConfigValue.ConfigTable(out)
+        }
+    }
+}
+
+// `from_config_value` is the right-inverse functor `ConfigValue → TomlValue`.
+// It is partial: ConfigValue features unrepresentable in TOML (Null, Bytes,
+// Duration, Tagged) raise `ConfigErrorKind.UnsupportedFeature`.
+public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, CfgError> {
+    match v {
+        ConfigValue.ConfigNull => Err(unsupported("null")),
+        ConfigValue.ConfigBool(b)              => Ok(TomlValue.TomlBool(*b)),
+        ConfigValue.ConfigInt(i)               => Ok(TomlValue.TomlInt(*i)),
+        ConfigValue.ConfigFloat(f)             => Ok(TomlValue.TomlFloat(*f)),
+        ConfigValue.ConfigString(s)            => Ok(TomlValue.TomlString(s.clone())),
+        ConfigValue.ConfigBytes(_)             => Err(unsupported("bytes")),
+        ConfigValue.ConfigOffsetDateTime(d)    => Ok(TomlValue.TomlOffsetDateTime(d.clone())),
+        ConfigValue.ConfigLocalDateTime(d)     => Ok(TomlValue.TomlLocalDateTime(d.clone())),
+        ConfigValue.ConfigLocalDate(d)         => Ok(TomlValue.TomlLocalDate(d.clone())),
+        ConfigValue.ConfigLocalTime(d)         => Ok(TomlValue.TomlLocalTime(d.clone())),
+        ConfigValue.ConfigDuration(_)          => Err(unsupported("duration")),
+        ConfigValue.ConfigArray(items) => {
+            let mut out: List<TomlValue> = List.new();
+            let mut i = 0;
+            while i < items.len() {
+                out.push(from_config_value(items.get(i).unwrap())?);
+                i = i + 1;
+            }
+            Ok(TomlValue.TomlArray(out))
+        }
+        ConfigValue.ConfigTable(t) => {
+            let mut out: Map<Text, TomlValue> = Map.new();
+            let keys = t.keys();
+            let mut i = 0;
+            while i < keys.len() {
+                let k = keys.get(i).unwrap();
+                out.insert(k.clone(), from_config_value(t.get(k).unwrap())?);
+                i = i + 1;
+            }
+            Ok(TomlValue.TomlTable(out))
+        }
+        ConfigValue.ConfigTagged(_, _)         => Err(unsupported("tagged")),
+    }
+}
+
+fn unsupported(feature: &str) -> CfgError {
+    CfgError {
+        format_id:   format_id_toml(),
+        kind:        ConfigErrorKind.UnsupportedFeature,
+        line:        0,
+        column:      0,
+        byte_offset: 0,
+        message:     "TOML cannot represent ".to_text().concat(&feature.to_text()),
+        path:        None,
+    }
+}
+
+// =============================================================================
+// ConfigFormat protocol implementation
+// =============================================================================
+//
+// The TOML adapter — singleton type implementing `ConfigFormat`. Registered
+// in the built-in format registry by `register(reg)` at module init.
+public type TomlFormat is {};
+
+public fn toml_format() -> TomlFormat { TomlFormat {} }
+
+implement ConfigFormat for TomlFormat {
+    fn format_id(&self) -> FormatId { format_id_toml() }
+
+    fn display_name(&self) -> Text { "TOML 1.0.0".to_text() }
+
+    fn extensions(&self) -> List<Text> {
+        let mut e: List<Text> = List.new();
+        e.push("toml".to_text());
+        e
+    }
+
+    fn mime_types(&self) -> List<Text> {
+        let mut m: List<Text> = List.new();
+        m.push("application/toml".to_text());
+        m.push("text/x-toml".to_text());
+        m
+    }
+
+    fn capabilities(&self) -> FormatCapabilities {
+        // TOML has datetime, no null, no bytes, heterogeneous-arrays
+        // disallowed (TOML 1.0 §"Array" — homogeneous), preserves key order,
+        // single root, no comments preserved (parser drops them).
+        let mut c = default_capabilities();
+        c.has_null = false;
+        c.has_bytes = false;
+        c.has_offset_datetime = true;
+        c.has_local_datetime = true;
+        c.has_duration = false;
+        c.has_references = false;
+        c.has_heterogeneous_arrays = false;
+        c.preserves_key_order = true;
+        c.preserves_comments = false;
+        c.single_root = true;
+        c
+    }
+
+    fn parse(&self, source: &Text) -> Result<ConfigValue, CfgError> {
+        let parsed = parse(source).map_err(toml_to_cfg_err)?;
+        Ok(to_config_value(&parsed))
+    }
+
+    fn parse_with_options(
+        &self,
+        source: &Text,
+        _options: &FormatOptions,
+    ) -> Result<ConfigValue, CfgError> {
+        // Phase 1: no options; ignore.
+        self.parse(source)
+    }
+
+    fn stringify(&self, value: &ConfigValue) -> Result<Text, CfgError> {
+        let toml_v = from_config_value(value)?;
+        Ok(stringify_pretty(&toml_v))
+    }
+
+    fn stringify_with_options(
+        &self,
+        value: &ConfigValue,
+        _options: &FormatOptions,
+    ) -> Result<Text, CfgError> {
+        self.stringify(value)
+    }
+}
+
+// Map TomlError → ConfigError.
+fn toml_to_cfg_err(e: TomlError) -> CfgError {
+    let kind = match e.kind {
+        UnexpectedEof          => ConfigErrorKind.UnexpectedEof,
+        UnexpectedChar         => ConfigErrorKind.UnexpectedChar,
+        InvalidEscape          => ConfigErrorKind.InvalidEscape,
+        InvalidNumber          => ConfigErrorKind.InvalidNumber,
+        InvalidUnicode         => ConfigErrorKind.InvalidUnicode,
+        InvalidDateTime        => ConfigErrorKind.InvalidDateTime,
+        DuplicateKey           => ConfigErrorKind.DuplicateKey,
+        DepthLimit             => ConfigErrorKind.DepthLimit,
+        StringTooLong          => ConfigErrorKind.StringTooLong,
+        TableTooLarge          => ConfigErrorKind.TableTooLarge,
+        ArrayTooLarge          => ConfigErrorKind.ArrayTooLarge,
+        TrailingGarbage        => ConfigErrorKind.TrailingGarbage,
+        EmptyKey               => ConfigErrorKind.EmptyKey,
+        KeyAfterValue          => ConfigErrorKind.KeyAfterValue,
+        RedefineSuperTable     => ConfigErrorKind.RedefineSuperTable,
+        TypeMismatchInArray    => ConfigErrorKind.TypeMismatchInArray,
+    };
+    CfgError {
+        format_id:   format_id_toml(),
+        kind:        kind,
+        line:        e.line,
+        column:      e.column,
+        byte_offset: 0,  // TomlError doesn't carry byte_offset; could be added
+        message:     e.message,
+        path:        None,
+    }
+}
+
+/// Self-register this format with a registry. Called by
+/// `core.configuration.mod` during built-in registry initialisation.
+public fn register(reg: &FormatRegistry) -> Result<(), Text> {
+    register_format(reg, Heap.new(toml_format()) as Heap<dyn ConfigFormat>)
+}

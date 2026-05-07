@@ -1,0 +1,362 @@
+// =============================================================================
+// configuration/error.vr — universal ConfigError taxonomy
+// =============================================================================
+// Layer: 2 (Configuration languages)
+// Dependencies: core, base, text
+// =============================================================================
+//
+// Universal error type for `core/configuration/*`. Every format parser
+// reports failures through this taxonomy, enabling format-agnostic error
+// handling at the call site.
+//
+// **Diagnostic position.** Every error carries `(line, column)` for
+// human-readable diagnostics. Byte-offset is also retained for tool
+// integration. Format identifier (`format_id: FormatId`) lets the
+// reporter render format-aware messages ("expected `=` per TOML §key").
+//
+// **Categorisation.** `ConfigErrorKind` is a structured enum partitioned
+// into syntactic (parse-time) and semantic (validation-time) groups.
+// This drives retry policy, user vs system error attribution, and
+// upstream error envelope mapping.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "universal error taxonomy for all configuration-format parsers",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.TypecheckPlusTests,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.configuration.error;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+
+// =============================================================================
+// Format identifier — stable across all configuration modules
+// =============================================================================
+
+public type FormatId is Text {
+    where self.matches(r"^[a-z][a-z0-9_-]{0,31}$")
+};
+
+// Canonical IDs for built-in formats. Extensions register new IDs via
+// FormatRegistry.
+public fn format_id_toml()        -> FormatId { "toml".to_text() }
+public fn format_id_yaml()        -> FormatId { "yaml".to_text() }
+public fn format_id_jsonc()       -> FormatId { "jsonc".to_text() }
+public fn format_id_json5()       -> FormatId { "json5".to_text() }
+public fn format_id_ini()         -> FormatId { "ini".to_text() }
+public fn format_id_properties()  -> FormatId { "properties".to_text() }
+public fn format_id_hcl()         -> FormatId { "hcl".to_text() }
+public fn format_id_hocon()       -> FormatId { "hocon".to_text() }
+public fn format_id_nestedtext()  -> FormatId { "nestedtext".to_text() }
+public fn format_id_kdl()         -> FormatId { "kdl".to_text() }
+public fn format_id_cue()         -> FormatId { "cue".to_text() }
+public fn format_id_dhall()       -> FormatId { "dhall".to_text() }
+
+// =============================================================================
+// ConfigError — the universal error type
+// =============================================================================
+
+public type ConfigError is {
+    /// Format the error originated from.
+    format_id: FormatId,
+    /// Structured error category.
+    kind: ConfigErrorKind,
+    /// 1-indexed line number in source.
+    line: Int,
+    /// 1-indexed column number (byte-counted; sources are UTF-8).
+    column: Int,
+    /// Byte offset in source (0-indexed).
+    byte_offset: Int,
+    /// Human-readable message.
+    message: Text,
+    /// Optional path into the document (for semantic errors).
+    path: Maybe<Text>,
+};
+
+// =============================================================================
+// ConfigErrorKind — structured taxonomy
+// =============================================================================
+//
+// Partitioned into:
+//   * Syntactic (parse-time): malformed input bytes
+//   * Semantic (validation-time): structurally valid but violates schema
+//                                 / refinement / format-specific rules
+//   * Resource: limits exceeded (DoS protection)
+//   * Conversion: cross-format conversion problems
+//   * IO: source acquisition failed (file not found, etc.)
+public type ConfigErrorKind is
+    // ----- Syntactic -----
+    | UnexpectedEof
+    | UnexpectedChar
+    | InvalidEscape
+    | InvalidNumber
+    | InvalidUnicode
+    | InvalidDateTime
+    | InvalidDuration
+    | InvalidIndent          // YAML indentation, NestedText
+    | InvalidEncoding        // non-UTF-8 input
+    | TrailingGarbage
+
+    // ----- Structural -----
+    | EmptyKey
+    | DuplicateKey
+    | KeyAfterValue
+    | RedefineSuperTable
+    | TypeMismatchInArray
+    | UnclosedBlock          // INI section, YAML literal-block, ...
+
+    // ----- Resource -----
+    | DepthLimit
+    | StringTooLong
+    | TableTooLarge
+    | ArrayTooLarge
+    | TotalSizeExceeded
+
+    // ----- Semantic / schema -----
+    | SchemaViolation         // typed loader: required field missing, type mismatch
+    | RefinementViolation     // typed loader: refinement predicate failed
+    | UnknownField            // strict mode: extra field not in schema
+    | ValueOutOfRange         // numeric range / enum violation
+    | InvalidReference        // anchor/ref resolution failed (YAML, HCL)
+    | CircularReference       // anchor/ref cycle (YAML, HCL, HOCON)
+
+    // ----- Conversion -----
+    | LossyConversion         // src has feature unrepresentable in dst
+    | UnsupportedFeature      // dst format does not support feature
+
+    // ----- IO -----
+    | IoFileNotFound
+    | IoPermissionDenied
+    | IoOther;
+
+public fn config_error_kind_name(k: &ConfigErrorKind) -> Text {
+    match k {
+        UnexpectedEof          => "UnexpectedEof".clone(),
+        UnexpectedChar         => "UnexpectedChar".clone(),
+        InvalidEscape          => "InvalidEscape".clone(),
+        InvalidNumber          => "InvalidNumber".clone(),
+        InvalidUnicode         => "InvalidUnicode".clone(),
+        InvalidDateTime        => "InvalidDateTime".clone(),
+        InvalidDuration        => "InvalidDuration".clone(),
+        InvalidIndent          => "InvalidIndent".clone(),
+        InvalidEncoding        => "InvalidEncoding".clone(),
+        TrailingGarbage        => "TrailingGarbage".clone(),
+        EmptyKey               => "EmptyKey".clone(),
+        DuplicateKey           => "DuplicateKey".clone(),
+        KeyAfterValue          => "KeyAfterValue".clone(),
+        RedefineSuperTable     => "RedefineSuperTable".clone(),
+        TypeMismatchInArray    => "TypeMismatchInArray".clone(),
+        UnclosedBlock          => "UnclosedBlock".clone(),
+        DepthLimit             => "DepthLimit".clone(),
+        StringTooLong          => "StringTooLong".clone(),
+        TableTooLarge          => "TableTooLarge".clone(),
+        ArrayTooLarge          => "ArrayTooLarge".clone(),
+        TotalSizeExceeded      => "TotalSizeExceeded".clone(),
+        SchemaViolation        => "SchemaViolation".clone(),
+        RefinementViolation    => "RefinementViolation".clone(),
+        UnknownField           => "UnknownField".clone(),
+        ValueOutOfRange        => "ValueOutOfRange".clone(),
+        InvalidReference       => "InvalidReference".clone(),
+        CircularReference      => "CircularReference".clone(),
+        LossyConversion        => "LossyConversion".clone(),
+        UnsupportedFeature     => "UnsupportedFeature".clone(),
+        IoFileNotFound         => "IoFileNotFound".clone(),
+        IoPermissionDenied     => "IoPermissionDenied".clone(),
+        IoOther                => "IoOther".clone(),
+    }
+}
+
+// =============================================================================
+// ConfigErrorCategory — five-level categorisation per Verum error model
+// =============================================================================
+//
+// Aligns ConfigError with the canonical five-level error model used by
+// `core/database/common/error.vr`. Drives retry policy, log severity,
+// HTTP status mapping for downstream services.
+public type ConfigErrorCategory is
+    | EcClient        // user input invalid (parse error, schema violation)
+    | EcUpstream      // remote source / IO failure (file not found, etc.)
+    | EcResource      // resource limit hit (depth, size)
+    | EcConversion    // cross-format conversion impossible
+    | EcInternal;     // bug in parser
+
+public fn category(k: &ConfigErrorKind) -> ConfigErrorCategory {
+    match k {
+        // Syntactic + structural + semantic — all client error
+        UnexpectedEof | UnexpectedChar | InvalidEscape | InvalidNumber
+        | InvalidUnicode | InvalidDateTime | InvalidDuration | InvalidIndent
+        | InvalidEncoding | TrailingGarbage
+        | EmptyKey | DuplicateKey | KeyAfterValue | RedefineSuperTable
+        | TypeMismatchInArray | UnclosedBlock
+        | SchemaViolation | RefinementViolation | UnknownField
+        | ValueOutOfRange | InvalidReference | CircularReference
+            => EcClient,
+        DepthLimit | StringTooLong | TableTooLarge | ArrayTooLarge
+        | TotalSizeExceeded
+            => EcResource,
+        LossyConversion | UnsupportedFeature
+            => EcConversion,
+        IoFileNotFound | IoPermissionDenied | IoOther
+            => EcUpstream,
+    }
+}
+
+// =============================================================================
+// ConfigError constructors
+// =============================================================================
+
+public fn config_err(
+    format_id: FormatId,
+    kind: ConfigErrorKind,
+    line: Int,
+    column: Int,
+    byte_offset: Int,
+    message: Text,
+) -> ConfigError {
+    ConfigError {
+        format_id: format_id,
+        kind: kind,
+        line: line,
+        column: column,
+        byte_offset: byte_offset,
+        message: message,
+        path: None,
+    }
+}
+
+public fn with_path(err: ConfigError, path: Text) -> ConfigError {
+    ConfigError {
+        format_id: err.format_id,
+        kind: err.kind,
+        line: err.line,
+        column: err.column,
+        byte_offset: err.byte_offset,
+        message: err.message,
+        path: Some(path),
+    }
+}
+
+// =============================================================================
+// Display + Debug + Eq impls
+// =============================================================================
+
+implement Display for ConfigErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(config_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for ConfigErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(config_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for ConfigErrorKind {
+    fn eq(&self, other: &Self) -> Bool {
+        config_error_kind_name(self) == config_error_kind_name(other)
+    }
+}
+
+implement Display for ConfigError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("ConfigError[")?;
+        f.write_str(self.format_id.as_str())?;
+        f.write_str("](")?;
+        f.write_str(config_error_kind_name(&self.kind).as_str())?;
+        f.write_str(" at ")?;
+        f.write_int(self.line)?;
+        f.write_str(":")?;
+        f.write_int(self.column)?;
+        match &self.path {
+            Some(p) => {
+                f.write_str(" [path=")?;
+                f.write_str(p.as_str())?;
+                f.write_str("]")?;
+            }
+            None => {}
+        }
+        f.write_str(": ")?;
+        f.write_str(self.message.as_str())?;
+        f.write_str(")")
+    }
+}
+
+implement Debug for ConfigError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        Display.fmt(self, f)
+    }
+}
+
+implement Eq for ConfigError {
+    fn eq(&self, other: &Self) -> Bool {
+        self.format_id == other.format_id
+            && self.kind == other.kind
+            && self.line == other.line
+            && self.column == other.column
+            && self.byte_offset == other.byte_offset
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_kind_categorisation() {
+        match category(&ConfigErrorKind.UnexpectedEof) {
+            EcClient => {}
+            _ => unreachable(),
+        }
+        match category(&ConfigErrorKind.DepthLimit) {
+            EcResource => {}
+            _ => unreachable(),
+        }
+        match category(&ConfigErrorKind.LossyConversion) {
+            EcConversion => {}
+            _ => unreachable(),
+        }
+        match category(&ConfigErrorKind.IoFileNotFound) {
+            EcUpstream => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_kind_eq() {
+        assert(ConfigErrorKind.UnexpectedEof.eq(&ConfigErrorKind.UnexpectedEof));
+        assert(!ConfigErrorKind.UnexpectedEof.eq(&ConfigErrorKind.UnexpectedChar));
+    }
+
+    #[test]
+    fn test_with_path() {
+        let e = config_err(
+            "toml".to_text(),
+            ConfigErrorKind.SchemaViolation,
+            1, 1, 0,
+            "missing field".to_text(),
+        );
+        let e2 = with_path(e, "server.port".to_text());
+        match e2.path {
+            Some(p) => assert_eq(p, "server.port".to_text()),
+            None    => unreachable(),
+        }
+    }
+}
