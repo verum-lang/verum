@@ -899,8 +899,6 @@ impl<'s> CompilationPipeline<'s> {
         later_modules: &std::collections::HashSet<&str>,
     ) -> Result<(verum_vbc::VbcModule, usize)> {
         use verum_vbc::codegen::CodegenConfig;
-        use verum_vbc::instruction::Instruction;
-        use verum_vbc::module::{FunctionDescriptor, VbcFunction};
 
         // Configure VBC codegen
         let codegen_config = CodegenConfig::new(&module.name)
@@ -949,117 +947,77 @@ impl<'s> CompilationPipeline<'s> {
         // This handles cross-file imports within the same module
         codegen.resolve_pending_imports();
 
-        // Pass 2: Compile all function bodies and merge.  Each
-        // per-file `compile_function_bodies` produces a fresh
-        // VbcModule with that file's bodies; `merge_stdlib_vbc_modules`
-        // remaps StringIds so descriptor names + bytecode operands
-        // stay valid through the string-pool union.
-        let mut total_func_count = 0;
-        let mut merged_vbc = verum_vbc::VbcModule::new(module.name.clone());
-
+        // Pass 2: Compile all function bodies into ONE shared codegen
+        // state, then emit a SINGLE coherent `VbcModule` at the end.
+        //
+        // Pre-fix the path here was per-file `compile_function_bodies`
+        // (returns a fresh VbcModule with the file's bodies) followed
+        // by `merge_stdlib_vbc_modules` to glue the per-file modules
+        // into one.  That merge re-interned strings and tried to remap
+        // StringIds inside FunctionDescriptors, but bytecode operands
+        // (which carry their OWN StringId offsets) stayed at SOURCE-
+        // local positions — and the per-file `build_module` had ALREADY
+        // run the function-id remap that turned the codegen's sparse
+        // `next_func_id`-allocated FunctionIds into 0..N-1 indices.
+        // The merge then concatenated those independently-renumbered
+        // function lists; any ID that was 0 in file A AND 0 in file B
+        // collapsed onto the same "merged" position via add_function's
+        // `len()`-based assignment, and whichever of the two file
+        // bodies pushed last won — the canonical case where the
+        // 158-method `core/text/text.vr` got its inherent-method
+        // bodies dropped down to 8.
+        //
+        // The fix: every file in the module shares ONE codegen
+        // instance — one string pool, one types table, one bytecode
+        // arena, one function table.  `compile_items_into_state`
+        // accumulates without finalising; `finalize_module_from_state`
+        // runs build_module ONCE at the end to perform the function-id
+        // remap on the union of all per-file bodies.  No merge step;
+        // no inherent-method drops.
         for ast_module in ast_modules {
-            match codegen.compile_function_bodies(ast_module) {
-                Ok(compiled_module) => {
-                    total_func_count += compiled_module.functions.len();
-                    self.merge_stdlib_vbc_modules(&mut merged_vbc, compiled_module)?;
-                }
-                Err(e) => {
-                    let is_forward_ref = if let Some(func_name) = e.undefined_function_name() {
-                        Self::is_forward_reference_to_later_module(
-                            func_name,
-                            &module.name,
-                            later_modules,
-                        )
+            // `compile_items_into_state` is the lenient single-pool
+            // accumulator: it walks the AST item-by-item via
+            // `compile_item_lenient`, so a single failing item
+            // (typically a forward-ref to a module compiled later)
+            // doesn't drop the rest of the file's bodies on the
+            // floor.  The lenient helper emits a panic-stub for the
+            // failed function so its slot in `self.functions` stays
+            // populated under its registered FunctionId.
+            if let Err(e) = codegen.compile_items_into_state(ast_module) {
+                let is_forward_ref = if let Some(func_name) = e.undefined_function_name() {
+                    Self::is_forward_reference_to_later_module(
+                        func_name,
+                        &module.name,
+                        later_modules,
+                    )
+                } else {
+                    false
+                };
+
+                if !is_forward_ref {
+                    let error_msg = if let Some(ref s) = e.span {
+                        format!("{} (byte {}-{})", e, s.start, s.end)
                     } else {
-                        false
+                        e.to_string()
                     };
-
-                    if !is_forward_ref {
-                        let error_msg = if let Some(ref s) = e.span {
-                            format!("{} (byte {}-{})", e, s.start, s.end)
-                        } else {
-                            e.to_string()
-                        };
-                        let diag = lint_diagnostics.codegen_warning(&module.name, &error_msg, None);
-                        let level = self
-                            .session
-                            .options()
-                            .lint_config
-                            .level_for(IntrinsicLint::MissingImplementation);
-                        if level.is_error() {
-                            self.stdlib_errors.push(diag);
-                        } else if level.should_emit() {
-                            self.stdlib_warnings.push(diag);
-                        }
-                    }
-
-                    // Create stub functions for items in the failing file.
-                    //
-                    // Pre-fix the stubs landed with `params = SmallVec::new()`
-                    // (from `FunctionDescriptor::default()`); archive_metadata
-                    // then surfaced every stub as a 0-param free fn.  When a
-                    // user mounted a same-named function from a sibling module
-                    // (`mount core.shell.builtins.{path_exists}`), the typecheck
-                    // alias ran through the simple-name slot — first-wins —
-                    // and picked up the 0-param stub instead of the real 1-arg
-                    // body.  Result: `path_exists(&path)` failed VBC codegen
-                    // with "wrong number of arguments: expected 0, found 1".
-                    //
-                    // Populate `params` (with positional names + UNIT type
-                    // refs) so the descriptor's arity matches the source
-                    // declaration even when the body itself couldn't be
-                    // compiled.  Type refs default to UNIT — the stub body
-                    // is `RetV` which never actually consults param types
-                    // at runtime, but the arity check at call sites does.
-                    for item in &ast_module.items {
-                        if let verum_ast::ItemKind::Function(func) = &item.kind {
-                            total_func_count += 1;
-                            let func_name = func.name.name.to_string();
-                            let name_id = merged_vbc.intern_string(&func_name);
-                            let mut descriptor = FunctionDescriptor::new(name_id);
-                            descriptor.register_count = 1;
-                            descriptor.locals_count = func.params.len() as u16;
-                            for (i, p) in func.params.iter().enumerate() {
-                                let name = match &p.kind {
-                                    verum_ast::FunctionParamKind::SelfValue
-                                    | verum_ast::FunctionParamKind::SelfValueMut
-                                    | verum_ast::FunctionParamKind::SelfRef
-                                    | verum_ast::FunctionParamKind::SelfRefMut
-                                    | verum_ast::FunctionParamKind::SelfOwn
-                                    | verum_ast::FunctionParamKind::SelfOwnMut
-                                    | verum_ast::FunctionParamKind::SelfRefChecked
-                                    | verum_ast::FunctionParamKind::SelfRefCheckedMut
-                                    | verum_ast::FunctionParamKind::SelfRefUnsafe
-                                    | verum_ast::FunctionParamKind::SelfRefUnsafeMut => {
-                                        "self".to_string()
-                                    }
-                                    verum_ast::FunctionParamKind::Regular { pattern, .. } => {
-                                        if let verum_ast::PatternKind::Ident { name, .. } =
-                                            &pattern.kind
-                                        {
-                                            name.name.to_string()
-                                        } else {
-                                            format!("_arg{}", i)
-                                        }
-                                    }
-                                };
-                            let pname_id = merged_vbc.intern_string(&name);
-                            descriptor.params.push(verum_vbc::module::ParamDescriptor {
-                                name: pname_id,
-                                type_ref: verum_vbc::types::TypeRef::Concrete(
-                                    verum_vbc::types::TypeId::UNIT,
-                                ),
-                                is_mut: false,
-                                default: None,
-                            });
-                            }
-                            let vbc_func = VbcFunction::new(descriptor, vec![Instruction::RetV]);
-                            merged_vbc.add_function(vbc_func.descriptor.clone());
-                        }
+                    let diag = lint_diagnostics.codegen_warning(&module.name, &error_msg, None);
+                    let level = self
+                        .session
+                        .options()
+                        .lint_config
+                        .level_for(IntrinsicLint::MissingImplementation);
+                    if level.is_error() {
+                        self.stdlib_errors.push(diag);
+                    } else if level.should_emit() {
+                        self.stdlib_warnings.push(diag);
                     }
                 }
             }
         }
+        let merged_vbc = codegen
+            .finalize_module_from_state()
+            .map_err(|e| anyhow::anyhow!("finalize stdlib module {}: {}", module.name, e))?;
+        let total_func_count = merged_vbc.functions.len();
 
         // Export newly registered functions and protocols to global registries
         let new_functions = codegen.export_functions();
@@ -1136,126 +1094,6 @@ impl<'s> CompilationPipeline<'s> {
         false
     }
 
-    /// Merge a compiled VBC module into the main module.
-    ///
-    /// **StringId remap on descriptors**: target's `strings` dedups by
-    /// content, so source strings re-interned into target may land at
-    /// different byte offsets.  Build a `source_id → target_id` map up
-    /// front and rewrite descriptor StringId fields (function name,
-    /// param names, debug-var names, type/variant/field names) before
-    /// pushing them into target.  Bytecode operands are NOT remapped
-    /// here — they're inert at the metadata-extraction layer
-    /// (`archive_metadata.rs` reads only descriptors), and remapping
-    /// would require decode/encode of every function's bytecode which
-    /// has its own compatibility issues with the VBC linker's
-    /// round-trip path.
-    ///
-    /// Pre-fix the descriptor names pointed at SOURCE-local string
-    /// offsets, so `module.strings.get(fn.name)` returned garbage
-    /// content from target's union table — the panic-message string
-    /// `"called unwrap() on None"` showed up as a function name on
-    /// `Maybe`, garbage method `log_base` showed up on `Result`,
-    /// etc.  Method-name lookup at user-code call sites then either
-    /// failed or matched the wrong method.
-    fn merge_stdlib_vbc_modules(
-        &self,
-        target: &mut verum_vbc::VbcModule,
-        source: verum_vbc::VbcModule,
-    ) -> Result<()> {
-        use std::collections::HashMap;
-        use verum_vbc::types::StringId;
-
-        let bytecode_offset = target.bytecode.len() as u32;
-        let func_id_base = target.functions.len() as u32;
-
-        // Build source_string_id → target_string_id remap by
-        // re-interning every source string into target's pool.
-        let mut string_remap: HashMap<u32, u32> = HashMap::new();
-        for (s, source_id) in source.strings.iter() {
-            let target_id = target.intern_string(s);
-            string_remap.insert(source_id.0, target_id.0);
-        }
-        let remap_string = |sid: StringId| -> StringId {
-            string_remap
-                .get(&sid.0)
-                .copied()
-                .map(StringId)
-                .unwrap_or(sid)
-        };
-
-        // Merge function descriptors with adjusted offsets, function
-        // ID base, and remapped StringIds.
-        for mut func in source.functions {
-            func.name = remap_string(func.name);
-            for param in func.params.iter_mut() {
-                param.name = remap_string(param.name);
-            }
-            for dv in func.debug_variables.iter_mut() {
-                dv.name = remap_string(dv.name);
-            }
-            func.bytecode_offset += bytecode_offset;
-            func.func_id_base = func_id_base;
-            target.add_function(func);
-        }
-
-        // Merge bytecode verbatim.  Bytecode StringId operands stay
-        // at SOURCE-local offsets — fine for the metadata-extraction
-        // path which reads only descriptors, fine for the linker
-        // round-trip path which reads bytecode at original offsets.
-        // Cross-module dispatch via merged bytecode is a known V1
-        // limitation tracked separately.
-        target.bytecode.extend_from_slice(&source.bytecode);
-
-        // Merge type descriptors with FunctionId + StringId remap.
-        for ty in &source.types {
-            let mut ty = ty.clone();
-            ty.name = remap_string(ty.name);
-            for f in ty.fields.iter_mut() {
-                f.name = remap_string(f.name);
-            }
-            for v in ty.variants.iter_mut() {
-                v.name = remap_string(v.name);
-                for vf in v.fields.iter_mut() {
-                    vf.name = remap_string(vf.name);
-                }
-            }
-            for proto_impl in ty.protocols.iter_mut() {
-                for fn_id in proto_impl.methods.iter_mut() {
-                    if *fn_id != u32::MAX {
-                        *fn_id += func_id_base;
-                    }
-                }
-            }
-            // Note: drop_fn and clone_fn are not remapped here because they
-            // are not currently used from the merged module at runtime.
-            target.add_type(ty);
-        }
-
-        // Merge constant pool
-        for c in &source.constants {
-            target.add_constant(c.clone());
-        }
-
-        // Merge specializations
-        target.specializations.extend(source.specializations);
-
-        // Merge field layout metadata (for GetF/SetF field index remapping in LLVM lowering)
-        // field_id_to_name: extend target with source entries (source IDs offset by target length)
-        // Note: VBC GetF instructions in each module use module-local field IDs.
-        // We keep all entries so the LLVM lowering can look up field names.
-        if !source.field_id_to_name.is_empty() {
-            let offset = target.field_id_to_name.len();
-            target.field_id_to_name.extend(source.field_id_to_name);
-            // Store offset for future remapping if needed
-            let _ = offset; // Currently field_ids are used per-module, not cross-module
-        }
-        // type_field_layouts: merge all type layouts (source overrides for same type names)
-        for (type_name, fields) in source.type_field_layouts {
-            target.type_field_layouts.entry(type_name).or_insert(fields);
-        }
-
-        Ok(())
-    }
 
     /// Build the VBC archive from compiled stdlib modules.
     fn build_stdlib_archive(&self, config: &CoreConfig) -> Result<verum_vbc::VbcArchive> {
