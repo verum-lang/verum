@@ -252,6 +252,17 @@ pub enum PersistenceMedium {
 }
 
 /// Wire protocol carried by `Capability::Network`.
+///
+/// HTTP version distinctions are explicit variants because each
+/// version has **substantially different security and operational
+/// surfaces**:
+///   - `Http`  — HTTP/1.x (line-oriented, header-line attacks).
+///   - `Http2` — binary framing + stream multiplexing
+///               (Rapid-Reset CVE-2023-44487 surface).
+///   - `Http3` — over QUIC (0-RTT, connection migration).
+/// Auditors check capability declarations against the actual deployed
+/// stack — a cog claiming `Http2` but binding HTTP/1 (or vice versa)
+/// triggers `AP-016 WireEncodingMismatch`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NetProtocol {
     /// Plain TCP.
@@ -262,12 +273,23 @@ pub enum NetProtocol {
     Unix,
     /// TLS-tunnelled TCP.
     Tls,
-    /// QUIC over UDP.
+    /// QUIC over UDP — distinct from HTTP/3 (the QUIC payload
+    /// might be raw bytes, custom protocol, etc.).
     Quic,
-    /// HTTP/1 or HTTP/2.
+    /// HTTP/1.x.
     Http,
+    /// HTTP/2 — binary framing, stream multiplexing.
+    Http2,
+    /// HTTP/3 — HTTP semantics carried over QUIC.
+    Http3,
     /// gRPC over HTTP/2.
     Grpc,
+    /// WebSocket over HTTP/1.x or HTTP/2.
+    WebSocket,
+    /// MQTT over TCP/TLS — common IoT pub/sub.
+    Mqtt,
+    /// AMQP — messaging queues (RabbitMQ, ActiveMQ).
+    Amqp,
 }
 
 /// Traffic direction for a `Capability::Network`.

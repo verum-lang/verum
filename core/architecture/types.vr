@@ -152,16 +152,44 @@ public type TaskLifetime is
     | Detached
     | Deadlined(Int);
 
+/// Expiration policy for `Capability.TimeBound`. Constructed
+/// via the canonical variants OR ergonomic helpers (see
+/// `expiration_after_duration`, `expiration_at_seconds`).
 public type ExpirationPolicy is
     | AtUnixTime(Int)
+    /// Capability lives `milliseconds` from issuance.
     | AfterDuration(Int)
     | OnEvent(Text);
+
+/// Build an `AfterDuration` policy from a typed `Duration` —
+/// ergonomic constructor preventing bare-millis literal-spam at
+/// `@arch_module` declaration sites.
+///
+/// Composes `core.time.duration::Duration.as_millis`.
+public fn expiration_after_duration(d: &core.time.duration.Duration) -> ExpirationPolicy {
+    ExpirationPolicy.AfterDuration(d.as_millis())
+}
+
+/// Build an `AtUnixTime` policy from a Unix-epoch second count.
+public fn expiration_at_seconds(unix_seconds: Int) -> ExpirationPolicy {
+    ExpirationPolicy.AtUnixTime(unix_seconds)
+}
 
 public type PersistenceMedium is
     | Disk(Text)
     | DatabaseMedium(Text)
     | DistributedLog(Text);
 
+/// Wire protocol carried by `Capability.Network`.
+///
+/// HTTP version distinctions are explicit because each version has
+/// substantially different security and operational surfaces:
+///   - `Http`  — HTTP/1.x (line-oriented, header-line attacks)
+///   - `Http2` — binary framing, stream multiplexing
+///               (Rapid-Reset CVE-2023-44487 surface)
+///   - `Http3` — HTTP semantics over QUIC (0-RTT, conn migration)
+/// Auditors check declarations against the deployed stack — a
+/// mismatch triggers AP-016 WireEncodingMismatch.
 public type NetProtocol is
     | Tcp
     | Udp
@@ -169,7 +197,12 @@ public type NetProtocol is
     | Tls
     | Quic
     | Http
-    | Grpc;
+    | Http2
+    | Http3
+    | Grpc
+    | WebSocket
+    | Mqtt
+    | Amqp;
 
 public type NetDirection is
     | Inbound
@@ -203,6 +236,101 @@ public type Capability is
     | Persist(PersistenceMedium)
     | Network(NetProtocol, NetDirection)
     | CustomCapability(Text);
+
+// =============================================================================
+// Capability — ergonomic constructors
+// =============================================================================
+//
+// Convenience builders that produce Capability values from typed
+// `core.time.duration::Duration` and other natural inputs. Use these
+// at `@arch_module` declaration sites to keep capability lists
+// readable; the canonical variants above remain available for
+// programmatic construction.
+
+/// `Capability.TimeBound(...)` from a Duration. Equivalent to
+/// `Capability.TimeBound(ExpirationPolicy.AfterDuration(d.as_millis()))`.
+///
+/// Example:
+///   ```verum
+///   exposes: [
+///       Capability.time_bounded(Duration.from_hours(1)),
+///       Capability.time_bounded(Duration.from_minutes(15)),
+///   ],
+///   ```
+public fn capability_time_bounded(d: &core.time.duration.Duration) -> Capability {
+    Capability.TimeBound(expiration_after_duration(d))
+}
+
+/// `Capability.Spawn(TaskLifetime.ScopedToParent)` — the canonical
+/// "structured concurrency" lifetime. Most production cogs use
+/// this; the bare variant is exposed for special cases (Detached
+/// for daemons, Deadlined for explicit-deadline workers).
+public fn capability_spawn_structured() -> Capability {
+    Capability.Spawn(TaskLifetime.ScopedToParent)
+}
+
+/// `Capability.Spawn(TaskLifetime.Detached)` — for long-running
+/// daemons with operator-controlled shutdown (NOT for ordinary
+/// request handlers — those use structured spawn).
+public fn capability_spawn_detached() -> Capability {
+    Capability.Spawn(TaskLifetime.Detached)
+}
+
+/// `Capability.Spawn(TaskLifetime.Deadlined(d.as_millis()))` —
+/// explicit-deadline worker.
+public fn capability_spawn_deadlined(d: &core.time.duration.Duration) -> Capability {
+    Capability.Spawn(TaskLifetime.Deadlined(d.as_millis()))
+}
+
+/// `Capability.Persist(PersistenceMedium.DatabaseMedium(tag))` —
+/// the canonical persistence form for SQL connections. The `tag`
+/// is the connection identifier (e.g., "postgres", "mysql/main").
+public fn capability_persist_database(connection_tag: Text) -> Capability {
+    Capability.Persist(PersistenceMedium.DatabaseMedium(connection_tag))
+}
+
+/// `Capability.Persist(PersistenceMedium.Disk(path))` — for
+/// filesystem-backed persistence (CBOR archives, append-only
+/// logs, S3-mounted FUSE, etc.). Object stores are also a `Disk`
+/// medium with a URI-shaped path (`s3://bucket/prefix/`).
+public fn capability_persist_disk(path: Text) -> Capability {
+    Capability.Persist(PersistenceMedium.Disk(path))
+}
+
+/// `Capability.Persist(PersistenceMedium.DistributedLog(topic))` —
+/// for Kafka / NATS JetStream / Redis Streams append-only
+/// persistence (sumdb, audit ledger).
+public fn capability_persist_log(topic: Text) -> Capability {
+    Capability.Persist(PersistenceMedium.DistributedLog(topic))
+}
+
+/// `Capability.Network(protocol, direction)` constructors for the
+/// most common shapes. The direct variants remain available for
+/// uncommon protocol/direction combinations.
+
+public fn capability_http_inbound() -> Capability {
+    Capability.Network(NetProtocol.Http, NetDirection.Inbound)
+}
+
+public fn capability_http2_inbound() -> Capability {
+    Capability.Network(NetProtocol.Http2, NetDirection.Inbound)
+}
+
+public fn capability_http3_inbound() -> Capability {
+    Capability.Network(NetProtocol.Http3, NetDirection.Inbound)
+}
+
+public fn capability_http_outbound() -> Capability {
+    Capability.Network(NetProtocol.Http, NetDirection.Outbound)
+}
+
+public fn capability_grpc_inbound() -> Capability {
+    Capability.Network(NetProtocol.Grpc, NetDirection.Inbound)
+}
+
+public fn capability_websocket_inbound() -> Capability {
+    Capability.Network(NetProtocol.WebSocket, NetDirection.Inbound)
+}
 
 // =============================================================================
 // Boundary — cross-module typed traffic discipline
