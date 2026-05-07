@@ -1146,38 +1146,150 @@ pub struct ArchitecturalDefect {
     pub proposed_resolution: Resolution,
 }
 
-/// Class of fixed-point theorem under which a self-referential
-/// construct admits a unique fixed point. Per cve-architecture spec
-/// §16: every self-referential claim must be re-articulated as
-/// `(operator T_X, fixed point Fix(T_X))`; this enum names the
-/// theorem class discharging existence (and uniqueness where
-/// applicable) of `Fix(T_X)`.
+/// Universal-property characterisation of a fixed-point theorem.
+///
+/// Categorically, a fixed-point theorem is the assertion that, in a
+/// chosen category `C` and for a chosen class `E ⊆ End(C)` of
+/// endomorphisms, every `T ∈ E` has a fixed point `Fix(T)` (and where
+/// applicable, the fixed point is unique). The triple
+/// `(category, endomorphism_class, theorem)` is the universal-property
+/// classifier; concrete theorems (Banach, Tarski-Knaster, Adamek)
+/// inhabit specific points of this classifier and are produced by
+/// the smart constructors [`FixpointClass::banach`],
+/// [`FixpointClass::tarski`], [`FixpointClass::adamek`].
+///
+/// Per CVE articulation hygiene (seven-symbols / articulation-hygiene
+/// §8), every self-referential `Shape` must carry a witness whose
+/// `fixpoint_class` is pinned to one of these classifiers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FixpointClass {
-    /// Banach fixed-point theorem — contracting operator on complete
-    /// metric space; gives unique fixed point.
+pub struct FixpointClass {
+    /// The category `C` in which the fixed-point claim is made.
+    pub category: FixpointCategory,
+    /// The class `E ⊆ End(C)` of endomorphisms admitted by the
+    /// theorem.
+    pub endomorphism_class: EndomorphismClass,
+    /// The theorem citation discharging existence (and where
+    /// applicable, uniqueness) of `Fix(T)` for every `T ∈ E`.
+    pub theorem: FixpointTheorem,
+}
+
+/// The category `C` in which a fixed-point theorem is stated. The
+/// three named variants correspond to the three canonical classifiers
+/// (complete metric space, complete lattice, cocomplete category);
+/// `CustomCategory` is the open variant for user-cited categories.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FixpointCategory {
+    /// Complete metric space; pairs with [`EndomorphismClass::Contracting`]
+    /// in Banach's theorem.
+    CompleteMetricSpace,
+    /// Complete lattice (every subset has join and meet); pairs with
+    /// [`EndomorphismClass::Monotone`] in Tarski-Knaster.
+    CompleteLattice,
+    /// Cocomplete category (admits all small colimits); pairs with
+    /// [`EndomorphismClass::ContinuousFunctor`] in Adamek's theorem.
+    CocompleteCategory,
+    /// User-cited category; the citation MUST appear in the cog's
+    /// `@framework(...)` attribute.
+    CustomCategory(String),
+}
+
+/// The class `E ⊆ End(C)` of endomorphisms admitted by a fixed-point
+/// theorem. Pairs canonically with a [`FixpointCategory`] under one of
+/// the three named theorems; `CustomEndomorphismClass` is the open
+/// variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EndomorphismClass {
+    /// Contracting endomorphism `T : C → C` — `d(T(x), T(y)) ≤ k·d(x, y)`
+    /// for some `k < 1` on a metric space `C`.
+    Contracting,
+    /// Monotone endomorphism `T : L → L` — order-preserving on a
+    /// lattice `L`.
+    Monotone,
+    /// Continuous endofunctor `F : C → C` — preserves colimits in a
+    /// cocomplete category.
+    ContinuousFunctor,
+    /// User-cited endomorphism class.
+    CustomEndomorphismClass(String),
+}
+
+/// The theorem citation discharging a fixed-point claim. The three
+/// named variants correspond to the three canonical theorems; `Custom`
+/// is the open variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FixpointTheorem {
+    /// Banach fixed-point theorem — unique fixed point of a contracting
+    /// endomorphism on a complete metric space.
     Banach,
-    /// Tarski-Knaster — monotone operator on complete lattice; gives
-    /// existence of fixed point (may be non-unique).
+    /// Tarski-Knaster — existence (possibly non-unique) of fixed
+    /// point of a monotone endomorphism on a complete lattice.
     Tarski,
-    /// Adamek's theorem — continuous functor on cocomplete category;
-    /// gives initial-algebra fixed point.
+    /// Adamek's initial-algebra theorem — initial-algebra fixed
+    /// point of a continuous endofunctor on a cocomplete category.
     Adamek,
-    /// User-cited fixed-point theorem; the citation MUST appear in the
-    /// cog's `@framework(...)` attribute and be enumerable by
+    /// User-cited theorem; the citation MUST appear in the cog's
+    /// `@framework(...)` attribute and be enumerable via
     /// `verum audit --framework-axioms`.
-    CustomFixpoint(String),
+    Custom(String),
 }
 
 impl FixpointClass {
-    /// Stable diagnostic tag for `FixpointClass`.
-    pub fn tag(&self) -> &'static str {
-        match self {
-            FixpointClass::Banach => "banach",
-            FixpointClass::Tarski => "tarski",
-            FixpointClass::Adamek => "adamek",
-            FixpointClass::CustomFixpoint(_) => "custom_fixpoint",
+    /// Smart constructor for Banach's fixed-point theorem class:
+    /// `(CompleteMetricSpace, Contracting, Banach)`.
+    pub fn banach() -> Self {
+        FixpointClass {
+            category: FixpointCategory::CompleteMetricSpace,
+            endomorphism_class: EndomorphismClass::Contracting,
+            theorem: FixpointTheorem::Banach,
         }
+    }
+
+    /// Smart constructor for the Tarski-Knaster theorem class:
+    /// `(CompleteLattice, Monotone, Tarski)`.
+    pub fn tarski() -> Self {
+        FixpointClass {
+            category: FixpointCategory::CompleteLattice,
+            endomorphism_class: EndomorphismClass::Monotone,
+            theorem: FixpointTheorem::Tarski,
+        }
+    }
+
+    /// Smart constructor for Adamek's initial-algebra theorem class:
+    /// `(CocompleteCategory, ContinuousFunctor, Adamek)`.
+    pub fn adamek() -> Self {
+        FixpointClass {
+            category: FixpointCategory::CocompleteCategory,
+            endomorphism_class: EndomorphismClass::ContinuousFunctor,
+            theorem: FixpointTheorem::Adamek,
+        }
+    }
+
+    /// Smart constructor for a user-cited fixed-point theorem class:
+    /// `(CustomCategory, CustomEndomorphismClass, Custom)`.  The
+    /// citation MUST be enumerable via `verum audit --framework-axioms`.
+    pub fn custom_fixpoint(citation: impl Into<String>) -> Self {
+        let c = citation.into();
+        FixpointClass {
+            category: FixpointCategory::CustomCategory(c.clone()),
+            endomorphism_class: EndomorphismClass::CustomEndomorphismClass(c.clone()),
+            theorem: FixpointTheorem::Custom(c),
+        }
+    }
+
+    /// Stable diagnostic tag, dispatched on the theorem citation.
+    /// Cross-side-aligned with `core/architecture/types.vr::fixpoint_class_tag`.
+    pub fn tag(&self) -> &'static str {
+        match &self.theorem {
+            FixpointTheorem::Banach   => "banach",
+            FixpointTheorem::Tarski   => "tarski",
+            FixpointTheorem::Adamek   => "adamek",
+            FixpointTheorem::Custom(_) => "custom_fixpoint",
+        }
+    }
+
+    /// Returns `true` when this class is one of the three canonical
+    /// (Banach / Tarski / Adamek); `false` for `Custom`.
+    pub fn is_canonical(&self) -> bool {
+        !matches!(self.theorem, FixpointTheorem::Custom(_))
     }
 }
 
@@ -1208,7 +1320,7 @@ impl SelfReferenceWitness {
         SelfReferenceWitness {
             operator: "unspecified".to_string(),
             fixed_point: "unspecified".to_string(),
-            fixpoint_class: FixpointClass::CustomFixpoint("unspecified".to_string()),
+            fixpoint_class: FixpointClass::custom_fixpoint("unspecified"),
         }
     }
 }
@@ -1455,6 +1567,138 @@ pub struct ArchCorpusAttr {
     /// translation between the two foundations.  When present,
     /// AP-005 FoundationDrift suppresses for the bridged pair.
     pub foundation_bridges: Vec<(String, String)>,
+}
+
+// =============================================================================
+// CVE seven-cell closure (seven-configurations §9 of the website)
+// =============================================================================
+
+/// **CVE axis mode** — per-axis valuation in the closure analysis
+/// of the seven-configurations truth-table. Three modes per axis,
+/// 3³ = 27 cells in the configuration space `CveAxisMode³`.
+///
+/// - `Positive` — axis clearly satisfied (witness present, decision
+///                procedure present, executable representation present).
+/// - `Partial`  — axis satisfied with qualification: trivial-by-fiat
+///                (definition), conditional (under stated assumption),
+///                external (delegated via citation), or formulated
+///                but not realised.
+/// - `Absent`   — axis not satisfied; no witness, no check, no
+///                executable representation.
+///
+/// The seven productive configurations of the seven-configurations
+/// taxonomy (`[T]`, `[D]`, `[C]`, `[P]`, `[H]`, `[I]`, `[✗]`) are the
+/// stable attractors of `CveAxisMode³`. The migration map from each
+/// cell to a productive cell is given by
+/// [`seven_configurations_closure_witness`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CveAxisMode {
+    /// Axis clearly satisfied — witness present, decision procedure
+    /// present, executable representation present.
+    Positive,
+    /// Axis satisfied with qualification — trivial-by-fiat, conditional,
+    /// external delegation, or formulated but not realised.
+    Partial,
+    /// Axis not satisfied — no witness, no check, no executable
+    /// representation.
+    Absent,
+}
+
+impl CveAxisMode {
+    /// Stable diagnostic tag, cross-side-aligned with
+    /// `core/architecture/types.vr::cve_axis_mode_tag`.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CveAxisMode::Positive => "positive",
+            CveAxisMode::Partial  => "partial",
+            CveAxisMode::Absent   => "absent",
+        }
+    }
+}
+
+/// Free-fn form for cross-side parity with the Verum side.
+pub fn cve_axis_mode_tag(m: CveAxisMode) -> &'static str {
+    m.tag()
+}
+
+/// **Closure witness for the CVE seven-cell theorem** (seven-configurations
+/// §9 of the website). For every (c, v, e) ∈ `CveAxisMode³` returns the
+/// canonical glyph of the productive cell to which the configuration
+/// migrates under the deciding rule (seven-configurations §10).
+///
+/// Glyph alphabet: `[T]`, `[D]`, `[C]`, `[P]`, `[H]`, `[I]`. `[✗]`
+/// Retracted is a meta-state outside `CveAxisMode³` (deliberate
+/// withdrawal) and is not produced by this witness.
+///
+/// Default migration of V=Partial is to `[C]` Conditional. The
+/// V-partial sub-classification (trivial → `[D]`, external → `[P]`,
+/// conditional → `[C]`) is operational at the call site; the closure
+/// witness returns the most general migration target.
+///
+/// Cross-side mirror: `core/architecture/types.vr::seven_configurations_closure_witness`.
+pub fn seven_configurations_closure_witness(
+    c: CveAxisMode,
+    v: CveAxisMode,
+    e: CveAxisMode,
+) -> &'static str {
+    use CveAxisMode::*;
+    match (c, v, e) {
+        (Positive, Positive, Positive) => "[T]",
+        (Positive, Positive, Partial)  => "[C]",
+        (Positive, Positive, Absent)   => "[C]",
+        (Positive, Partial,  Positive) => "[C]",
+        (Positive, Partial,  Partial)  => "[C]",
+        (Positive, Partial,  Absent)   => "[C]",
+        (Positive, Absent,   Positive) => "[H]",
+        (Positive, Absent,   Partial)  => "[H]",
+        (Positive, Absent,   Absent)   => "[H]",
+        (Partial,  Positive, Positive) => "[C]",
+        (Partial,  Positive, Partial)  => "[C]",
+        (Partial,  Positive, Absent)   => "[C]",
+        (Partial,  Partial,  Positive) => "[C]",
+        (Partial,  Partial,  Partial)  => "[C]",
+        (Partial,  Partial,  Absent)   => "[H]",
+        (Partial,  Absent,   Positive) => "[H]",
+        (Partial,  Absent,   Partial)  => "[H]",
+        (Partial,  Absent,   Absent)   => "[H]",
+        (Absent,   Positive, Positive) => "[I]",
+        (Absent,   Positive, Partial)  => "[I]",
+        (Absent,   Positive, Absent)   => "[I]",
+        (Absent,   Partial,  Positive) => "[I]",
+        (Absent,   Partial,  Partial)  => "[I]",
+        (Absent,   Partial,  Absent)   => "[I]",
+        (Absent,   Absent,   Positive) => "[I]",
+        (Absent,   Absent,   Partial)  => "[I]",
+        (Absent,   Absent,   Absent)   => "[I]",
+    }
+}
+
+/// Predicate: glyph belongs to the productive alphabet (six base
+/// glyphs of the seven-configurations taxonomy; `[✗]` is excluded as
+/// a meta-state).
+pub fn is_productive_glyph(g: &str) -> bool {
+    matches!(g, "[T]" | "[D]" | "[C]" | "[P]" | "[H]" | "[I]")
+}
+
+/// **Soundness pin** (CVE seven-cell closure §9): every cell of
+/// `CveAxisMode³` maps to a productive glyph. The 27-arm match in
+/// [`seven_configurations_closure_witness`] is exhaustive by pattern
+/// coverage; this pin re-asserts exhaustiveness operationally and
+/// pin-tests cross-side parity with
+/// `core/architecture/types.vr::seven_configurations_closure_exhaustive`.
+pub fn seven_configurations_closure_exhaustive() -> bool {
+    use CveAxisMode::*;
+    let modes = [Positive, Partial, Absent];
+    for &c in &modes {
+        for &v in &modes {
+            for &e in &modes {
+                if !is_productive_glyph(seven_configurations_closure_witness(c, v, e)) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 // =============================================================================

@@ -651,13 +651,43 @@ fn pin_shape_declarations_extension() {
 
 #[test]
 fn pin_fixpoint_class_four_canonical() {
-    use verum_kernel::arch::FixpointClass;
-    let canonical = [
-        FixpointClass::Banach,
-        FixpointClass::Tarski,
-        FixpointClass::Adamek,
-        FixpointClass::CustomFixpoint("any".to_string()),
-    ];
+    use verum_kernel::arch::{
+        EndomorphismClass, FixpointCategory, FixpointClass, FixpointTheorem,
+    };
+
+    // Smart constructors produce the canonical (category, endomorphism,
+    // theorem) triples per the universal-property classifier
+    // (articulation-hygiene §8.1.fixpoint-class-universal).
+    let banach = FixpointClass::banach();
+    assert_eq!(banach.category, FixpointCategory::CompleteMetricSpace);
+    assert_eq!(banach.endomorphism_class, EndomorphismClass::Contracting);
+    assert_eq!(banach.theorem, FixpointTheorem::Banach);
+    assert!(banach.is_canonical());
+
+    let tarski = FixpointClass::tarski();
+    assert_eq!(tarski.category, FixpointCategory::CompleteLattice);
+    assert_eq!(tarski.endomorphism_class, EndomorphismClass::Monotone);
+    assert_eq!(tarski.theorem, FixpointTheorem::Tarski);
+    assert!(tarski.is_canonical());
+
+    let adamek = FixpointClass::adamek();
+    assert_eq!(adamek.category, FixpointCategory::CocompleteCategory);
+    assert_eq!(
+        adamek.endomorphism_class,
+        EndomorphismClass::ContinuousFunctor
+    );
+    assert_eq!(adamek.theorem, FixpointTheorem::Adamek);
+    assert!(adamek.is_canonical());
+
+    let custom = FixpointClass::custom_fixpoint("any");
+    assert!(matches!(
+        custom.theorem,
+        FixpointTheorem::Custom(ref s) if s == "any"
+    ));
+    assert!(!custom.is_canonical());
+
+    // The four classes have pairwise distinct tags.
+    let canonical = [&banach, &tarski, &adamek, &custom];
     let tags: BTreeSet<&'static str> = canonical.iter().map(|f| f.tag()).collect();
     assert_eq!(
         tags.len(),
@@ -665,32 +695,115 @@ fn pin_fixpoint_class_four_canonical() {
         "FixpointClass tags must be 4 distinct (Banach + Tarski + Adamek + Custom)"
     );
 
+    // Cross-side parity: Verum-side helpers exist with matching names.
     let vr = read_vr("types.vr");
-    for v in &["Banach", "Tarski", "Adamek", "CustomFixpoint"] {
-        assert_variant_in(&vr, v, "core/architecture/types.vr (FixpointClass)");
+    for v in &[
+        "Banach",
+        "Tarski",
+        "Adamek",
+        "Custom",
+        "CompleteMetricSpace",
+        "CompleteLattice",
+        "CocompleteCategory",
+        "CustomCategory",
+        "Contracting",
+        "Monotone",
+        "ContinuousFunctor",
+        "CustomEndomorphismClass",
+    ] {
+        assert_variant_in(&vr, v, "core/architecture/types.vr (FixpointClass universal-property)");
     }
     assert_helper_in(&vr, "fixpoint_class_tag", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_is_canonical", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_banach", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_tarski", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_adamek", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_custom_fixpoint", "types.vr");
     assert_helper_in(&vr, "fixpoint_class_tags_distinct", "types.vr");
+    assert_helper_in(&vr, "fixpoint_class_canonical_triples", "types.vr");
+}
+
+#[test]
+fn pin_seven_configurations_closure_exhaustive() {
+    // Pin: CVE seven-cell closure (seven-configurations §9 of the
+    // website). Every cell of CveAxisMode³ must map to a productive
+    // glyph; cross-side parity is enforced.
+    use verum_kernel::arch::{
+        CveAxisMode, is_productive_glyph,
+        seven_configurations_closure_exhaustive,
+        seven_configurations_closure_witness,
+    };
+
+    // Kernel-side exhaustive predicate.
+    assert!(
+        seven_configurations_closure_exhaustive(),
+        "seven_configurations_closure_witness must produce a productive \
+         glyph for every (c, v, e) ∈ CveAxisMode³"
+    );
+
+    // Spot-check the named cells of seven-configurations §1
+    // (the seven productive configurations) against the witness.
+    use CveAxisMode::*;
+    assert_eq!(
+        seven_configurations_closure_witness(Positive, Positive, Positive),
+        "[T]",
+        "cell 1 of §1 — Theorem"
+    );
+    assert_eq!(
+        seven_configurations_closure_witness(Positive, Absent, Absent),
+        "[H]",
+        "cell 9 of §9 — Hypothesis"
+    );
+    assert_eq!(
+        seven_configurations_closure_witness(Absent, Absent, Absent),
+        "[I]",
+        "cell 27 of §9 — Interpretation"
+    );
+
+    // Productive alphabet predicate.
+    assert!(is_productive_glyph("[T]"));
+    assert!(is_productive_glyph("[D]"));
+    assert!(is_productive_glyph("[C]"));
+    assert!(is_productive_glyph("[P]"));
+    assert!(is_productive_glyph("[H]"));
+    assert!(is_productive_glyph("[I]"));
+    assert!(
+        !is_productive_glyph("[✗]"),
+        "[✗] is a meta-state, not a productive glyph"
+    );
+
+    // Tag tags are pairwise distinct.
+    assert_ne!(CveAxisMode::Positive.tag(), CveAxisMode::Partial.tag());
+    assert_ne!(CveAxisMode::Partial.tag(), CveAxisMode::Absent.tag());
+    assert_ne!(CveAxisMode::Positive.tag(), CveAxisMode::Absent.tag());
+
+    // Cross-side parity: Verum-side helpers exist with matching names.
+    let vr = read_vr("types.vr");
+    assert_helper_in(&vr, "cve_axis_mode_tag", "types.vr");
+    assert_helper_in(&vr, "seven_configurations_closure_witness", "types.vr");
+    assert_helper_in(&vr, "seven_configurations_closure_exhaustive", "types.vr");
 }
 
 #[test]
 fn pin_self_reference_witness_format() {
-    use verum_kernel::arch::{FixpointClass, SelfReferenceWitness};
+    use verum_kernel::arch::{FixpointClass, FixpointTheorem, SelfReferenceWitness};
     let w = SelfReferenceWitness::unspecified();
     assert_eq!(w.operator, "unspecified");
     assert_eq!(w.fixed_point, "unspecified");
     assert!(matches!(
-        w.fixpoint_class,
-        FixpointClass::CustomFixpoint(_)
+        w.fixpoint_class.theorem,
+        FixpointTheorem::Custom(_)
     ));
+    assert!(!w.fixpoint_class.is_canonical());
 
     // Concrete witness construction roundtrip.
     let w2 = SelfReferenceWitness {
         operator: "synarc.governance.amendment_operator".to_string(),
         fixed_point: "synarc.governance.constitution_v1".to_string(),
-        fixpoint_class: FixpointClass::Banach,
+        fixpoint_class: FixpointClass::banach(),
     };
     assert_eq!(w2.fixpoint_class.tag(), "banach");
+    assert!(w2.fixpoint_class.is_canonical());
 
     let vr = read_vr("types.vr");
     assert_helper_in(&vr, "self_reference_witness_unspecified", "types.vr");
