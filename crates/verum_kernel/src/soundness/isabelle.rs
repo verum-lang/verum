@@ -174,6 +174,11 @@ impl SoundnessBackend for IsabelleBackend {
         //    Isabelle's `inductive` keyword introduces an inductive
         //    predicate; the nine structural-fragment rules become its
         //    introduction rules with names like `T_var`, `T_univ`, …
+        //
+        //    Important: each introduction-rule string is on a single
+        //    line.  Isabelle's string parser treats `\n` inside a
+        //    "double-quoted" inner term as a literal two-char sequence
+        //    (not a newline), which fails the inner-term parser.
         out.push_str(
             "(* The reflective typing relation. *)\n\
              (* Nine structural-rule introduction rules — real meta-theoretic *)\n\
@@ -181,26 +186,16 @@ impl SoundnessBackend for IsabelleBackend {
              (* rule application (apply (rule T_var)), not vacuously. *)\n\
              inductive Typing :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\"\n\
                (\"_ \\<turnstile> _ : _\" [60, 0, 0] 60)\n\
-             where\n  \
-               T_var:    \"(x, T) \\<in> set \\<Gamma> \\<Longrightarrow> \\<Gamma> \\<turnstile> Var x : T\"\n\
-             | T_univ:   \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
-             | T_pi:     \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i;\\n             \
-                  ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow>\\n        \
-                \\<Gamma> \\<turnstile> Pi x A B : Universe i\"\n\
-             | T_lam:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i;\\n             \
-                  ((x, A) # \\<Gamma>) \\<turnstile> b : B\\<rbrakk> \\<Longrightarrow>\\n        \
-                \\<Gamma> \\<turnstile> Lam x A b : Pi x A B\"\n\
-             | T_app:    \"\\<lbrakk>\\<Gamma> \\<turnstile> f : Pi x A B;\\n             \
-                  \\<Gamma> \\<turnstile> a : A\\<rbrakk> \\<Longrightarrow>\\n        \
-                \\<Gamma> \\<turnstile> App f a : subst x a B\"\n\
-             | T_sigma:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i;\\n             \
-                  ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow>\\n        \
-                \\<Gamma> \\<turnstile> Sigma x A B : Universe i\"\n\
-             | T_pair:   \"\\<lbrakk>\\<Gamma> \\<turnstile> a : A;\\n             \
-                  \\<Gamma> \\<turnstile> b : subst x a B\\<rbrakk> \\<Longrightarrow>\\n        \
-                \\<Gamma> \\<turnstile> Pair a b : Sigma x A B\"\n\
-             | T_fst:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Fst p : A\"\n\
-             | T_snd:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"\n",
+             where\n\
+               T_var:   \"(x, T) \\<in> set \\<Gamma> \\<Longrightarrow> \\<Gamma> \\<turnstile> Var x : T\"\n\
+             | T_univ:  \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
+             | T_pi:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Pi x A B : Universe i\"\n\
+             | T_lam:   \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> b : B\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Lam x A b : Pi x A B\"\n\
+             | T_app:   \"\\<lbrakk>\\<Gamma> \\<turnstile> f : Pi x A B; \\<Gamma> \\<turnstile> a : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> App f a : subst x a B\"\n\
+             | T_sigma: \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Sigma x A B : Universe i\"\n\
+             | T_pair:  \"\\<lbrakk>\\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : subst x a B\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Pair a b : Sigma x A B\"\n\
+             | T_fst:   \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Fst p : A\"\n\
+             | T_snd:   \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"\n",
         );
         out
     }
@@ -254,30 +249,23 @@ impl SoundnessBackend for IsabelleBackend {
         // The main meta-circular soundness statement: a conjunction
         // of all nine structural-fragment lemmas, fully proved by
         // direct rule application.  Mirrors lean.rs and coq.rs.
+        //
+        // The conjunction body lives on a single line so Isabelle's
+        // inner-term parser doesn't trip on embedded `\n` escapes.
         String::from(
             "(* **Structural-fragment kernel soundness** — bundles the *)\n\
              (* nine structural rules' per-rule lemmas into a single *)\n\
              (* statement.  Fully proved by `auto intro` against all *)\n\
              (* nine introduction rules of Typing. *)\n\
              theorem kernel_structural_soundness:\n  \
-               \"(\\<forall>\\<Gamma> x T. (x, T) \\<in> set \\<Gamma> \\<longrightarrow> \\<Gamma> \\<turnstile> Var x : T)\\n   \
-               \\<and> (\\<forall>\\<Gamma> i. \\<Gamma> \\<turnstile> Universe i : Universe (Suc i))\\n   \
-               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow>\\n         \
-                  ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> Pi x A B : Universe i)\\n   \
-               \\<and> (\\<forall>\\<Gamma> x A b B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow>\\n         \
-                  ((x, A) # \\<Gamma>) \\<turnstile> b : B \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> Lam x A b : Pi x A B)\\n   \
-               \\<and> (\\<forall>\\<Gamma> f a x A B. \\<Gamma> \\<turnstile> f : Pi x A B \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> a : A \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> App f a : subst x a B)\\n   \
-               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow>\\n         \
-                  ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> Sigma x A B : Universe i)\\n   \
-               \\<and> (\\<forall>\\<Gamma> x A B a b. \\<Gamma> \\<turnstile> a : A \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> b : subst x a B \\<longrightarrow>\\n         \
-                  \\<Gamma> \\<turnstile> Pair a b : Sigma x A B)\\n   \
-               \\<and> (\\<forall>\\<Gamma> p x A B. \\<Gamma> \\<turnstile> p : Sigma x A B \\<longrightarrow> \\<Gamma> \\<turnstile> Fst p : A)\\n   \
+               \"(\\<forall>\\<Gamma> x T. (x, T) \\<in> set \\<Gamma> \\<longrightarrow> \\<Gamma> \\<turnstile> Var x : T) \
+               \\<and> (\\<forall>\\<Gamma> i. \\<Gamma> \\<turnstile> Universe i : Universe (Suc i)) \
+               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow> \\<Gamma> \\<turnstile> Pi x A B : Universe i) \
+               \\<and> (\\<forall>\\<Gamma> x A b B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> b : B \\<longrightarrow> \\<Gamma> \\<turnstile> Lam x A b : Pi x A B) \
+               \\<and> (\\<forall>\\<Gamma> f a x A B. \\<Gamma> \\<turnstile> f : Pi x A B \\<longrightarrow> \\<Gamma> \\<turnstile> a : A \\<longrightarrow> \\<Gamma> \\<turnstile> App f a : subst x a B) \
+               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow> \\<Gamma> \\<turnstile> Sigma x A B : Universe i) \
+               \\<and> (\\<forall>\\<Gamma> x A B a b. \\<Gamma> \\<turnstile> a : A \\<longrightarrow> \\<Gamma> \\<turnstile> b : subst x a B \\<longrightarrow> \\<Gamma> \\<turnstile> Pair a b : Sigma x A B) \
+               \\<and> (\\<forall>\\<Gamma> p x A B. \\<Gamma> \\<turnstile> p : Sigma x A B \\<longrightarrow> \\<Gamma> \\<turnstile> Fst p : A) \
                \\<and> (\\<forall>\\<Gamma> p x A B. \\<Gamma> \\<turnstile> p : Sigma x A B \\<longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B)\"\n  \
                by (auto intro: T_var T_univ T_pi T_lam T_app T_sigma T_pair T_fst T_snd)\n\n\
              (* **Admit roster** — for the 29 non-structural rules whose *)\n\
