@@ -1,0 +1,102 @@
+// =============================================================================
+// security/webauthn/mod.vr — WebAuthn / FIDO2 subsystem facade
+// =============================================================================
+// Layer: 2 (Security primitives)
+//
+// **Purpose.** Public surface for WebAuthn Level 3 + FIDO2 CTAP2.
+// Passwordless / phishing-resistant authentication built on
+// public-key cryptography, used by every modern passkey-capable
+// service (browsers, password managers, OS-level authenticators).
+//
+// **Layer composition.**
+//
+//   types.vr               — credential / authenticator data model
+//   cose_key.vr            — COSE_Key decode/encode (Ed25519, EC2, RSA)
+//   authenticator_data.vr  — binary authData parser/encoder
+//   attestation.vr         — per-fmt attestation verification
+//                            (none / packed / fido-u2f / apple)
+//   register.vr            — WebAuthn §7.1 registration ceremony
+//   authenticate.vr        — WebAuthn §7.2 authentication ceremony
+//
+// **Composes against.**
+//   - core.encoding.{cbor, json, base64}    — wire formats
+//   - core.security.hash.sha256             — clientDataHash, rpIdHash
+//   - core.security.{ecc.{ed25519, p256}, sig.rsa} — sig verify
+//   - core.security.x509                    — attestation chain check
+//
+// **Used by.** Verum registry's passwordless login, any service
+// implementing FIDO2-class authentication.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "WebAuthn / FIDO2 subsystem facade — types + cose_key + authData + attestation + register + auth",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn;
+
+public module types;
+public module cose_key;
+public module authenticator_data;
+public module attestation;
+public module register;
+public module authenticate;
+
+// Re-exports — types
+public mount .types.{
+    AuthenticatorAttestationResponse, AuthenticatorAssertionResponse,
+    AuthenticatorData, AttestedCredentialData, AttestationObject,
+    AttestationFormat, AuthDataFlags, ClientDataType, CollectedClientData,
+    CredentialDescriptor, RpEntity, UserEntity, PubKeyCredParam,
+    AuthenticatorAttachment, UserVerificationRequirement,
+    ResidentKeyRequirement, AttestationConveyance, VerifiedCredential,
+    WebAuthnError,
+    parse_flags, flags_to_byte, alg_supported,
+    attestation_format_to_text, attestation_format_from_text,
+    client_data_type_to_text, client_data_type_from_text,
+    COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
+    COSE_ALG_ES384, COSE_ALG_ES512,
+    AAGUID_BYTES, RP_ID_HASH_BYTES, MIN_AUTH_DATA_BYTES,
+    CHALLENGE_MIN_BYTES, CHALLENGE_MAX_BYTES, CREDENTIAL_ID_MAX_BYTES,
+};
+
+// Re-exports — cose_key
+public mount .cose_key.{
+    CredentialPublicKey, decode_cose_key, decode_cose_key_value,
+    encode_cose_key, alg_of,
+    COSE_KTY_OKP, COSE_KTY_EC2, COSE_KTY_RSA,
+    COSE_CRV_P256, COSE_CRV_P384, COSE_CRV_P521, COSE_CRV_ED25519,
+};
+
+// Re-exports — authenticator_data
+public mount .authenticator_data.{
+    parse_authenticator_data, encode_authenticator_data, hash_rp_id,
+};
+
+// Re-exports — attestation
+public mount .attestation.{
+    AttestationType, VerifiedAttestation, verify_attestation,
+};
+
+// Re-exports — register
+public mount .register.{
+    RegistrationOptions, ExpectedContext, verify_registration,
+};
+
+// Re-exports — authenticate
+public mount .authenticate.{
+    AuthenticationOptions, ExpectedAuthContext, AuthenticationResult,
+    verify_authentication,
+};

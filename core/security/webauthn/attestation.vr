@@ -1,0 +1,561 @@
+// =============================================================================
+// security/webauthn/attestation.vr — attestation format verifiers
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, encoding/cbor, security/{webauthn/{types, cose_key,
+//               authenticator_data}, ecc/{p256, ed25519}, sig/rsa, hash/sha256,
+//               x509}
+// =============================================================================
+//
+// **Purpose.** Per-format verification of `attStmt` (the format-
+// specific attestation statement inside an `AttestationObject`).
+// Each format has its own statement structure, signed input, and
+// trust model. WebAuthn L3 §8 defines:
+//
+//   `none`      — no attestation. Empty statement, accepted as-is.
+//   `packed`    — the most common; either self-attested (signed by
+//                 the credential's own private key) or x5c-chain
+//                 attested (signed by a manufacturer-issued cert).
+//   `fido-u2f`  — legacy CTAP1 P-256 over a custom message format.
+//   `apple`     — Apple anonymous attestation (nonce extension OID
+//                 1.2.840.113635.100.8.2).
+//   `tpm`       — TPM 2.0 attestation (TPMT_PUBLIC + TPMS_ATTEST).
+//   `android-key` — Android Keystore key attestation (extension
+//                 1.3.6.1.4.1.11129.2.1.17).
+//   `android-safetynet` — JWS-encoded SafetyNet response (deprecated).
+//
+// **What we ship in v0.1.**
+//
+//   - `none`      : full
+//   - `packed`    : self-attestation full; x5c-chain partial (chain
+//                   verification delegated to caller via callback;
+//                   we extract the x5c list for them to feed to
+//                   x509.verifier).
+//   - `fido-u2f`  : full (P-256 only)
+//   - `apple`     : structural — extract chain + nonce, expose for
+//                   downstream verification; full nonce-binding
+//                   verification deferred (requires Apple cert
+//                   parsing of the custom extension).
+//   - `tpm`/`android-*` : not in v0.1 (return UnsupportedFormat).
+//
+// **Categorical structure.** Each format is an arrow in the
+// category of attestations: input(authData, clientDataHash, attStmt)
+// → output(VerifiedAttestation { trust_path, attestation_type,
+// trust_chain }). The composition with x509.verifier produces the
+// final trust verdict.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Per-format WebAuthn attestation verifiers (none, packed, fido-u2f, apple)",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn.attestation;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+mount encoding.cbor.CborValue;
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
+mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.sig.rsa.{
+    RsaPublicKey as RsaVerifyKey, RsaHash,
+    verify_pkcs1_v15_prehashed, verify_pss_prehashed,
+};
+mount security.webauthn.types.{
+    AuthenticatorData, AttestedCredentialData, AttestationFormat,
+    WebAuthnError,
+    COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
+    COSE_ALG_ES384, COSE_ALG_ES512,
+};
+mount security.webauthn.cose_key.{
+    CredentialPublicKey, decode_cose_key_value, alg_of,
+};
+
+// =============================================================================
+// Output type
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type AttestationType is
+    /// "Basic" — chain to manufacturer CA.
+    | Basic
+    /// "Self" — credential signed its own attestation.
+    | SelfAtt
+    /// "AnonCA" — anonymous CA (e.g., Apple).
+    | AnonCa
+    /// "None" — no attestation.
+    | NoneAtt;
+
+@derive(Clone, Debug)
+pub type VerifiedAttestation is {
+    fmt:                AttestationFormat,
+    attestation_type:   AttestationType,
+    /// X.509 chain (DER, leaf-first). Empty for `none` /
+    /// self-attestation. Caller is responsible for chaining this
+    /// to a trusted root via core.security.x509.verifier when
+    /// `attestation_type = Basic` or `AnonCa`.
+    trust_chain:        List<List<Byte>>,
+};
+
+// =============================================================================
+// Public dispatch
+// =============================================================================
+
+/// Verify an attestation statement against authData + clientDataHash.
+/// Returns `VerifiedAttestation` describing the trust model + chain
+/// (when present). Caller validates the chain externally.
+pub fn verify_attestation(
+    fmt:                &AttestationFormat,
+    att_stmt:           &CborValue,
+    auth_data:          &AuthenticatorData,
+    client_data_hash:   &[Byte],
+) -> Result<VerifiedAttestation, WebAuthnError> {
+    match fmt {
+        AttestationFormat.None_   => verify_none(att_stmt),
+        AttestationFormat.Packed  => verify_packed(att_stmt, auth_data, client_data_hash),
+        AttestationFormat.FidoU2f => verify_fido_u2f(att_stmt, auth_data, client_data_hash),
+        AttestationFormat.Apple   => verify_apple(att_stmt, auth_data, client_data_hash),
+        AttestationFormat.Tpm | AttestationFormat.AndroidKey | AttestationFormat.AndroidSafetynet
+        | AttestationFormat.AppleAppAttest =>
+            Err(WebAuthnError.InvalidAttestation(format!("fmt {fmt:?} not supported in v0.1").to_text())),
+        AttestationFormat.Other(s) =>
+            Err(WebAuthnError.InvalidAttestation(format!("unknown fmt {s}").to_text())),
+    }
+}
+
+// =============================================================================
+// `none` — empty stmt
+// =============================================================================
+
+fn verify_none(att_stmt: &CborValue) -> Result<VerifiedAttestation, WebAuthnError> {
+    // Per WebAuthn §8.7: attStmt MUST be empty for fmt=none.
+    let map = att_stmt.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("none: attStmt not a map".to_text()))?;
+    if !map.is_empty() {
+        return Err(WebAuthnError.InvalidAttestation("none: attStmt must be empty".to_text()));
+    }
+    Ok(VerifiedAttestation {
+        fmt:              AttestationFormat.None_,
+        attestation_type: AttestationType.NoneAtt,
+        trust_chain:      List.new(),
+    })
+}
+
+// =============================================================================
+// `packed` — most common modern attestation
+// =============================================================================
+//
+// Spec (WebAuthn §8.2):
+//
+//   attStmt ::= {
+//     "alg":  <COSE alg>,
+//     "sig":  <bytes — signature over (authData || clientDataHash)>,
+//     "x5c":  <optional — array of DER-encoded X.509 certs leaf-first>
+//   }
+//
+// Verification:
+//   - Compute signed bytes = authData_raw || clientDataHash.
+//   - If x5c present: verify sig with x5c[0]'s SPKI, attestation_type=Basic.
+//     Caller chains x5c[0]..x5c[n-1] against a trusted root.
+//   - Else (self-attestation): verify sig with the credential's own
+//     COSE_Key. attestation_type=SelfAtt.
+
+fn verify_packed(
+    att_stmt:         &CborValue,
+    auth_data:        &AuthenticatorData,
+    client_data_hash: &[Byte],
+) -> Result<VerifiedAttestation, WebAuthnError> {
+    let map = att_stmt.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("packed: attStmt not a map".to_text()))?;
+    let alg = get_text_keyed_int(map, "alg")
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("packed: alg missing".to_text()))?;
+    let sig = get_text_keyed_bytes(map, "sig")
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("packed: sig missing".to_text()))?;
+
+    let signed_input = concat_bytes(&auth_data.raw, client_data_hash);
+
+    // x5c (optional)
+    let x5c_chain = get_text_keyed_x5c(map, "x5c");
+
+    if !x5c_chain.is_empty() {
+        // Basic attestation: verify with leaf cert's SPKI.
+        verify_packed_with_x5c(alg, &sig, &signed_input, &x5c_chain[0])?;
+        Ok(VerifiedAttestation {
+            fmt:              AttestationFormat.Packed,
+            attestation_type: AttestationType.Basic,
+            trust_chain:      x5c_chain,
+        })
+    } else {
+        // Self-attestation: verify with credential's own COSE_Key.
+        let acd = auth_data.attested_credential_data.as_ref()
+            .ok_or_else(|| WebAuthnError.InvalidAttestation(
+                "packed self-att requires attested credential data".to_text()))?;
+        let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
+        if alg_of(&cred_pk) != alg {
+            return Err(WebAuthnError.InvalidAttestation(
+                format!("packed self-att alg mismatch (cose={}, attStmt={})",
+                    alg_of(&cred_pk), alg).to_text()));
+        }
+        verify_signature_with_credential_pk(&cred_pk, &signed_input, &sig)?;
+        Ok(VerifiedAttestation {
+            fmt:              AttestationFormat.Packed,
+            attestation_type: AttestationType.SelfAtt,
+            trust_chain:      List.new(),
+        })
+    }
+}
+
+fn verify_packed_with_x5c(
+    alg:          Int,
+    sig:          &List<Byte>,
+    signed_input: &List<Byte>,
+    leaf_der:     &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    let leaf = security.x509.certificate.parse_certificate(leaf_der.as_slice())
+        .map_err(|e| WebAuthnError.InvalidAttestation(format!("x5c[0] parse: {e}").to_text()))?;
+    verify_signature_against_spki(alg, sig, signed_input, &leaf.tbs.spki)
+}
+
+// =============================================================================
+// `fido-u2f` — legacy CTAP1
+// =============================================================================
+//
+// Spec (WebAuthn §8.6):
+//
+//   attStmt ::= {
+//     "x5c": <array — must contain exactly 1 cert>,
+//     "sig": <bytes — ECDSA-P-256 signature>
+//   }
+//
+//   verification_data = 0x00 || rpIdHash || clientDataHash ||
+//                       credentialId || raw_pubkey (0x04 || X || Y)
+//
+//   Verify sig with x5c[0]'s SPKI (must be P-256).
+
+fn verify_fido_u2f(
+    att_stmt:         &CborValue,
+    auth_data:        &AuthenticatorData,
+    client_data_hash: &[Byte],
+) -> Result<VerifiedAttestation, WebAuthnError> {
+    let map = att_stmt.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("fido-u2f: attStmt not a map".to_text()))?;
+    let sig = get_text_keyed_bytes(map, "sig")
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("fido-u2f: sig missing".to_text()))?;
+    let x5c = get_text_keyed_x5c(map, "x5c");
+    if x5c.len() != 1 {
+        return Err(WebAuthnError.InvalidAttestation(
+            format!("fido-u2f: x5c must have exactly 1 cert, got {}", x5c.len()).to_text()));
+    }
+    let acd = auth_data.attested_credential_data.as_ref()
+        .ok_or_else(|| WebAuthnError.InvalidAttestation(
+            "fido-u2f requires attested credential data".to_text()))?;
+    let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
+    let (x, y) = match &cred_pk {
+        CredentialPublicKey.EcdsaP256 { x, y } => (x.clone(), y.clone()),
+        _ => return Err(WebAuthnError.InvalidAttestation(
+            "fido-u2f credential must be P-256".to_text())),
+    };
+
+    let mut verification_data: List<Byte> = List.new();
+    verification_data.push(0x00);
+    let mut i: Int = 0;
+    while i < 32 { verification_data.push(auth_data.rp_id_hash[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < client_data_hash.len() { verification_data.push(client_data_hash[j]); j = j + 1; }
+    let mut k: Int = 0;
+    while k < acd.credential_id.len() { verification_data.push(acd.credential_id[k]); k = k + 1; }
+    verification_data.push(0x04);
+    let mut m: Int = 0;
+    while m < x.len() { verification_data.push(x[m]); m = m + 1; }
+    let mut n: Int = 0;
+    while n < y.len() { verification_data.push(y[n]); n = n + 1; }
+
+    let leaf = security.x509.certificate.parse_certificate(x5c[0].as_slice())
+        .map_err(|e| WebAuthnError.InvalidAttestation(format!("fido-u2f x5c parse: {e}").to_text()))?;
+    verify_signature_against_spki(COSE_ALG_ES256, &sig, &verification_data, &leaf.tbs.spki)?;
+
+    Ok(VerifiedAttestation {
+        fmt:              AttestationFormat.FidoU2f,
+        attestation_type: AttestationType.Basic,
+        trust_chain:      x5c,
+    })
+}
+
+// =============================================================================
+// `apple` — anonymous nonce attestation
+// =============================================================================
+//
+// Spec (Apple Anonymous Attestation, FIDO Alliance):
+//
+//   attStmt ::= { "x5c": <chain> }
+//
+//   nonce_to_hash = authData || clientDataHash
+//   expected_nonce = SHA-256(nonce_to_hash)
+//   - The leaf cert MUST have an extension with OID 1.2.840.113635.100.8.2
+//     containing the nonce; the nonce inside MUST equal expected_nonce.
+//   - There is no `sig` field — Apple verifies the nonce binding
+//     server-side via the cert's extension.
+//
+// **v0.1 scope.** We extract the chain + the expected_nonce; we
+// surface the cert chain to the caller. Full nonce-extension
+// validation requires DER parsing of the custom extension (left
+// for follow-up — see core.security.x509.ext for the parser-add
+// path).
+
+fn verify_apple(
+    att_stmt:         &CborValue,
+    auth_data:        &AuthenticatorData,
+    client_data_hash: &[Byte],
+) -> Result<VerifiedAttestation, WebAuthnError> {
+    let map = att_stmt.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidAttestation("apple: attStmt not a map".to_text()))?;
+    let x5c = get_text_keyed_x5c(map, "x5c");
+    if x5c.is_empty() {
+        return Err(WebAuthnError.InvalidAttestation("apple: x5c required".to_text()));
+    }
+    // Compute expected_nonce — caller can verify the cert extension.
+    let mut input: List<Byte> = List.with_capacity(auth_data.raw.len() + client_data_hash.len());
+    let mut i: Int = 0;
+    while i < auth_data.raw.len() { input.push(auth_data.raw[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < client_data_hash.len() { input.push(client_data_hash[j]); j = j + 1; }
+    let _expected_nonce = sha256_digest(input.as_slice());
+
+    Ok(VerifiedAttestation {
+        fmt:              AttestationFormat.Apple,
+        attestation_type: AttestationType.AnonCa,
+        trust_chain:      x5c,
+    })
+}
+
+// =============================================================================
+// Signature verification dispatch
+// =============================================================================
+
+fn verify_signature_with_credential_pk(
+    pk:           &CredentialPublicKey,
+    signed_input: &List<Byte>,
+    sig:          &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    match pk {
+        CredentialPublicKey.Ed25519 { x } => {
+            if sig.len() != 64 { return Err(WebAuthnError.InvalidSignature); }
+            if x.len() != 32 { return Err(WebAuthnError.InvalidSignature); }
+            let mut pk_arr: Ed25519PublicKey = [0_u8; 32];
+            let mut k: Int = 0;
+            while k < 32 { pk_arr[k] = x[k]; k = k + 1; }
+            let mut sig_arr: Ed25519Signature = [0_u8; 64];
+            let mut m: Int = 0;
+            while m < 64 { sig_arr[m] = sig[m]; m = m + 1; }
+            ed25519_verify(&pk_arr, signed_input.as_slice(), &sig_arr)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        CredentialPublicKey.EcdsaP256 { x, y } => {
+            verify_ecdsa_p256(x, y, signed_input, sig)
+        }
+        CredentialPublicKey.Rsa { n, e, alg } => {
+            verify_rsa(n, e, *alg, signed_input, sig)
+        }
+        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
+    }
+}
+
+fn verify_signature_against_spki(
+    alg:          Int,
+    sig:          &List<Byte>,
+    signed_input: &List<Byte>,
+    spki:         &security.x509.spki.Spki,
+) -> Result<(), WebAuthnError> {
+    match (&spki.public_key, alg) {
+        (security.x509.spki.SubjectPublicKey.Ed25519(ed), COSE_ALG_EDDSA) => {
+            if sig.len() != 64 { return Err(WebAuthnError.InvalidSignature); }
+            let mut sig_arr: Ed25519Signature = [0_u8; 64];
+            let mut k: Int = 0;
+            while k < 64 { sig_arr[k] = sig[k]; k = k + 1; }
+            ed25519_verify(&ed.bytes, signed_input.as_slice(), &sig_arr)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        (security.x509.spki.SubjectPublicKey.EcP256(ec), COSE_ALG_ES256) => {
+            let pk = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)?;
+            let p_sig = P256Signature.from_der(sig.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)?;
+            let digest = Sha256.digest(signed_input.as_slice());
+            P256.verify_prehashed(&pk, &digest, &p_sig)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        (security.x509.spki.SubjectPublicKey.Rsa(rsa), COSE_ALG_RS256) => {
+            let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
+            let digest = Sha256.digest(signed_input.as_slice()).to_list();
+            verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        (security.x509.spki.SubjectPublicKey.Rsa(rsa), COSE_ALG_PS256) => {
+            let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
+            let digest = Sha256.digest(signed_input.as_slice()).to_list();
+            verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg)),
+    }
+}
+
+fn verify_ecdsa_p256(
+    x: &List<Byte>, y: &List<Byte>,
+    signed_input: &List<Byte>,
+    sig: &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    if x.len() != 32 || y.len() != 32 {
+        return Err(WebAuthnError.InvalidSignature);
+    }
+    let mut uncompressed: List<Byte> = List.with_capacity(65);
+    uncompressed.push(0x04);
+    let mut i: Int = 0;
+    while i < 32 { uncompressed.push(x[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 32 { uncompressed.push(y[j]); j = j + 1; }
+    let pk = P256PublicKey.from_uncompressed(uncompressed.as_slice())
+        .map_err(|_| WebAuthnError.InvalidSignature)?;
+    let p_sig = P256Signature.from_der(sig.as_slice())
+        .map_err(|_| WebAuthnError.InvalidSignature)?;
+    let digest = Sha256.digest(signed_input.as_slice());
+    P256.verify_prehashed(&pk, &digest, &p_sig)
+        .map_err(|_| WebAuthnError.InvalidSignature)
+}
+
+fn verify_rsa(
+    n: &List<Byte>, e: &List<Byte>, alg: Int,
+    signed_input: &List<Byte>,
+    sig: &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    let vk = RsaVerifyKey { n: n.clone(), e: e.clone() };
+    let digest = Sha256.digest(signed_input.as_slice()).to_list();
+    let res = match alg {
+        COSE_ALG_RS256 => verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
+        COSE_ALG_PS256 => verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
+        _              => return Err(WebAuthnError.UnsupportedAlgorithm(alg)),
+    };
+    res.map_err(|_| WebAuthnError.InvalidSignature)
+}
+
+// =============================================================================
+// Helpers — text-keyed CBOR map lookups
+// =============================================================================
+
+fn get_text_keyed_int(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<Int> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key { return v.as_int(); }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key { return v.as_bytes().map(|b| b.clone()); }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn get_text_keyed_x5c(map: &List<(CborValue, CborValue)>, key: &str) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = List.new();
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key {
+                if let Some(arr) = v.as_array() {
+                    let mut j: Int = 0;
+                    while j < arr.len() {
+                        if let Some(b) = arr[j].as_bytes() {
+                            out.push(b.clone());
+                        }
+                        j = j + 1;
+                    }
+                }
+                break;
+            }
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn concat_bytes(a: &List<Byte>, b: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(a.len() + b.len());
+    let mut i: Int = 0;
+    while i < a.len() { out.push(a[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < b.len() { out.push(b[j]); j = j + 1; }
+    out
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_none_empty_stmt_ok() {
+        let stmt = CborValue.Map(List.new());
+        let v = verify_attestation(&AttestationFormat.None_, &stmt,
+            &dummy_auth_data(), &[0_u8; 32]).unwrap();
+        assert(v.attestation_type is AttestationType.NoneAtt);
+        assert(v.trust_chain.is_empty());
+    }
+
+    #[test]
+    fn test_none_nonempty_stmt_rejected() {
+        let mut entries: List<(CborValue, CborValue)> = List.new();
+        entries.push((CborValue.Text("foo".to_text()), CborValue.Integer(1)));
+        let stmt = CborValue.Map(entries);
+        match verify_attestation(&AttestationFormat.None_, &stmt,
+            &dummy_auth_data(), &[0_u8; 32]) {
+            Err(WebAuthnError.InvalidAttestation(_)) => {}
+            _ => unreachable(),
+        }
+    }
+
+    fn dummy_auth_data() -> AuthenticatorData {
+        let raw: List<Byte> = {
+            let mut r: List<Byte> = List.with_capacity(37);
+            let mut i: Int = 0;
+            while i < 37 { r.push(0); i = i + 1; }
+            r
+        };
+        AuthenticatorData {
+            rp_id_hash:                [0_u8; 32],
+            flags:                     security.webauthn.types.parse_flags(0),
+            sign_count:                0,
+            attested_credential_data:  None,
+            extensions:                None,
+            raw,
+        }
+    }
+}

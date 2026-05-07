@@ -1,0 +1,462 @@
+// =============================================================================
+// security/webauthn/register.vr — registration ceremony (WebAuthn §7.1)
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/{json, base64, cbor},
+//               security/webauthn/{types, cose_key, authenticator_data,
+//               attestation}, security/hash/sha256
+// =============================================================================
+//
+// **Purpose.** End-to-end verification of a registration response
+// from the client. Given the relying-party's server-side state
+// (challenge, RP ID, expected origins) and the client's response
+// (clientDataJSON + attestationObject + transports), produce a
+// `VerifiedCredential` that's safe to persist.
+//
+// **WebAuthn §7.1 verification steps (paraphrased).**
+//
+//   1. Decode clientDataJSON; check type='webauthn.create',
+//      challenge matches expected, origin matches expected.
+//   2. Compute clientDataHash = SHA-256(clientDataJSON).
+//   3. Decode attestationObject CBOR → fmt + authData + attStmt.
+//   4. Parse authData: rpIdHash, flags, signCount, attestedCredData.
+//   5. Verify SHA-256(rpId) == authData.rpIdHash.
+//   6. Verify UP flag is set.
+//   7. If userVerification policy = Required, verify UV flag set.
+//   8. Decode the COSE_Key in attestedCredData and check the alg
+//      is in the relying-party's allow-list.
+//   9. Run per-fmt attestation verification (passing authData +
+//      clientDataHash). Returns VerifiedAttestation with chain hint.
+//   10. (Optional) chain x5c against trusted attestation roots
+//       (caller responsibility — we surface the chain).
+//   11. Build VerifiedCredential and return.
+//
+// **Categorical structure.** Registration is the unit of an
+// authenticator-relying-party adjunction: the credential is the
+// universal map that, through later Authentication ceremonies,
+// witnesses `(user, RP)` binding without ever revealing the user's
+// private key.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "WebAuthn §7.1 registration ceremony — clientData + attestationObject → VerifiedCredential",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn.register;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Set};
+mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.base64.{decode_url_no_pad as b64url_decode};
+mount encoding.cbor.{CborValue, decode as cbor_decode};
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.webauthn.types.{
+    AuthenticatorAttestationResponse, AttestationObject, AttestationFormat,
+    AuthenticatorData, AttestedCredentialData, ClientDataType,
+    CollectedClientData, TokenBindingStatus, VerifiedCredential,
+    UserVerificationRequirement, AttestationConveyance,
+    PubKeyCredParam, RpEntity, UserEntity, CredentialDescriptor,
+    WebAuthnError, alg_supported,
+    attestation_format_from_text, client_data_type_from_text,
+    parse_flags, CHALLENGE_MIN_BYTES, CHALLENGE_MAX_BYTES,
+};
+mount security.webauthn.cose_key.{
+    CredentialPublicKey, decode_cose_key_value, encode_cose_key, alg_of,
+};
+mount security.webauthn.authenticator_data.{
+    parse_authenticator_data, hash_rp_id,
+};
+mount security.webauthn.attestation.{
+    verify_attestation, VerifiedAttestation, AttestationType,
+};
+
+// =============================================================================
+// Inputs (server-side state)
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type RegistrationOptions is {
+    /// Random server-generated challenge (16-1024 bytes).
+    challenge:                List<Byte>,
+    rp:                        RpEntity,
+    user:                      UserEntity,
+    /// Algorithms the RP is willing to accept. Order = preference.
+    pub_key_cred_params:       List<PubKeyCredParam>,
+    /// Credentials already registered by this user — prevents
+    /// duplicate registration.
+    exclude_credentials:       List<CredentialDescriptor>,
+    user_verification:         UserVerificationRequirement,
+    attestation_conveyance:    AttestationConveyance,
+};
+
+@derive(Clone, Debug)
+pub type ExpectedContext is {
+    /// Origins the RP accepts. Per WebAuthn §13.4.9 the origin must
+    /// be in the RP's allow-list AND the RP's effective domain must
+    /// be a registrable suffix of the origin's host.
+    origins:        List<Text>,
+    /// RP ID — typically the registrable domain (e.g.,
+    /// "example.com"). `authData.rpIdHash` MUST equal SHA-256(rpId).
+    rp_id:          Text,
+    /// AAGUIDs the RP is willing to accept. Empty = any.
+    allowed_aaguids: Set<List<Byte>>,
+};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Verify a WebAuthn registration response. On success, returns the
+/// `VerifiedCredential` to be persisted on the relying-party side.
+pub fn verify_registration(
+    response:    &AuthenticatorAttestationResponse,
+    options:     &RegistrationOptions,
+    expected:    &ExpectedContext,
+) -> Result<VerifiedCredential, WebAuthnError> {
+    // 0. Bound checks on options.challenge length.
+    if options.challenge.len() < CHALLENGE_MIN_BYTES || options.challenge.len() > CHALLENGE_MAX_BYTES {
+        return Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
+    }
+
+    // 1. Decode + validate clientDataJSON.
+    let client_data = parse_client_data(&response.client_data_json)?;
+    if !(client_data.type_ is ClientDataType.Create) {
+        return Err(WebAuthnError.InvalidClientDataType {
+            expected: ClientDataType.Create,
+            found:    client_data.type_.clone(),
+        });
+    }
+    if !bytes_eq(&client_data.challenge, &options.challenge) {
+        return Err(WebAuthnError.ChallengeMismatch);
+    }
+    check_origin(&client_data.origin, &expected.origins)?;
+
+    // 2. Compute clientDataHash.
+    let client_data_hash = sha256_digest(response.client_data_json.as_slice());
+
+    // 3. Decode attestationObject CBOR.
+    let att_obj = parse_attestation_object(&response.attestation_object)?;
+
+    // 4. Parse authData (the binary blob inside the attestationObject).
+    //    parse_authenticator_data was already called inside
+    //    parse_attestation_object — but we keep `att_obj.auth_data`
+    //    as the canonical view here.
+    let auth_data = &att_obj.auth_data;
+
+    // 5. rpIdHash check.
+    let expected_rp_id_hash = hash_rp_id(&expected.rp_id);
+    let mut i: Int = 0;
+    while i < 32 {
+        if auth_data.rp_id_hash[i] != expected_rp_id_hash[i] {
+            return Err(WebAuthnError.RpIdHashMismatch);
+        }
+        i = i + 1;
+    }
+
+    // 6. UP flag check.
+    if !auth_data.flags.user_present {
+        return Err(WebAuthnError.UpFlagMissing);
+    }
+
+    // 7. UV flag check (per RP policy).
+    match options.user_verification {
+        UserVerificationRequirement.Required => {
+            if !auth_data.flags.user_verified {
+                return Err(WebAuthnError.UvFlagMissing);
+            }
+        }
+        _ => {}
+    }
+
+    // AT flag must be set during registration.
+    let acd = match &auth_data.attested_credential_data {
+        Some(a) => a.clone(),
+        None    => return Err(WebAuthnError.InvalidAttestation(
+            "registration response missing attested credential data".to_text())),
+    };
+
+    // 8. COSE_Key + alg allow-list.
+    let cred_pk = decode_cose_key_value(&acd.credential_public_key)?;
+    let chosen_alg = alg_of(&cred_pk);
+    if !rp_allows_alg(&options.pub_key_cred_params, chosen_alg) {
+        return Err(WebAuthnError.UnsupportedAlgorithm(chosen_alg));
+    }
+
+    // AAGUID allow-list (when set).
+    if !expected.allowed_aaguids.is_empty() {
+        let aaguid_list = aaguid_to_list(&acd.aaguid);
+        if !expected.allowed_aaguids.contains(&aaguid_list) {
+            return Err(WebAuthnError.InvalidAttestation(
+                "AAGUID not in allow-list".to_text()));
+        }
+    }
+
+    // Exclude-credentials check.
+    if cred_in_exclude_list(&acd.credential_id, &options.exclude_credentials) {
+        return Err(WebAuthnError.CredentialNotAllowed(acd.credential_id.clone()));
+    }
+
+    // 9. Per-fmt attestation verification.
+    let verified_att = verify_attestation(
+        &att_obj.fmt,
+        &att_obj.att_stmt,
+        auth_data,
+        &client_data_hash,
+    )?;
+
+    // 11. Build VerifiedCredential.
+    let public_key_cose = encode_cose_key(&cred_pk);
+    Ok(VerifiedCredential {
+        credential_id:        acd.credential_id,
+        public_key_cose,
+        cose_alg:             chosen_alg,
+        aaguid:               acd.aaguid,
+        sign_count:           auth_data.sign_count,
+        backup_eligible:      auth_data.flags.backup_eligible,
+        backup_state:         auth_data.flags.backup_state,
+        attestation_format:   verified_att.fmt,
+        attestation_chain:    verified_att.trust_chain,
+        user_handle:          Some(options.user.id.clone()),
+    })
+}
+
+// =============================================================================
+// clientData parsing
+// =============================================================================
+
+fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, WebAuthnError> {
+    let value = json_decode(json_bytes.as_slice())
+        .map_err(|e| WebAuthnError.InvalidJson(format!("{e}").to_text()))?;
+    let obj = value.as_object()
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData not an object".to_text()))?;
+    let type_text = obj.get("type").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.type missing".to_text()))?;
+    let challenge_b64 = obj.get("challenge").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.challenge missing".to_text()))?;
+    let origin = obj.get("origin").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.origin missing".to_text()))?;
+    let cross_origin = obj.get("crossOrigin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let token_binding = match obj.get("tokenBinding").and_then(|v| v.as_object()) {
+        Some(tb) => Some(parse_token_binding(tb)?),
+        None     => None,
+    };
+    let challenge = b64url_decode(&challenge_b64)
+        .map_err(|e| WebAuthnError.InvalidJson(format!("challenge b64url: {e}").to_text()))?;
+    Ok(CollectedClientData {
+        type_:         client_data_type_from_text(&type_text),
+        challenge,
+        origin,
+        cross_origin,
+        token_binding,
+    })
+}
+
+fn parse_token_binding(obj: &JsonObject) -> Result<TokenBindingStatus, WebAuthnError> {
+    let status = obj.get("status").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("tokenBinding.status missing".to_text()))?;
+    Ok(match status.as_str() {
+        "present" => {
+            let id = obj.get("id").and_then(|v| v.as_string()).unwrap_or_else(|| "".to_text());
+            TokenBindingStatus.Present(id)
+        }
+        "supported"     => TokenBindingStatus.Supported,
+        "not-supported" => TokenBindingStatus.NotSupported,
+        other           => TokenBindingStatus.Unknown(other.to_text()),
+    })
+}
+
+// =============================================================================
+// attestationObject parsing
+// =============================================================================
+
+fn parse_attestation_object(bytes: &List<Byte>) -> Result<AttestationObject, WebAuthnError> {
+    let value = cbor_decode(bytes.as_slice())
+        .map_err(|e| WebAuthnError.InvalidCbor(format!("attestationObject: {e}").to_text()))?;
+    let map = value.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject not a map".to_text()))?;
+
+    let fmt_text = get_text_keyed_text(map, "fmt")
+        .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject.fmt missing".to_text()))?;
+    let auth_data_bytes = get_text_keyed_bytes(map, "authData")
+        .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject.authData missing".to_text()))?;
+    let att_stmt = get_text_keyed_value(map, "attStmt")
+        .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject.attStmt missing".to_text()))?;
+
+    let auth_data = parse_authenticator_data(auth_data_bytes.as_slice())?;
+    Ok(AttestationObject {
+        fmt: attestation_format_from_text(&fmt_text),
+        auth_data,
+        att_stmt,
+    })
+}
+
+fn get_text_keyed_text(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<Text> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key { return v.as_text().map(|t| t.clone()); }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key { return v.as_bytes().map(|b| b.clone()); }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn get_text_keyed_value(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<CborValue> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(s) = k.as_text() {
+            if s == key { return Some(v.clone()); }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+// =============================================================================
+// Origin + algorithm + AAGUID checks
+// =============================================================================
+
+fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError> {
+    // Per WebAuthn §13.4.9: the origin must be in the RP's allow-list.
+    // Additionally, only `https://` (or `http://localhost*` for dev)
+    // is acceptable.
+    if !found.starts_with("https://") && !is_localhost_http(found) {
+        return Err(WebAuthnError.OriginScheme(found.clone()));
+    }
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if &allowed[i] == found { return Ok(()); }
+        i = i + 1;
+    }
+    Err(WebAuthnError.OriginMismatch {
+        expected: format!("{:?}", allowed).to_text(),
+        found:    found.clone(),
+    })
+}
+
+fn is_localhost_http(origin: &Text) -> Bool {
+    if !origin.starts_with("http://") { return false; }
+    let after_scheme = origin.byte_substring(7, origin.len());
+    after_scheme.starts_with("localhost") || after_scheme.starts_with("127.0.0.1")
+}
+
+fn rp_allows_alg(params: &List<PubKeyCredParam>, alg: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < params.len() {
+        if params[i].cose_alg == alg { return true; }
+        i = i + 1;
+    }
+    // Empty params list = accept any supported algorithm (defensive
+    // default for callers using `[].into()`).
+    if params.is_empty() { return alg_supported(alg); }
+    false
+}
+
+fn aaguid_to_list(aaguid: &[Byte; 16]) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(16);
+    let mut i: Int = 0;
+    while i < 16 { out.push(aaguid[i]); i = i + 1; }
+    out
+}
+
+fn cred_in_exclude_list(id: &List<Byte>, list: &List<CredentialDescriptor>) -> Bool {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if bytes_eq(id, &list[i].credential_id) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_check_origin_https_match() {
+        let mut allowed: List<Text> = List.new();
+        allowed.push("https://example.com".to_text());
+        assert!(check_origin(&"https://example.com".to_text(), &allowed).is_ok());
+    }
+
+    #[test]
+    fn test_check_origin_http_only_localhost() {
+        let mut allowed: List<Text> = List.new();
+        allowed.push("http://localhost:8080".to_text());
+        assert!(check_origin(&"http://localhost:8080".to_text(), &allowed).is_ok());
+        let mut allowed2: List<Text> = List.new();
+        allowed2.push("http://example.com".to_text());
+        match check_origin(&"http://example.com".to_text(), &allowed2) {
+            Err(WebAuthnError.OriginScheme(_)) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_check_origin_mismatch() {
+        let mut allowed: List<Text> = List.new();
+        allowed.push("https://expected.com".to_text());
+        match check_origin(&"https://attacker.com".to_text(), &allowed) {
+            Err(WebAuthnError.OriginMismatch { .. }) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_rp_allows_alg_explicit() {
+        let mut params: List<PubKeyCredParam> = List.new();
+        params.push(PubKeyCredParam { type_: "public-key".to_text(), cose_alg: -7 });
+        assert!(rp_allows_alg(&params, -7));
+        assert!(!rp_allows_alg(&params, -8));
+    }
+
+    #[test]
+    fn test_rp_allows_alg_empty_defaults_to_supported() {
+        let params: List<PubKeyCredParam> = List.new();
+        assert!(rp_allows_alg(&params, -7));   // ES256 supported
+        assert!(rp_allows_alg(&params, -8));   // EdDSA supported
+        assert!(!rp_allows_alg(&params, 100)); // unknown alg rejected
+    }
+}

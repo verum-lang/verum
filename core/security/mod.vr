@@ -136,6 +136,15 @@ public module tuf;
 // provenance (DSSE), oidc (token verify).
 public module sigstore;
 
+// WebAuthn / FIDO2 — phishing-resistant passwordless authentication
+// built on public-key cryptography. Server-side relying-party
+// implementation: registration ceremony (clientData + attestationObject
+// → VerifiedCredential), authentication ceremony (clientData +
+// authData + signature → AuthenticationResult with cloning detection
+// via signCount). Supports COSE_Key formats (Ed25519, EC2 P-256/384/521,
+// RSA) and attestation formats (none, packed, fido-u2f, apple).
+public module webauthn;
+
 // OpenID Connect (OIDC) — discovery (.well-known/openid-configuration),
 // JWKS cache with TTL, token validation. For trusted-publishing
 // flows where CI runners (GitHub Actions / GitLab / Sigstore)

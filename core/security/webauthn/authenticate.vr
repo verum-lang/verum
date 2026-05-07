@@ -1,0 +1,412 @@
+// =============================================================================
+// security/webauthn/authenticate.vr — authentication ceremony (WebAuthn §7.2)
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, collections, encoding/{json, base64},
+//               security/webauthn/{types, cose_key, authenticator_data,
+//               attestation}, security/{ecc/{ed25519, p256}, sig/rsa, hash/sha256}
+// =============================================================================
+//
+// **Purpose.** End-to-end verification of an authentication response
+// from the client. Given the relying-party's stored
+// `VerifiedCredential` (from the prior registration ceremony) and
+// the client's response (clientDataJSON + authenticatorData +
+// signature + userHandle), produce an `AuthenticationResult` that's
+// safe to grant a session for.
+//
+// **WebAuthn §7.2 verification steps.**
+//
+//   1. Decode clientDataJSON; check type='webauthn.get', challenge
+//      matches expected, origin matches expected.
+//   2. Compute clientDataHash = SHA-256(clientDataJSON).
+//   3. Parse authenticatorData binary blob.
+//   4. Verify SHA-256(rpId) == authData.rpIdHash.
+//   5. Verify UP flag is set.
+//   6. If userVerification policy = Required, verify UV flag set.
+//   7. Form sigData = authData_raw || clientDataHash.
+//   8. Verify signature against the credential's stored public key.
+//   9. Verify signCount monotonicity:
+//        - If presented_count > stored_count: OK, advance stored.
+//        - If presented_count == 0 AND stored_count == 0: OK
+//          (authenticator does not implement counter — common for
+//          passkeys that get cloud-synced).
+//        - Else: REJECT — possible cloning.
+//   10. Detect backup-state changes for diagnostics (BS bit
+//       transitioning 0→1 indicates passkey was just synced).
+//
+// **Categorical structure.** Authentication is the counit of the
+// authenticator-RP adjunction: given the stored credential
+// (universal map from registration), the assertion is a unique
+// arrow whose composition with the credential equals the original
+// challenge — proving that the holder of the matching private key
+// is present.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "WebAuthn §7.2 authentication ceremony — clientData + authData + sig → AuthenticationResult",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn.authenticate;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.List;
+mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.base64.{decode_url_no_pad as b64url_decode};
+mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
+mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.sig.rsa.{
+    RsaPublicKey as RsaVerifyKey, RsaHash,
+    verify_pkcs1_v15_prehashed, verify_pss_prehashed,
+};
+mount security.webauthn.types.{
+    AuthenticatorAssertionResponse, ClientDataType, CollectedClientData,
+    UserVerificationRequirement, VerifiedCredential, AuthDataFlags,
+    WebAuthnError, CHALLENGE_MIN_BYTES, CHALLENGE_MAX_BYTES,
+    COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
+    COSE_ALG_ES384, COSE_ALG_ES512,
+    parse_flags, client_data_type_from_text,
+    CredentialDescriptor,
+};
+mount security.webauthn.cose_key.{
+    CredentialPublicKey, decode_cose_key, alg_of,
+};
+mount security.webauthn.authenticator_data.{
+    parse_authenticator_data, hash_rp_id,
+};
+
+// =============================================================================
+// Inputs
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type AuthenticationOptions is {
+    /// Random server-generated challenge (16-1024 bytes).
+    challenge:           List<Byte>,
+    /// RP ID (typically the registrable domain).
+    rp_id:               Text,
+    /// Allowed credential descriptors. Empty = "discoverable" flow
+    /// where any credential the user has for this RP is acceptable.
+    allow_credentials:   List<CredentialDescriptor>,
+    user_verification:   UserVerificationRequirement,
+};
+
+@derive(Clone, Debug)
+pub type ExpectedAuthContext is {
+    origins:        List<Text>,
+};
+
+// =============================================================================
+// Output
+// =============================================================================
+
+@derive(Clone, Debug)
+pub type AuthenticationResult is {
+    /// The credential that authenticated (matches the credential id
+    /// of the stored VerifiedCredential).
+    credential_id:        List<Byte>,
+    /// New signCount value to persist (replaces stored.sign_count).
+    new_sign_count:       Int,
+    /// Whether the authenticator-presented user-verified bit was set.
+    user_verified:        Bool,
+    /// Backup state at the time of authentication.
+    backup_state:         Bool,
+    /// True iff the BS bit transitioned compared to stored. Useful
+    /// for "your passkey was just synced" UX hints.
+    backup_state_changed: Bool,
+    /// User handle from the response (for credential-discovery
+    /// flows where the RP looks up the user from the assertion).
+    user_handle:          Maybe<List<Byte>>,
+};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Verify a WebAuthn authentication response against a stored
+/// VerifiedCredential. On success, returns AuthenticationResult.
+pub fn verify_authentication(
+    response:    &AuthenticatorAssertionResponse,
+    options:     &AuthenticationOptions,
+    expected:    &ExpectedAuthContext,
+    stored:      &VerifiedCredential,
+) -> Result<AuthenticationResult, WebAuthnError> {
+    // 0. Bound checks on options.
+    if options.challenge.len() < CHALLENGE_MIN_BYTES || options.challenge.len() > CHALLENGE_MAX_BYTES {
+        return Err(WebAuthnError.InvalidChallengeLength(options.challenge.len()));
+    }
+
+    // (Pre-check) credentialId-in-allow-list: when allow_credentials
+    // is non-empty, the response's credential MUST match one entry.
+    // The credentialId is part of the PublicKeyCredential wrapper,
+    // not in AuthenticatorAssertionResponse — callers SHOULD verify
+    // it before invoking this function. For defence-in-depth, we
+    // check that `stored.credential_id` itself is in the allow list
+    // (which presupposes the caller already routed to the right
+    // stored credential).
+    if !options.allow_credentials.is_empty()
+        && !cred_in_allow_list(&stored.credential_id, &options.allow_credentials)
+    {
+        return Err(WebAuthnError.CredentialNotAllowed(stored.credential_id.clone()));
+    }
+
+    // 1. Decode + validate clientDataJSON.
+    let client_data = parse_client_data(&response.client_data_json)?;
+    if !(client_data.type_ is ClientDataType.Get) {
+        return Err(WebAuthnError.InvalidClientDataType {
+            expected: ClientDataType.Get,
+            found:    client_data.type_.clone(),
+        });
+    }
+    if !bytes_eq(&client_data.challenge, &options.challenge) {
+        return Err(WebAuthnError.ChallengeMismatch);
+    }
+    check_origin(&client_data.origin, &expected.origins)?;
+
+    // 2. clientDataHash.
+    let client_data_hash = sha256_digest(response.client_data_json.as_slice());
+
+    // 3. Parse authData.
+    let auth_data = parse_authenticator_data(response.authenticator_data.as_slice())?;
+
+    // 4. rpIdHash check.
+    let expected_rp_id_hash = hash_rp_id(&options.rp_id);
+    let mut i: Int = 0;
+    while i < 32 {
+        if auth_data.rp_id_hash[i] != expected_rp_id_hash[i] {
+            return Err(WebAuthnError.RpIdHashMismatch);
+        }
+        i = i + 1;
+    }
+
+    // 5. UP flag.
+    if !auth_data.flags.user_present {
+        return Err(WebAuthnError.UpFlagMissing);
+    }
+
+    // 6. UV flag.
+    match options.user_verification {
+        UserVerificationRequirement.Required => {
+            if !auth_data.flags.user_verified {
+                return Err(WebAuthnError.UvFlagMissing);
+            }
+        }
+        _ => {}
+    }
+
+    // 7. sigData = authData_raw || clientDataHash.
+    let mut sig_data: List<Byte> = List.with_capacity(
+        response.authenticator_data.len() + client_data_hash.len(),
+    );
+    let mut k: Int = 0;
+    while k < response.authenticator_data.len() {
+        sig_data.push(response.authenticator_data[k]);
+        k = k + 1;
+    }
+    let mut m: Int = 0;
+    while m < client_data_hash.len() {
+        sig_data.push(client_data_hash[m]);
+        m = m + 1;
+    }
+
+    // 8. Signature verification with stored public key.
+    let cred_pk = decode_cose_key(stored.public_key_cose.as_slice())?;
+    verify_signature(&cred_pk, &sig_data, &response.signature)?;
+
+    // 9. signCount monotonicity.
+    let presented = auth_data.sign_count;
+    let stored_count = stored.sign_count;
+    let counter_supported = !(presented == 0 && stored_count == 0);
+    if counter_supported && presented <= stored_count {
+        return Err(WebAuthnError.SignCountNotIncreasing {
+            stored:    stored_count,
+            presented,
+        });
+    }
+
+    // 10. Backup-state diagnostics.
+    let backup_state_changed = auth_data.flags.backup_state != stored.backup_state;
+
+    Ok(AuthenticationResult {
+        credential_id:        stored.credential_id.clone(),
+        new_sign_count:       presented,
+        user_verified:        auth_data.flags.user_verified,
+        backup_state:         auth_data.flags.backup_state,
+        backup_state_changed,
+        user_handle:          response.user_handle.clone(),
+    })
+}
+
+// =============================================================================
+// Signature verification dispatch
+// =============================================================================
+
+fn verify_signature(
+    pk:    &CredentialPublicKey,
+    msg:   &List<Byte>,
+    sig:   &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    match pk {
+        CredentialPublicKey.Ed25519 { x } => {
+            if sig.len() != 64 || x.len() != 32 {
+                return Err(WebAuthnError.InvalidSignature);
+            }
+            let mut pk_arr: Ed25519PublicKey = [0_u8; 32];
+            let mut k: Int = 0;
+            while k < 32 { pk_arr[k] = x[k]; k = k + 1; }
+            let mut sig_arr: Ed25519Signature = [0_u8; 64];
+            let mut m: Int = 0;
+            while m < 64 { sig_arr[m] = sig[m]; m = m + 1; }
+            ed25519_verify(&pk_arr, msg.as_slice(), &sig_arr)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        CredentialPublicKey.EcdsaP256 { x, y } => {
+            if x.len() != 32 || y.len() != 32 {
+                return Err(WebAuthnError.InvalidSignature);
+            }
+            let mut uncompressed: List<Byte> = List.with_capacity(65);
+            uncompressed.push(0x04);
+            let mut i: Int = 0;
+            while i < 32 { uncompressed.push(x[i]); i = i + 1; }
+            let mut j: Int = 0;
+            while j < 32 { uncompressed.push(y[j]); j = j + 1; }
+            let p_pk = P256PublicKey.from_uncompressed(uncompressed.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)?;
+            let p_sig = P256Signature.from_der(sig.as_slice())
+                .map_err(|_| WebAuthnError.InvalidSignature)?;
+            let digest = Sha256.digest(msg.as_slice());
+            P256.verify_prehashed(&p_pk, &digest, &p_sig)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        CredentialPublicKey.Rsa { n, e, alg } => {
+            let vk = RsaVerifyKey { n: n.clone(), e: e.clone() };
+            let digest = Sha256.digest(msg.as_slice()).to_list();
+            let res = match *alg {
+                COSE_ALG_RS256 => verify_pkcs1_v15_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
+                COSE_ALG_PS256 => verify_pss_prehashed(&vk, RsaHash.Sha256_, &digest, sig.as_slice()),
+                _              => return Err(WebAuthnError.UnsupportedAlgorithm(*alg)),
+            };
+            res.map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        _ => Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, WebAuthnError> {
+    // Same shape as register.vr's parser, intentionally duplicated
+    // here to keep this module self-contained and free of cyclic
+    // imports through register.vr.
+    let value = json_decode(json_bytes.as_slice())
+        .map_err(|e| WebAuthnError.InvalidJson(format!("{e}").to_text()))?;
+    let obj = value.as_object()
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData not an object".to_text()))?;
+    let type_text = obj.get("type").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.type missing".to_text()))?;
+    let challenge_b64 = obj.get("challenge").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.challenge missing".to_text()))?;
+    let origin = obj.get("origin").and_then(|v| v.as_string())
+        .ok_or_else(|| WebAuthnError.InvalidJson("clientData.origin missing".to_text()))?;
+    let cross_origin = obj.get("crossOrigin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let challenge = b64url_decode(&challenge_b64)
+        .map_err(|e| WebAuthnError.InvalidJson(format!("challenge b64url: {e}").to_text()))?;
+    Ok(CollectedClientData {
+        type_:         client_data_type_from_text(&type_text),
+        challenge,
+        origin,
+        cross_origin,
+        token_binding: None,
+    })
+}
+
+fn check_origin(found: &Text, allowed: &List<Text>) -> Result<(), WebAuthnError> {
+    if !found.starts_with("https://") && !is_localhost_http(found) {
+        return Err(WebAuthnError.OriginScheme(found.clone()));
+    }
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if &allowed[i] == found { return Ok(()); }
+        i = i + 1;
+    }
+    Err(WebAuthnError.OriginMismatch {
+        expected: format!("{:?}", allowed).to_text(),
+        found:    found.clone(),
+    })
+}
+
+fn is_localhost_http(origin: &Text) -> Bool {
+    if !origin.starts_with("http://") { return false; }
+    let after_scheme = origin.byte_substring(7, origin.len());
+    after_scheme.starts_with("localhost") || after_scheme.starts_with("127.0.0.1")
+}
+
+fn cred_in_allow_list(id: &List<Byte>, list: &List<CredentialDescriptor>) -> Bool {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if bytes_eq(id, &list[i].credential_id) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_check_origin_mismatch_rejected() {
+        let mut allowed: List<Text> = List.new();
+        allowed.push("https://expected.com".to_text());
+        match check_origin(&"https://attacker.com".to_text(), &allowed) {
+            Err(WebAuthnError.OriginMismatch { .. }) => {}
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_cred_in_allow_list() {
+        let mut id: List<Byte> = List.new();
+        id.push(1); id.push(2); id.push(3);
+        let mut list: List<CredentialDescriptor> = List.new();
+        list.push(CredentialDescriptor {
+            type_: "public-key".to_text(),
+            credential_id: id.clone(),
+            transports: List.new(),
+        });
+        assert!(cred_in_allow_list(&id, &list));
+        let mut other: List<Byte> = List.new();
+        other.push(99);
+        assert!(!cred_in_allow_list(&other, &list));
+    }
+}

@@ -1,0 +1,342 @@
+// =============================================================================
+// security/webauthn/cose_key.vr — COSE_Key decoder for credential public keys
+// =============================================================================
+// Layer: 2 (Security primitives)
+// Dependencies: core, base, encoding/cbor, security/webauthn/types
+// =============================================================================
+//
+// **Purpose.** Decode a CBOR-encoded COSE_Key (the format
+// authenticators use to express credential public keys) into a typed
+// `CredentialPublicKey` ADT. This is the bridge between the
+// authenticator's wire format and the cryptographic primitives in
+// `core.security.{ecc, sig}`.
+//
+// **COSE_Key map labels (RFC 8152 + IANA COSE registry).**
+//
+//   1   kty       — key type:
+//                    1 = OKP (Ed25519 / Ed448)
+//                    2 = EC2 (P-256 / P-384 / P-521)
+//                    3 = RSA
+//   3   alg       — algorithm:
+//                    -7   ES256, -8 EdDSA, -35 ES384, -36 ES512,
+//                    -257 RS256, -37 PS256
+//   -1  crv (EC2)  — curve: 1=P-256, 2=P-384, 3=P-521
+//   -1  crv (OKP)  — curve: 6=Ed25519
+//   -2  x          — EC2 x-coordinate or OKP x-coordinate (Ed25519 pubkey)
+//   -3  y          — EC2 y-coordinate
+//   -1  n (RSA)    — modulus
+//   -2  e (RSA)    — public exponent
+//
+// **Wire encoding.** A CBOR map. WebAuthn requires canonical CBOR
+// (RFC 8949 §4.2.1) for the COSE_Key inside AttestedCredentialData
+// — keys must be sorted, integers must use shortest form, etc.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "COSE_Key decoder for WebAuthn credential public keys (Ed25519 / EC2 / RSA)",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate:      Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring:      Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:        Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.security.webauthn.cose_key;
+
+mount core.*;
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
+mount collections.{List, Map};
+mount encoding.cbor.{
+    CborValue, decode as cbor_decode, encode as cbor_encode,
+    CborError,
+};
+mount security.webauthn.types.{
+    WebAuthnError,
+    COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
+    COSE_ALG_ES384, COSE_ALG_ES512,
+};
+
+// =============================================================================
+// COSE key-type + curve constants (per IANA COSE registry)
+// =============================================================================
+
+pub const COSE_KTY_OKP:  Int = 1;
+pub const COSE_KTY_EC2:  Int = 2;
+pub const COSE_KTY_RSA:  Int = 3;
+
+pub const COSE_CRV_P256:    Int = 1;
+pub const COSE_CRV_P384:    Int = 2;
+pub const COSE_CRV_P521:    Int = 3;
+pub const COSE_CRV_ED25519: Int = 6;
+
+// =============================================================================
+// Typed credential public key
+// =============================================================================
+
+@derive(Eq, Clone, Debug)
+pub type CredentialPublicKey is
+    | Ed25519 { x: List<Byte> }                    // 32-byte Ed25519 pubkey
+    | EcdsaP256 { x: List<Byte>, y: List<Byte> }   // 32-byte coords
+    | EcdsaP384 { x: List<Byte>, y: List<Byte> }   // 48-byte coords
+    | EcdsaP521 { x: List<Byte>, y: List<Byte> }   // 66-byte coords
+    | Rsa { n: List<Byte>, e: List<Byte>, alg: Int }; // PS256 vs RS256
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Decode a CBOR-encoded COSE_Key into a typed credential public
+/// key. Validates kty / alg / crv / coordinate-length consistency
+/// per the registered IANA constants.
+pub fn decode_cose_key(bytes: &[Byte]) -> Result<CredentialPublicKey, WebAuthnError> {
+    let value = cbor_decode(bytes).map_err(|e| WebAuthnError.InvalidCbor(format!("{e}").to_text()))?;
+    decode_cose_key_value(&value)
+}
+
+/// Decode a parsed CborValue (the COSE_Key map). Useful when the
+/// caller already has the CBOR value in hand (e.g., extracted from
+/// AttestedCredentialData).
+pub fn decode_cose_key_value(value: &CborValue) -> Result<CredentialPublicKey, WebAuthnError> {
+    let map = value.as_map()
+        .ok_or_else(|| WebAuthnError.InvalidCbor("COSE_Key not a map".to_text()))?;
+
+    let kty = get_int(map, 1)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("COSE_Key missing kty (label 1)".to_text()))?;
+    let alg = get_int(map, 3).unwrap_or(0);
+
+    match kty {
+        COSE_KTY_OKP => decode_okp(map, alg),
+        COSE_KTY_EC2 => decode_ec2(map, alg),
+        COSE_KTY_RSA => decode_rsa(map, alg),
+        other        => Err(WebAuthnError.UnknownCoseKeyType(other)),
+    }
+}
+
+fn decode_okp(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<CredentialPublicKey, WebAuthnError> {
+    let crv = get_int(map, -1).unwrap_or(0);
+    if crv != COSE_CRV_ED25519 {
+        return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+    }
+    if alg != 0 && alg != COSE_ALG_EDDSA {
+        return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+    }
+    let x = get_bytes(map, -2)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("OKP missing x (label -2)".to_text()))?;
+    if x.len() != 32 {
+        return Err(WebAuthnError.InvalidCbor(format!(
+            "Ed25519 x must be 32 bytes, got {}", x.len()).to_text()));
+    }
+    Ok(CredentialPublicKey.Ed25519 { x })
+}
+
+fn decode_ec2(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<CredentialPublicKey, WebAuthnError> {
+    let crv = get_int(map, -1)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing crv (label -1)".to_text()))?;
+    let x = get_bytes(map, -2)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing x (label -2)".to_text()))?;
+    let y = get_bytes(map, -3)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing y (label -3)".to_text()))?;
+    match crv {
+        COSE_CRV_P256 => {
+            if alg != 0 && alg != COSE_ALG_ES256 {
+                return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+            }
+            if x.len() != 32 || y.len() != 32 {
+                return Err(WebAuthnError.InvalidCbor("P-256 coords must be 32 bytes each".to_text()));
+            }
+            Ok(CredentialPublicKey.EcdsaP256 { x, y })
+        }
+        COSE_CRV_P384 => {
+            if alg != 0 && alg != COSE_ALG_ES384 {
+                return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+            }
+            if x.len() != 48 || y.len() != 48 {
+                return Err(WebAuthnError.InvalidCbor("P-384 coords must be 48 bytes each".to_text()));
+            }
+            Ok(CredentialPublicKey.EcdsaP384 { x, y })
+        }
+        COSE_CRV_P521 => {
+            if alg != 0 && alg != COSE_ALG_ES512 {
+                return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+            }
+            if x.len() != 66 || y.len() != 66 {
+                return Err(WebAuthnError.InvalidCbor("P-521 coords must be 66 bytes each".to_text()));
+            }
+            Ok(CredentialPublicKey.EcdsaP521 { x, y })
+        }
+        other => Err(WebAuthnError.UnsupportedAlgorithm(other)),
+    }
+}
+
+fn decode_rsa(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<CredentialPublicKey, WebAuthnError> {
+    if alg != COSE_ALG_RS256 && alg != COSE_ALG_PS256 && alg != 0 {
+        return Err(WebAuthnError.UnsupportedAlgorithm(alg));
+    }
+    let n = get_bytes(map, -1)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("RSA missing n (label -1)".to_text()))?;
+    let e = get_bytes(map, -2)
+        .ok_or_else(|| WebAuthnError.InvalidCbor("RSA missing e (label -2)".to_text()))?;
+    Ok(CredentialPublicKey.Rsa { n, e, alg })
+}
+
+// =============================================================================
+// Helpers — CBOR map lookup by integer label
+// =============================================================================
+
+fn get_int(map: &List<(CborValue, CborValue)>, label: Int) -> Maybe<Int> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(ki) = k.as_int() {
+            if ki == label {
+                return v.as_int();
+            }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn get_bytes(map: &List<(CborValue, CborValue)>, label: Int) -> Maybe<List<Byte>> {
+    let mut i: Int = 0;
+    while i < map.len() {
+        let (k, v) = &map[i];
+        if let Some(ki) = k.as_int() {
+            if ki == label {
+                return v.as_bytes().map(|b| b.clone());
+            }
+        }
+        i = i + 1;
+    }
+    None
+}
+
+// =============================================================================
+// Algorithm dispatch helper
+// =============================================================================
+
+/// Map a CredentialPublicKey to the negotiated COSE algorithm
+/// identifier (used during signature verification dispatch).
+pub fn alg_of(pk: &CredentialPublicKey) -> Int {
+    match pk {
+        CredentialPublicKey.Ed25519 { .. }       => COSE_ALG_EDDSA,
+        CredentialPublicKey.EcdsaP256 { .. }     => COSE_ALG_ES256,
+        CredentialPublicKey.EcdsaP384 { .. }     => COSE_ALG_ES384,
+        CredentialPublicKey.EcdsaP521 { .. }     => COSE_ALG_ES512,
+        CredentialPublicKey.Rsa { alg, .. }      => *alg,
+    }
+}
+
+// =============================================================================
+// Round-trip encoder
+// =============================================================================
+
+/// Re-encode a CredentialPublicKey to canonical CBOR. Useful for
+/// tests + for storing the COSE_Key with deterministic bytes.
+pub fn encode_cose_key(pk: &CredentialPublicKey) -> List<Byte> {
+    let mut entries: List<(CborValue, CborValue)> = List.new();
+    match pk {
+        CredentialPublicKey.Ed25519 { x } => {
+            entries.push((CborValue.Integer(1),  CborValue.Integer(COSE_KTY_OKP)));
+            entries.push((CborValue.Integer(3),  CborValue.Integer(COSE_ALG_EDDSA)));
+            entries.push((CborValue.Integer(-1), CborValue.Integer(COSE_CRV_ED25519)));
+            entries.push((CborValue.Integer(-2), CborValue.Bytes(x.clone())));
+        }
+        CredentialPublicKey.EcdsaP256 { x, y } => {
+            entries.push((CborValue.Integer(1),  CborValue.Integer(COSE_KTY_EC2)));
+            entries.push((CborValue.Integer(3),  CborValue.Integer(COSE_ALG_ES256)));
+            entries.push((CborValue.Integer(-1), CborValue.Integer(COSE_CRV_P256)));
+            entries.push((CborValue.Integer(-2), CborValue.Bytes(x.clone())));
+            entries.push((CborValue.Integer(-3), CborValue.Bytes(y.clone())));
+        }
+        CredentialPublicKey.EcdsaP384 { x, y } => {
+            entries.push((CborValue.Integer(1),  CborValue.Integer(COSE_KTY_EC2)));
+            entries.push((CborValue.Integer(3),  CborValue.Integer(COSE_ALG_ES384)));
+            entries.push((CborValue.Integer(-1), CborValue.Integer(COSE_CRV_P384)));
+            entries.push((CborValue.Integer(-2), CborValue.Bytes(x.clone())));
+            entries.push((CborValue.Integer(-3), CborValue.Bytes(y.clone())));
+        }
+        CredentialPublicKey.EcdsaP521 { x, y } => {
+            entries.push((CborValue.Integer(1),  CborValue.Integer(COSE_KTY_EC2)));
+            entries.push((CborValue.Integer(3),  CborValue.Integer(COSE_ALG_ES512)));
+            entries.push((CborValue.Integer(-1), CborValue.Integer(COSE_CRV_P521)));
+            entries.push((CborValue.Integer(-2), CborValue.Bytes(x.clone())));
+            entries.push((CborValue.Integer(-3), CborValue.Bytes(y.clone())));
+        }
+        CredentialPublicKey.Rsa { n, e, alg } => {
+            entries.push((CborValue.Integer(1),  CborValue.Integer(COSE_KTY_RSA)));
+            entries.push((CborValue.Integer(3),  CborValue.Integer(*alg)));
+            entries.push((CborValue.Integer(-1), CborValue.Bytes(n.clone())));
+            entries.push((CborValue.Integer(-2), CborValue.Bytes(e.clone())));
+        }
+    }
+    encoding.cbor.encode_canonical(&CborValue.Map(entries))
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super.*;
+
+    #[test]
+    fn test_round_trip_ed25519() {
+        let mut x: List<Byte> = List.with_capacity(32);
+        let mut i: Int = 0;
+        while i < 32 { x.push(i as Byte); i = i + 1; }
+        let pk = CredentialPublicKey.Ed25519 { x: x.clone() };
+        let bytes = encode_cose_key(&pk);
+        let decoded = decode_cose_key(bytes.as_slice()).unwrap();
+        match decoded {
+            CredentialPublicKey.Ed25519 { x: x2 } => assert_eq(x, x2),
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_p256() {
+        let mut x: List<Byte> = List.with_capacity(32);
+        let mut y: List<Byte> = List.with_capacity(32);
+        let mut i: Int = 0;
+        while i < 32 { x.push(i as Byte); y.push((i + 1) as Byte); i = i + 1; }
+        let pk = CredentialPublicKey.EcdsaP256 { x: x.clone(), y: y.clone() };
+        let bytes = encode_cose_key(&pk);
+        let decoded = decode_cose_key(bytes.as_slice()).unwrap();
+        match decoded {
+            CredentialPublicKey.EcdsaP256 { x: xx, y: yy } => {
+                assert_eq(x, xx);
+                assert_eq(y, yy);
+            }
+            _ => unreachable(),
+        }
+    }
+
+    #[test]
+    fn test_alg_of() {
+        let pk_ed = CredentialPublicKey.Ed25519 { x: List.with_capacity(32) };
+        assert_eq(alg_of(&pk_ed), COSE_ALG_EDDSA);
+        let pk_p256 = CredentialPublicKey.EcdsaP256 { x: List.new(), y: List.new() };
+        assert_eq(alg_of(&pk_p256), COSE_ALG_ES256);
+    }
+
+    #[test]
+    fn test_unknown_kty_rejected() {
+        let mut entries: List<(CborValue, CborValue)> = List.new();
+        entries.push((CborValue.Integer(1), CborValue.Integer(99)));
+        let bytes = encoding.cbor.encode_canonical(&CborValue.Map(entries));
+        match decode_cose_key(bytes.as_slice()) {
+            Err(WebAuthnError.UnknownCoseKeyType(99)) => {}
+            _ => unreachable(),
+        }
+    }
+}
