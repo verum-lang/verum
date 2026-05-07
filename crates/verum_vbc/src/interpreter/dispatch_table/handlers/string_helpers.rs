@@ -258,6 +258,59 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         return true;
     }
 
+    // Single-side reference unwrap.  The mixed (ThinRef vs CBGR-ref)
+    // and double-ref branches below handle ref-vs-ref comparisons,
+    // but `&text == raw_text` (one side a ref to a register, other
+    // side an inline value such as a `for a in argv { a == &needle }`
+    // pattern where `a` is the iteration's bound raw value and
+    // `&needle` is a CBGR ref to the caller's register) was missing.
+    // Without this unwrap, the string-likeness check below sees the
+    // ref-encoded side as a non-string-like int and the comparison
+    // returns false even though both sides hold "--help".
+    //
+    // We unwrap into LOCAL copies so the rest of the comparison logic
+    // operates on the dereferenced values uniformly.
+    let va_unwrapped = if is_cbgr_ref(va) {
+        let (abs_idx, _gen) = decode_cbgr_ref(va.as_i64());
+        Some(state.registers.get_absolute(abs_idx))
+    } else if va.is_thin_ref() {
+        let tr = va.as_thin_ref();
+        if !tr.ptr.is_null() {
+            Some(unsafe { *(tr.ptr as *const Value) })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let vb_unwrapped = if is_cbgr_ref(vb) {
+        let (abs_idx, _gen) = decode_cbgr_ref(vb.as_i64());
+        Some(state.registers.get_absolute(abs_idx))
+    } else if vb.is_thin_ref() {
+        let tr = vb.as_thin_ref();
+        if !tr.ptr.is_null() {
+            Some(unsafe { *(tr.ptr as *const Value) })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // If exactly one side is a reference, recurse with the unwrapped
+    // form on that side and the raw value on the other.  This pulls
+    // single-side ref/raw comparisons into the canonical raw-vs-raw
+    // path where the string-likeness check actually fires.
+    if va_unwrapped.is_some() && vb_unwrapped.is_none() {
+        let a = va_unwrapped.unwrap();
+        return deep_value_eq_depth(&a, vb, state, depth + 1);
+    }
+    if vb_unwrapped.is_some() && va_unwrapped.is_none() {
+        let b = vb_unwrapped.unwrap();
+        return deep_value_eq_depth(va, &b, state, depth + 1);
+    }
+    // (Both-ref and neither-ref cases fall through to the existing
+    // type-specific branches.)
+
     // Handle ThinRef values - compare dereferenced values
     if va.is_thin_ref() && vb.is_thin_ref() {
         let thin_a = va.as_thin_ref();

@@ -11910,6 +11910,175 @@ impl VbcCodegen {
         &mut self.ctx
     }
 
+    /// Mutable access to the function-id allocator counter.  Exposed
+    /// for archive-driven pre-population (T2) so the loader can
+    /// remap each archive-local FunctionId to a globally-unique id
+    /// in the user codegen's namespace.  Without this, two archive
+    /// modules with overlapping local FunctionIds (e.g. both expose
+    /// id=0 for their first function) collapse to a single
+    /// ctx.functions slot at codegen time and `emit_missing_stub_descriptors`
+    /// emits exactly one stub for that id — picking an arbitrary
+    /// canonical name and routing every `Call(0)` through that name's
+    /// intercept regardless of which source function the call site
+    /// intended.
+    pub fn next_func_id_mut(&mut self) -> &mut u32 {
+        &mut self.next_func_id
+    }
+
+    /// Import a TypeDescriptor from an archive module into the user
+    /// codegen.  Walks the descriptor's StringId references (name,
+    /// type-param names, field names, variant names, variant field
+    /// names) and re-interns each into the user codegen's
+    /// `ctx.strings` table; allocates a fresh user-side TypeId via
+    /// `alloc_user_type_id` so cross-archive id collisions don't
+    /// collapse two stdlib types onto a single slot; updates
+    /// `type_name_to_id` so `compile_record`'s descriptor_match path
+    /// can resolve `parent_canonical → TypeId` and `emit_make_variant`
+    /// can route through `MakeVariantTyped`.
+    ///
+    /// Idempotent on the type's name: when the same name is already
+    /// bound (user-defined type collides with archive type), keep the
+    /// user's binding — same first-wins discipline as the function
+    /// table loader.
+    ///
+    /// `archive_strings` is the source module's string table — every
+    /// StringId in `ty` indexes into this slice, NOT the user codegen.
+    pub fn import_archive_type(
+        &mut self,
+        ty: &crate::types::TypeDescriptor,
+        archive_strings: &crate::module::StringTable,
+    ) {
+        let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
+            let name = match archive_strings.get(sid) {
+                Some(s) => s.to_string(),
+                None => return crate::types::StringId::EMPTY,
+            };
+            // Use HashMap-backed intern path on the context — O(1)
+            // amortised vs the linear scan in `Self::intern_string`.
+            crate::types::StringId(this.ctx.intern_string_raw(&name))
+        };
+        // Bail out cleanly when the name doesn't resolve in the archive
+        // string table — keeps the loader robust against malformed
+        // archive entries instead of panicking mid-walk.
+        let name_str = match archive_strings.get(ty.name) {
+            Some(s) => s.to_string(),
+            None => return,
+        };
+        // First-wins: user-defined / earlier-archive type with the
+        // same name already owns the slot.
+        if self.type_name_to_id.contains_key(&name_str) {
+            return;
+        }
+        let new_id = self.alloc_user_type_id();
+        self.type_name_to_id.insert(name_str.clone(), new_id);
+        let new_name_id = crate::types::StringId(self.ctx.intern_string_raw(&name_str));
+
+        // Type parameters
+        let mut new_type_params: smallvec::SmallVec<[crate::types::TypeParamDescriptor; 2]> =
+            smallvec::SmallVec::new();
+        for tp in ty.type_params.iter() {
+            new_type_params.push(crate::types::TypeParamDescriptor {
+                name: intern(self, tp.name),
+                id: tp.id,
+                bounds: tp.bounds.clone(),
+                default: tp.default.clone(),
+                variance: tp.variance,
+            });
+        }
+
+        // Record fields
+        let mut new_fields: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+            smallvec::SmallVec::new();
+        for fd in ty.fields.iter() {
+            new_fields.push(crate::types::FieldDescriptor {
+                name: intern(self, fd.name),
+                ..fd.clone()
+            });
+        }
+
+        // Variants (each carries its own field list).  Type-layout
+        // invariants per `verify_type_layout_invariants`:
+        //  * Unit  — `arity == 0` AND `fields.is_empty()`
+        //  * Tuple — `arity > 0`  AND `fields.is_empty()` (payload
+        //    count lives in `arity`, NOT in `fields`)
+        //  * Record — `arity == 0` AND `!fields.is_empty()` (named
+        //    field metadata lives in `fields`)
+        // Some archive precompile sites populate `fields` for Tuple
+        // variants too (positional `_0`/`_1` synthesised names) — our
+        // import strips them to keep the codegen-time invariant
+        // checker happy.
+        let mut new_variants: smallvec::SmallVec<[crate::types::VariantDescriptor; 4]> =
+            smallvec::SmallVec::new();
+        for v in ty.variants.iter() {
+            let copy_fields = matches!(v.kind, crate::types::VariantKind::Record);
+            let mut v_fields: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> =
+                smallvec::SmallVec::new();
+            if copy_fields {
+                for fd in v.fields.iter() {
+                    v_fields.push(crate::types::FieldDescriptor {
+                        name: intern(self, fd.name),
+                        ..fd.clone()
+                    });
+                }
+            }
+            // Tuple variants use `arity`; record variants use
+            // `fields.len()`. Re-derive arity for record variants so
+            // the invariant `kind == Record → arity == 0` holds.
+            let arity = match v.kind {
+                crate::types::VariantKind::Tuple => v.arity,
+                _ => 0,
+            };
+            new_variants.push(crate::types::VariantDescriptor {
+                name: intern(self, v.name),
+                tag: v.tag,
+                payload: v.payload.clone(),
+                kind: v.kind,
+                arity,
+                fields: v_fields,
+            });
+        }
+
+        let imported = crate::types::TypeDescriptor {
+            id: new_id,
+            name: new_name_id,
+            kind: ty.kind.clone(),
+            type_params: new_type_params,
+            fields: new_fields,
+            variants: new_variants,
+            size: ty.size,
+            alignment: ty.alignment,
+            drop_fn: ty.drop_fn,
+            clone_fn: ty.clone_fn,
+            protocols: ty.protocols.clone(),
+            visibility: ty.visibility,
+            alias_target: ty.alias_target.clone(),
+        };
+        self.push_type_dedupe(imported);
+    }
+
+    /// Bulk import every TypeDescriptor in an archive module into the
+    /// user codegen.  Wraps `import_archive_type` for caller
+    /// convenience; the loader uses this from the archive lazy-load
+    /// path to extend the type table with stdlib sum types
+    /// (`ShellError`, `IoErrorKind`, `Lifecycle`, …) so the runtime's
+    /// `format_variant_for_print_depth` resolves variant names
+    /// type-scoped instead of globally guessing.
+    ///
+    /// Protocol-kind descriptors are deliberately excluded — their
+    /// `variants` field stores method-name vtable entries (used by
+    /// the dyn: dispatch lowering, not for variant pattern-match
+    /// rendering) and including them would pollute the type-scoped
+    /// variant scan that `format_variant_for_print_depth` uses as the
+    /// primary lookup path.
+    pub fn import_archive_module_types(&mut self, module: &crate::module::VbcModule) {
+        for ty in module.types.iter() {
+            if matches!(ty.kind, crate::types::TypeKind::Protocol) {
+                continue;
+            }
+            self.import_archive_type(ty, &module.strings);
+        }
+    }
+
     /// Returns the current configuration.
     pub fn config(&self) -> &CodegenConfig {
         &self.config

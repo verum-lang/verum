@@ -113,6 +113,18 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
     if depth >= MAX_PRINT_DEPTH {
         return "<...>".to_string();
     }
+    // CBGR-encoded register reference — dereference to the underlying
+    // register value and recurse.  The CBGR encoding overlaps the
+    // integer NaN-box tag (negative-i64 sentinel range), so without
+    // this branch a `&"text"` passed to `println` would format as the
+    // raw bit pattern instead of the string.  Mirrors the auto-deref
+    // ThinRef handling below.
+    if super::cbgr_helpers::is_cbgr_ref(&value) {
+        let (abs_index, _gen) =
+            super::cbgr_helpers::decode_cbgr_ref(value.as_i64());
+        let derefed = state.registers.get_absolute(abs_index);
+        return format_value_for_print_depth(state, derefed, depth + 1);
+    }
     // Check for small string (inline string up to 7 bytes)
     if value.is_small_string() {
         let ss = value.as_small_string();
