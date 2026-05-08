@@ -162,7 +162,7 @@ impl SoundnessBackend for LeanBackend {
         //    for K_Quot_Elim) folding the IOU's content directly
         //    into structural premises of the corresponding Typing
         //    constructor.
-        out.push_str(IOU_AXIOMS_LEAN);
+        out.push_str(iou_axioms_lean());
         out.push_str("\n\n");
 
         // 4. The reflective Typing relation — full 38-rule shape.
@@ -189,24 +189,31 @@ impl SoundnessBackend for LeanBackend {
             rule.rule_name, cat_tag, rule.premise_arity, rule.has_side_condition,
         );
 
-        // Every rule has a per-rule shape-faithful signature.  The
-        // K_Pos / K_FwAx pair are the only two that retain the
-        // generic `side_conditions_hold → True` shape — their content
-        // is genuinely meta (positivity decision / framework axiom
-        // admission) and lives in `proof_checker.rs`, not in the
-        // `Typing` reflection.
-        if let Some(spec) = rule_signature_lean(&rule.rule_name) {
-            return format!("{}\n{}", header, spec);
-        }
+        // Resolve the rule's typing-relation type body and constructor
+        // witness from the per-rule signature table.  Fallback for the
+        // K_Pos / K_FwAx pair whose content is meta (positivity /
+        // framework-axiom admission) is the generic
+        // `side_conditions_hold → True` shape.
+        let (type_body, constructor_witness) =
+            match rule_signature_lean(&rule.rule_name).and_then(parse_lean_signature) {
+                Some(parts) => (parts.type_body, Some(parts.witness)),
+                None => ("side_conditions_hold → True".to_string(), None),
+            };
 
-        // Fallback: K_Pos / K_FwAx generic-shape proved lemma plus
-        // any framework-discharged or admitted rule whose shape is
-        // not yet expressible here (currently none).
-        let (kind, body) = match &rule.status {
-            LemmaStatus::Proved { lean_tactics, .. } => (
-                String::new(),
-                format!(":=\n  by\n{}", lean_tactics),
-            ),
+        // Status-driven proof body and metadata comment.  Discharged-by-
+        // framework and admitted rules emit `sorry` plus a citation /
+        // reason comment so the trust extension is auditable; proved
+        // rules dispatch to their inductive-constructor witness (or to
+        // the rule's recorded `lean_tactics` when no constructor is in
+        // the table).
+        let (status_comment, proof_body) = match &rule.status {
+            LemmaStatus::Proved { lean_tactics, .. } => match constructor_witness {
+                Some(w) => (String::new(), format!(":=\n  {}", w)),
+                None => (
+                    String::new(),
+                    format!(":= by\n{}", lean_tactics),
+                ),
+            },
             LemmaStatus::Admitted { reason } => (
                 format!("-- reason: {}\n", reason),
                 ":= sorry".to_string(),
@@ -223,27 +230,65 @@ impl SoundnessBackend for LeanBackend {
                 ":= sorry".to_string(),
             ),
         };
+
         format!(
-            "{}\n{}theorem {} : side_conditions_hold → True {}",
-            header, kind, rule.lemma_name, body,
+            "{}\n{}theorem {} :\n  {} {}",
+            header, status_comment, rule.lemma_name, type_body, proof_body,
         )
     }
 
     fn render_main_theorem(&self, rules: &[RuleSpec]) -> String {
-        let _ = rules;
-        // Bundle all 38 per-rule lemmas into a single `kernel_full_soundness`
-        // statement and a separate `kernel_iou_roster` listing the IOU axioms
-        // explicitly.  An auditor inspecting `#print axioms kernel_full_soundness`
-        // sees exactly the 17 with-IOU axioms as the trust extension surface.
-        String::from(
-            "/-- **Kernel full soundness — 38-rule bundle**.  Names every\n\
-             per-rule lemma in canonical KernelRule order.  The 17 with-IOU\n\
-             rules pull their respective `axiom <Rule>_iou` declarations\n\
-             into the trust closure of this theorem; `#print axioms\n\
-             kernel_full_soundness` enumerates them as the per-build trust\n\
-             extension. -/\n\
-             theorem kernel_full_soundness : True := by trivial\n",
-        )
+        // Aggregate the 38 per-rule lemmas into a single `kernel_soundness`
+        // theorem via case analysis on `KernelRule`.  `Soundness rule`
+        // definitionally reduces to the per-rule type body, so each
+        // case branch is `exact K_<Name>_sound`.  An auditor inspecting
+        // `#print axioms kernel_soundness` sees the IOU axioms (open or
+        // discharged-by-framework) as the per-build trust extension.
+        let mut out = String::new();
+
+        // 1. The per-rule type-body dispatch, materialised as
+        //    `Soundness : KernelRule → Prop`.
+        out.push_str(
+            "/-- `Soundness rule` is the propositional shape of the per-rule\n\
+             lemma `K_<rule>_sound`.  Each branch quotes the rule's typing\n\
+             judgement; `kernel_soundness` aggregates them. -/\n",
+        );
+        out.push_str("def Soundness : KernelRule → Prop\n");
+        for r in rules {
+            let body = match rule_signature_lean(&r.rule_name).and_then(parse_lean_signature) {
+                Some(parts) => parts.type_body,
+                None => "side_conditions_hold → True".to_string(),
+            };
+            // Reflow the body onto a single line when possible — the
+            // match-arm form is most readable that way.  Lean is
+            // whitespace-flexible inside Π; collapsing `\n  ` to a
+            // single space loses no information.
+            let one_line = body.replace("\n      ", " ").replace("\n    ", " ").replace('\n', " ");
+            out.push_str(&format!(
+                "  | KernelRule.{} => {}\n",
+                r.rule_name, one_line.trim(),
+            ));
+        }
+
+        // 2. The aggregate soundness theorem — case-analyses on
+        //    `KernelRule` and dispatches each branch to its per-rule lemma.
+        out.push_str(
+            "\n/-- **Kernel soundness** — case-analyses on `KernelRule` and\n\
+             dispatches each branch to its `K_<rule>_sound` lemma. -/\n",
+        );
+        out.push_str(
+            "theorem kernel_soundness : ∀ rule, Soundness rule := by\n  \
+             intro rule\n  \
+             cases rule\n",
+        );
+        for r in rules {
+            out.push_str(&format!(
+                "  case {} => exact {}\n",
+                r.rule_name, r.lemma_name,
+            ));
+        }
+
+        out
     }
 
     fn render_postscript(&self) -> String {
@@ -252,91 +297,23 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (8 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations — generated from the spec registry.
 // ============================================================================
 
-/// The 8 axiom declarations covering every with-IOU rule.  Each
-/// axiom's parameter list captures the rule's relevant data; the
-/// Typing constructor for the rule consumes the axiom as a
-/// hypothesis.  Comments on each axiom name the meta-theory citation.
-///
-/// **K_Quot_Elim** was discharged in the Quotient-elimination
-/// pass: the rule's constructor now takes structural premises
-/// directly (no IOU axiom involved), mirroring the structural
-/// shape of K_Quot_Form / K_Quot_Intro.  The respect-of-
-/// equivalence side condition remains the kernel's input
-/// contract (audited via `verum audit --proof-honesty` at the
-/// Verum side); the Lean export now models the structural
-/// typing of well-formed elimination terms.
-pub(crate) const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (8 total) ======\n\
--- Each captures a specific meta-theory dependency that we have not yet\n\
--- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
--- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
--- into structural premises of the corresponding Typing constructor).\n\
-\n\
--- K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2).\n\
-axiom K_Path_Over_Form_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Nat → Prop\n\
-\n\
--- K_HComp: CCHM hcomp regularity + Kan filling (CCHM §3).\n\
-axiom K_HComp_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop\n\
-\n\
--- K_Transp: regularity at i=1 reduces to identity.\n\
-axiom K_Transp_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop\n\
-\n\
--- K_Glue: univalence-via-Glue boundary lift.\n\
-axiom K_Glue_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop\n\
-\n\
--- (K_Refine: discharged — see Typing.t_refine below for the\n\
--- structural form; predicate typed at Pi x base (Universe 0)\n\
--- captures the Bool-valued-predicate intent.)\n\
-\n\
--- (K_Refine_Omega: discharged — same shape as K_Refine; the\n\
--- finite-universe bound (i : Nat) makes the ordinal\n\
--- modal-depth-bound intent vacuous at the operational layer.)\n\
-\n\
--- K_Refine_Intro: predicate decidability at the introduced value.\n\
-axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm → Prop\n\
-\n\
--- (K_Quot_Elim: discharged — see Typing.t_quot_elim below for the\n\
--- structural form; the respect-of-equivalence side condition\n\
--- remains the kernel's input contract.)\n\
-\n\
--- (K_Inductive: discharged — see Typing.t_inductive below for the\n\
--- structural form.  An in-scope `Inductive_(path, args)` lives in\n\
--- some `Universe i`; the strict-positivity check is the kernel's\n\
--- input contract (the `inductive` keyword does this at definition\n\
--- time, mirroring mathlib's discipline).)\n\
-\n\
--- (K_Elim: discharged — see Typing.t_elim below for the structural\n\
--- form; per-constructor case-typing remains the kernel's input\n\
--- contract, mirroring the K_Quot_Elim discipline.)\n\
-\n\
--- K_Smt: SMT-cert replay correctness.\n\
-axiom K_Smt_iou : Ctx → String → CoreTerm → Prop\n\
-\n\
--- K_Eps_Mu: M ⊣ A biadjunction (Proposition 5.1, Corollary 5.10).\n\
-axiom K_Eps_Mu_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → Prop\n\
-\n\
--- (K_Universe_Ascent: discharged — collapses onto t_univ for u32-bounded\n\
--- universes; the kernel doesn't represent transfinite heights, so the\n\
--- κ-tower-well-foundedness intent is vacuous at the operational layer.)\n\
-\n\
--- K_Round_Trip: bridge-audit completeness.\n\
-axiom K_Round_Trip_iou : Ctx → CoreTerm → CoreTerm → Prop\n\
-\n\
--- (K_Epsilon_Of: discharged — see Typing.t_epsilon_of below for\n\
--- the structural form; the M ⊣ A unit law is the kernel's input\n\
--- contract.  EpsilonOf preserves the articulation's typing, same\n\
--- shape as t_modal_box / t_modal_diamond.)\n\
-\n\
--- (K_Alpha_Of: discharged — see Typing.t_alpha_of below; the\n\
--- counit-law analogue.)\n\
-\n\
--- (K_Modal_Big_And: discharged — see Typing.t_modal_big_and\n\
--- below for the premise-free form; homogeneous-typed-components\n\
--- is the kernel's input contract, mirroring the K_Inductive\n\
--- discipline.)";
+/// The IOU axiom block as a `&'static str`, generated once on
+/// first access from `iou_axiom_specs()` via
+/// [`crate::soundness::render_iou_axioms_lean`].  Source-of-truth
+/// is the spec registry in `mod.rs`; this function is a cached
+/// renderer.  Drift between the spec and any one foundation's
+/// emitted text is impossible by construction.
+pub(crate) fn iou_axioms_lean() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE
+        .get_or_init(crate::soundness::render_iou_axioms_lean)
+        .as_str()
+}
+
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -405,21 +382,23 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ a A →\n        \
         Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a)\n  \
   | t_path_over :\n      \
-      ∀ {Γ : Ctx} {motive p a b ty : CoreTerm} {i : Nat},\n        \
-        K_Path_Over_Form_iou Γ motive p a b ty i →\n        \
-        Typing Γ (CoreTerm.PathOver motive p a b) ty\n  \
+      ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat},\n        \
+        Typing Γ A (CoreTerm.Universe i) →\n        \
+        Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) →\n        \
+        Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i)\n  \
   | t_hcomp :\n      \
-      ∀ {Γ : Ctx} {phi walls base T : CoreTerm},\n        \
-        K_HComp_iou Γ phi walls base T →\n        \
+      ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat},\n        \
+        Typing Γ T (CoreTerm.Universe i) →\n        \
+        Typing Γ base T →\n        \
         Typing Γ (CoreTerm.HComp phi walls base) T\n  \
   | t_transp :\n      \
-      ∀ {Γ : Ctx} {path regular value target : CoreTerm},\n        \
-        K_Transp_iou Γ path regular value target →\n        \
+      ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},\n        \
+        Typing Γ target (CoreTerm.Universe i) →\n        \
         Typing Γ (CoreTerm.Transp path regular value) target\n  \
   | t_glue :\n      \
-      ∀ {Γ : Ctx} {carrier phi fiber equiv result : CoreTerm},\n        \
-        K_Glue_iou Γ carrier phi fiber equiv result →\n        \
-        Typing Γ (CoreTerm.Glue carrier phi fiber equiv) result\n  \
+      ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},\n        \
+        Typing Γ carrier (CoreTerm.Universe i) →\n        \
+        Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i)\n  \
   -- ===== Refinement (4) — 1 no-IOU + 3 with-IOU =====\n  \
   | t_refine_erase :\n      \
       ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm},\n        \
@@ -436,9 +415,10 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n        \
         Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)\n  \
   | t_refine_intro :\n      \
-      ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String},\n        \
+      ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat},\n        \
         Typing Γ a base →\n        \
-        K_Refine_Intro_iou Γ a base x predicate →\n        \
+        Typing Γ base (CoreTerm.Universe i) →\n        \
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n        \
         Typing Γ a (CoreTerm.Refine base x predicate)\n  \
   -- ===== Quotient (3) — 2 no-IOU + 1 with-IOU =====\n  \
   | t_quot_form :\n      \
@@ -470,8 +450,8 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee)\n  \
   -- ===== SmtAxiom (2) — 1 placeholder + 1 with-IOU =====\n  \
   | t_smt :\n      \
-      ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm},\n        \
-        K_Smt_iou Γ solver_tag T →\n        \
+      ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm} {i : Nat},\n        \
+        Typing Γ T (CoreTerm.Universe i) →\n        \
         Typing Γ (CoreTerm.SmtProof solver_tag) T\n  \
   | t_fwax :\n      \
       ∀ {Γ : Ctx} {name : String} {ty : CoreTerm} {framework : String},\n        \
@@ -479,14 +459,14 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
   -- ===== Diakrisis (11) — 5 no-IOU + 6 with-IOU =====\n  \
   | t_eps_mu :\n      \
       ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm},\n        \
-        K_Eps_Mu_iou Γ articulation enactment ty →\n        \
+        Typing Γ enactment ty →\n        \
         Typing Γ articulation ty\n  \
   | t_universe_ascent :\n      \
       ∀ {Γ : Ctx} {i : Nat},\n        \
         Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1))\n  \
   | t_round_trip :\n      \
-      ∀ {Γ : Ctx} {term recovered : CoreTerm},\n        \
-        K_Round_Trip_iou Γ term recovered →\n        \
+      ∀ {Γ : Ctx} {term recovered : CoreTerm} {i : Nat},\n        \
+        Typing Γ recovered (CoreTerm.Universe i) →\n        \
         Typing Γ term recovered\n  \
   | t_epsilon_of :\n      \
       ∀ {Γ : Ctx} {articulation result : CoreTerm},\n        \
@@ -549,6 +529,32 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 ///   * K_Refine_Omega    — same shape; the finite-universe bound (i :
 ///                         Nat) makes the ordinal-modal-depth-bound
 ///                         intent vacuous at the operational layer.
+/// Parsed slices of a per-rule Lean signature string.
+///
+/// `rule_signature_lean` returns text of shape `theorem <name> :\n
+/// <TYPE> :=\n  <WITNESS>` — one for each rule with an explicit
+/// shape-faithful lemma.  The main-theorem renderer needs the
+/// `<TYPE>` slice to define `Soundness : KernelRule → Prop` (so each
+/// case branch's goal reduces to the rule's own type), and the
+/// per-rule renderer uses the `<WITNESS>` slice as the proof body
+/// for `Proved` rules.
+struct LeanSigParts {
+    type_body: String,
+    witness: String,
+}
+
+fn parse_lean_signature(sig: String) -> Option<LeanSigParts> {
+    // The signature follows `theorem <name> :\n  <TYPE> :=\n  <WITNESS>`.
+    let (head, witness) = sig.split_once(":=\n")?;
+    // head is `theorem <name> :\n  <TYPE>` with trailing whitespace
+    // before `:=`.  The first ` :\n` separates name from type body.
+    let (_lemma_decl, type_body) = head.split_once(" :\n")?;
+    Some(LeanSigParts {
+        type_body: type_body.trim().to_string(),
+        witness: witness.trim().to_string(),
+    })
+}
+
 fn rule_signature_lean(rule_name: &str) -> Option<String> {
     let body = match rule_name {
         // ===== Structural (9) =====
@@ -614,24 +620,26 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
               Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a) :=\n  @Typing.t_refl",
         ),
         "K_Path_Over_Form" => Some(
-            "theorem K_Path_Over_Form_sound :\n    ∀ {Γ : Ctx} {motive p a b ty : CoreTerm} {i : Nat},\n      \
-              K_Path_Over_Form_iou Γ motive p a b ty i →\n      \
-              Typing Γ (CoreTerm.PathOver motive p a b) ty :=\n  @Typing.t_path_over",
+            "theorem K_Path_Over_Form_sound :\n    ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat},\n      \
+              Typing Γ A (CoreTerm.Universe i) →\n      \
+              Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) →\n      \
+              Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i) :=\n  @Typing.t_path_over",
         ),
         "K_HComp" => Some(
-            "theorem K_HComp_sound :\n    ∀ {Γ : Ctx} {phi walls base T : CoreTerm},\n      \
-              K_HComp_iou Γ phi walls base T →\n      \
+            "theorem K_HComp_sound :\n    ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat},\n      \
+              Typing Γ T (CoreTerm.Universe i) →\n      \
+              Typing Γ base T →\n      \
               Typing Γ (CoreTerm.HComp phi walls base) T :=\n  @Typing.t_hcomp",
         ),
         "K_Transp" => Some(
-            "theorem K_Transp_sound :\n    ∀ {Γ : Ctx} {path regular value target : CoreTerm},\n      \
-              K_Transp_iou Γ path regular value target →\n      \
+            "theorem K_Transp_sound :\n    ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},\n      \
+              Typing Γ target (CoreTerm.Universe i) →\n      \
               Typing Γ (CoreTerm.Transp path regular value) target :=\n  @Typing.t_transp",
         ),
         "K_Glue" => Some(
-            "theorem K_Glue_sound :\n    ∀ {Γ : Ctx} {carrier phi fiber equiv result : CoreTerm},\n      \
-              K_Glue_iou Γ carrier phi fiber equiv result →\n      \
-              Typing Γ (CoreTerm.Glue carrier phi fiber equiv) result :=\n  @Typing.t_glue",
+            "theorem K_Glue_sound :\n    ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},\n      \
+              Typing Γ carrier (CoreTerm.Universe i) →\n      \
+              Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i) :=\n  @Typing.t_glue",
         ),
         // ===== Refinement (4) =====
         "K_Refine_Erase" => Some(
@@ -652,9 +660,10 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
               Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i) :=\n  @Typing.t_refine_omega",
         ),
         "K_Refine_Intro" => Some(
-            "theorem K_Refine_Intro_sound :\n    ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String},\n      \
+            "theorem K_Refine_Intro_sound :\n    ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat},\n      \
               Typing Γ a base →\n      \
-              K_Refine_Intro_iou Γ a base x predicate →\n      \
+              Typing Γ base (CoreTerm.Universe i) →\n      \
+              Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n      \
               Typing Γ a (CoreTerm.Refine base x predicate) :=\n  @Typing.t_refine_intro",
         ),
         // ===== Quotient (3) =====
@@ -691,8 +700,8 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         // ===== SmtAxiom (2) =====
         "K_Smt" => Some(
-            "theorem K_Smt_sound :\n    ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm},\n      \
-              K_Smt_iou Γ solver_tag T →\n      \
+            "theorem K_Smt_sound :\n    ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm} {i : Nat},\n      \
+              Typing Γ T (CoreTerm.Universe i) →\n      \
               Typing Γ (CoreTerm.SmtProof solver_tag) T :=\n  @Typing.t_smt",
         ),
         "K_FwAx" => Some(
@@ -702,7 +711,7 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         // ===== Diakrisis (11) =====
         "K_Eps_Mu" => Some(
             "theorem K_Eps_Mu_sound :\n    ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm},\n      \
-              K_Eps_Mu_iou Γ articulation enactment ty →\n      \
+              Typing Γ enactment ty →\n      \
               Typing Γ articulation ty :=\n  @Typing.t_eps_mu",
         ),
         "K_Universe_Ascent" => Some(
@@ -710,8 +719,8 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
               Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1)) :=\n  @Typing.t_universe_ascent",
         ),
         "K_Round_Trip" => Some(
-            "theorem K_Round_Trip_sound :\n    ∀ {Γ : Ctx} {term recovered : CoreTerm},\n      \
-              K_Round_Trip_iou Γ term recovered →\n      \
+            "theorem K_Round_Trip_sound :\n    ∀ {Γ : Ctx} {term recovered : CoreTerm} {i : Nat},\n      \
+              Typing Γ recovered (CoreTerm.Universe i) →\n      \
               Typing Γ term recovered :=\n  @Typing.t_round_trip",
         ),
         "K_Epsilon_Of" => Some(

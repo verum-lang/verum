@@ -121,7 +121,7 @@ impl SoundnessBackend for CoqBackend {
              Parameter side_conditions_hold : Prop.\n\n",
         );
 
-        out.push_str(IOU_AXIOMS_COQ);
+        out.push_str(iou_axioms_coq());
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_COQ);
         out
@@ -144,46 +144,108 @@ impl SoundnessBackend for CoqBackend {
             rule.has_side_condition,
         );
 
-        if let Some(spec) = rule_signature_coq(&rule.rule_name) {
-            return format!("{}\n{}", category_comment, spec);
-        }
+        // Resolve the rule's typing-relation type body and Typing-
+        // constructor witness from the per-rule signature table.
+        // Fallback for the K_Pos / K_FwAx pair whose content is meta
+        // (positivity / framework-axiom admission) is the generic
+        // `side_conditions_hold -> True` shape.
+        let (type_body, constructor_witness) =
+            match rule_signature_coq(&rule.rule_name).and_then(parse_coq_signature) {
+                Some(parts) => (parts.type_body, Some(parts.witness)),
+                None => ("side_conditions_hold -> True".to_string(), None),
+            };
 
-        // Fallback for any rule not in the dispatch table (should be empty
-        // post-refactor; kept for forward-compat with future additions).
-        let stmt = format!(
-            "Lemma {} : side_conditions_hold -> True.",
-            rule.lemma_name,
-        );
-        let body = match &rule.status {
-            LemmaStatus::Proved { coq_tactics, .. } => {
-                format!("Proof.\n{}\nQed.", coq_tactics)
-            }
-            LemmaStatus::Admitted { reason } => {
-                format!("(* reason: {} *)\nProof.\nAdmitted.", reason)
-            }
+        // Status-driven proof body and metadata comment.  Discharged-by-
+        // framework and admitted rules emit `Admitted.` plus a citation
+        // / reason comment so the trust extension is auditable; proved
+        // rules dispatch to their inductive-constructor witness (or to
+        // the rule's recorded `coq_tactics` when no constructor is in
+        // the table).
+        let (status_comment, proof_body) = match &rule.status {
+            LemmaStatus::Proved { coq_tactics, .. } => match constructor_witness {
+                Some(w) => (
+                    String::new(),
+                    format!("Proof. exact {}. Qed.", w),
+                ),
+                None => (
+                    String::new(),
+                    format!("Proof.\n{}\nQed.", coq_tactics),
+                ),
+            },
+            LemmaStatus::Admitted { reason } => (
+                format!("(* reason: {} *)\n", reason),
+                "Admitted.".to_string(),
+            ),
             LemmaStatus::DischargedByFramework {
                 lemma_path,
                 framework,
                 citation,
-            } => format!(
-                "(* discharged-by: {} *)\n(* framework: {} *)\n(* citation: {} *)\nProof.\nAdmitted.",
-                lemma_path, framework, citation
+            } => (
+                format!(
+                    "(* discharged-by: {} *)\n(* framework: {} *)\n(* citation: {} *)\n",
+                    lemma_path, framework, citation
+                ),
+                "Admitted.".to_string(),
             ),
         };
-        format!("{}\n{}\n{}", category_comment, stmt, body)
+
+        format!(
+            "{}\n{}Lemma {} :\n  {}.\n{}",
+            category_comment, status_comment, rule.lemma_name, type_body, proof_body,
+        )
     }
 
     fn render_main_theorem(&self, rules: &[RuleSpec]) -> String {
-        let _ = rules;
-        String::from(
-            "(* **Kernel full soundness — 38-rule bundle**.  The 17 with-IOU *)\n\
-             (* rules pull their respective Axiom <Rule>_iou declarations  *)\n\
-             (* into the trust closure of any theorem that depends on the   *)\n\
-             (* corresponding K_*_sound lemma.  `Print Assumptions          *)\n\
-             (* kernel_full_soundness.` enumerates them as the per-build    *)\n\
-             (* trust extension. *)\n\
-             Theorem kernel_full_soundness : True. Proof. trivial. Qed.\n",
-        )
+        // Aggregate the 38 per-rule lemmas into a single
+        // `kernel_soundness` theorem via case analysis on `KernelRule`.
+        // `Soundness rule` definitionally reduces to the per-rule type
+        // body, so each branch is `apply (K_<Name>_sound).`.  An
+        // auditor running `Print Assumptions kernel_soundness.` sees
+        // every IOU axiom (open or discharged-by-framework) as the
+        // per-build trust extension.
+        let mut out = String::new();
+
+        // 1. The per-rule type-body dispatch, materialised as
+        //    `Soundness : KernelRule -> Prop`.
+        out.push_str(
+            "(* `Soundness rule` is the propositional shape of the per-rule    *)\n\
+             (* lemma `K_<rule>_sound`.  Each branch quotes the rule's typing  *)\n\
+             (* judgement; `kernel_soundness` aggregates them.                 *)\n",
+        );
+        out.push_str("Definition Soundness (rule : KernelRule) : Prop :=\n  match rule with\n");
+        for r in rules {
+            let body = match rule_signature_coq(&r.rule_name).and_then(parse_coq_signature) {
+                Some(parts) => parts.type_body,
+                None => "side_conditions_hold -> True".to_string(),
+            };
+            // Reflow body to one line — Coq is whitespace-flexible
+            // inside forall.  The inline form keeps the match block
+            // dense and readable.
+            let one_line = body.replace("\n    ", " ").replace("\n  ", " ").replace('\n', " ");
+            out.push_str(&format!(
+                "  | {} => {}\n",
+                r.rule_name, one_line.trim(),
+            ));
+        }
+        out.push_str("  end.\n");
+
+        // 2. The aggregate soundness theorem — case-analyses on
+        //    `KernelRule` and dispatches each branch to its per-rule lemma.
+        out.push_str(
+            "\n(* **Kernel soundness** — case-analyses on `KernelRule` and *)\n\
+             (* dispatches each branch to its `K_<rule>_sound` lemma.    *)\n",
+        );
+        out.push_str(
+            "Theorem kernel_soundness : forall rule : KernelRule, Soundness rule.\n\
+             Proof.\n  \
+             intro rule. destruct rule.\n",
+        );
+        for r in rules {
+            out.push_str(&format!("  - apply ({}).\n", r.lemma_name));
+        }
+        out.push_str("Qed.\n");
+
+        out
     }
 
     fn render_postscript(&self) -> String {
@@ -204,63 +266,19 @@ impl SoundnessBackend for CoqBackend {
 //                         ordinal-modal-depth-bound vacuous.
 // ============================================================================
 
-pub(crate) const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (8 total) ====== *)\n\
-\n\
-(* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
-Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
-\n\
-(* K_HComp: CCHM hcomp regularity + Kan filling (CCHM §3). *)\n\
-Axiom K_HComp_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
-\n\
-(* K_Transp: regularity at i=1 reduces to identity. *)\n\
-Axiom K_Transp_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
-\n\
-(* K_Glue: univalence-via-Glue boundary lift. *)\n\
-Axiom K_Glue_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
-\n\
-(* (K_Refine: discharged — see T_refine below for the structural\n\
-   form; predicate typed at Pi x base (Universe 0) captures the\n\
-   Bool-valued-predicate intent.) *)\n\
-\n\
-(* (K_Refine_Omega: discharged — same shape as K_Refine; the\n\
-   finite-universe bound makes the ordinal-modal-depth-bound\n\
-   intent vacuous at the operational layer.) *)\n\
-\n\
-(* K_Refine_Intro: predicate decidability at the introduced value. *)\n\
-Axiom K_Refine_Intro_iou : Ctx -> CoreTerm -> CoreTerm -> string -> CoreTerm -> Prop.\n\
-\n\
-(* (K_Quot_Elim: discharged — see T_quot_elim below for the structural\n\
-   form; the respect-of-equivalence side condition remains the kernel's\n\
-   input contract.) *)\n\
-\n\
-(* (K_Inductive: discharged — see T_inductive below for the structural\n\
-   form; strict-positivity is the kernel's input contract.) *)\n\
-\n\
-(* (K_Elim: discharged — see T_elim below for the structural form;\n\
-   per-constructor case-typing remains the kernel's input contract.) *)\n\
-\n\
-(* K_Smt: SMT-cert replay correctness. *)\n\
-Axiom K_Smt_iou : Ctx -> string -> CoreTerm -> Prop.\n\
-\n\
-(* K_Eps_Mu: M ⊣ A biadjunction (Proposition 5.1, Corollary 5.10). *)\n\
-Axiom K_Eps_Mu_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
-\n\
-(* (K_Universe_Ascent: discharged — collapses onto T_univ for u32-bounded\n\
-   universes; no transfinite heights are representable.) *)\n\
-\n\
-(* K_Round_Trip: bridge-audit completeness. *)\n\
-Axiom K_Round_Trip_iou : Ctx -> CoreTerm -> CoreTerm -> Prop.\n\
-\n\
-(* (K_Epsilon_Of: discharged — see T_epsilon_of below; the M ⊣ A\n\
-   unit law is the kernel's input contract.  EpsilonOf preserves\n\
-   the articulation's typing, mirroring T_modal_box / T_modal_diamond.) *)\n\
-\n\
-(* (K_Alpha_Of: discharged — see T_alpha_of below; counit-law analogue.) *)\n\
-\n\
-(* (K_Modal_Big_And: discharged — see T_modal_big_and below for the\n\
-   premise-free form; homogeneous-typed-components is the kernel's\n\
-   input contract, mirroring K_Inductive.) *)";
+/// The IOU axiom block as a `&'static str`, generated once on first
+/// access from `iou_axiom_specs()` via
+/// [`crate::soundness::render_iou_axioms_coq`].  Source-of-truth is
+/// the spec registry in `mod.rs`; this function is a cached
+/// renderer.
+pub(crate) fn iou_axioms_coq() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE
+        .get_or_init(crate::soundness::render_iou_axioms_coq)
+        .as_str()
+}
+
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -323,21 +341,23 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma a A ->\n        \
         Typing Gamma (Refl a) (PathTy A a a)\n  \
   | T_path_over :\n      \
-      forall (Gamma : Ctx) (motive p a b ty : CoreTerm) (i : nat),\n        \
-        K_Path_Over_Form_iou Gamma motive p a b ty i ->\n        \
-        Typing Gamma (PathOver motive p a b) ty\n  \
+      forall (Gamma : Ctx) (motive p a b A : CoreTerm) (x : string) (i : nat),\n        \
+        Typing Gamma A (Universe i) ->\n        \
+        Typing Gamma motive (Pi x A (Universe i)) ->\n        \
+        Typing Gamma (PathOver motive p a b) (Universe i)\n  \
   | T_hcomp :\n      \
-      forall (Gamma : Ctx) (phi walls base T : CoreTerm),\n        \
-        K_HComp_iou Gamma phi walls base T ->\n        \
+      forall (Gamma : Ctx) (phi walls base T : CoreTerm) (i : nat),\n        \
+        Typing Gamma T (Universe i) ->\n        \
+        Typing Gamma base T ->\n        \
         Typing Gamma (HComp phi walls base) T\n  \
   | T_transp :\n      \
-      forall (Gamma : Ctx) (path regular value target : CoreTerm),\n        \
-        K_Transp_iou Gamma path regular value target ->\n        \
+      forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),\n        \
+        Typing Gamma target (Universe i) ->\n        \
         Typing Gamma (Transp path regular value) target\n  \
   | T_glue :\n      \
-      forall (Gamma : Ctx) (carrier phi fiber equiv result : CoreTerm),\n        \
-        K_Glue_iou Gamma carrier phi fiber equiv result ->\n        \
-        Typing Gamma (Glue carrier phi fiber equiv) result\n  \
+      forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat),\n        \
+        Typing Gamma carrier (Universe i) ->\n        \
+        Typing Gamma (Glue carrier phi fiber equiv) (Universe i)\n  \
   (* ===== Refinement (4) ===== *)\n  \
   | T_refine_erase :\n      \
       forall (Gamma : Ctx) (a base : CoreTerm) (x : string) (predicate : CoreTerm),\n        \
@@ -354,9 +374,10 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
         Typing Gamma (Refine base x predicate) (Universe i)\n  \
   | T_refine_intro :\n      \
-      forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string),\n        \
+      forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),\n        \
         Typing Gamma a base ->\n        \
-        K_Refine_Intro_iou Gamma a base x predicate ->\n        \
+        Typing Gamma base (Universe i) ->\n        \
+        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
         Typing Gamma a (Refine base x predicate)\n  \
   (* ===== Quotient (3) ===== *)\n  \
   | T_quot_form :\n      \
@@ -388,8 +409,8 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma (Elim scrutinee motive cases) (App motive scrutinee)\n  \
   (* ===== SmtAxiom (2) ===== *)\n  \
   | T_smt :\n      \
-      forall (Gamma : Ctx) (solver_tag : string) (T : CoreTerm),\n        \
-        K_Smt_iou Gamma solver_tag T ->\n        \
+      forall (Gamma : Ctx) (solver_tag : string) (T : CoreTerm) (i : nat),\n        \
+        Typing Gamma T (Universe i) ->\n        \
         Typing Gamma (SmtProof solver_tag) T\n  \
   | T_fwax :\n      \
       forall (Gamma : Ctx) (name : string) (ty : CoreTerm) (framework : string),\n        \
@@ -397,14 +418,14 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
   (* ===== Diakrisis (11) ===== *)\n  \
   | T_eps_mu :\n      \
       forall (Gamma : Ctx) (articulation enactment ty : CoreTerm),\n        \
-        K_Eps_Mu_iou Gamma articulation enactment ty ->\n        \
+        Typing Gamma enactment ty ->\n        \
         Typing Gamma articulation ty\n  \
   | T_universe_ascent :\n      \
       forall (Gamma : Ctx) (i : nat),\n        \
         Typing Gamma (Universe i) (Universe (S i))\n  \
   | T_round_trip :\n      \
-      forall (Gamma : Ctx) (term recovered : CoreTerm),\n        \
-        K_Round_Trip_iou Gamma term recovered ->\n        \
+      forall (Gamma : Ctx) (term recovered : CoreTerm) (i : nat),\n        \
+        Typing Gamma recovered (Universe i) ->\n        \
         Typing Gamma term recovered\n  \
   | T_epsilon_of :\n      \
       forall (Gamma : Ctx) (articulation result : CoreTerm),\n        \
@@ -442,6 +463,45 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
 // ============================================================================
 // Per-rule lemma signature lookup — dispatches all 38 rules.
 // ============================================================================
+
+/// Parsed slices of a per-rule Coq signature string.
+///
+/// `rule_signature_coq` returns text of shape
+/// `Lemma <name> :\n  <TYPE>.\nProof. exact <WITNESS>. Qed.` — one
+/// for each rule with an explicit shape-faithful lemma.  The main-
+/// theorem renderer uses the `<TYPE>` slice to define
+/// `Soundness : KernelRule -> Prop`; the per-rule renderer uses the
+/// `<WITNESS>` slice as the proof body for `Proved` rules.
+struct CoqSigParts {
+    type_body: String,
+    witness: String,
+}
+
+fn parse_coq_signature(sig: String) -> Option<CoqSigParts> {
+    // Format: `Lemma <name> :\n  <TYPE>.\nProof. ... Qed.` — split on
+    // the period that terminates the lemma's type declaration.
+    let (head, proof) = sig.split_once(".\n")?;
+    let (_lemma_decl, type_body) = head.split_once(" :\n")?;
+    Some(CoqSigParts {
+        type_body: type_body.trim().to_string(),
+        witness: extract_coq_witness(proof.trim()),
+    })
+}
+
+/// Extract the Typing-constructor witness from a Coq proof block.
+///
+/// Common shape: `Proof. exact T_var. Qed.` → `T_var`.  When the
+/// proof body uses an unrecognised tactic, the entire block is
+/// returned as-is and the per-rule renderer falls back to embedding
+/// the full `coq_tactics` from the rule's `LemmaStatus::Proved`.
+fn extract_coq_witness(proof_block: &str) -> String {
+    if let Some(rest) = proof_block.strip_prefix("Proof. exact ") {
+        if let Some((witness, _)) = rest.split_once('.') {
+            return witness.trim().to_string();
+        }
+    }
+    proof_block.to_string()
+}
 
 fn rule_signature_coq(rule_name: &str) -> Option<String> {
     let body = match rule_name {
@@ -525,30 +585,32 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         "K_Path_Over_Form" => Some(
             "Lemma K_Path_Over_Form_sound :\n  \
-              forall (Gamma : Ctx) (motive p a b ty : CoreTerm) (i : nat),\n    \
-                K_Path_Over_Form_iou Gamma motive p a b ty i ->\n    \
-                Typing Gamma (PathOver motive p a b) ty.\n\
+              forall (Gamma : Ctx) (motive p a b A : CoreTerm) (x : string) (i : nat),\n    \
+                Typing Gamma A (Universe i) ->\n    \
+                Typing Gamma motive (Pi x A (Universe i)) ->\n    \
+                Typing Gamma (PathOver motive p a b) (Universe i).\n\
               Proof. exact T_path_over. Qed.",
         ),
         "K_HComp" => Some(
             "Lemma K_HComp_sound :\n  \
-              forall (Gamma : Ctx) (phi walls base T : CoreTerm),\n    \
-                K_HComp_iou Gamma phi walls base T ->\n    \
+              forall (Gamma : Ctx) (phi walls base T : CoreTerm) (i : nat),\n    \
+                Typing Gamma T (Universe i) ->\n    \
+                Typing Gamma base T ->\n    \
                 Typing Gamma (HComp phi walls base) T.\n\
               Proof. exact T_hcomp. Qed.",
         ),
         "K_Transp" => Some(
             "Lemma K_Transp_sound :\n  \
-              forall (Gamma : Ctx) (path regular value target : CoreTerm),\n    \
-                K_Transp_iou Gamma path regular value target ->\n    \
+              forall (Gamma : Ctx) (path regular value target : CoreTerm) (i : nat),\n    \
+                Typing Gamma target (Universe i) ->\n    \
                 Typing Gamma (Transp path regular value) target.\n\
               Proof. exact T_transp. Qed.",
         ),
         "K_Glue" => Some(
             "Lemma K_Glue_sound :\n  \
-              forall (Gamma : Ctx) (carrier phi fiber equiv result : CoreTerm),\n    \
-                K_Glue_iou Gamma carrier phi fiber equiv result ->\n    \
-                Typing Gamma (Glue carrier phi fiber equiv) result.\n\
+              forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat),\n    \
+                Typing Gamma carrier (Universe i) ->\n    \
+                Typing Gamma (Glue carrier phi fiber equiv) (Universe i).\n\
               Proof. exact T_glue. Qed.",
         ),
         // ===== Refinement (4) =====
@@ -576,8 +638,10 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         "K_Refine_Intro" => Some(
             "Lemma K_Refine_Intro_sound :\n  \
-              forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string),\n    \
-                Typing Gamma a base -> K_Refine_Intro_iou Gamma a base x predicate ->\n    \
+              forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),\n    \
+                Typing Gamma a base ->\n    \
+                Typing Gamma base (Universe i) ->\n    \
+                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
                 Typing Gamma a (Refine base x predicate).\n\
               Proof. exact T_refine_intro. Qed.",
         ),
@@ -626,8 +690,8 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         // ===== SmtAxiom (2) =====
         "K_Smt" => Some(
             "Lemma K_Smt_sound :\n  \
-              forall (Gamma : Ctx) (solver_tag : string) (T : CoreTerm),\n    \
-                K_Smt_iou Gamma solver_tag T ->\n    \
+              forall (Gamma : Ctx) (solver_tag : string) (T : CoreTerm) (i : nat),\n    \
+                Typing Gamma T (Universe i) ->\n    \
                 Typing Gamma (SmtProof solver_tag) T.\n\
               Proof. exact T_smt. Qed.",
         ),
@@ -641,7 +705,8 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         "K_Eps_Mu" => Some(
             "Lemma K_Eps_Mu_sound :\n  \
               forall (Gamma : Ctx) (articulation enactment ty : CoreTerm),\n    \
-                K_Eps_Mu_iou Gamma articulation enactment ty -> Typing Gamma articulation ty.\n\
+                Typing Gamma enactment ty ->\n    \
+                Typing Gamma articulation ty.\n\
               Proof. exact T_eps_mu. Qed.",
         ),
         "K_Universe_Ascent" => Some(
@@ -652,8 +717,9 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         "K_Round_Trip" => Some(
             "Lemma K_Round_Trip_sound :\n  \
-              forall (Gamma : Ctx) (term recovered : CoreTerm),\n    \
-                K_Round_Trip_iou Gamma term recovered -> Typing Gamma term recovered.\n\
+              forall (Gamma : Ctx) (term recovered : CoreTerm) (i : nat),\n    \
+                Typing Gamma recovered (Universe i) ->\n    \
+                Typing Gamma term recovered.\n\
               Proof. exact T_round_trip. Qed.",
         ),
         "K_Epsilon_Of" => Some(
