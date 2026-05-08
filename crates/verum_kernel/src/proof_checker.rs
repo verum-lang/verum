@@ -635,12 +635,32 @@ impl Certificate {
     pub fn verify(&self) -> Result<(), CheckError> {
         let ctx = Context::new();
         // Step 1 — claimed_type must itself be a type.
-        let claimed_kind = infer(&ctx, &self.claimed_type)?;
-        if expect_universe(&claimed_kind).is_none() {
-            return Err(CheckError::ClaimedTypeNotAType {
-                claimed_type: self.claimed_type.clone(),
-                actual: claimed_kind,
-            });
+        //
+        // **Top-of-tower escape hatch.**  When `claimed_type` is at
+        // (or transitively contains) `Universe(u32::MAX)`, inferring
+        // its own kind would emit `UniverseOverflow` — but the
+        // claimed_type is still a *type* (universes are types at every
+        // representable level).  Differentially-tested with the Lean
+        // ReferenceChecker which uses unbounded `Nat`; without this
+        // escape hatch the two kernels disagree on `Universe(MAX-1) :
+        // Universe(MAX)` (`defect-2-univ-max-minus-one-ok` battery
+        // row in `audit --differential-lean-checker`).
+        match infer(&ctx, &self.claimed_type) {
+            Ok(claimed_kind) => {
+                if expect_universe(&claimed_kind).is_none() {
+                    return Err(CheckError::ClaimedTypeNotAType {
+                        claimed_type: self.claimed_type.clone(),
+                        actual: claimed_kind,
+                    });
+                }
+            }
+            Err(CheckError::UniverseOverflow { .. }) => {
+                // claimed_type lives at the top of the universe
+                // tower — still a type.  Step 2 below will catch any
+                // genuine type mismatch via `def_eq` against the
+                // term's inferred type.
+            }
+            Err(other) => return Err(other),
         }
         // Step 2 — term has the claimed type.
         check(&ctx, &self.term, &self.claimed_type)

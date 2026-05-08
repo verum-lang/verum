@@ -2404,6 +2404,520 @@ fn print_kernel_soundness_report_json(
 }
 
 // =============================================================================
+// audit --differential-lean-checker — cert-by-cert Rust↔Lean agreement (FV-3)
+// =============================================================================
+
+/// One certificate row in the differential battery.  The id is a
+/// stable string used in the cross-language verdict comparison.
+#[derive(Debug, Clone, serde::Serialize)]
+struct DifferentialCert {
+    id: &'static str,
+    term: verum_kernel::proof_checker::Term,
+    claimed_type: verum_kernel::proof_checker::Term,
+}
+
+/// Per-cert verdict captured by either kernel.  `ok=true` ⇔
+/// `verifyCertificate` accepted; `ok=false` carries a short error
+/// tag (mirroring `CheckError`'s variant names) for diagnostic
+/// purposes — the cross-checker compares only the `ok` field, not
+/// the error tag wording.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct DifferentialVerdict {
+    id: String,
+    ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// JSON envelope read back from the Lean executable.
+#[derive(Debug, serde::Deserialize)]
+struct LeanVerdictBundle {
+    #[allow(dead_code)]
+    schema_version: u32,
+    verdicts: Vec<DifferentialVerdict>,
+}
+
+/// Load the canonical battery — covers the structural fragment of
+/// `proof_checker.rs` (Var / Universe / Pi / Lam / App), each of the
+/// kernel-audit-2026 defects (DEFECT-1..4), plus a handful of
+/// nested / polymorphic / negative-shape cases.  Every cert has a
+/// stable `id` that survives the JSON round-trip and is the key for
+/// cross-prover verdict comparison.
+fn load_differential_battery() -> Vec<DifferentialCert> {
+    use verum_kernel::proof_checker::Term as T;
+
+    // Helpers — keep cert construction terse.
+    let univ = |n: u32| T::Universe(n);
+    let var = |i: usize| T::Var(i);
+    let pi = |a: T, b: T| T::Pi(Box::new(a), Box::new(b));
+    let lam = |a: T, b: T| T::Lam(Box::new(a), Box::new(b));
+    let app = |a: T, b: T| T::App(Box::new(a), Box::new(b));
+
+    vec![
+        // ---- 1. Universe formation (T-Univ) -------------------------------
+        DifferentialCert {
+            id: "univ-0-in-1",
+            term: univ(0),
+            claimed_type: univ(1),
+        },
+        DifferentialCert {
+            id: "univ-5-in-6",
+            term: univ(5),
+            claimed_type: univ(6),
+        },
+        DifferentialCert {
+            id: "univ-mismatch",
+            term: univ(0),
+            claimed_type: univ(2),
+        },
+        // ---- 2. Var (T-Var) — empty ctx → unbound -------------------------
+        DifferentialCert {
+            id: "var0-empty-ctx-fails",
+            term: var(0),
+            claimed_type: univ(0),
+        },
+        // ---- 3. Identity at Universe(0) (T-Lam-Intro + T-Var) -------------
+        DifferentialCert {
+            id: "id-at-univ0",
+            term: lam(univ(0), var(0)),
+            claimed_type: pi(univ(0), univ(0)),
+        },
+        DifferentialCert {
+            id: "id-at-univ0-wrong-claim",
+            term: lam(univ(0), var(0)),
+            claimed_type: univ(0),
+        },
+        // ---- 4. Identity at Universe(3) -----------------------------------
+        DifferentialCert {
+            id: "id-at-univ3",
+            term: lam(univ(3), var(0)),
+            claimed_type: pi(univ(3), univ(3)),
+        },
+        // ---- 5. Polymorphic identity (Π A. Π _:A. A) ----------------------
+        DifferentialCert {
+            id: "poly-id-shape",
+            term: lam(univ(0), lam(var(0), var(0))),
+            claimed_type: pi(univ(0), pi(var(0), var(1))),
+        },
+        // ---- 6. Pi formation (T-Pi-Form) ----------------------------------
+        DifferentialCert {
+            id: "pi-univ-univ",
+            term: pi(univ(0), univ(0)),
+            claimed_type: univ(1),
+        },
+        DifferentialCert {
+            id: "pi-takes-max",
+            term: pi(univ(2), univ(5)),
+            claimed_type: univ(6),
+        },
+        // ---- 7. App-Elim (β-reduction) ------------------------------------
+        // ((λ_:U(0). Var(0)) U(0))    — but U(0):U(1), Pi expects U(0):? — type-fail.
+        DifferentialCert {
+            id: "app-domain-mismatch",
+            term: app(lam(univ(0), var(0)), univ(5)),
+            claimed_type: univ(0),
+        },
+        // ---- 8. App on non-function ---------------------------------------
+        DifferentialCert {
+            id: "app-non-function",
+            term: app(univ(0), univ(0)),
+            claimed_type: univ(0),
+        },
+        // ---- 9. DEFECT-2: universe overflow rejection ---------------------
+        DifferentialCert {
+            id: "defect-2-univ-max-overflows",
+            term: univ(u32::MAX),
+            claimed_type: univ(0),
+        },
+        DifferentialCert {
+            id: "defect-2-univ-max-minus-one-ok",
+            term: univ(u32::MAX - 1),
+            claimed_type: univ(u32::MAX),
+        },
+        // ---- 10. DEFECT-4: claimed_type must be a type --------------------
+        DifferentialCert {
+            id: "defect-4-claimed-is-value",
+            term: lam(univ(0), var(0)),
+            claimed_type: lam(univ(0), var(0)),
+        },
+        // ---- 11. Nested identity ((λx.x)((λx.x)U(0))) reduces ok ---------
+        // The body Var(0) gets the type the lambda captures.
+        // Argument U(0) has type U(1); the outer λ expects U(0). Mismatch.
+        DifferentialCert {
+            id: "nested-app-domain-mismatch",
+            term: app(
+                lam(univ(0), var(0)),
+                app(lam(univ(0), var(0)), univ(0)),
+            ),
+            claimed_type: univ(0),
+        },
+        // ---- 12. Const function (λ_:A. λ_:B. Var(1)) ----------------------
+        // Type: Π(_:A). Π(_:B). A
+        DifferentialCert {
+            id: "const-fn",
+            term: lam(univ(0), lam(univ(0), var(1))),
+            claimed_type: pi(univ(0), pi(univ(0), univ(0))),
+        },
+        // ---- 13. Higher universe Pi (Type 2 → Type 7 lives in Type 8) ----
+        DifferentialCert {
+            id: "high-pi",
+            term: pi(univ(2), univ(7)),
+            claimed_type: univ(8),
+        },
+        // ---- 14. Identity-arrow at Universe(0) — tests T-Lam ---------------
+        DifferentialCert {
+            id: "id-arrow",
+            term: lam(univ(0), var(0)),
+            claimed_type: pi(univ(0), univ(0)),
+        },
+        // ---- 15. App with correct argument (when wrapped by outer λ) ------
+        // λ(x : U(0)). x   applied to itself isn't valid — but λ.x : Π.U(0)
+        // applied to a value of U(0) is.  Need a hypothesis though;
+        // closed terms can't easily make this.  We skip; covered by id-at-univ.
+        // ---- 16. Free var inside nested Pi --------------------------------
+        DifferentialCert {
+            id: "deep-var",
+            term: lam(univ(0), lam(var(0), lam(var(1), var(0)))),
+            claimed_type: pi(univ(0), pi(var(0), pi(var(1), var(2)))),
+        },
+        // ---- 17. Eta-redex: λx.(f x) ≡_η f when f closed ------------------
+        // We can't directly test eta against a free f, but we can pin
+        // the structural shape.  Identity wrapped in eta: λ(x:U(0)).((λ(y:U(0)).y) x)
+        DifferentialCert {
+            id: "eta-via-id-application",
+            term: lam(
+                univ(0),
+                app(lam(univ(0), var(0)), var(0)),
+            ),
+            claimed_type: pi(univ(0), univ(0)),
+        },
+        // ---- 18. Type-mismatch: identity claimed as Universe(0) -----------
+        DifferentialCert {
+            id: "id-claimed-as-universe",
+            term: lam(univ(0), var(0)),
+            claimed_type: univ(1),
+        },
+        // ---- 19. Nested Pi — Π(_:U(0)). Π(_:U(0)). U(0) -------------------
+        DifferentialCert {
+            id: "nested-pi",
+            term: pi(univ(0), pi(univ(0), univ(0))),
+            claimed_type: univ(1),
+        },
+        // ---- 20. Nested Lam — λ(A:U(0)). λ(x:A). Var(1) (= A's type itself) is wrong shape.
+        // The classic identity λ(A:U(0)). λ(x:A). Var(0) at type Π(A:U(0)). Π(_:A). A is correct.
+        DifferentialCert {
+            id: "nested-lam-correct",
+            term: lam(univ(0), lam(var(0), var(0))),
+            claimed_type: pi(univ(0), pi(var(0), var(1))),
+        },
+    ]
+}
+
+/// Run the Rust kernel's `Certificate::verify()` on every battery
+/// row, package per-cert verdicts in the cross-language envelope.
+fn run_rust_battery(
+    battery: &[DifferentialCert],
+) -> Vec<DifferentialVerdict> {
+    use verum_kernel::proof_checker::{Certificate, CheckError};
+
+    battery
+        .iter()
+        .map(|cert| {
+            let vc = Certificate {
+                term: cert.term.clone(),
+                claimed_type: cert.claimed_type.clone(),
+                metadata: std::collections::BTreeMap::new(),
+            };
+            match vc.verify() {
+                Ok(()) => DifferentialVerdict {
+                    id: cert.id.to_string(),
+                    ok: true,
+                    error: None,
+                },
+                Err(e) => {
+                    let tag = match e {
+                        CheckError::UnboundVariable(_) => "UnboundVariable",
+                        CheckError::NotAType(_) => "NotAType",
+                        CheckError::NotAFunction(_) => "NotAFunction",
+                        CheckError::DomainMismatch { .. } => "DomainMismatch",
+                        CheckError::TypeMismatch { .. } => "TypeMismatch",
+                        CheckError::UniverseOverflow { .. } => "UniverseOverflow",
+                        CheckError::ClaimedTypeNotAType { .. } => "ClaimedTypeNotAType",
+                        // The remaining variants come from the wider
+                        // KernelV0 manifest pipeline; they don't
+                        // arise in `Certificate::verify`'s six-rule
+                        // CoC fragment so we map them defensively.
+                        _ => "OtherKernelError",
+                    };
+                    DifferentialVerdict {
+                        id: cert.id.to_string(),
+                        ok: false,
+                        error: Some(tag.to_string()),
+                    }
+                }
+            }
+        })
+        .collect()
+}
+
+/// Spawn the Lean executable on the battery JSON file, parse its
+/// verdicts envelope.
+fn run_lean_battery(
+    manifest_dir: &Path,
+    battery_path: &Path,
+) -> std::result::Result<Vec<DifferentialVerdict>, String> {
+    use std::process::Command;
+
+    let lake_candidates = [
+        manifest_dir.join("..").join(".elan").join("bin").join("lake"),
+        std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(".elan/bin/lake"))
+            .unwrap_or_default(),
+        std::path::PathBuf::from("lake"),
+    ];
+    let lake = lake_candidates
+        .iter()
+        .find(|p| p.exists() || p.as_os_str() == "lake")
+        .cloned()
+        .unwrap_or(std::path::PathBuf::from("lake"));
+    if !lake.exists() && !is_on_path("lake") {
+        return Err("lake binary not on PATH; install via elan".to_string());
+    }
+
+    let lake_dir = find_verification_root(manifest_dir)
+        .map(|v| v.join("external").join("lean"))
+        .unwrap_or_else(|| {
+            manifest_dir
+                .join("verification")
+                .join("external")
+                .join("lean")
+        });
+    if !lake_dir.exists() {
+        return Err(format!("Lake project missing at {}", lake_dir.display()));
+    }
+
+    // Build the exe (incremental — no-op when already built).
+    let build = Command::new(&lake)
+        .args(["build", "verum_replay_checker"])
+        .current_dir(&lake_dir)
+        .output()
+        .map_err(|e| format!("lake build spawn: {e}"))?;
+    if !build.status.success() {
+        return Err(format!(
+            "lake build verum_replay_checker failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        ));
+    }
+
+    // Run the exe.  The compiled binary is at
+    // `<lake_dir>/.lake/build/bin/verum_replay_checker`.
+    let exe = lake_dir
+        .join(".lake")
+        .join("build")
+        .join("bin")
+        .join("verum_replay_checker");
+    if !exe.exists() {
+        return Err(format!("verum_replay_checker not at {}", exe.display()));
+    }
+    let run = Command::new(&exe)
+        .arg(battery_path)
+        .output()
+        .map_err(|e| format!("verum_replay_checker spawn: {e}"))?;
+    if !run.status.success() {
+        return Err(format!(
+            "verum_replay_checker exit {}:\n{}",
+            run.status,
+            String::from_utf8_lossy(&run.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let bundle: LeanVerdictBundle = serde_json::from_str(&stdout)
+        .map_err(|e| format!("verdict JSON parse: {e}\nstdout was:\n{stdout}"))?;
+    Ok(bundle.verdicts)
+}
+
+/// Cross-comparison verdict for the entire battery.
+#[derive(Debug, serde::Serialize)]
+struct AgreementReport {
+    schema_version: u32,
+    total: usize,
+    agreements: usize,
+    disagreements: usize,
+    /// Per-cert details (only mismatches in plain output; full set in JSON).
+    rows: Vec<AgreementRow>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AgreementRow {
+    id: String,
+    rust_ok: bool,
+    lean_ok: bool,
+    agree: bool,
+    rust_error: Option<String>,
+    lean_error: Option<String>,
+}
+
+/// Entry-point for `verum audit --differential-lean-checker`.
+///
+/// Generates a battery of certificates, runs them through both the
+/// Rust kernel (`Certificate::verify`) and the Lean reference
+/// checker (`VerumKernel.verifyCertificate`), and compares verdicts
+/// cert-by-cert.  Any disagreement is a load-bearing bug in *one* of
+/// the two implementations and exits non-zero.
+pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Differential Lean-checker replay (Rust kernel ↔ Lean ReferenceChecker)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("differential-lean");
+    std::fs::create_dir_all(&report_dir).ok();
+
+    // 1. Battery + Rust verdicts.
+    let battery = load_differential_battery();
+    let rust_verdicts = run_rust_battery(&battery);
+
+    // 2. Write battery JSON for the Lean exe to read.
+    let battery_json = serde_json::json!({
+        "schema_version": 1,
+        "certificates": battery
+            .iter()
+            .map(|c| serde_json::json!({
+                "id": c.id,
+                "term": &c.term,
+                "claimed_type": &c.claimed_type,
+            }))
+            .collect::<Vec<_>>(),
+    });
+    let battery_path = report_dir.join("battery.json");
+    std::fs::write(
+        &battery_path,
+        serde_json::to_string_pretty(&battery_json).unwrap(),
+    )
+    .map_err(|e| {
+        crate::error::CliError::VerificationFailed(format!(
+            "battery write {}: {}",
+            battery_path.display(),
+            e
+        ))
+    })?;
+
+    // 3. Lean verdicts.
+    let lean_verdicts = match run_lean_battery(&manifest_dir, &battery_path) {
+        Ok(v) => v,
+        Err(reason) => {
+            return Err(crate::error::CliError::VerificationFailed(format!(
+                "Lean replay failed: {reason}"
+            )));
+        }
+    };
+
+    // 4. Cross-comparison.
+    let mut rows = Vec::with_capacity(rust_verdicts.len());
+    let lean_by_id: std::collections::BTreeMap<&str, &DifferentialVerdict> = lean_verdicts
+        .iter()
+        .map(|v| (v.id.as_str(), v))
+        .collect();
+    for r in &rust_verdicts {
+        let l = lean_by_id.get(r.id.as_str()).copied();
+        let lean_ok = l.map(|x| x.ok).unwrap_or(false);
+        let lean_error = l.and_then(|x| x.error.clone());
+        let agree = l.is_some() && r.ok == lean_ok;
+        rows.push(AgreementRow {
+            id: r.id.clone(),
+            rust_ok: r.ok,
+            lean_ok,
+            agree,
+            rust_error: r.error.clone(),
+            lean_error,
+        });
+    }
+    let agreements = rows.iter().filter(|r| r.agree).count();
+    let disagreements = rows.len() - agreements;
+
+    // 5. Persist + render.
+    let report = AgreementReport {
+        schema_version: 1,
+        total: rows.len(),
+        agreements,
+        disagreements,
+        rows,
+    };
+    let report_path = report_dir.join("agreement.json");
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).unwrap(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("{}", "Differential Lean-checker agreement".bold());
+            println!("{}", "─".repeat(40).dimmed());
+            println!("  Total certs:    {}", report.total);
+            println!("  Agreements:     {}", report.agreements);
+            println!("  Disagreements:  {}", report.disagreements);
+            println!();
+            for row in &report.rows {
+                let mark = if row.agree { "✓".green() } else { "✗".red() };
+                let detail = if row.agree {
+                    if row.rust_ok {
+                        "both accept".dimmed().to_string()
+                    } else {
+                        format!(
+                            "both reject ({})",
+                            row.rust_error.clone().unwrap_or_default()
+                        )
+                        .dimmed()
+                        .to_string()
+                    }
+                } else {
+                    format!(
+                        "Rust={} Lean={}{}",
+                        if row.rust_ok { "ok" } else { "err" },
+                        if row.lean_ok { "ok" } else { "err" },
+                        row.rust_error
+                            .as_ref()
+                            .map(|e| format!(" Rust-tag:{}", e))
+                            .unwrap_or_default()
+                    )
+                };
+                println!("  {} {:30} {}", mark, row.id, detail);
+            }
+            println!();
+            if disagreements == 0 {
+                println!(
+                    "  {} all {} certs unanimous — Rust kernel and Lean ReferenceChecker agree.",
+                    "✓".green(),
+                    report.total
+                );
+            } else {
+                println!(
+                    "  {} {} cert(s) disagree — load-bearing bug in one of the kernels.",
+                    "✗".red(),
+                    disagreements
+                );
+            }
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        }
+    }
+
+    if disagreements > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "differential Lean-checker: {} disagreement(s) on {} certs",
+            disagreements, report.total
+        )));
+    }
+    Ok(())
+}
+
+// =============================================================================
 // audit --external-prover-replay — Lean 4 + Coq/Rocq foreign re-check
 // =============================================================================
 

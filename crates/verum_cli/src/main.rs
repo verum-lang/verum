@@ -1255,6 +1255,17 @@ enum Commands {
         #[clap(long = "strict", requires = "external_prover_replay")]
         external_prover_strict: bool,
 
+ /// Run the **differential Lean-checker** replay (FV-3).  Generates
+ /// a battery of certificates, runs each through the Rust kernel
+ /// (`Certificate::verify`) and the Lean ReferenceChecker
+ /// (`VerumKernel.verifyCertificate`), compares verdicts cert-by-
+ /// cert.  Any disagreement is a load-bearing bug in *one* of the
+ /// two implementations and exits non-zero.
+ ///
+ /// Output: `target/audit-reports/differential-lean/{battery,agreement}.json`.
+        #[clap(long = "differential-lean-checker")]
+        differential_lean_checker: bool,
+
  /// kernel_v0 roster audit (task #154 / Phase 3).
  /// Walks the canonical 10-rule kernel_v0 manifest and the
  /// `core/verify/kernel_v0/rules/` directory on disk.
@@ -4091,6 +4102,7 @@ fn run_command(cli: Cli) -> Result<()> {
             external_prover_replay,
             external_prover_backend,
             external_prover_strict,
+            differential_lean_checker,
             kernel_v0_roster,
             dependent_theorems,
             codegen_attestation,
@@ -4160,6 +4172,8 @@ fn run_command(cli: Cli) -> Result<()> {
                     &external_prover_backend,
                     external_prover_strict,
                 )
+            } else if differential_lean_checker {
+                commands::audit::audit_differential_lean_checker_with_format(output_format)
             } else if kernel_v0_roster {
                 commands::audit::audit_kernel_v0_roster_with_format(output_format)
             } else if let Some(axiom_name) = dependent_theorems.as_deref() {
