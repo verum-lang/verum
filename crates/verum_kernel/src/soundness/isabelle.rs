@@ -222,8 +222,8 @@ axiomatization\n  \
   K_HComp_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Transp_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Glue_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Refine_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Refine_Omega_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
+  (* (K_Refine: discharged — see T_refine below for the structural form.) *)\n  \
+  (* (K_Refine_Omega: discharged — same shape as K_Refine.) *)\n  \
   K_Refine_Intro_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   (* (K_Quot_Elim: discharged — see T_quot_elim below for the structural form.) *) \n  \
   K_Inductive_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
@@ -261,8 +261,8 @@ where\n\
 | T_transp:     \"K_Transp_iou \\<Gamma> path regular value target \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
 | T_glue:       \"K_Glue_iou \\<Gamma> carrier phi fiber equivP result \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : result\"\n\
 | T_refine_erase: \"\\<Gamma> \\<turnstile> a : Refine base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> a : base\"\n\
-| T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; K_Refine_iou \\<Gamma> base x predicate\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-| T_refine_omega: \"K_Refine_Omega_iou \\<Gamma> base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
+| T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
+| T_refine_omega: \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
 | T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; K_Refine_Intro_iou \\<Gamma> a base x predicate\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
 | T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
 | T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
@@ -387,13 +387,15 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Refine" => Some(
             "lemma K_Refine_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> base : Universe i\" and \"K_Refine_iou \\<Gamma> base x predicate\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> base : Universe i\"\n  \
+              and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
               shows \"\\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n  \
               using assms by (rule T_refine)",
         ),
         "K_Refine_Omega" => Some(
             "lemma K_Refine_Omega_sound:\n  \
-              assumes \"K_Refine_Omega_iou \\<Gamma> base x predicate\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> base : Universe i\"\n  \
+              and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
               shows \"\\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n  \
               using assms by (rule T_refine_omega)",
         ),

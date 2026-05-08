@@ -31,15 +31,18 @@ fn canonical_rules_has_expected_count() {
 }
 
 #[test]
-fn proved_lemma_set_includes_three_discharged_iou_rules() {
+fn proved_lemma_set_includes_five_discharged_iou_rules() {
     // Pin: 4 placeholder structurally-proved lemmas (K_Var / K_Univ
-    // / K_FwAx / K_Pos) + 3 IOU discharges = 7 proved.
+    // / K_FwAx / K_Pos) + 5 IOU discharges = 9 proved.
     //
     // Discharged so far:
     //   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
     //   * K_Elim            — same template; per-constructor case-typing
     //                         remains the kernel's input contract.
     //   * K_Universe_Ascent — collapses onto T_univ (no transfinite heights).
+    //   * K_Refine          — predicate typed at Pi x base (Universe 0).
+    //   * K_Refine_Omega    — same shape; finite-universe bound vacates
+    //                         the ordinal-modal-depth-bound intent.
     let rules = canonical_rules();
     let proved: Vec<&str> = rules
         .iter()
@@ -49,8 +52,8 @@ fn proved_lemma_set_includes_three_discharged_iou_rules() {
 
     assert_eq!(
         proved.len(),
-        7,
-        "expected 7 structurally-proved lemmas, got {}: {:?}",
+        9,
+        "expected 9 structurally-proved lemmas, got {}: {:?}",
         proved.len(),
         proved,
     );
@@ -70,6 +73,14 @@ fn proved_lemma_set_includes_three_discharged_iou_rules() {
     assert!(
         proved.contains(&"K_Universe_Ascent"),
         "K_Universe_Ascent must be proved (collapses onto T_univ)",
+    );
+    assert!(
+        proved.contains(&"K_Refine"),
+        "K_Refine must be proved (predicate at Pi x base (Universe 0))",
+    );
+    assert!(
+        proved.contains(&"K_Refine_Omega"),
+        "K_Refine_Omega must be proved (same shape as K_Refine)",
     );
 }
 
@@ -316,9 +327,9 @@ fn proved_count_plus_admitted_count_matches_total() {
         "every rule must be either proved, admitted, or discharged-by-framework",
     );
     // 4 placeholder structural rules (K_Var / K_Univ / K_FwAx /
-    // K_Pos) + 3 discharged IOUs (K_Quot_Elim / K_Elim /
-    // K_Universe_Ascent) = 7 proved.
-    assert_eq!(proved, 7, "expected 7 proved lemmas");
+    // K_Pos) + 5 discharged IOUs (K_Quot_Elim / K_Elim /
+    // K_Universe_Ascent / K_Refine / K_Refine_Omega) = 9 proved.
+    assert_eq!(proved, 9, "expected 9 proved lemmas");
     assert!(
         discharged >= 7,
         "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",

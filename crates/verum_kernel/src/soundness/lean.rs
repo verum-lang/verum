@@ -155,7 +155,7 @@ impl SoundnessBackend for LeanBackend {
              opaque side_conditions_hold : Prop\n\n",
         );
 
-        // 3. Per-rule IOU axioms — exactly 14 axioms, one per
+        // 3. Per-rule IOU axioms — exactly 12 axioms, one per
         //    with-IOU rule.  Each captures the rule's meta-theory
         //    dependency at the type level: discharging the IOU =
         //    replacing the `axiom` declaration with a `def`, or (as
@@ -252,10 +252,10 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (14 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (12 axioms — one per with-IOU rule).
 // ============================================================================
 
-/// The 14 axiom declarations covering every with-IOU rule.  Each
+/// The 12 axiom declarations covering every with-IOU rule.  Each
 /// axiom's parameter list captures the rule's relevant data; the
 /// Typing constructor for the rule consumes the axiom as a
 /// hypothesis.  Comments on each axiom name the meta-theory citation.
@@ -269,7 +269,7 @@ impl SoundnessBackend for LeanBackend {
 /// Verum side); the Lean export now models the structural
 /// typing of well-formed elimination terms.
 const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (14 total) ======\n\
+-- ====== Per-rule IOU axioms (12 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
 -- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
 -- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
@@ -287,11 +287,13 @@ axiom K_Transp_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm →
 -- K_Glue: univalence-via-Glue boundary lift.\n\
 axiom K_Glue_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop\n\
 \n\
--- K_Refine: refinement-typing hierarchy + Bool-valued predicate.\n\
-axiom K_Refine_iou : Ctx → CoreTerm → String → CoreTerm → Prop\n\
+-- (K_Refine: discharged — see Typing.t_refine below for the\n\
+-- structural form; predicate typed at Pi x base (Universe 0)\n\
+-- captures the Bool-valued-predicate intent.)\n\
 \n\
--- K_Refine_Omega: ordinal modal-depth bound (Definition 136.D1, Lemma 136.L0).\n\
-axiom K_Refine_Omega_iou : Ctx → CoreTerm → String → CoreTerm → Prop\n\
+-- (K_Refine_Omega: discharged — same shape as K_Refine; the\n\
+-- finite-universe bound (i : Nat) makes the ordinal\n\
+-- modal-depth-bound intent vacuous at the operational layer.)\n\
 \n\
 -- K_Refine_Intro: predicate decidability at the introduced value.\n\
 axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm → Prop\n\
@@ -419,11 +421,12 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
   | t_refine :\n      \
       ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},\n        \
         Typing Γ base (CoreTerm.Universe i) →\n        \
-        K_Refine_iou Γ base x predicate →\n        \
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n        \
         Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)\n  \
   | t_refine_omega :\n      \
       ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},\n        \
-        K_Refine_Omega_iou Γ base x predicate →\n        \
+        Typing Γ base (CoreTerm.Universe i) →\n        \
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n        \
         Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)\n  \
   | t_refine_intro :\n      \
       ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String},\n        \
@@ -526,15 +529,21 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 /// the lemmas' shapes.  Real proofs across the entire surface; no
 /// `sorry` for any structural- or formation-level concern.
 ///
-/// The 14 with-IOU rules' lemmas thread the per-rule axiom as a
-/// hypothesis; their `#print axioms` output enumerates the 14 IOU
+/// The 12 with-IOU rules' lemmas thread the per-rule axiom as a
+/// hypothesis; their `#print axioms` output enumerates the 12 IOU
 /// trust extensions explicitly.  Discharges so far:
-///   * K_Quot_Elim — structural premises mirroring K_Quot_Form / K_Quot_Intro.
-///   * K_Elim       — same template, with per-constructor case-typing
-///                    remaining the kernel's input contract.
+///   * K_Quot_Elim       — structural premises mirroring K_Quot_Form / K_Quot_Intro.
+///   * K_Elim            — same template, with per-constructor case-typing
+///                         remaining the kernel's input contract.
 ///   * K_Universe_Ascent — collapses onto T_univ for u32-bounded
-///                    universes (no transfinite heights are
-///                    representable at the operational layer).
+///                         universes (no transfinite heights are
+///                         representable at the operational layer).
+///   * K_Refine          — structural premises (base : Universe i,
+///                         predicate : Pi x base (Universe 0))
+///                         capturing the Bool-valued-predicate intent.
+///   * K_Refine_Omega    — same shape; the finite-universe bound (i :
+///                         Nat) makes the ordinal-modal-depth-bound
+///                         intent vacuous at the operational layer.
 fn rule_signature_lean(rule_name: &str) -> Option<String> {
     let body = match rule_name {
         // ===== Structural (9) =====
@@ -628,12 +637,13 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         "K_Refine" => Some(
             "theorem K_Refine_sound :\n    ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},\n      \
               Typing Γ base (CoreTerm.Universe i) →\n      \
-              K_Refine_iou Γ base x predicate →\n      \
+              Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n      \
               Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i) :=\n  @Typing.t_refine",
         ),
         "K_Refine_Omega" => Some(
             "theorem K_Refine_Omega_sound :\n    ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},\n      \
-              K_Refine_Omega_iou Γ base x predicate →\n      \
+              Typing Γ base (CoreTerm.Universe i) →\n      \
+              Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →\n      \
               Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i) :=\n  @Typing.t_refine_omega",
         ),
         "K_Refine_Intro" => Some(

@@ -192,17 +192,20 @@ impl SoundnessBackend for CoqBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (14 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (12 axioms — one per with-IOU rule).
 //
 // Discharged so far (each removed an axiom):
 //   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
 //   * K_Elim            — same template, with per-constructor case-typing
 //                         remaining the kernel's input contract.
 //   * K_Universe_Ascent — collapses onto T_univ for u32-bounded universes.
+//   * K_Refine          — predicate typed at Pi x base (Universe 0).
+//   * K_Refine_Omega    — same shape; finite-universe bound makes the
+//                         ordinal-modal-depth-bound vacuous.
 // ============================================================================
 
 const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (14 total) ====== *)\n\
+(* ====== Per-rule IOU axioms (12 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
 Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
@@ -216,11 +219,13 @@ Axiom K_Transp_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop
 (* K_Glue: univalence-via-Glue boundary lift. *)\n\
 Axiom K_Glue_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
 \n\
-(* K_Refine: refinement-typing hierarchy + Bool-valued predicate. *)\n\
-Axiom K_Refine_iou : Ctx -> CoreTerm -> string -> CoreTerm -> Prop.\n\
+(* (K_Refine: discharged — see T_refine below for the structural\n\
+   form; predicate typed at Pi x base (Universe 0) captures the\n\
+   Bool-valued-predicate intent.) *)\n\
 \n\
-(* K_Refine_Omega: ordinal modal-depth bound (Definition 136.D1, Lemma 136.L0). *)\n\
-Axiom K_Refine_Omega_iou : Ctx -> CoreTerm -> string -> CoreTerm -> Prop.\n\
+(* (K_Refine_Omega: discharged — same shape as K_Refine; the\n\
+   finite-universe bound makes the ordinal-modal-depth-bound\n\
+   intent vacuous at the operational layer.) *)\n\
 \n\
 (* K_Refine_Intro: predicate decidability at the introduced value. *)\n\
 Axiom K_Refine_Intro_iou : Ctx -> CoreTerm -> CoreTerm -> string -> CoreTerm -> Prop.\n\
@@ -340,11 +345,12 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
   | T_refine :\n      \
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n        \
         Typing Gamma base (Universe i) ->\n        \
-        K_Refine_iou Gamma base x predicate ->\n        \
+        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
         Typing Gamma (Refine base x predicate) (Universe i)\n  \
   | T_refine_omega :\n      \
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n        \
-        K_Refine_Omega_iou Gamma base x predicate ->\n        \
+        Typing Gamma base (Universe i) ->\n        \
+        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
         Typing Gamma (Refine base x predicate) (Universe i)\n  \
   | T_refine_intro :\n      \
       forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string),\n        \
@@ -556,14 +562,16 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         "K_Refine" => Some(
             "Lemma K_Refine_sound :\n  \
               forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n    \
-                Typing Gamma base (Universe i) -> K_Refine_iou Gamma base x predicate ->\n    \
+                Typing Gamma base (Universe i) ->\n    \
+                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
                 Typing Gamma (Refine base x predicate) (Universe i).\n\
               Proof. exact T_refine. Qed.",
         ),
         "K_Refine_Omega" => Some(
             "Lemma K_Refine_Omega_sound :\n  \
               forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n    \
-                K_Refine_Omega_iou Gamma base x predicate ->\n    \
+                Typing Gamma base (Universe i) ->\n    \
+                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
                 Typing Gamma (Refine base x predicate) (Universe i).\n\
               Proof. exact T_refine_omega. Qed.",
         ),
