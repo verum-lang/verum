@@ -91,18 +91,18 @@
 module context;
 
 // Re-export scope types
-public mount super.context.scope.*;
-public mount super.context.error.*;
-public mount super.context.provider.*;
-public mount super.context.layer.*;
+public mount self.scope.*;
+public mount self.error.*;
+public mount self.provider.*;
+public mount self.layer.*;
 
 // Standard contexts library — pre-fix the file shipped (Logger,
 // Database, Auth, Tracer + canonical context-group definitions
 // like WebCtx) but had no re-export here, so user code had to
 // import via direct file path despite the umbrella convention.
-public mount super.context.standard.*;
+public mount self.standard.*;
 
 // Re-export key types for convenience
-public mount super.context.provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
-public mount super.context.scope.{Scope, ContextScope};
-public mount super.context.error.ContextError;
+public mount self.provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
+public mount self.scope.{Scope, ContextScope};
+public mount self.error.ContextError;
