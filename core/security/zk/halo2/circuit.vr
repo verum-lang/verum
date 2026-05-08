@@ -50,7 +50,7 @@ public type ColumnType is
     | Fixed
     /// One-bit gate activator. By convention, exactly one selector
     /// per logical gate.
-    | Selector;
+    | SelectorColumn;
 
 /// A single column in the circuit's grid layout.
 public type Column is {
@@ -265,7 +265,7 @@ implement ConfigureContext {
     }
 
     public fn alloc_selector(&mut self, name: Text) -> Selector {
-        let c = Column.new(self.next_selector, ColumnType.Selector, name);
+        let c = Column.new(self.next_selector, ColumnType.SelectorColumn, name);
         self.next_selector = self.next_selector + 1;
         Selector { column: c }
     }
