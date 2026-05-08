@@ -34509,6 +34509,44 @@ impl TypeChecker {
             return Ok(());
         }
 
+        // **Pre-flight existence check.** If the source module does not
+        // actually export `item_name`, return Ok early WITHOUT touching
+        // `glob_import_provenance`.  Without this gate, transitive-
+        // dependency walks that probe a sibling module for a name it
+        // doesn't have (e.g. a parent type's body referring to `Maybe`,
+        // imported transitively from `core.base.iterator` which doesn't
+        // export `Maybe`) would silently insert a stub provenance entry
+        // — blocking later valid attempts from the canonical source via
+        // the "tied-priority preserves first" rule in
+        // `ImportProvenance::allows_overwrite`.
+        //
+        // The check uses path aliases so module-path normalisation
+        // (core. prefix, std. legacy) is applied consistently with the
+        // body resolution path.
+        if let Some(probed_module_info) =
+            self.get_module_with_path_aliases(module_path.as_str(), registry)
+        {
+            let probed_name_text: Text = item_name.to_string().into();
+            if probed_module_info.exports.get(&probed_name_text).is_none() {
+                // Try the simple-path inline fallback (mirrors the
+                // resolution in `import_item_from_module_body` so we
+                // don't false-skip inline modules registered without
+                // file-name prefix).
+                let path_str = module_path.as_str();
+                let inline_has_export = if let Some(dot_pos) = path_str.find('.') {
+                    let simple_path = &path_str[dot_pos + 1..];
+                    self.get_module_with_path_aliases(simple_path, registry)
+                        .map(|m| m.exports.get(&probed_name_text).is_some())
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                if !inline_has_export {
+                    return Ok(());
+                }
+            }
+        }
+
         // MOD-MED-2 — glob origin discipline. For
         // glob/internal imports (`import_span.is_none()`), classify
         // the source module against the user's cog name and consult
@@ -34782,17 +34820,49 @@ impl TypeChecker {
                                         continue;
                                     }
 
-                                    // Try to import the dependency from the source module
-                                    if let Err(e) = self.import_item_from_module(
+                                    // Try to import the dependency from the source module first
+                                    // (the module that actually declares the parent type — this is
+                                    // the canonical location for sibling types that the parent
+                                    // depends on directly).
+                                    let mut imported = match self.import_item_from_module(
                                         &source_module_path,
                                         dep_name.as_str(),
                                         registry,
                                     ) {
+                                        Ok(()) => self.ctx.lookup_type(dep_name.as_str()).is_some(),
+                                        Err(_) => false,
+                                    };
+
+                                    // Fallback 1: when the source module is a *submodule* of the
+                                    // requesting module (e.g. parent type in `core.base.iterator`,
+                                    // dep declared in `core.base.maybe`), the dep is reachable via
+                                    // the requesting module's re-export surface. Retry against the
+                                    // original `module_path` (e.g. `core.base`) which collects all
+                                    // submodule re-exports under one roof.
+                                    //
+                                    // This closes the silent-drop where `Iterator` (declared in
+                                    // `core.base.iterator`) depends on `Maybe` (declared in
+                                    // `core.base.maybe`) — the source module `core.base.iterator`
+                                    // doesn't export `Maybe`, but the requesting module
+                                    // `core.base` does (via `public mount .maybe.{Maybe, ...}`).
+                                    if !imported && resolved_module_path != source_module_path {
+                                        if let Ok(()) = self.import_item_from_module(
+                                            &resolved_module_path,
+                                            dep_name.as_str(),
+                                            registry,
+                                        ) {
+                                            imported =
+                                                self.ctx.lookup_type(dep_name.as_str()).is_some();
+                                        }
+                                    }
+
+                                    if !imported {
                                         tracing::debug!(
-                                            "Could not import transitive dependency '{}' for type '{}': {}",
+                                            "Could not import transitive dependency '{}' for type '{}' (tried source={}, root={})",
                                             dep_name,
                                             item_name,
-                                            e
+                                            source_module_path.as_str(),
+                                            resolved_module_path.as_str(),
                                         );
                                         // Don't fail - the dependency might be a built-in type
                                         // or from a different module that's already imported
