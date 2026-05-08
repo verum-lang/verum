@@ -39,6 +39,7 @@ use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
 use crate::value::Value;
+use verum_common::well_known_types::{varerror_not_present_tag, varerror_not_unicode_tag};
 
 pub(in super::super) fn try_intercept_env_runtime(
     state: &mut InterpreterState,
@@ -179,7 +180,7 @@ fn intercept_var(
             Ok(Some(wrap_in_variant(state, "Result", 0, &[text])?))
         }
         Err(std::env::VarError::NotPresent) => {
-            let err = wrap_in_variant(state, "VarError", 0, &[])?;
+            let err = wrap_in_variant(state, "VarError", varerror_not_present_tag(), &[])?;
             Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?))
         }
         Err(std::env::VarError::NotUnicode(_)) => {
@@ -189,7 +190,7 @@ fn intercept_var(
             // here). Substitute an empty list so the variant
             // structure stays sound.
             let empty_list = alloc_byte_list(state, &[])?;
-            let err = wrap_in_variant(state, "VarError", 1, &[empty_list])?;
+            let err = wrap_in_variant(state, "VarError", varerror_not_unicode_tag(), &[empty_list])?;
             Ok(Some(wrap_in_variant(state, "Result", 1, &[err])?))
         }
     }

@@ -361,6 +361,45 @@ pub const CONTROLFLOW_VARIANT_LAYOUT: &[(&str, u32)] = &[
     ("Break", 1),
 ];
 
+/// Canonical layout of the variants of `core::base::env::VarError`.
+///
+/// **Single source of truth.** The runtime intercept for `env::var`
+/// (`env_runtime.rs`) must use this constant when constructing
+/// `VarError.NotPresent` or `VarError.NotUnicode(bytes)` variants via
+/// `wrap_in_variant` — never the raw integer literals `0` / `1`.
+///
+/// **Drift contract:** the slice's order MUST match `core/base/env.vr`:
+/// ```text
+///     public type VarError is
+///         | NotPresent
+///         | NotUnicode(List<Byte>);
+/// ```
+/// — `NotPresent = 0`, `NotUnicode = 1` in declaration order.
+pub const VARERROR_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("NotPresent", 0),
+    ("NotUnicode", 1),
+];
+
+/// Returns the canonical tag for `VarError::NotPresent` (tag 0).
+///
+/// Use this instead of the literal `0` in `wrap_in_variant(state, "VarError", ...)`.
+pub fn varerror_not_present_tag() -> u32 {
+    VARERROR_VARIANT_LAYOUT
+        .iter()
+        .find_map(|&(n, t)| if n == "NotPresent" { Some(t) } else { None })
+        .expect("VARERROR_VARIANT_LAYOUT must contain 'NotPresent'")
+}
+
+/// Returns the canonical tag for `VarError::NotUnicode` (tag 1).
+///
+/// Use this instead of the literal `1` in `wrap_in_variant(state, "VarError", ...)`.
+pub fn varerror_not_unicode_tag() -> u32 {
+    VARERROR_VARIANT_LAYOUT
+        .iter()
+        .find_map(|&(n, t)| if n == "NotUnicode" { Some(t) } else { None })
+        .expect("VARERROR_VARIANT_LAYOUT must contain 'NotUnicode'")
+}
+
 /// Returns the canonical success variant tag for `Maybe<T>` (the tag for `Some`).
 ///
 /// Derived from `MAYBE_VARIANT_LAYOUT` — same source of truth used by
@@ -579,6 +618,7 @@ mod ordering_layout_tests {
             (MAYBE_VARIANT_LAYOUT, "MAYBE", 2usize),
             (RESULT_VARIANT_LAYOUT, "RESULT", 2),
             (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW", 2),
+            (VARERROR_VARIANT_LAYOUT, "VARERROR", 2),
         ];
         let n_variant: &[(&[(&str, u32)], &str, usize)] =
             &[(DATA_VARIANT_LAYOUT, "DATA", 7)];
@@ -590,6 +630,22 @@ mod ordering_layout_tests {
             let names: std::collections::HashSet<&str> = layout.iter().map(|&(n, _)| n).collect();
             assert_eq!(names.len(), expected_len, "{} layout must have unique variant names", name);
         }
+    }
+
+    /// Pins `VarError` variant order: NotPresent=0, NotUnicode=1.
+    /// The runtime env intercept (`env_runtime.rs`) must use these tags.
+    #[test]
+    fn varerror_variant_layout_pinned() {
+        assert_eq!(VARERROR_VARIANT_LAYOUT.len(), 2);
+        assert_eq!(VARERROR_VARIANT_LAYOUT[0], ("NotPresent", 0));
+        assert_eq!(VARERROR_VARIANT_LAYOUT[1], ("NotUnicode", 1));
+    }
+
+    #[test]
+    fn varerror_tag_helpers_consistent_with_layout() {
+        assert_eq!(varerror_not_present_tag(), 0);
+        assert_eq!(varerror_not_unicode_tag(), 1);
+        assert_ne!(varerror_not_present_tag(), varerror_not_unicode_tag());
     }
 }
 
