@@ -2,16 +2,17 @@
 //!
 //! ## Architectural role
 //!
-//! The canonical-certificate roster (proof_term_examples/) is curated:
-//! ~13 hand-built certificates that the registry's kernels are
-//! cross-validated against. That covers the *intentional* surface,
-//! but not the long tail of structurally-arbitrary terms. Two
-//! algorithmically distinct kernels (bidirectional + WHNF; NbE +
-//! quote) can match on every curated certificate yet diverge on a
-//! corner case the curator never considered.
+//! The canonical-battery roster is curated: 24 hand-built
+//! certificates that the registry's kernels are cross-validated
+//! against.  That covers the *intentional* surface, but not the
+//! long tail of structurally-arbitrary terms.  Algorithmically-
+//! distinct kernels (bidirectional + WHNF; NbE + quote;
+//! manifest-driven) can match on every curated certificate yet
+//! diverge on a corner case the curator never considered.
 //!
 //! This module ships **mutation-based property fuzzing**: it takes
-//! the canonical seeds, applies structural mutations (universe
+//! the canonical accept-path certs as **seeds**, applies structural
+//! **mutation chains** (1–3 mutations applied in sequence — universe
 //! lifts, subterm-swaps, binder-domain rewrites, application
 //! injections, variable-index perturbations), and runs each mutant
 //! through every kernel in the registry. The property invariant is
@@ -20,36 +21,57 @@
 //!   must NOT be `Disagreement`.**
 //!
 //! Whether the mutant types or fails to type is irrelevant — what
-//! matters is that all kernels reach the same verdict. Disagreement
+//! matters is that all kernels reach the same verdict.  Disagreement
 //! flags a kernel-implementation bug.
+//!
+//! ## Disagreement triage — automatic shrinking
+//!
+//! When the harness finds a disagreement, it automatically shrinks
+//! the producing chain to a minimal failing case via greedy
+//! 1-element-removal to fixpoint.  The audit report carries both
+//! the original chain and the shrunk minimal chain — so the kernel
+//! author sees the smallest reproducer rather than a deeply-mutated
+//! cert.  A shrunk-to-empty chain is the highest-priority bug
+//! class: the seed alone disagrees, meaning kernel drift exists on
+//! the unmutated curated surface.
 //!
 //! ## Why mutation, not from-scratch generation
 //!
 //! Generating arbitrary closed CIC terms uniformly produces almost
-//! exclusively ill-typed shapes. Both kernels reject them quickly,
-//! but rejection-only fuzzing has poor signal: the kernels share
-//! the same fast-rejection paths, and the interesting divergences
-//! happen on *near-well-typed* shapes where one kernel might
-//! tolerate something the other does not.
+//! exclusively ill-typed shapes.  Both kernels reject them quickly,
+//! but rejection-only fuzzing has poor signal: kernels share
+//! fast-rejection paths, and the interesting divergences happen on
+//! *near-well-typed* shapes where one kernel might tolerate
+//! something the other does not.
 //!
 //! Mutation seeded from canonical well-typed certificates keeps
-//! mutants close to the well-typed surface. A single universe lift
+//! mutants close to the well-typed surface.  A single universe lift
 //! often preserves typeability; a subterm swap usually breaks it
-//! cleanly. Both regimes exercise the kernels' decision boundary
-//! aggressively.
+//! cleanly.  Both regimes exercise the kernels' decision boundary
+//! aggressively.  A complementary [`run_generative_campaign`]
+//! samples structurally-arbitrary terms directly for rejection-
+//! path coverage.
 //!
 //! ## Determinism
 //!
 //! The PRNG is a deterministic xorshift64* seeded by the campaign's
-//! base seed. The same base seed produces the same mutant sequence
+//! base seed.  The same base seed produces the same mutant sequence
 //! across runs — disagreements are reproducible and bisectable.
 //! No `rand` crate dependency.
+//!
+//! ## Coverage instrumentation
+//!
+//! Every campaign records per-mutation hit counts, per-seed hit
+//! counts, and the chain-length distribution.  Surfaced in the
+//! audit-report payload so sampling bias is observable when the
+//! gate passes — a mutation that never fires across 500 iters
+//! deserves investigation.
 //!
 //! ## Integration
 //!
 //! The audit gate runs a small bounded campaign each invocation
-//! (default 100 iterations) and flips to failure on the first
-//! disagreement. Bug-detection is live — at audit time every
+//! (default 500 iterations) and flips to failure on the first
+//! disagreement.  Bug-detection is live — at audit time every
 //! mutant gets cross-checked.
 
 use crate::kernel_registry::{AgreementVerdict, KernelRegistry, MultiVerdict};
@@ -314,6 +336,75 @@ fn sample_small_domain(rng: &mut FuzzRng) -> Term {
 }
 
 // =============================================================================
+// Mutation chains
+// =============================================================================
+
+/// Default upper bound on mutation-chain length.  Each iteration
+/// samples a chain of length 1..=`MAX_MUTATION_CHAIN_LEN` and
+/// applies them sequentially.  Chains > 3 rarely produce novel
+/// shapes (mutations saturate after a few applications) and waste
+/// CI budget.
+pub const MAX_MUTATION_CHAIN_LEN: usize = 3;
+
+/// A reproducible sequence of mutations applied to a seed
+/// certificate.  Length 1 reduces to a single-mutation iteration;
+/// longer chains explore deeper neighbourhoods of the seed.
+///
+/// Chains are recorded verbatim in [`FuzzResult`] so a disagreement
+/// found in CI can be replayed locally by re-applying the same
+/// chain to the same seed — the bug is bisectable from a single
+/// `(seed_index, chain)` pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutationChain {
+    /// Mutations applied in order.  An empty chain is the identity.
+    pub mutations: Vec<Mutation>,
+}
+
+impl MutationChain {
+    /// Number of mutations in the chain.
+    pub fn len(&self) -> usize {
+        self.mutations.len()
+    }
+    /// True iff the chain is empty (identity mutation).
+    pub fn is_empty(&self) -> bool {
+        self.mutations.is_empty()
+    }
+    /// Stable diagnostic representation: comma-separated mutation
+    /// tags, in chain order.  Used in audit-report rows.
+    pub fn tags(&self) -> String {
+        self.mutations
+            .iter()
+            .map(|m| m.tag())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+/// Sample a mutation chain of length 1..=`max_chain_len`.
+/// Length is uniformly sampled in that closed interval; mutations
+/// are sampled independently via [`sample_mutation`].
+pub fn sample_mutation_chain(rng: &mut FuzzRng, max_chain_len: usize) -> MutationChain {
+    let len = if max_chain_len == 0 {
+        1
+    } else {
+        1 + rng.gen_below(max_chain_len as u64) as usize
+    };
+    let mutations = (0..len).map(|_| sample_mutation(rng)).collect();
+    MutationChain { mutations }
+}
+
+/// Apply a chain of mutations to a certificate, in order.
+/// `apply_mutation_chain(c, &chain)` is left-associative:
+/// `chain[1](chain[0](c))`, etc.
+pub fn apply_mutation_chain(cert: &Certificate, chain: &MutationChain) -> Certificate {
+    let mut current = cert.clone();
+    for mutation in &chain.mutations {
+        current = apply_mutation(&current, mutation);
+    }
+    current
+}
+
+// =============================================================================
 // Canonical seed certificates
 // =============================================================================
 
@@ -321,76 +412,186 @@ fn sample_small_domain(rng: &mut FuzzRng) -> Term {
 /// known to be accepted by every registered kernel; mutations
 /// drive the kernels into the long tail of accept/reject regions.
 ///
-/// **Stable list** — the seed roster is a load-bearing surface:
-/// expanding it strengthens fuzz coverage. Removing a seed weakens
-/// it. Adding a new seed requires confirming all default-registry
-/// kernels accept the unmutated form.
+/// Sourced from [`crate::canonical_battery::canonical_battery`] —
+/// every accept-path cert in the canonical 24-cert library is a
+/// seed.  This shares the seed roster with the differential audit
+/// gates: a regression in either gate exercises the *same* term
+/// surface, so any drift between mutation campaign and curated
+/// audit shows up immediately.
+///
+/// Augmented with one extra hand-built seed (the K combinator —
+/// 4-binder constant function) that's structurally deeper than
+/// any cert in the canonical battery, so mutation chains have
+/// room to reach novel shapes.
 pub fn seed_certificates() -> Vec<Certificate> {
-    vec![
-        // Seed 1 — polymorphic identity.
-        // λ(A : Universe(0)). λ(x : A). x  :  Π(A : Universe(0)). Π(_ : A). A
-        Certificate {
-            term: Term::lam(
+    let mut seeds: Vec<Certificate> = crate::canonical_battery::canonical_battery()
+        .into_iter()
+        .filter_map(|c| {
+            crate::canonical_battery::expected_verdict(c.id)
+                .filter(|expect| *expect)
+                .map(|_| c.certificate)
+        })
+        .collect();
+    // K combinator — λA. λB. λa. λ_. a  :  ΠA. ΠB. Πa. Π_. A.
+    // Deeper binder nesting than anything in the canonical battery;
+    // gives mutation chains room to reach novel shapes.
+    seeds.push(Certificate {
+        term: Term::lam(
+            Term::universe(0),
+            Term::lam(
                 Term::universe(0),
-                Term::lam(Term::var(0), Term::var(0)),
+                Term::lam(Term::var(1), Term::lam(Term::var(1), Term::var(1))),
             ),
-            claimed_type: Term::pi(
+        ),
+        claimed_type: Term::pi(
+            Term::universe(0),
+            Term::pi(
                 Term::universe(0),
-                Term::pi(Term::var(0), Term::var(1)),
+                Term::pi(Term::var(1), Term::pi(Term::var(1), Term::var(3))),
             ),
-            metadata: std::collections::BTreeMap::new(),
-        },
-        // Seed 2 — identity at Universe(0).
-        // λ(x : Universe(0)). x  :  Π(_ : Universe(0)). Universe(0)
-        Certificate {
-            term: Term::lam(Term::universe(0), Term::var(0)),
-            claimed_type: Term::pi(Term::universe(0), Term::universe(0)),
-            metadata: std::collections::BTreeMap::new(),
-        },
-        // Seed 3 — K combinator (constant function).
-        // λ(A : Universe(0)). λ(B : Universe(0)). λ(a : A). λ(_ : B). a
-        //   :  Π(A : Universe(0)). Π(B : Universe(0)). Π(_ : A). Π(_ : B). A
-        Certificate {
-            term: Term::lam(
-                Term::universe(0),
-                Term::lam(
-                    Term::universe(0),
-                    Term::lam(
-                        Term::var(1),
-                        Term::lam(Term::var(1), Term::var(1)),
-                    ),
-                ),
-            ),
-            claimed_type: Term::pi(
-                Term::universe(0),
-                Term::pi(
-                    Term::universe(0),
-                    Term::pi(
-                        Term::var(1),
-                        Term::pi(Term::var(1), Term::var(3)),
-                    ),
-                ),
-            ),
-            metadata: std::collections::BTreeMap::new(),
-        },
-    ]
+        ),
+        metadata: std::collections::BTreeMap::new(),
+    });
+    seeds
+}
+
+// =============================================================================
+// Coverage instrumentation
+// =============================================================================
+
+/// Coverage instrumentation for a fuzz campaign.  Lets the audit
+/// report flag distribution bias — e.g. a mutation that never
+/// fires on any seed, or a seed never picked by the round-robin
+/// dispatcher.
+#[derive(Debug, Clone, Default)]
+pub struct FuzzCoverage {
+    /// Per-mutation hit count, keyed by stable tag.  A mutation
+    /// with zero hits across a 500-iter campaign is suspicious —
+    /// likely a bug in [`sample_mutation`] or a tag rename.
+    pub per_mutation_hits: std::collections::BTreeMap<&'static str, usize>,
+    /// Per-seed hit count, keyed by seed index.  Pinpoints round-
+    /// robin behaviour: every seed should receive ≈ `iter/seeds`
+    /// hits in a balanced campaign.
+    pub per_seed_hits: std::collections::BTreeMap<usize, usize>,
+    /// Distribution of chain lengths observed.  Index `i` holds
+    /// the count of iterations whose chain had length `i+1`
+    /// (chain length is always ≥ 1 in the mutation regime).
+    pub chain_length_distribution: Vec<usize>,
+}
+
+impl FuzzCoverage {
+    fn record(&mut self, seed_index: usize, chain: &MutationChain) {
+        *self.per_seed_hits.entry(seed_index).or_insert(0) += 1;
+        for m in &chain.mutations {
+            *self.per_mutation_hits.entry(m.tag()).or_insert(0) += 1;
+        }
+        let len = chain.len().max(1);
+        if self.chain_length_distribution.len() < len {
+            self.chain_length_distribution.resize(len, 0);
+        }
+        self.chain_length_distribution[len - 1] += 1;
+    }
+}
+
+// =============================================================================
+// Shrinker
+// =============================================================================
+
+/// Result of shrinking a disagreement to a minimal failing case.
+/// Reduces audit-report noise and gives the kernel author the
+/// smallest reproducer rather than the original (potentially
+/// deeply-mutated) chain.
+#[derive(Debug, Clone)]
+pub struct ShrinkReport {
+    /// Length of the chain that originally produced the disagreement.
+    pub original_chain_len: usize,
+    /// Length of the minimal chain still producing a disagreement.
+    /// `<=` `original_chain_len`; usually strictly less.
+    pub minimal_chain_len: usize,
+    /// The minimal chain itself.  Empty iff the seed *alone* (no
+    /// mutations) already produces a disagreement — that's a much
+    /// more interesting bug class than mutation-induced ones.
+    pub minimal_chain: MutationChain,
+    /// Number of shrink steps the algorithm took before reaching
+    /// the minimum.  Bounded by the chain length.
+    pub steps_taken: usize,
+}
+
+/// Shrink a disagreeing mutation chain to a minimal failing case.
+///
+/// Algorithm: greedy 1-element-removal, repeated to fixpoint.  At
+/// each step try removing one mutation from the chain (every
+/// position) and re-running through the registry.  The first
+/// removal that *preserves* the disagreement becomes the new
+/// chain; iterate.  Terminates when no single-element removal
+/// preserves disagreement (or the chain is empty, which means the
+/// seed itself disagrees — a far more interesting bug class).
+///
+/// Bounded by `seed_chain.len()` outer iterations × `chain.len()`
+/// inner trials; total `O(n²)` registry calls.  For
+/// [`MAX_MUTATION_CHAIN_LEN`] = 3 this is at most 6 calls per
+/// shrink — negligible cost vs CI runtime budget.
+pub fn shrink_disagreement(
+    registry: &KernelRegistry,
+    seed: &Certificate,
+    seed_chain: &MutationChain,
+) -> ShrinkReport {
+    let original_chain_len = seed_chain.len();
+    let mut current = seed_chain.clone();
+    let mut steps = 0usize;
+
+    'outer: loop {
+        if current.is_empty() {
+            break;
+        }
+        // Try to remove each element in turn; the first removal
+        // that preserves disagreement becomes the new current.
+        for i in 0..current.len() {
+            let mut candidate = current.clone();
+            candidate.mutations.remove(i);
+            let mutant = apply_mutation_chain(seed, &candidate);
+            let verdict = registry.verify_all(&mutant);
+            if matches!(
+                verdict.agreement,
+                AgreementVerdict::Disagreement { .. }
+            ) {
+                current = candidate;
+                steps += 1;
+                continue 'outer;
+            }
+        }
+        // No single removal preserves disagreement — fixpoint.
+        break;
+    }
+
+    ShrinkReport {
+        original_chain_len,
+        minimal_chain_len: current.len(),
+        minimal_chain: current,
+        steps_taken: steps,
+    }
 }
 
 // =============================================================================
 // Fuzz iteration + campaign
 // =============================================================================
 
-/// One fuzz iteration's outcome.  Carries the mutation applied,
-/// the resulting verdict, and the seed-certificate index for
-/// reproducibility.
+/// One fuzz iteration's outcome.  Carries the mutation chain
+/// applied, the resulting verdict, and the seed-certificate index
+/// for reproducibility.
 #[derive(Debug, Clone)]
 pub struct FuzzResult {
     /// Iteration index in the campaign, starting at 0.
     pub iteration: usize,
     /// Index into `seed_certificates()` of the seed used.
     pub seed_index: usize,
-    /// The mutation applied this iteration.
-    pub mutation_tag: &'static str,
+    /// Stable comma-joined mutation-tag list ("" for generative
+    /// iterations or empty chains; see [`MutationChain::tags`]).
+    /// Kept as a string so the audit-report payload is JSON-stable.
+    pub mutation_tag: String,
+    /// The mutation chain that produced the mutant — exact replay
+    /// surface.  Empty for generative iterations.
+    pub chain: MutationChain,
     /// Multi-kernel verdict on the mutant.
     pub verdict: MultiVerdict,
 }
@@ -418,6 +619,16 @@ pub struct FuzzCampaignReport {
     /// Mutants where kernels disagreed.  EVERY entry is a soundness
     /// alert — the audit gate fails on any non-empty list.
     pub disagreements: Vec<FuzzResult>,
+    /// Per-disagreement minimal-failing-case reports.  Same length
+    /// + index-aligned with `disagreements`.  An empty
+    /// `minimal_chain` means the seed alone already disagrees,
+    /// which is a much higher-priority bug.
+    pub shrunk_disagreements: Vec<ShrinkReport>,
+    /// Coverage instrumentation: per-mutation, per-seed,
+    /// chain-length-distribution.  Surfaces sampling bias when the
+    /// campaign passes — a mutation that never fires deserves
+    /// investigation.
+    pub coverage: FuzzCoverage,
     /// Names of every registered kernel (registration order).
     pub registered_kernels: Vec<&'static str>,
 }
@@ -431,8 +642,9 @@ impl FuzzCampaignReport {
 }
 
 /// Run a single fuzz iteration.  Picks a seed by `iter % seeds.len()`,
-/// samples a mutation from `rng`, applies it, runs the registry's
-/// `verify_all`, and returns the result.
+/// samples a mutation chain from `rng` (length 1..=[`MAX_MUTATION_CHAIN_LEN`]),
+/// applies it, runs the registry's `verify_all`, and returns the
+/// result.
 pub fn run_fuzz_iteration(
     iteration: usize,
     rng: &mut FuzzRng,
@@ -441,13 +653,14 @@ pub fn run_fuzz_iteration(
 ) -> FuzzResult {
     let seed_index = iteration % seeds.len();
     let seed = &seeds[seed_index];
-    let mutation = sample_mutation(rng);
-    let mutant = apply_mutation(seed, &mutation);
+    let chain = sample_mutation_chain(rng, MAX_MUTATION_CHAIN_LEN);
+    let mutant = apply_mutation_chain(seed, &chain);
     let verdict = registry.verify_all(&mutant);
     FuzzResult {
         iteration,
         seed_index,
-        mutation_tag: mutation.tag(),
+        mutation_tag: chain.tags(),
+        chain,
         verdict,
     }
 }
@@ -465,6 +678,10 @@ pub fn run_fuzz_campaign(n_iterations: usize, base_seed: u64) -> FuzzCampaignRep
 
 /// Run a fuzz campaign against a specific registry (test seam +
 /// custom-registry callers).
+///
+/// Builds coverage instrumentation incrementally + runs the
+/// shrinker on every disagreement so the report carries a
+/// minimal failing case for each bug surfaced.
 pub fn run_fuzz_campaign_against(
     registry: &KernelRegistry,
     n_iterations: usize,
@@ -475,13 +692,21 @@ pub fn run_fuzz_campaign_against(
     let mut unanimous_accept = 0usize;
     let mut unanimous_reject = 0usize;
     let mut disagreements: Vec<FuzzResult> = Vec::new();
+    let mut shrunk_disagreements: Vec<ShrinkReport> = Vec::new();
+    let mut coverage = FuzzCoverage::default();
 
     for iter in 0..n_iterations {
         let result = run_fuzz_iteration(iter, &mut rng, &seeds, registry);
+        coverage.record(result.seed_index, &result.chain);
         match &result.verdict.agreement {
             AgreementVerdict::Unanimous => unanimous_accept += 1,
             AgreementVerdict::UnanimousReject => unanimous_reject += 1,
-            AgreementVerdict::Disagreement { .. } => disagreements.push(result),
+            AgreementVerdict::Disagreement { .. } => {
+                let shrink =
+                    shrink_disagreement(registry, &seeds[result.seed_index], &result.chain);
+                disagreements.push(result);
+                shrunk_disagreements.push(shrink);
+            }
         }
     }
 
@@ -490,6 +715,8 @@ pub fn run_fuzz_campaign_against(
         unanimous_accept,
         unanimous_reject,
         disagreements,
+        shrunk_disagreements,
+        coverage,
         registered_kernels: registry.names(),
     }
 }
@@ -600,7 +827,13 @@ pub fn run_generative_iteration(
         // index since certificates are sampled fresh.
         seed_index: 0,
         // Stable diagnostic tag for generative iterations.
-        mutation_tag: "generative",
+        mutation_tag: "generative".to_string(),
+        // Generative iterations have no chain — the certificate is
+        // synthesised directly, not derived from a seed via
+        // mutations.  An empty chain is the canonical sentinel.
+        chain: MutationChain {
+            mutations: Vec::new(),
+        },
         verdict,
     }
 }
@@ -645,6 +878,15 @@ pub fn run_generative_campaign_against(
         unanimous_accept,
         unanimous_reject,
         disagreements,
+        // Generative iterations carry no mutation chain → no
+        // shrinking surface.  An empty `shrunk_disagreements`
+        // index-aligned with `disagreements` keeps the report
+        // shape uniform across both regimes.
+        shrunk_disagreements: Vec::new(),
+        // Generative iterations don't exercise the per-mutation /
+        // per-seed dimensions (no seeds, no chains), so coverage is
+        // intentionally empty for this regime.
+        coverage: FuzzCoverage::default(),
         registered_kernels: registry.names(),
     }
 }
@@ -746,7 +988,20 @@ mod tests {
         // Polymorphic identity is universe-stable: lift every
         // universe by a constant and the certificate remains
         // well-typed (cumulativity-respecting).
-        let cert = seed_certificates()[0].clone();
+        let seeds = seed_certificates();
+        // Find the polymorphic-identity seed (poly-id-shape) — the
+        // first 3-binder Lam in the canonical battery.
+        let cert = seeds
+            .iter()
+            .find(|c| {
+                matches!(
+                    &c.term,
+                    Term::Lam(_, body)
+                        if matches!(&**body, Term::Lam(_, _))
+                )
+            })
+            .expect("polymorphic-identity seed must exist")
+            .clone();
         let lifted = apply_mutation(&cert, &Mutation::LiftAllUniverses { delta: 3 });
         // Both kernels must still accept.
         let r = KernelRegistry::default().verify_all(&lifted);
@@ -801,6 +1056,65 @@ mod tests {
         );
     }
 
+    // ----- Mutation chains -----
+
+    #[test]
+    fn empty_chain_is_identity() {
+        // Pin: applying an empty chain returns the seed unchanged.
+        let chain = MutationChain { mutations: vec![] };
+        let seed = &seed_certificates()[0];
+        let result = apply_mutation_chain(seed, &chain);
+        assert_eq!(result.term, seed.term);
+        assert_eq!(result.claimed_type, seed.claimed_type);
+    }
+
+    #[test]
+    fn chain_application_is_left_associative() {
+        // Pin: chain[0] applied first, chain[1] to that result.
+        // Lifting universes by 1 then by 2 should equal lifting by 3.
+        let chain_a = MutationChain {
+            mutations: vec![
+                Mutation::LiftAllUniverses { delta: 1 },
+                Mutation::LiftAllUniverses { delta: 2 },
+            ],
+        };
+        let chain_b = MutationChain {
+            mutations: vec![Mutation::LiftAllUniverses { delta: 3 }],
+        };
+        let seed = &seed_certificates()[0];
+        let r_a = apply_mutation_chain(seed, &chain_a);
+        let r_b = apply_mutation_chain(seed, &chain_b);
+        assert_eq!(r_a.term, r_b.term);
+        assert_eq!(r_a.claimed_type, r_b.claimed_type);
+    }
+
+    #[test]
+    fn sample_mutation_chain_respects_max_len() {
+        // Pin: sampled chains never exceed max_chain_len.
+        let mut rng = FuzzRng::new(123);
+        for _ in 0..200 {
+            let chain = sample_mutation_chain(&mut rng, 5);
+            assert!(chain.len() >= 1, "chain length must be at least 1");
+            assert!(chain.len() <= 5, "chain length must be ≤ max");
+        }
+    }
+
+    #[test]
+    fn chain_tags_join_with_commas() {
+        // Pin: stable serialization shape for audit reports.
+        let chain = MutationChain {
+            mutations: vec![
+                Mutation::LiftAllUniverses { delta: 1 },
+                Mutation::AppToNonFunction,
+                Mutation::SwapTermAndType,
+            ],
+        };
+        assert_eq!(
+            chain.tags(),
+            "lift_all_universes,app_to_non_function,swap_term_and_type"
+        );
+    }
+
     // ----- Canonical seeds verify under default registry -----
 
     #[test]
@@ -821,14 +1135,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn seed_roster_includes_canonical_battery_accept_path() {
+        // Pin: every accept-path canonical cert is a fuzz seed.
+        // A drift here means a freshly-added canonical cert isn't
+        // exercising the fuzzer, weakening coverage silently.
+        let canonical_count = crate::canonical_battery::canonical_battery()
+            .iter()
+            .filter(|c| {
+                crate::canonical_battery::expected_verdict(c.id).unwrap_or(false)
+            })
+            .count();
+        let seeds = seed_certificates();
+        // Plus one extra K-combinator seed that's hand-built.
+        assert_eq!(seeds.len(), canonical_count + 1);
+    }
+
     // ----- Campaign soundness on the default registry -----
 
     #[test]
     fn small_campaign_default_registry_zero_disagreements() {
         // The headline soundness pin: a 200-iteration campaign
-        // against the default (proof_checker + proof_checker_nbe)
-        // registry must produce ZERO disagreements. A failure
-        // here is a kernel-implementation bug.
+        // against the default registry must produce ZERO
+        // disagreements.  Failure here is a kernel-implementation
+        // bug.
         let report = run_fuzz_campaign(200, 0xDEAD_BEEF);
         assert_eq!(report.total_iterations, 200);
         assert!(
@@ -988,6 +1318,20 @@ mod tests {
         }
     }
 
+    /// Synthetic kernel that always rejects.
+    struct AlwaysRejectKernel;
+    impl KernelChecker for AlwaysRejectKernel {
+        fn name(&self) -> &'static str {
+            "always_reject_synthetic"
+        }
+        fn description(&self) -> &'static str {
+            "synthetic — always rejects (test-only)"
+        }
+        fn verify(&self, _cert: &Certificate) -> Result<(), CheckError> {
+            Err(CheckError::NotAType(Term::Universe(0)))
+        }
+    }
+
     #[test]
     fn fuzz_campaign_surfaces_disagreement_against_always_accept() {
         // Architectural pin: when a kernel that always accepts is
@@ -1013,6 +1357,169 @@ mod tests {
         // Every disagreement should list both kernels.
         for d in &report.disagreements {
             assert_eq!(d.verdict.outcomes.len(), 2);
+        }
+        // Every disagreement must come paired with a shrunk
+        // minimal-failing-case report.
+        assert_eq!(
+            report.disagreements.len(),
+            report.shrunk_disagreements.len(),
+        );
+        // At least one shrunk chain should be strictly shorter
+        // than its origin (the shrinker is doing real work).
+        let any_shrunk = report
+            .shrunk_disagreements
+            .iter()
+            .any(|s| s.minimal_chain_len < s.original_chain_len);
+        assert!(
+            any_shrunk,
+            "shrinker should reduce at least one chain in a 100-iter campaign",
+        );
+    }
+
+    // ----- Shrinker -----
+
+    #[test]
+    fn shrinker_reduces_chain_to_minimum() {
+        // Pin: a 3-element chain where only mutation #1 contributes
+        // to the disagreement should shrink to a 1-element chain.
+        // Setup: trusted-base + AlwaysAccept; the seed (polymorphic
+        // identity) is unanimously accepted by both.  AppToNonFunction
+        // makes the trusted base reject (app on non-function), which
+        // AlwaysAccept still accepts → disagreement.  Lift mutations
+        // alone preserve cumulativity-respecting typeability, so they
+        // don't disagree.
+        use crate::kernel_registry::ProofCheckerKernel;
+        let mut registry = KernelRegistry::new();
+        registry.register(ProofCheckerKernel);
+        registry.register(AlwaysAcceptKernel);
+        let seed = &seed_certificates()[0];
+        // Sanity: seed alone is unanimously accepted.
+        let v0 = registry.verify_all(seed);
+        assert!(matches!(v0.agreement, AgreementVerdict::Unanimous));
+
+        let chain = MutationChain {
+            mutations: vec![
+                Mutation::LiftAllUniverses { delta: 1 },
+                Mutation::AppToNonFunction,
+                Mutation::LiftAllUniverses { delta: 1 },
+            ],
+        };
+        // Sanity: the original 3-chain produces a disagreement.
+        let mutant = apply_mutation_chain(seed, &chain);
+        let v = registry.verify_all(&mutant);
+        assert!(
+            matches!(v.agreement, AgreementVerdict::Disagreement { .. }),
+            "expected disagreement on full chain, got {:?}",
+            v.agreement
+        );
+
+        let report = shrink_disagreement(&registry, seed, &chain);
+        assert_eq!(report.original_chain_len, 3);
+        assert_eq!(
+            report.minimal_chain_len, 1,
+            "shrinker should isolate the AppToNonFunction mutation"
+        );
+        assert_eq!(
+            report.minimal_chain.mutations[0].tag(),
+            "app_to_non_function"
+        );
+        // Sanity: the minimal chain still produces a disagreement.
+        let minimal_mutant = apply_mutation_chain(seed, &report.minimal_chain);
+        let v = registry.verify_all(&minimal_mutant);
+        assert!(matches!(v.agreement, AgreementVerdict::Disagreement { .. }));
+    }
+
+    #[test]
+    fn shrinker_terminates_on_seed_level_disagreement() {
+        // Pin: when the seed itself disagrees (kernel drift on the
+        // unmutated curated surface), the shrinker reduces the chain
+        // to empty — every mutation is removable because the seed
+        // alone already triggers disagreement.
+        use crate::kernel_registry::ProofCheckerKernel;
+        let mut registry = KernelRegistry::new();
+        registry.register(ProofCheckerKernel);
+        registry.register(AlwaysRejectKernel);
+        let seed = &seed_certificates()[0];
+        let chain = MutationChain {
+            mutations: vec![
+                Mutation::LiftAllUniverses { delta: 0 },
+                Mutation::LiftAllUniverses { delta: 0 },
+            ],
+        };
+        let report = shrink_disagreement(&registry, seed, &chain);
+        assert_eq!(report.original_chain_len, 2);
+        assert_eq!(report.minimal_chain_len, 0);
+        // Sanity: the seed alone produces disagreement, confirming
+        // the shrinker reached a minimum that is genuinely the
+        // shortest disagreeing prefix.
+        let v = registry.verify_all(seed);
+        assert!(matches!(v.agreement, AgreementVerdict::Disagreement { .. }));
+    }
+
+    // ----- Coverage instrumentation -----
+
+    #[test]
+    fn coverage_per_seed_hits_round_robin_balanced() {
+        // Pin: a campaign of `2 × seeds.len()` iterations should
+        // hit every seed exactly twice (round-robin scheduling).
+        let registry = KernelRegistry::default();
+        let seeds = seed_certificates();
+        let n = seeds.len() * 2;
+        let report = run_fuzz_campaign_against(&registry, n, 0xDEAD_BEEF);
+        for (idx, hits) in &report.coverage.per_seed_hits {
+            assert!(*idx < seeds.len(), "seed index out of range");
+            assert_eq!(*hits, 2, "seed {} got {} hits, expected 2", idx, hits);
+        }
+        assert_eq!(report.coverage.per_seed_hits.len(), seeds.len());
+    }
+
+    #[test]
+    fn coverage_chain_length_distribution_within_bounds() {
+        // Pin: every chain length recorded is in 1..=MAX_MUTATION_CHAIN_LEN.
+        let registry = KernelRegistry::default();
+        let report = run_fuzz_campaign_against(&registry, 200, 42);
+        let max_observed = report
+            .coverage
+            .chain_length_distribution
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c > 0)
+            .map(|(i, _)| i + 1)
+            .max()
+            .unwrap_or(0);
+        assert!(max_observed >= 1);
+        assert!(max_observed <= MAX_MUTATION_CHAIN_LEN);
+        let total: usize = report.coverage.chain_length_distribution.iter().sum();
+        assert_eq!(total, 200, "total chain hits should equal iterations");
+    }
+
+    #[test]
+    fn coverage_records_every_mutation_tag_within_500_iters() {
+        // Pin: a 500-iter campaign should hit every mutation tag at
+        // least once (with chain lengths up to 3 the expected hit
+        // rate per mutation is ~1/11 × ~2 per iter = ~91 hits).
+        // Zero hits would indicate a sampling bug.
+        let registry = KernelRegistry::default();
+        let report = run_fuzz_campaign_against(&registry, 500, 0xABCD);
+        let expected_tags = [
+            "lift_all_universes",
+            "lift_term_universes_only",
+            "lift_claimed_type_universes_only",
+            "replace_term_with_universe_zero",
+            "replace_claimed_type_with_universe_zero",
+            "replace_term_with_free_variable",
+            "app_to_non_function",
+            "wrap_term_in_extra_lam",
+            "swap_term_and_type",
+            "pi_domain_to_universe_zero",
+            "lam_domain_to_universe_zero",
+        ];
+        for tag in expected_tags {
+            assert!(
+                report.coverage.per_mutation_hits.get(tag).copied().unwrap_or(0) > 0,
+                "mutation '{}' got zero hits in 500-iter campaign",
+                tag
+            );
         }
     }
 
