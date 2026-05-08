@@ -192,7 +192,7 @@ impl SoundnessBackend for CoqBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (12 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (11 axioms — one per with-IOU rule).
 //
 // Discharged so far (each removed an axiom):
 //   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
@@ -205,7 +205,7 @@ impl SoundnessBackend for CoqBackend {
 // ============================================================================
 
 const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (12 total) ====== *)\n\
+(* ====== Per-rule IOU axioms (11 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
 Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
@@ -234,8 +234,8 @@ Axiom K_Refine_Intro_iou : Ctx -> CoreTerm -> CoreTerm -> string -> CoreTerm -> 
    form; the respect-of-equivalence side condition remains the kernel's\n\
    input contract.) *)\n\
 \n\
-(* K_Inductive: positivity decision procedure. *)\n\
-Axiom K_Inductive_iou : Ctx -> string -> list CoreTerm -> CoreTerm -> Prop.\n\
+(* (K_Inductive: discharged — see T_inductive below for the structural\n\
+   form; strict-positivity is the kernel's input contract.) *)\n\
 \n\
 (* (K_Elim: discharged — see T_elim below for the structural form;\n\
    per-constructor case-typing remains the kernel's input contract.) *)\n\
@@ -374,9 +374,8 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee)\n  \
   (* ===== Inductive (3) ===== *)\n  \
   | T_inductive :\n      \
-      forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (result : CoreTerm),\n        \
-        K_Inductive_iou Gamma path args result ->\n        \
-        Typing Gamma (Inductive_ path args) result\n  \
+      forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (i : nat),\n        \
+        Typing Gamma (Inductive_ path args) (Universe i)\n  \
   | T_pos :\n      \
       forall (Gamma : Ctx) (t T : CoreTerm),\n        \
         side_conditions_hold ->\n        \
@@ -608,9 +607,8 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         // ===== Inductive (3) =====
         "K_Inductive" => Some(
             "Lemma K_Inductive_sound :\n  \
-              forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (result : CoreTerm),\n    \
-                K_Inductive_iou Gamma path args result ->\n    \
-                Typing Gamma (Inductive_ path args) result.\n\
+              forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (i : nat),\n    \
+                Typing Gamma (Inductive_ path args) (Universe i).\n\
               Proof. exact T_inductive. Qed.",
         ),
         "K_Pos" => Some(

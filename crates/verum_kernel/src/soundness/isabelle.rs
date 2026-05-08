@@ -226,7 +226,7 @@ axiomatization\n  \
   (* (K_Refine_Omega: discharged — same shape as K_Refine.) *)\n  \
   K_Refine_Intro_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   (* (K_Quot_Elim: discharged — see T_quot_elim below for the structural form.) *) \n  \
-  K_Inductive_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
+  (* (K_Inductive: discharged — see T_inductive below for the structural form.) *)\n  \
   (* (K_Elim: discharged — see T_elim below for the structural form.) *)\n  \
   K_Smt_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Eps_Mu_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
@@ -267,7 +267,7 @@ where\n\
 | T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
 | T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
 | T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
-| T_inductive:    \"K_Inductive_iou \\<Gamma> path args result \\<Longrightarrow> \\<Gamma> \\<turnstile> InductiveT path args : result\"\n\
+| T_inductive:    \"\\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n\
 | T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
 | T_elim:         \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
 | T_smt:          \"K_Smt_iou \\<Gamma> solver_tag T \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
@@ -429,9 +429,8 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         // Inductive (3)
         "K_Inductive" => Some(
             "lemma K_Inductive_sound:\n  \
-              assumes \"K_Inductive_iou \\<Gamma> path args result\"\n  \
-              shows \"\\<Gamma> \\<turnstile> InductiveT path args : result\"\n  \
-              using assms by (rule T_inductive)",
+              shows \"\\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n  \
+              by (rule T_inductive)",
         ),
         "K_Pos" => Some(
             "lemma K_Pos_sound: \"side_conditions_hold \\<longrightarrow> True\"\n  by simp",

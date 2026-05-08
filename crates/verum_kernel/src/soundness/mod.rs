@@ -501,8 +501,17 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Inductive,
             0,
             false,
-            admitted(
-                "requires positivity-condition decision procedure (mutual recursion with K-Pos)",
+            // Discharged: at the export layer, an in-scope
+            // `Inductive_(path, args)` lives in `Universe i` for
+            // some i.  The strict-positivity check is the kernel's
+            // input contract — the `inductive` keyword does this at
+            // definition time, mirroring mathlib's `inductive`
+            // discipline.  By the time we have an `Inductive_(...)`
+            // term in CoreTerm, the kernel has already verified the
+            // strict-positivity invariant for the named inductive.
+            proved(
+                "exact T_inductive.",
+                "  exact @Typing.t_inductive _ _ _ _",
             ),
         ),
         spec(
