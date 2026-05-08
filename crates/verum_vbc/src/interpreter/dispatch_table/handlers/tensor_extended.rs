@@ -23,6 +23,20 @@ pub(in super::super) fn handle_tensor_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
+    // Wire format: `opcode + sub_op + varint(operand_byte_count) +
+    // operand_bytes`.  The varint is consumed here so existing
+    // per-sub_op inline reads below operate exactly as before — they
+    // know how many register operands to read for their specific
+    // sub-op based on the structured arms (Pool, Argmin, …) or, for
+    // the registry-driven `Instruction::TensorExtended` carrier
+    // emitted by `emit_intrinsic_tensor_extended`, the operand
+    // unpacker reads exactly the operands packed at codegen time.
+    // The varint length prefix is needed by the sequential bytecode
+    // decoder (linker round-trip / disassembler) to advance past the
+    // operand bytes without knowing per-intrinsic arity, since the
+    // same sub_op byte is shared by intrinsics with different param
+    // counts (TENSOR_UNOP vs TENSOR_SIGMOID, etc.).
+    let _operand_byte_count = read_varint(state)?;
     let sub_op = TensorSubOpcode::from_byte(sub_op_byte);
 
     use super::super::super::kernel::tokenizer::{
