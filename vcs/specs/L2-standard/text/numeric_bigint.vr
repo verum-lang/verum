@@ -109,21 +109,17 @@ fn check_compare() {
     let c = BigInt.from_int(5);
     let neg = BigInt.from_int(-100);
 
-    assert(matches_less(a.compare(&b)));
-    assert(matches_equal(a.compare(&c)));
-    assert(matches_greater(b.compare(&a)));
+    assert(a.compare(&b).is_less());
+    assert(a.compare(&c).is_equal());
+    assert(b.compare(&a).is_greater());
 
     // Negatives always less than positives (zero handled separately).
-    assert(matches_less(neg.compare(&a)));
+    assert(neg.compare(&a).is_less());
 
     // Negative ordering is REVERSED of magnitude.
     let big_neg = BigInt.from_int(-1_000_000);
-    assert(matches_less(big_neg.compare(&neg)));
+    assert(big_neg.compare(&neg).is_less());
 }
-
-fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
-fn matches_less(o: Ordering) -> Bool  { match o { Less => true,  _ => false } }
-fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
 
 fn check_render() {
     assert(BigInt.zero().to_text() == "0");
