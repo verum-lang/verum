@@ -4200,11 +4200,13 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
     let disagreement_summaries: Vec<serde_json::Value> = report
         .disagreements
         .iter()
-        .map(|d| {
+        .zip(report.shrunk_disagreements.iter())
+        .map(|(d, shrink)| {
             serde_json::json!({
                 "iteration": d.iteration,
                 "seed_index": d.seed_index,
-                "mutation": d.mutation_tag,
+                "mutation_chain": d.mutation_tag,
+                "chain_length": d.chain.len(),
                 "agreement": d.agreement_tag(),
                 "outcomes": d.verdict.outcomes.iter().map(|o| {
                     serde_json::json!({
@@ -4213,24 +4215,38 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
                         "error": o.error_summary,
                     })
                 }).collect::<Vec<_>>(),
+                "shrunk": {
+                    "original_chain_len": shrink.original_chain_len,
+                    "minimal_chain_len": shrink.minimal_chain_len,
+                    "minimal_chain_tags": shrink.minimal_chain.tags(),
+                    "steps_taken": shrink.steps_taken,
+                },
             })
         })
         .collect();
 
+    let coverage_payload = serde_json::json!({
+        "per_mutation_hits": &report.coverage.per_mutation_hits,
+        "per_seed_hits": &report.coverage.per_seed_hits,
+        "chain_length_distribution": &report.coverage.chain_length_distribution,
+    });
+
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "kernel_version": env!("CARGO_PKG_VERSION"),
         "discipline": "differential_kernel_property_fuzz",
         "campaign": {
             "iterations": report.total_iterations,
             "base_seed": format!("{:#x}", DIFFERENTIAL_FUZZ_DEFAULT_SEED),
             "registered_kernels": report.registered_kernels,
+            "max_chain_len": verum_kernel::differential_fuzz::MAX_MUTATION_CHAIN_LEN,
         },
         "outcome": {
             "unanimous_accept": report.unanimous_accept,
             "unanimous_reject": report.unanimous_reject,
             "disagreements": report.disagreements.len(),
         },
+        "coverage": coverage_payload,
         "load_bearing": report.is_sound(),
         "disagreement_details": disagreement_summaries,
     });
@@ -4268,17 +4284,60 @@ pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result
                     "✓".green(),
                     report.total_iterations,
                 );
+                // Coverage instrumentation — surface bias when the
+                // gate passes.  A mutation with zero hits across a
+                // 500-iter campaign is a sampling regression worth
+                // investigating.
+                let mut covered: Vec<(&&str, &usize)> =
+                    report.coverage.per_mutation_hits.iter().collect();
+                covered.sort_by_key(|(k, _)| **k);
+                println!();
+                println!("Mutation coverage:");
+                for (tag, hits) in covered {
+                    println!("  {:<40} {}", tag, hits);
+                }
+                let total_chain_hits: usize =
+                    report.coverage.chain_length_distribution.iter().sum();
+                if total_chain_hits > 0 {
+                    println!();
+                    print!("Chain-length distribution: ");
+                    for (i, n) in report
+                        .coverage
+                        .chain_length_distribution
+                        .iter()
+                        .enumerate()
+                    {
+                        print!("len={} → {}  ", i + 1, n);
+                    }
+                    println!();
+                }
             } else {
                 println!(
                     "{} {} disagreement(s) detected — kernel-implementation bug surfaced.",
                     "✗".red(),
                     report.disagreements.len(),
                 );
-                for d in report.disagreements.iter().take(5) {
+                for (d, shrink) in report
+                    .disagreements
+                    .iter()
+                    .zip(report.shrunk_disagreements.iter())
+                    .take(5)
+                {
                     println!(
-                        "    iter {} seed {} mutation={} agreement={}",
+                        "    iter {} seed {} chain={} agreement={}",
                         d.iteration, d.seed_index, d.mutation_tag, d.agreement_tag(),
                     );
+                    if shrink.minimal_chain_len < shrink.original_chain_len {
+                        println!(
+                            "      shrunk to minimal {}-step chain: {}",
+                            shrink.minimal_chain_len,
+                            if shrink.minimal_chain.tags().is_empty() {
+                                "<seed alone disagrees>".to_string()
+                            } else {
+                                shrink.minimal_chain.tags()
+                            },
+                        );
+                    }
                 }
                 if report.disagreements.len() > 5 {
                     println!("    ... ({} more)", report.disagreements.len() - 5);
