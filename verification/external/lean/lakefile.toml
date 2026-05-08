@@ -4,3 +4,11 @@ defaultTargets = ["VerumExternalReplay"]
 
 [[lean_lib]]
 name = "VerumExternalReplay"
+
+# Executable for the differential JSON harness (`verum audit
+# --differential-lean-checker`).  Reads a battery of certificates
+# from the path given as argv[0], runs `verifyCertificate` on each,
+# emits per-cert verdicts as JSON to stdout.
+[[lean_exe]]
+name = "verum_replay_checker"
+root = "VerumExternalReplay.ReplayChecker"
