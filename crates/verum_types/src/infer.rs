@@ -33349,6 +33349,142 @@ impl TypeChecker {
                 )))
             })?;
 
+        // Two-pass: collect Mount re-exports first (so we can drop the
+        // borrow on `module.items` before recursing into cross-file
+        // imports that may re-enter `self.inline_modules`).  Re-exports
+        // visit BEFORE local items so a local declaration that
+        // shadows a re-export wins (per the language's
+        // first-registered-wins discipline).
+        let mut reexport_paths: Vec<(Text, Option<Text>)> = Vec::new();
+        if let Some(items) = &module.items {
+            for item in items.iter() {
+                if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
+                    if !matches!(mount_decl.visibility, verum_ast::decl::Visibility::Public) {
+                        continue;
+                    }
+                    use verum_ast::decl::MountTreeKind;
+                    use verum_ast::ty::PathSegment;
+                    // Resolve `super.X` / `self.X` against the inline
+                    // module's own path (`module_name`).  The inline
+                    // module sits at `module_name`; `super` strips the
+                    // last segment to reach the parent file module.
+                    let resolve = |path: &verum_ast::ty::Path| -> Text {
+                        let mut parts: Vec<String> = Vec::new();
+                        for seg in &path.segments {
+                            match seg {
+                                PathSegment::Super => {
+                                    if parts.is_empty() {
+                                        // Strip last segment from module_name
+                                        let segs: Vec<&str> = module_name.split('.').collect();
+                                        if segs.len() > 1 {
+                                            for s in &segs[..segs.len() - 1] {
+                                                parts.push(s.to_string());
+                                            }
+                                        }
+                                    } else {
+                                        parts.pop();
+                                    }
+                                }
+                                PathSegment::SelfValue => {
+                                    if parts.is_empty() {
+                                        for s in module_name.split('.') {
+                                            parts.push(s.to_string());
+                                        }
+                                    }
+                                }
+                                PathSegment::Cog => {
+                                    parts.clear();
+                                }
+                                PathSegment::Relative => {
+                                    if parts.is_empty() {
+                                        for s in module_name.split('.') {
+                                            parts.push(s.to_string());
+                                        }
+                                    }
+                                }
+                                PathSegment::Name(ident) => {
+                                    parts.push(ident.name.as_str().to_string());
+                                }
+                            }
+                        }
+                        verum_common::Text::from(parts.join("."))
+                    };
+                    match &mount_decl.tree.kind {
+                        MountTreeKind::Glob(path) => {
+                            let p = resolve(path);
+                            reexport_paths.push((p, None));
+                        }
+                        MountTreeKind::Path(path) => {
+                            // Single item: parent is everything except last segment
+                            let mut prefix = path.clone();
+                            let item_name_text =
+                                if let Some(PathSegment::Name(id)) = prefix.segments.last() {
+                                    Some(verum_common::Text::from(id.name.as_str()))
+                                } else {
+                                    None
+                                };
+                            if !prefix.segments.is_empty() {
+                                let mut new_segs = prefix.segments.clone();
+                                new_segs.pop();
+                                prefix.segments = new_segs;
+                            }
+                            let parent = resolve(&prefix);
+                            reexport_paths.push((parent, item_name_text));
+                        }
+                        MountTreeKind::Nested { prefix, trees } => {
+                            let parent = resolve(prefix);
+                            for tree in trees {
+                                if let MountTreeKind::Path(p) = &tree.kind {
+                                    if let Some(PathSegment::Name(id)) = p.segments.first() {
+                                        reexport_paths.push((
+                                            parent.clone(),
+                                            Some(verum_common::Text::from(id.name.as_str())),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        MountTreeKind::File { .. } => {}
+                    }
+                }
+            }
+        }
+
+        // Process the Mount re-exports against the cross-file
+        // ModuleRegistry.  Glob mounts → `import_all_from_module`;
+        // specific items → `import_item_from_module`.  Errors are
+        // logged but not propagated — a missing dependency at
+        // prelude-injection time is non-fatal (the user code that
+        // tries to use the unimported name will surface E101).
+        let registry_snapshot = self.module_registry.read().clone();
+        for (path, item_name_opt) in reexport_paths {
+            match item_name_opt {
+                None => {
+                    if let Err(e) = self.import_all_from_module(&path, &registry_snapshot) {
+                        tracing::debug!(
+                            "import_all_from_inline_module: glob re-export {} failed: {:?}",
+                            path.as_str(),
+                            e
+                        );
+                    }
+                }
+                Some(item_name) => {
+                    if let Err(e) = self.import_item_from_module(
+                        &path,
+                        item_name.as_str(),
+                        &registry_snapshot,
+                    ) {
+                        tracing::debug!(
+                            "import_all_from_inline_module: specific re-export {}.{} failed: {:?}",
+                            path.as_str(),
+                            item_name.as_str(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
         if let Some(items) = &module.items {
             for item in items.iter() {
                 let (item_name, visibility) = match &item.kind {
