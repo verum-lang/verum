@@ -27,7 +27,7 @@ module core.database.sqlite.native.l3_btree.comparator;
 // `SeekKey` carries the actual key payload; `cmp_keys` is the
 // branch-table comparator dispatching on the (key shape, cell shape)
 // pair.  All comparators are PURE — they consume `&` references
-// and return a `KeyOrdering` (Less/Equal/Greater) without touching
+// and return a `Ordering` (Less/Equal/Greater) without touching
 // the pager.
 // =============================================================================
 
@@ -62,65 +62,29 @@ public fn seek_key_kind(k: &SeekKey) -> KeyKind {
 }
 
 // -----------------------------------------------------------------------------
-// KeyOrdering — the comparator return type
-// -----------------------------------------------------------------------------
-
-/// Three-valued ordering — same shape as the standard library's
-/// `Ordering` but specialised so the B-tree code doesn't take a
-/// transitive dependency on the protocol surface.
-public type KeyOrdering is
-      KoLess
-    | KoEqual
-    | KoGreater;
-
-public fn ordering_name(o: &KeyOrdering) -> Text {
-    match o {
-        KoLess    => "<".clone(),
-        KoEqual   => "==".clone(),
-        KoGreater => ">".clone(),
-    }
-}
-
-/// Reverse the ordering — `KoLess <-> KoGreater`.  Used by
-/// descending-walk (Prev) seek paths.
-public fn reverse_ordering(o: &KeyOrdering) -> KeyOrdering {
-    match o {
-        KoLess    => KoGreater,
-        KoEqual   => KoEqual,
-        KoGreater => KoLess,
-    }
-}
-
-// -----------------------------------------------------------------------------
 // Primitive comparators
 // -----------------------------------------------------------------------------
 
 /// Compare two `Int64` values.  Used for rowid keys + integer
 /// columns inside records.
-public fn cmp_int64(a: Int64, b: Int64) -> KeyOrdering {
-    if a < b { KoLess }
-    else if a > b { KoGreater }
-    else { KoEqual }
+public fn cmp_int64(a: Int64, b: Int64) -> Ordering {
+    Ordering.from_int(a - b)
 }
 
 /// Lex-compare two byte sequences.  Used as the BINARY collation
 /// for index records and for blob columns.  Shorter sequence is
 /// less when prefixes are equal — standard memcmp semantics.
-public fn cmp_bytes(a: &List<Byte>, b: &List<Byte>) -> KeyOrdering {
+public fn cmp_bytes(a: &List<Byte>, b: &List<Byte>) -> Ordering {
     let an = a.len();
     let bn = b.len();
     let n = if an < bn { an } else { bn };
     let mut i: Int = 0;
     while i < n {
-        let av: Int = a[i] as Int;
-        let bv: Int = b[i] as Int;
-        if av < bv { return KoLess; }
-        if av > bv { return KoGreater; }
+        let c = Ordering.from_int(a[i] as Int - b[i] as Int);
+        if c != Equal { return c; }
         i = i + 1;
     }
-    if an < bn { KoLess }
-    else if an > bn { KoGreater }
-    else { KoEqual }
+    Ordering.from_int(an - bn)
 }
 
 // -----------------------------------------------------------------------------
@@ -145,7 +109,7 @@ public type CellKey is
 /// `RecordSchema` — that path is what index seeks should drive.
 /// This entry remains for table-scan / rowid-only paths and as
 /// fallback for legacy callers without a schema.
-public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text> {
+public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<Ordering, Text> {
     match target {
         SkRowId(t) => match cell {
             CkRowId(c)  => Ok(cmp_int64(t, c)),
@@ -169,15 +133,15 @@ public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<KeyOrdering, Text
 /// `index` is the cell position; `ordering` describes the key
 /// relationship at that index:
 ///
-///   * `KoEqual`   — exact hit at `index`
-///   * `KoLess`    — every cell key is < target; cursor sits past
+///   * `Equal`   — exact hit at `index`
+///   * `Less`    — every cell key is < target; cursor sits past
 ///                   the last cell (index = cell_count)
-///   * `KoGreater` — cell at `index` is the first key > target;
+///   * `Greater` — cell at `index` is the first key > target;
 ///                   for interior pages descend via the LEFT child;
 ///                   for leaves position the cursor BEFORE this cell
 public type BinarySearchResult is {
     index: Int,
-    ordering: KeyOrdering,
+    ordering: Ordering,
 };
 
 /// `cell_at` is a pure callback returning the cell key at index `i`
@@ -185,7 +149,7 @@ public type BinarySearchResult is {
 /// touches the pager.
 ///
 /// Algorithm: standard half-open binary search [lo, hi).  Returns
-/// `KoEqual` if a hit was found; otherwise the index of the first
+/// `Equal` if a hit was found; otherwise the index of the first
 /// cell strictly greater than target (or `cell_count` if all are
 /// less).  Caller interprets this against `SeekOp` to decide the
 /// final cursor position.
@@ -198,7 +162,7 @@ where F: Fn(Int) -> CellKey
 {
     let mut lo: Int = 0;
     let mut hi: Int = cell_count;
-    let mut last_ordering: KeyOrdering = KoLess;
+    let mut last_ordering: Ordering = Less;
 
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
@@ -208,18 +172,18 @@ where F: Fn(Int) -> CellKey
             Err(e) => { return Err(e); }
         };
         match ord {
-            KoEqual   => {
-                return Ok(BinarySearchResult { index: mid, ordering: KoEqual });
+            Equal   => {
+                return Ok(BinarySearchResult { index: mid, ordering: Equal });
             }
-            KoLess    => {
+            Less    => {
                 // target < cell[mid] — search left half.
                 hi = mid;
-                last_ordering = KoGreater;   // relative to cells we passed
+                last_ordering = Greater;   // relative to cells we passed
             }
-            KoGreater => {
+            Greater => {
                 // target > cell[mid] — search right half.
                 lo = mid + 1;
-                last_ordering = KoLess;
+                last_ordering = Less;
             }
         }
     }

@@ -24,7 +24,7 @@ module core.database.sqlite.native.l3_btree.record_compare;
 // Numeric / blob / NULL columns ignore the schema (collation is a
 // text-only concept per SQLite §9.5).
 //
-// The comparator is PURE — input borrowed, output is a `KeyOrdering`.
+// The comparator is PURE — input borrowed, output is a `Ordering`.
 // It does NOT touch the pager and does NOT mutate the schema.  All
 // dispatch tables are sum-type-keyed (no `dyn` requirement) so codegen
 // monomorphises the comparator chains at the call site.
@@ -51,9 +51,8 @@ mount core.database.sqlite.native.l2_record.collation.{
     binary_cmp, nocase_cmp, rtrim_cmp,
 };
 mount core.database.sqlite.native.l3_btree.comparator.{
-    KeyOrdering, KoLess, KoEqual, KoGreater, cmp_int64, cmp_bytes,
+    cmp_int64, cmp_bytes,
 };
-mount core.base.ordering.{Ordering, Less, Equal, Greater};
 
 // -----------------------------------------------------------------------------
 // RecordSchema — per-column collation choice
@@ -152,12 +151,8 @@ fn type_class_rank(tc: &TypeClass) -> Int {
     }
 }
 
-fn cmp_type_classes(a: &TypeClass, b: &TypeClass) -> KeyOrdering {
-    let ra = type_class_rank(a);
-    let rb = type_class_rank(b);
-    if ra < rb { KoLess }
-    else if ra > rb { KoGreater }
-    else { KoEqual }
+fn cmp_type_classes(a: &TypeClass, b: &TypeClass) -> Ordering {
+    Ordering.from_int(type_class_rank(a) - type_class_rank(b))
 }
 
 // -----------------------------------------------------------------------------
@@ -215,7 +210,7 @@ fn decode_real_payload(buf: &[Byte], start: Int) -> Float64 {
 fn cmp_numeric(
     a_st: &SerialType, a_buf: &[Byte], a_start: Int,
     b_st: &SerialType, b_buf: &[Byte], b_start: Int,
-) -> KeyOrdering {
+) -> Ordering {
     let a_is_real = match a_st { StReal => true, _ => false };
     let b_is_real = match b_st { StReal => true, _ => false };
     if !a_is_real && !b_is_real {
@@ -237,10 +232,8 @@ fn cmp_numeric(
     }
 }
 
-fn cmp_float64(a: Float64, b: Float64) -> KeyOrdering {
-    if a < b { KoLess }
-    else if a > b { KoGreater }
-    else { KoEqual }
+fn cmp_float64(a: Float64, b: Float64) -> Ordering {
+    if a < b { Less } else if a > b { Greater } else { Equal }
 }
 
 /// Compare two text payloads under the chosen collation.  Falls back
@@ -255,7 +248,7 @@ fn cmp_text(
     registry: Maybe<&CollationRegistry>,
     a_buf: &[Byte], a_start: Int, a_len: Int,
     b_buf: &[Byte], b_start: Int, b_len: Int,
-) -> KeyOrdering {
+) -> Ordering {
     let a_text = bytes_to_text(a_buf, a_start, a_len);
     let b_text = bytes_to_text(b_buf, b_start, b_len);
     let ord: Ordering = match coll {
@@ -277,15 +270,7 @@ fn cmp_text(
             }
         }
     };
-    ordering_to_key_ordering(&ord)
-}
-
-fn ordering_to_key_ordering(o: &Ordering) -> KeyOrdering {
-    match o {
-        Less => KoLess,
-        Equal => KoEqual,
-        Greater => KoGreater,
-    }
+    ord
 }
 
 fn bytes_to_text(buf: &[Byte], start: Int, len: Int) -> Text {
@@ -301,19 +286,15 @@ fn bytes_to_text(buf: &[Byte], start: Int, len: Int) -> Text {
 fn cmp_blob(
     a_buf: &[Byte], a_start: Int, a_len: Int,
     b_buf: &[Byte], b_start: Int, b_len: Int,
-) -> KeyOrdering {
+) -> Ordering {
     let n = if a_len < b_len { a_len } else { b_len };
     let mut i: Int = 0;
     while i < n {
-        let av = a_buf[a_start + i] as Int;
-        let bv = b_buf[b_start + i] as Int;
-        if av < bv { return KoLess; }
-        if av > bv { return KoGreater; }
+        let c = Ordering.from_int(a_buf[a_start + i] as Int - b_buf[b_start + i] as Int);
+        if c != Equal { return c; }
         i = i + 1;
     }
-    if a_len < b_len { KoLess }
-    else if a_len > b_len { KoGreater }
-    else { KoEqual }
+    Ordering.from_int(a_len - b_len)
 }
 
 // -----------------------------------------------------------------------------
@@ -330,18 +311,18 @@ fn cmp_one_column(
     b_st: &SerialType, b_buf: &[Byte], b_start: Int,
     col: &ColumnSchema,
     registry: Maybe<&CollationRegistry>,
-) -> KeyOrdering {
+) -> Ordering {
     let a_class = type_class_of(a_st);
     let b_class = type_class_of(b_st);
     let class_ord = cmp_type_classes(&a_class, &b_class);
     match class_ord {
-        KoLess    => return KoLess,
-        KoGreater => return KoGreater,
-        KoEqual   => {},
+        Less    => return Less,
+        Greater => return Greater,
+        Equal   => {},
     }
     // Same class — dispatch the per-class comparator.
     match a_class {
-        TcNull => KoEqual,
+        TcNull => Equal,
         TcNumeric => cmp_numeric(a_st, a_buf, a_start, b_st, b_buf, b_start),
         TcText => {
             let a_len = serial_type_payload_size(*a_st);
@@ -384,7 +365,7 @@ public fn cmp_records_with_schema(
     b: &List<Byte>,
     schema: &RecordSchema,
     registry: Maybe<&CollationRegistry>,
-) -> Result<KeyOrdering, RecordCompareError> {
+) -> Result<Ordering, RecordCompareError> {
     let a_buf = a.as_slice();
     let b_buf = b.as_slice();
     let (a_types, a_hdr_len) = match decode_record_header(a_buf, 0) {
@@ -420,13 +401,13 @@ public fn cmp_records_with_schema(
         let mut ord = cmp_one_column(&a_st, a_buf, a_off, &b_st, b_buf, b_off, col, registry);
         if col.desc {
             ord = match ord {
-                KoLess => KoGreater,
-                KoEqual => KoEqual,
-                KoGreater => KoLess,
+                Less => Greater,
+                Equal => Equal,
+                Greater => Less,
             };
         }
         match ord {
-            KoEqual => {},
+            Equal => {},
             _ => { return Ok(ord); }
         }
         a_off = a_off + a_payload;
@@ -434,9 +415,9 @@ public fn cmp_records_with_schema(
         i = i + 1;
     }
     // All shared columns equal — shorter record wins.
-    if a_types.len() < b_types.len() { Ok(KoLess) }
-    else if a_types.len() > b_types.len() { Ok(KoGreater) }
-    else { Ok(KoEqual) }
+    if a_types.len() < b_types.len() { Ok(Less) }
+    else if a_types.len() > b_types.len() { Ok(Greater) }
+    else { Ok(Equal) }
 }
 
 /// Module-local default schema entry — BINARY ascending — used when
@@ -462,7 +443,7 @@ public fn cmp_byte_records(
     b: &List<Byte>,
     schema: &RecordSchema,
     registry: Maybe<&CollationRegistry>,
-) -> KeyOrdering {
+) -> Ordering {
     match cmp_records_with_schema(a, b, schema, registry) {
         Ok(o) => o,
         // On corruption, fall back to the lex byte compare so the
