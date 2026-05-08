@@ -2625,7 +2625,9 @@ fn replay_lean(manifest_dir: &Path, lean_export: &Path) -> BackendReport {
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             let combined = format!("{stdout}\n{stderr}");
  // Lean emits "error:" for hard errors and "warning: ... declaration uses `sorry`"
- // for honest IOUs.  Distinguish via prefix.
+ // for honest IOUs.  Post-FV-9 the emitter also declares per-rule
+ // `axiom <Rule>_iou : … → Prop` declarations as the trust-extension
+ // surface for with-IOU rules; we count both flavours uniformly.
             let mut hard_errors: Vec<String> = Vec::new();
             let mut sorry_count = 0usize;
             for line in combined.lines() {
@@ -2636,13 +2638,24 @@ fn replay_lean(manifest_dir: &Path, lean_export: &Path) -> BackendReport {
                     sorry_count += 1;
                 }
             }
+            let axiom_iou_count = std::fs::read_to_string(&lake_target)
+                .map(|s| {
+                    s.lines()
+                        .filter(|l| {
+                            let t = l.trim_start();
+                            t.starts_with("axiom ") && t.contains("_iou ")
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            let total_ious = sorry_count + axiom_iou_count;
             let verdict = if !out.status.success() || !hard_errors.is_empty() {
                 ReplayVerdict::HardError {
                     error_count: hard_errors.len().max(1),
                     sample: hard_errors.into_iter().take(8).collect(),
                 }
-            } else if sorry_count > 0 {
-                ReplayVerdict::IouOnly { sorry_count }
+            } else if total_ious > 0 {
+                ReplayVerdict::IouOnly { sorry_count: total_ious }
             } else {
                 ReplayVerdict::Clean
             };
@@ -2746,25 +2759,36 @@ fn replay_coq(manifest_dir: &Path, coq_export: &Path) -> BackendReport {
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             let combined = format!("{stdout}\n{stderr}");
  // Coq emits "Error:" for hard failures.  Honest IOUs are
- // `Admitted.` lines in the emitted source — they don't surface
- // as diagnostics so we count them by re-reading the source.
+ // `Admitted.` lines plus `Axiom <Rule>_iou` declarations in the
+ // emitted source — we count both by re-reading the source.
             let mut hard_errors: Vec<String> = Vec::new();
             for line in combined.lines() {
                 if line.starts_with("Error:") || line.contains("\nError:") {
                     hard_errors.push(line.to_string());
                 }
             }
-            let admitted_count = std::fs::read_to_string(&coq_target)
-                .map(|s| s.matches("Admitted.").count())
-                .unwrap_or(0);
+            let (admitted_count, axiom_iou_count) = std::fs::read_to_string(&coq_target)
+                .map(|s| {
+                    let admit = s.matches("Admitted.").count();
+                    let ax = s
+                        .lines()
+                        .filter(|l| {
+                            let t = l.trim_start();
+                            t.starts_with("Axiom ") && t.contains("_iou ")
+                        })
+                        .count();
+                    (admit, ax)
+                })
+                .unwrap_or((0, 0));
+            let total_ious = admitted_count + axiom_iou_count;
             let verdict = if !out.status.success() || !hard_errors.is_empty() {
                 ReplayVerdict::HardError {
                     error_count: hard_errors.len().max(1),
                     sample: hard_errors.into_iter().take(8).collect(),
                 }
-            } else if admitted_count > 0 {
+            } else if total_ious > 0 {
                 ReplayVerdict::IouOnly {
-                    sorry_count: admitted_count,
+                    sorry_count: total_ious,
                 }
             } else {
                 ReplayVerdict::Clean
@@ -2900,17 +2924,28 @@ fn replay_isabelle(manifest_dir: &Path, isabelle_export: &Path) -> BackendReport
                     hard_errors.push(line.to_string());
                 }
             }
-            let oops_count = std::fs::read_to_string(&isa_target)
-                .map(|s| s.matches("\n  oops").count())
-                .unwrap_or(0);
+            // IOUs in Isabelle: `oops` declarations (legacy shape) +
+            // per-rule `_iou ::` lines inside the `axiomatization`
+            // block (post-FV-9 shape).  Both are counted uniformly.
+            let (oops_count, axiom_iou_count) = std::fs::read_to_string(&isa_target)
+                .map(|s| {
+                    let oops = s.matches("\n  oops").count();
+                    let ax = s
+                        .lines()
+                        .filter(|l| l.contains("_iou ::"))
+                        .count();
+                    (oops, ax)
+                })
+                .unwrap_or((0, 0));
+            let total_ious = oops_count + axiom_iou_count;
             let verdict = if !out.status.success() || !hard_errors.is_empty() {
                 ReplayVerdict::HardError {
                     error_count: hard_errors.len().max(1),
                     sample: hard_errors.into_iter().take(8).collect(),
                 }
-            } else if oops_count > 0 {
+            } else if total_ious > 0 {
                 ReplayVerdict::IouOnly {
-                    sorry_count: oops_count,
+                    sorry_count: total_ious,
                 }
             } else {
                 ReplayVerdict::Clean
