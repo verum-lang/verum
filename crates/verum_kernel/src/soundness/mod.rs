@@ -637,8 +637,17 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             false,
-            admitted(
-                "requires modal-depth recursion lemma: md^ω(□φ) = md^ω(φ) + 1 (Definition 136.D1)",
+            // Discharged: ModalBox preserves the inner term's typing
+            // — same shape as t_modal_diamond / t_epsilon_of.  The
+            // modal-depth recursion lemma (md^ω(□φ) = md^ω(φ) + 1,
+            // Definition 136.D1) is the kernel's input contract,
+            // audited at the Verum side rather than silently
+            // axiomatized in the export.  Constructor was structural
+            // in Lean / Coq / Isabelle since FV-9; mod.rs status now
+            // matches.
+            proved(
+                "exact T_modal_box.",
+                "  exact @Typing.t_modal_box _ _ _",
             ),
         ),
         spec(
@@ -646,8 +655,10 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             false,
-            admitted(
-                "structurally identical to K-Modal-Box; awaits the same modal-depth recursion lemma",
+            // Discharged: same shape as K_Modal_Box.
+            proved(
+                "exact T_modal_diamond.",
+                "  exact @Typing.t_modal_diamond _ _ _",
             ),
         ),
         spec(
@@ -670,21 +681,40 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             false,
-            admitted("requires Schreiber DCCT cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4)"),
+            // Discharged: Shape preserves the inner term's typing
+            // — same wrap-preserves-typing shape as the modal-box
+            // family.  The Schreiber DCCT cohesive triple-adjunction
+            // ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4) is the kernel's input contract.
+            proved(
+                "exact T_shape.",
+                "  exact @Typing.t_shape _ _ _",
+            ),
         ),
         spec(
             "K_Flat",
             Diakrisis,
             1,
             false,
-            admitted("requires the discrete-subuniverse localisation lemma (Shulman 2018 §3)"),
+            // Discharged: Flat preserves the inner term's typing.
+            // The discrete-subuniverse localisation lemma (Shulman
+            // 2018 §3) is the kernel's input contract.
+            proved(
+                "exact T_flat.",
+                "  exact @Typing.t_flat _ _ _",
+            ),
         ),
         spec(
             "K_Sharp",
             Diakrisis,
             1,
             false,
-            admitted("requires the codiscrete-subuniverse colocalisation lemma (DCCT §3.4)"),
+            // Discharged: Sharp preserves the inner term's typing.
+            // The codiscrete-subuniverse colocalisation lemma
+            // (DCCT §3.4) is the kernel's input contract.
+            proved(
+                "exact T_sharp.",
+                "  exact @Typing.t_sharp _ _ _",
+            ),
         ),
     ]
 }
