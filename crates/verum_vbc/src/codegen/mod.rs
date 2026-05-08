@@ -4923,23 +4923,41 @@ impl VbcCodegen {
         // runtime with "method 'Some' not found on value".
         //
 
-        // The tags here match the declaration order in `core/base/maybe.vr`,
-        // `core/base/result.vr`, `core/base/ordering.vr`. When a user program
-        // *does* define its own `type Maybe is None | Some(T)` (or similar),
+        // Variant entries here are NOT hardcoded — they're sourced from
+        // the canonical layouts in
+        // `verum_common::well_known_types::{MAYBE_VARIANT_LAYOUT,
+        // RESULT_VARIANT_LAYOUT, ORDERING_VARIANT_LAYOUT}`. The runtime
+        // constructors (`make_ordering`, future `make_maybe_*` /
+        // `make_result_*`) consult the same constants, so drift between
+        // the .vr source-of-truth and either consumer is caught at the
+        // verum_common test surface (`*_variant_layout_pinned`).
+        //
+        // When a user program *does* define its own
+        // `type Maybe is None | Some(T)` (or similar),
         // register_type_constructors overwrites these entries with the
-        // user-level tags (which also happen to match), so both paths agree.
+        // user-level tags (which also happen to match by convention), so
+        // both paths agree.
         use crate::codegen::context::FunctionInfo;
         use crate::module::FunctionId;
-        let builtins: &[(&str, &str, u32, usize, Vec<String>)] = &[
-            // (type_name, variant_name, tag, arity, param_names)
-            ("Maybe", "None", 0, 0, vec![]),
-            ("Maybe", "Some", 1, 1, vec!["_0".into()]),
-            ("Result", "Ok", 0, 1, vec!["_0".into()]),
-            ("Result", "Err", 1, 1, vec!["_0".into()]),
-            ("Ordering", "Less", 0, 0, vec![]),
-            ("Ordering", "Equal", 1, 0, vec![]),
-            ("Ordering", "Greater", 2, 0, vec![]),
-        ];
+        // Variant arities for the carrier types (the layout constants
+        // only carry name+tag; arity is encoded here once).
+        let mut builtins: Vec<(&str, &str, u32, usize, Vec<String>)> = Vec::new();
+        for (name, tag) in verum_common::well_known_types::MAYBE_VARIANT_LAYOUT.iter() {
+            let (arity, params): (usize, Vec<String>) = if *name == "Some" {
+                (1, vec!["_0".into()])
+            } else {
+                (0, vec![])
+            };
+            builtins.push(("Maybe", *name, *tag, arity, params));
+        }
+        for (name, tag) in verum_common::well_known_types::RESULT_VARIANT_LAYOUT.iter() {
+            // Result variants both carry one payload (Ok(T) / Err(E)).
+            builtins.push(("Result", *name, *tag, 1, vec!["_0".into()]));
+        }
+        for (name, tag) in verum_common::well_known_types::ORDERING_VARIANT_LAYOUT.iter() {
+            builtins.push(("Ordering", *name, *tag, 0, vec![]));
+        }
+        let builtins = &builtins;
         for (type_name, variant_name, tag, arity, param_names) in builtins {
             let qualified = format!("{}.{}", type_name, variant_name);
             // Skip if already registered (e.g., earlier pass or user-defined)

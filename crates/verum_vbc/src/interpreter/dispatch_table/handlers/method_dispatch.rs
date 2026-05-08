@@ -7665,17 +7665,21 @@ fn make_result_variant(
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
-/// Create an Ordering variant: Less (tag 0), Equal (tag 1), or Greater (tag 2)
+/// Create an Ordering variant.
+///
+/// Variant tags are obtained from the canonical layout
+/// (`verum_common::well_known_types::ORDERING_VARIANT_LAYOUT`) — NOT from a
+/// local hardcode. Sibling consumer is the codegen builtin variant registry
+/// in `verum_vbc/src/codegen/mod.rs` (the `builtins` array near the
+/// `register_function` loop). Both consult the same constant, so if the
+/// layout in `core/base/ordering.vr` is reordered, both sides update at once.
 pub(super) fn make_ordering(
     state: &mut InterpreterState,
     ord: std::cmp::Ordering,
 ) -> InterpreterResult<Value> {
-    let tag = match ord {
-        std::cmp::Ordering::Less => 0u32,
-        std::cmp::Ordering::Equal => 1u32,
-        std::cmp::Ordering::Greater => 2u32,
-    };
-    // Ordering variants are unit types (no payload), but allocate min 8 bytes for tag storage
+    let tag = verum_common::well_known_types::ordering_tag_for_std(ord);
+    // Ordering variants are unit types (no payload); allocate the minimum
+    // 8-byte slot for the tag word (header layout matches `MakeVariant`).
     let data_size = 8;
     let type_id = TypeId(0x8000 + tag);
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
