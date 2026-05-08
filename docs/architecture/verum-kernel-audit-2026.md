@@ -193,6 +193,51 @@ through three independent foreign type-checkers (Lean / Coq /
 Isabelle) on three different foundations.  Hard-error from any
 single backend fails the gate.
 
+## 3.A FV-9 milestone — full 38-rule Typing inductive (2026-05-08)
+
+After commit `097a2ef0` (Lean-only, 9 structural rules) and
+`6a0996b3` (Coq + Isabelle structural mirror), the FV-9 refactor
+landed the **full 38-rule** real-Typing shape across all three
+emitters:
+
+* **9 structural rules** — discharged by direct constructor
+  application against the structural fragment of `Typing` (real
+  proofs since `097a2ef0`).
+* **2 placeholder rules** (`K_Pos`, `K_FwAx`) — trivially
+  discharged at the `side_conditions_hold → True` layer; their
+  content is meta-theoretic and lives in `proof_checker.rs`.
+* **10 fully-proved non-structural rules** — formation is
+  structural at this layer, the Typing constructor is shape-faithful,
+  the per-rule lemma is discharged directly:
+  `K_Path_Ty_Form`, `K_Refl_Intro`, `K_Refine_Erase`, `K_Quot_Form`,
+  `K_Quot_Intro`, `K_Modal_Box`, `K_Modal_Diamond`, `K_Shape`,
+  `K_Flat`, `K_Sharp`.
+* **17 with-IOU rules** — each has a faithful Typing constructor
+  that takes a per-rule `axiom <Rule>_iou : … → Prop` (Lean) /
+  `Axiom <Rule>_iou : … -> Prop` (Coq) / `axiomatization
+  <Rule>_iou :: …` (Isabelle) declaration as a meta-theory
+  hypothesis.  The per-rule soundness lemma proves the rule against
+  `Typing` *modulo* the IOU axiom — discharging an IOU = replacing
+  the axiom with a real definition.
+
+The architectural payoff: **every K_*_sound lemma is a real proof
+across all three foundations** — no `sorry`/`Admitted`/`oops` for
+structural-shape concerns.  The 17 axioms are first-class trust
+extensions that show up in `#print axioms` / `Print Assumptions` /
+`thm.foundation_axioms` so the trust surface is inspectable.
+
+Tri-prover verdict (warm Isabelle heap):
+
+```
+► LEAN     iou-only (17 IOUs)  [410 ms]
+► COQ      iou-only (17 IOUs)  [606 ms]
+► ISABELLE iou-only (17 IOUs)  [≈16 s]
+```
+
+IOU count drops from 27 (sorry-based) to 17 (axiom-based), and
+the 27 vacuous `side_conditions_hold → True` lemmas reclassify
+into 10 fully-proved + 17 with-IOU.
+
 ## 4. What is now mechanically guaranteed
 
 The combination of `--kernel-soundness` (drift gate) +
