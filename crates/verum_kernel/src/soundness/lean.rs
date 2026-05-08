@@ -155,7 +155,7 @@ impl SoundnessBackend for LeanBackend {
              opaque side_conditions_hold : Prop\n\n",
         );
 
-        // 3. Per-rule IOU axioms — exactly 12 axioms, one per
+        // 3. Per-rule IOU axioms — exactly 11 axioms, one per
         //    with-IOU rule.  Each captures the rule's meta-theory
         //    dependency at the type level: discharging the IOU =
         //    replacing the `axiom` declaration with a `def`, or (as
@@ -252,10 +252,10 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (12 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (11 axioms — one per with-IOU rule).
 // ============================================================================
 
-/// The 12 axiom declarations covering every with-IOU rule.  Each
+/// The 11 axiom declarations covering every with-IOU rule.  Each
 /// axiom's parameter list captures the rule's relevant data; the
 /// Typing constructor for the rule consumes the axiom as a
 /// hypothesis.  Comments on each axiom name the meta-theory citation.
@@ -269,7 +269,7 @@ impl SoundnessBackend for LeanBackend {
 /// Verum side); the Lean export now models the structural
 /// typing of well-formed elimination terms.
 const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (12 total) ======\n\
+-- ====== Per-rule IOU axioms (11 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
 -- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
 -- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
@@ -302,8 +302,11 @@ axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm
 -- structural form; the respect-of-equivalence side condition\n\
 -- remains the kernel's input contract.)\n\
 \n\
--- K_Inductive: positivity decision procedure.\n\
-axiom K_Inductive_iou : Ctx → String → List CoreTerm → CoreTerm → Prop\n\
+-- (K_Inductive: discharged — see Typing.t_inductive below for the\n\
+-- structural form.  An in-scope `Inductive_(path, args)` lives in\n\
+-- some `Universe i`; the strict-positivity check is the kernel's\n\
+-- input contract (the `inductive` keyword does this at definition\n\
+-- time, mirroring mathlib's discipline).)\n\
 \n\
 -- (K_Elim: discharged — see Typing.t_elim below for the structural\n\
 -- form; per-constructor case-typing remains the kernel's input\n\
@@ -450,9 +453,8 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)\n  \
   -- ===== Inductive (3) — 1 placeholder + 2 with-IOU =====\n  \
   | t_inductive :\n      \
-      ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {result : CoreTerm},\n        \
-        K_Inductive_iou Γ path args result →\n        \
-        Typing Γ (CoreTerm.Inductive_ path args) result\n  \
+      ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},\n        \
+        Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)\n  \
   | t_pos :\n      \
       ∀ {Γ : Ctx} {t T : CoreTerm},\n        \
         side_conditions_hold →\n        \
@@ -529,8 +531,8 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 /// the lemmas' shapes.  Real proofs across the entire surface; no
 /// `sorry` for any structural- or formation-level concern.
 ///
-/// The 12 with-IOU rules' lemmas thread the per-rule axiom as a
-/// hypothesis; their `#print axioms` output enumerates the 12 IOU
+/// The 11 with-IOU rules' lemmas thread the per-rule axiom as a
+/// hypothesis; their `#print axioms` output enumerates the 11 IOU
 /// trust extensions explicitly.  Discharges so far:
 ///   * K_Quot_Elim       — structural premises mirroring K_Quot_Form / K_Quot_Intro.
 ///   * K_Elim            — same template, with per-constructor case-typing
@@ -672,9 +674,8 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         // ===== Inductive (3) =====
         "K_Inductive" => Some(
-            "theorem K_Inductive_sound :\n    ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {result : CoreTerm},\n      \
-              K_Inductive_iou Γ path args result →\n      \
-              Typing Γ (CoreTerm.Inductive_ path args) result :=\n  @Typing.t_inductive",
+            "theorem K_Inductive_sound :\n    ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},\n      \
+              Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i) :=\n  @Typing.t_inductive",
         ),
         "K_Pos" => Some(
             "theorem K_Pos_sound : side_conditions_hold → True :=\n  by\n  intro _; trivial",
