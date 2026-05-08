@@ -167,11 +167,7 @@ implement Debug for EpistemicStatus {
 
 implement Ord for EpistemicStatus {
     fn cmp(&self, other: &EpistemicStatus) -> Ordering {
-        let l = self.rank();
-        let r = other.rank();
-        if l < r      { Less }
-        else if l > r { Greater }
-        else          { Equal }
+        Ordering.from_int(self.rank() - other.rank())
     }
 }
 
