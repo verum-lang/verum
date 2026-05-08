@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/base/nanoid/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.nanoid` — URL-safe short-ID generator.
+// Default length 21 chars ≈ 126 bits of entropy.
+// Companion files: property_test.vr, integration_test.vr, audit.md
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.nanoid.{generate, generate_len, generate_with_alphabet};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Default length is 21 characters
+// =============================================================================
+
+@test
+fn test_generate_default_length_is_21() {
+    let id = generate();
+    assert_eq(id.len(), 21);
+}
+
+// =============================================================================
+// Section 2: Custom length is honoured
+// =============================================================================
+
+@test
+fn test_generate_len_8_returns_8_chars() {
+    let id = generate_len(8);
+    assert_eq(id.len(), 8);
+}
+
+@test
+fn test_generate_len_32_returns_32_chars() {
+    let id = generate_len(32);
+    assert_eq(id.len(), 32);
+}
+
+@test
+fn test_generate_len_zero_returns_empty() {
+    let id = generate_len(0);
+    assert_eq(id.len(), 0);
+}
+
+// =============================================================================
+// Section 3: Default alphabet is URL-safe (A-Za-z0-9_-)
+// =============================================================================
+
+@test
+fn test_generate_uses_url_safe_alphabet() {
+    let id = generate();
+    let mut all_safe = true;
+    for c in id.chars() {
+        let n = c as Int;
+        let is_alpha = (n >= 65 && n <= 90) || (n >= 97 && n <= 122);
+        let is_digit = n >= 48 && n <= 57;
+        let is_special = c == '_' || c == '-';
+        if !(is_alpha || is_digit || is_special) {
+            all_safe = false;
+        }
+    }
+    assert(all_safe);
+}
+
+// =============================================================================
+// Section 4: Distinct calls produce distinct IDs (collision-resistance)
+// =============================================================================
+
+@test
+fn test_distinct_calls_produce_distinct_ids() {
+    let a = generate();
+    let b = generate();
+    let c = generate();
+    // 126 bits of entropy: collision probability is astronomically low.
+    assert(a != b);
+    assert(b != c);
+    assert(a != c);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

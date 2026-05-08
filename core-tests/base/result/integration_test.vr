@@ -1,0 +1,214 @@
+// =============================================================================
+// core-tests/base/result/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Result<T, E> across the rest of the standard
+// library: collections, ?-chains with error promotion, Maybe/Result
+// cross-conversion, sorting, hashing.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+mount core.collections.map.Map;
+mount core.collections.set.Set;
+
+// -----------------------------------------------------------------------------
+// §1  Result as Map value.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_map_storing_results() {
+    let mut m: Map<Text, Result<Int, Text>> = Map.new();
+    m.insert("a", Ok(1));
+    m.insert("b", Err("missing"));
+
+    assert_eq(m.get("a").unwrap(), Ok(1));
+    assert_eq(m.get("b").unwrap(), Err("missing"));
+}
+
+// -----------------------------------------------------------------------------
+// §2  Result in Set — Hash + Eq enable membership.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_set_of_result_membership() {
+    let mut s: Set<Result<Int, Text>> = Set.new();
+    s.insert(Ok(1));
+    s.insert(Err("e"));
+    s.insert(Ok(1));   // duplicate
+    s.insert(Err("e"));
+
+    assert_eq(s.len(), 2);
+    assert(s.contains(&Ok(1)));
+    assert(s.contains(&Err("e")));
+}
+
+// -----------------------------------------------------------------------------
+// §3  ?-operator chain — propagation through multiple calls.
+// -----------------------------------------------------------------------------
+
+fn parse_int(s: &Text) -> Result<Int, Text> {
+    if *s == "1" { Ok(1) }
+    else if *s == "2" { Ok(2) }
+    else { Err(f"unparseable: {s}") }
+}
+
+fn sum_pair(a: &Text, b: &Text) -> Result<Int, Text> {
+    let x = parse_int(a)?;
+    let y = parse_int(b)?;
+    Ok(x + y)
+}
+
+@test
+fn integration_q_chain_full_success() {
+    assert_eq(sum_pair(&"1", &"2"), Ok(3));
+}
+
+@test
+fn integration_q_chain_short_circuits_on_first_error() {
+    let r = sum_pair(&"x", &"2");
+    assert(r.is_err());
+    assert(r.unwrap_err().contains("x"));
+}
+
+@test
+fn integration_q_chain_short_circuits_on_second_error() {
+    let r = sum_pair(&"1", &"y");
+    assert(r.is_err());
+    assert(r.unwrap_err().contains("y"));
+}
+
+// -----------------------------------------------------------------------------
+// §4  Cross-type ?: Maybe inside Result.
+// -----------------------------------------------------------------------------
+
+fn maybe_inside_result(m: Maybe<Int>) -> Result<Int, Text> {
+    let v = m?;
+    Ok(v + 1)
+}
+
+@test
+fn integration_maybe_in_result_some() {
+    assert_eq(maybe_inside_result(Some(41)), Ok(42));
+}
+
+@test
+fn integration_maybe_in_result_none_becomes_err() {
+    let r = maybe_inside_result(None);
+    assert(r.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// §5  Cross-type ?: Result inside Maybe.
+// -----------------------------------------------------------------------------
+
+fn result_inside_maybe(r: Result<Int, Text>) -> Maybe<Int> {
+    let v = r?;
+    Some(v * 2)
+}
+
+@test
+fn integration_result_in_maybe_ok() {
+    assert_eq(result_inside_maybe(Ok(21)), Some(42));
+}
+
+@test
+fn integration_result_in_maybe_err_becomes_none() {
+    let r = result_inside_maybe(Err("ignored"));
+    assert(r.is_none());
+}
+
+// -----------------------------------------------------------------------------
+// §6  From-bound error promotion in ?-chains.
+// -----------------------------------------------------------------------------
+
+type Inner is { code: Int };
+type Outer is { code: Int, where_msg: Text };
+
+implement From<Inner> for Outer {
+    fn from(e: Inner) -> Outer {
+        Outer { code: e.code, where_msg: "promoted" }
+    }
+}
+
+fn inner_call(x: Int) -> Result<Int, Inner> {
+    if x < 0 { Err(Inner { code: 7 }) } else { Ok(x) }
+}
+
+fn outer_call(x: Int) -> Result<Int, Outer> {
+    let v = inner_call(x)?;       // Inner converts via From
+    Ok(v + 1)
+}
+
+@test
+fn integration_error_promotion_via_from_success() {
+    assert_eq(outer_call(5), Ok(6));
+}
+
+@test
+fn integration_error_promotion_via_from_failure() {
+    let r = outer_call(-1);
+    assert(r.is_err());
+    let e = r.unwrap_err();
+    assert_eq(e.code, 7);
+    assert_eq(e.where_msg, "promoted");
+}
+
+// -----------------------------------------------------------------------------
+// §7  List<Result> — fold pattern with early termination.
+// -----------------------------------------------------------------------------
+
+fn first_err_or_sum(xs: &List<Result<Int, Text>>) -> Result<Int, Text> {
+    let mut acc: Int = 0;
+    for r in xs.iter() {
+        match (*r).clone() {
+            Ok(n) => acc = acc + n,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(acc)
+}
+
+@test
+fn integration_fold_all_ok() {
+    let xs: List<Result<Int, Text>> = [Ok(1), Ok(2), Ok(3), Ok(4)];
+    assert_eq(first_err_or_sum(&xs), Ok(10));
+}
+
+@test
+fn integration_fold_short_circuits_on_first_err() {
+    let xs: List<Result<Int, Text>> = [Ok(1), Ok(2), Err("boom"), Ok(4)];
+    assert_eq(first_err_or_sum(&xs), Err("boom"));
+}
+
+// -----------------------------------------------------------------------------
+// §8  Sort a list of Results — stability under Ord.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_sort_results() {
+    let mut xs: List<Result<Int, Text>> = [
+        Err("z"),
+        Ok(2),
+        Ok(1),
+        Err("a"),
+        Ok(3),
+    ];
+    xs.sort();
+    // The exact total order follows Result's Ord impl; verify it's
+    // monotone (each element ≤ the next).
+    let n = xs.len();
+    let mut i = 0;
+    while i + 1 < n {
+        assert(xs[i] <= xs[i + 1]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

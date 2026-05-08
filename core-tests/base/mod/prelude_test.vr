@@ -1,11 +1,6 @@
 // =============================================================================
 // prelude_types_test.vr - Test that core prelude types are available
 // =============================================================================
-// @test: typecheck-pass
-// @level: L0
-// @tier: 0
-// @tags: core, prelude, types, basic, regression
-// @description: Verifies core types are available without explicit imports
 // =============================================================================
 
 // This test verifies that fundamental types like Int, Float, Bool, Text, Char

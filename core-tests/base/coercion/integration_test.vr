@@ -1,0 +1,158 @@
+// =============================================================================
+// core-tests/base/coercion/integration_test.vr
+// =============================================================================
+//
+// Integration tests for the coercion-marker system. Each test exercises
+// the *unifier rule* the marker is supposed to enable. If the unifier
+// stops applying a rule, the test is the witness.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coercion.{IntCoercible, TensorLike, Indexable, RangeLike};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  IntCoercible — bidirectional Type ↔ Int in arithmetic contexts.
+// -----------------------------------------------------------------------------
+
+type Counter is { n: Int };
+
+implement IntCoercible for Counter {}
+
+implement From<Int> for Counter {
+    fn from(n: Int) -> Counter { Counter { n: n } }
+}
+
+implement Counter {
+    public fn to_int(&self) -> Int { self.n }
+}
+
+@test
+fn integration_int_coercible_round_trip_via_explicit_cast() {
+    let c: Counter = Counter.from(42);
+    let n: Int = c.to_int();
+    assert_eq(n, 42);
+
+    let c2: Counter = Counter.from(n);
+    assert_eq(c2.to_int(), 42);
+}
+
+// -----------------------------------------------------------------------------
+// §2  TensorLike — Float ↔ Tensor<Float> mixed arithmetic.
+// -----------------------------------------------------------------------------
+
+type Vec2 is { x: Float, y: Float };
+
+implement TensorLike for Vec2 {}
+
+implement Vec2 {
+    public fn scale(&self, k: Float) -> Vec2 {
+        Vec2 { x: self.x * k, y: self.y * k }
+    }
+    public fn norm_squared(&self) -> Float {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+@test
+fn integration_tensor_like_scalar_arithmetic() {
+    let v = Vec2 { x: 3.0, y: 4.0 };
+    let scaled = v.scale(2.0);
+    assert_eq(scaled.x, 6.0);
+    assert_eq(scaled.y, 8.0);
+    assert_eq(scaled.norm_squared(), 100.0);   // (6,8) → 36 + 64 = 100
+}
+
+// -----------------------------------------------------------------------------
+// §3  Indexable — t[i: Int] indexing with arithmetic on the index.
+// -----------------------------------------------------------------------------
+
+type CircularBuf is { data: List<Int>, head: Int };
+
+implement Indexable for CircularBuf {}
+
+implement CircularBuf {
+    public fn at(&self, offset: Int) -> Int {
+        let n = self.data.len();
+        let idx = (self.head + offset) % n;
+        self.data[idx]
+    }
+}
+
+@test
+fn integration_indexable_with_arithmetic_index() {
+    let buf = CircularBuf {
+        data: [10, 20, 30, 40, 50],
+        head: 2,
+    };
+
+    // head=2, offsets [0..5) → values starting at index 2 wrapping around
+    assert_eq(buf.at(0), 30);    // data[2]
+    assert_eq(buf.at(1), 40);    // data[3]
+    assert_eq(buf.at(2), 50);    // data[4]
+    assert_eq(buf.at(3), 10);    // data[5 % 5 = 0]
+    assert_eq(buf.at(4), 20);    // data[6 % 5 = 1]
+}
+
+// -----------------------------------------------------------------------------
+// §4  RangeLike — slicing semantics with explicit start/end.
+// -----------------------------------------------------------------------------
+
+type Slice is { start: Int, end: Int };
+
+implement RangeLike for Slice {}
+
+implement Slice {
+    public fn len(&self) -> Int {
+        if self.end >= self.start { self.end - self.start } else { 0 }
+    }
+    public fn contains(&self, i: Int) -> Bool {
+        i >= self.start && i < self.end
+    }
+}
+
+@test
+fn integration_range_like_slice_semantics() {
+    let s = Slice { start: 5, end: 10 };
+    assert_eq(s.len(), 5);
+    assert(!s.contains(4));
+    assert(s.contains(5));
+    assert(s.contains(9));
+    assert(!s.contains(10));
+}
+
+@test
+fn integration_range_like_empty_slice() {
+    let s = Slice { start: 5, end: 5 };
+    assert_eq(s.len(), 0);
+    assert(!s.contains(5));
+}
+
+// -----------------------------------------------------------------------------
+// §5  Combined: a type carrying multiple markers used in a real flow.
+// -----------------------------------------------------------------------------
+
+type Address is { offset: Int };
+
+implement IntCoercible for Address {}
+implement Indexable for Address {}
+
+implement From<Int> for Address {
+    fn from(n: Int) -> Address { Address { offset: n } }
+}
+
+@test
+fn integration_combined_markers_address_arithmetic() {
+    let a = Address.from(0x1000);
+    let b = Address { offset: a.offset + 8 };
+    assert_eq(a.offset, 4096);
+    assert_eq(b.offset, 4104);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

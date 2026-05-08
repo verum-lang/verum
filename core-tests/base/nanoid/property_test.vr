@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/base/nanoid/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for nanoid: length invariants, alphabet
+// membership, uniqueness over N samples (probabilistic collision).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.nanoid.{generate, generate_len};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+
+// =============================================================================
+// §A  Length invariant
+// =============================================================================
+
+@property
+fn prop_generate_len_returns_n_chars(n: Int) {
+    if n >= 0 && n <= 256 {
+        let id = generate_len(n);
+        assert_eq(id.len(), n);
+    }
+}
+
+@test_case(0)
+@test_case(1)
+@test_case(8)
+@test_case(21)
+@test_case(64)
+@test_case(128)
+fn parametrised_length_invariant(n: Int) {
+    let id = generate_len(n);
+    assert_eq(id.len(), n);
+}
+
+// =============================================================================
+// §B  Uniqueness over N samples — collision-resistance check.
+// =============================================================================
+
+@test
+fn law_uniqueness_over_1000_samples() {
+    let mut seen: Set<Text> = Set.new();
+    let mut i = 0;
+    while i < 1000 {
+        let id = generate();
+        seen.insert(id);
+        i = i + 1;
+    }
+    // 126 bits of entropy: 1000 samples should have zero collisions
+    // with overwhelming probability.
+    assert_eq(seen.len(), 1000);
+}
+
+// =============================================================================
+// §C  Default-length witnesses are length 21.
+// =============================================================================
+
+@test
+fn law_default_length_witnesses() {
+    let mut i = 0;
+    while i < 100 {
+        let id = generate();
+        assert_eq(id.len(), 21);
+        i = i + 1;
+    }
+}
+
+fn main() {}

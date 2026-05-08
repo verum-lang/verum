@@ -1,0 +1,183 @@
+// =============================================================================
+// core-tests/base/maybe/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Maybe<T> across the rest of the standard library:
+// collections, ?-operator chains, Result conversion, sorting, hashing.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+mount core.collections.map.Map;
+mount core.collections.set.Set;
+
+// -----------------------------------------------------------------------------
+// §1  Maybe as Map value — get returns Maybe<&V>, but stored as Maybe.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_map_lookup_returns_maybe() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+
+    assert_eq(m.get("a"), Some(1));
+    assert_eq(m.get("b"), Some(2));
+    assert_eq(m.get("missing"), None);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Maybe in List — sorting Maybe<Int> respects None < Some ordering.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_list_of_maybe_sorts_none_first() {
+    let mut xs: List<Maybe<Int>> = [Some(3), None, Some(1), None, Some(2)];
+    xs.sort();
+    // Expect: [None, None, Some(1), Some(2), Some(3)]
+    assert_eq(xs[0], None);
+    assert_eq(xs[1], None);
+    assert_eq(xs[2], Some(1));
+    assert_eq(xs[3], Some(2));
+    assert_eq(xs[4], Some(3));
+}
+
+// -----------------------------------------------------------------------------
+// §3  ?-operator chain across multiple Maybe-returning calls.
+// -----------------------------------------------------------------------------
+
+fn first_word(s: &Text) -> Maybe<Text> {
+    if s.len() == 0 { None } else { Some("first") }
+}
+
+fn first_char(s: &Text) -> Maybe<Char> {
+    if s.len() == 0 { None } else { Some('a') }
+}
+
+fn process(s: Text) -> Maybe<Char> {
+    let word = first_word(&s)?;
+    let c = first_char(&word)?;
+    Some(c)
+}
+
+@test
+fn integration_q_chain_full_success() {
+    assert_eq(process("hello"), Some('a'));
+}
+
+@test
+fn integration_q_chain_short_circuits_on_empty() {
+    assert_eq(process(""), None);
+}
+
+// -----------------------------------------------------------------------------
+// §4  ok_or / ok_or_else — Maybe → Result conversion.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_ok_or_some_to_ok() {
+    let m = Some(42);
+    let r: Result<Int, Text> = m.ok_or("default error");
+    assert_eq(r, Ok(42));
+}
+
+@test
+fn integration_ok_or_none_to_err() {
+    let m: Maybe<Int> = None;
+    let r: Result<Int, Text> = m.ok_or("default error");
+    assert_eq(r, Err("default error"));
+}
+
+@test
+fn integration_ok_or_else_lazy_evaluation() {
+    let mut closure_called = false;
+    let m: Maybe<Int> = Some(42);
+    let _: Result<Int, Text> = m.ok_or_else(|| {
+        closure_called = true;
+        "should not be called"
+    });
+    assert(!closure_called);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Maybe in Set — Hash + Eq enable membership.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_set_of_maybe_membership() {
+    let mut s: Set<Maybe<Int>> = Set.new();
+    s.insert(None);
+    s.insert(Some(1));
+    s.insert(Some(2));
+    s.insert(Some(1));   // duplicate
+
+    assert_eq(s.len(), 3);
+    assert(s.contains(&None));
+    assert(s.contains(&Some(1)));
+    assert(s.contains(&Some(2)));
+    assert(!s.contains(&Some(99)));
+}
+
+// -----------------------------------------------------------------------------
+// §6  Iterator over Maybe — iter / iter_mut.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_iter_collects_some_into_list() {
+    let m: Maybe<Int> = Some(42);
+    let mut collected: List<Int> = [];
+    for v in m.iter() {
+        collected.push(*v);
+    }
+    assert_eq(collected, [42]);
+}
+
+@test
+fn integration_iter_collects_none_to_empty() {
+    let m: Maybe<Int> = None;
+    let mut collected: List<Int> = [];
+    for v in m.iter() {
+        collected.push(*v);
+    }
+    assert_eq(collected, []);
+}
+
+// -----------------------------------------------------------------------------
+// §7  filter_map idiom — flatten + map fusion via and_then.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_and_then_filter_map_idiom() {
+    fn parse(s: &Text) -> Maybe<Int> {
+        if *s == "42" { Some(42) }
+        else if *s == "100" { Some(100) }
+        else { None }
+    }
+
+    let inputs: List<Text> = ["42", "abc", "100", "x"];
+    let mut parsed: List<Int> = [];
+    for s in inputs.iter() {
+        if let Some(n) = parse(s) {
+            parsed.push(n);
+        }
+    }
+    assert_eq(parsed, [42, 100]);
+}
+
+// -----------------------------------------------------------------------------
+// §8  Default — type-default produces None.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_default_is_none() {
+    let m: Maybe<Int> = Maybe.default();
+    assert(m.is_none());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

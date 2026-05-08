@@ -1,0 +1,88 @@
+// =============================================================================
+// core-tests/base/ulid/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for ULID: parse round-trip, lexicographic
+// time-order, alphabet membership, uniqueness.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ulid.{Ulid, parse};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+
+// =============================================================================
+// §A  parse ∘ to_text round-trip.
+// =============================================================================
+
+@test
+fn law_round_trip_via_text() {
+    let mut i = 0;
+    while i < 100 {
+        let u = Ulid.new();
+        let s = u.to_text();
+        let parsed = parse(&s);
+        assert(parsed.is_ok());
+        assert_eq(parsed.unwrap(), u);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §B  Length invariant: 26 characters.
+// =============================================================================
+
+@test
+fn law_canonical_length_26() {
+    let mut i = 0;
+    while i < 50 {
+        assert_eq(Ulid.new().to_text().len(), 26);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §C  Lexicographic order matches time order (modulo same-ms entropy).
+// =============================================================================
+
+@test
+fn law_lex_order_non_decreasing() {
+    let mut prev = Ulid.new();
+    let mut i = 0;
+    while i < 50 {
+        let curr = Ulid.new();
+        assert(prev.to_text() <= curr.to_text());
+        prev = curr;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §D  Uniqueness over 1000 samples.
+// =============================================================================
+
+@test
+fn law_uniqueness_over_1000_samples() {
+    let mut seen: Set<Text> = Set.new();
+    let mut i = 0;
+    while i < 1000 {
+        seen.insert(Ulid.new().to_text());
+        i = i + 1;
+    }
+    assert_eq(seen.len(), 1000);
+}
+
+// =============================================================================
+// §E  from_parts: pinned timestamp round-trips.
+// =============================================================================
+
+@property
+fn prop_from_parts_timestamp_round_trip(ts: Int) {
+    if ts >= 0 {
+        let rand: [Byte; 10] = [0 as Byte; 10];
+        let u = Ulid.from_parts(ts as UInt64, &rand);
+        assert_eq(u.timestamp_ms(), ts as UInt64);
+    }
+}
+
+fn main() {}

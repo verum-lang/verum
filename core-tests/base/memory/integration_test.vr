@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/base/memory/integration_test.vr
+// =============================================================================
+//
+// Integration tests: Heap-allocated values inside collections,
+// Shared used as a context-system value, Cow with text mutations.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// -----------------------------------------------------------------------------
+// §1  List<Heap<Int>> — heap-allocated values in a collection.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_list_of_heap_int() {
+    let xs: List<Heap<Int>> = [Heap.new(1), Heap.new(2), Heap.new(3)];
+    let mut total: Int = 0;
+    for h in xs.iter() { total = total + **h; }
+    assert_eq(total, 6);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Map<Text, Shared<Int>> — refcounted values keyed by text.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_map_of_shared_int() {
+    let mut m: Map<Text, Shared<Int>> = Map.new();
+    m.insert("a", Shared.new(10));
+    m.insert("b", Shared.new(20));
+
+    let a = m.get("a").unwrap();
+    let b = m.get("b").unwrap();
+    assert_eq(*a, 10);
+    assert_eq(*b, 20);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Cow<Text> — borrowed-then-owned transition.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_cow_borrowed_path() {
+    let original = "borrowed";
+    let cow: Cow<Text> = Cow.borrowed(&original);
+    assert_eq(&*cow, &original);
+}
+
+@test
+fn integration_cow_owned_path() {
+    let cow: Cow<Text> = Cow.owned("owned".to_text());
+    assert_eq(&*cow, &"owned");
+}
+
+// -----------------------------------------------------------------------------
+// §4  swap exchanges entries inside a list.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_swap_list_elements() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    // Manual swap via temporary
+    let a = xs[0];
+    xs[0] = xs[3];
+    xs[3] = a;
+    assert_eq(xs, [4, 2, 3, 1]);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Heap<Heap<Int>> — nested heap allocation works.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_nested_heap() {
+    let inner: Heap<Int> = Heap.new(42);
+    let outer: Heap<Heap<Int>> = Heap.new(inner);
+    assert_eq(**outer, 42);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Allocator try_alloc family returns Result<_, AllocError>.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_try_alloc_succeeds_for_normal_size() {
+    // Allocating a single Int should always succeed; this verifies
+    // try_alloc returns Ok.
+    let r: Result<Heap<Int>, AllocError> = Heap.try_new(7);
+    assert(r.is_ok());
+    assert_eq(*(r.unwrap()), 7);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

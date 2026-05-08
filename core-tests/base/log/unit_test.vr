@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/base/log/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.log` — LogLevel, Logger protocol, LogRecord.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.log.{LogLevel, LogRecord, Logger};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: LogLevel severity ordering
+// =============================================================================
+
+@test
+fn test_log_level_severity_monotonic() {
+    let trace = LogLevel.Trace;
+    let debug = LogLevel.Debug;
+    let info = LogLevel.Info;
+    let warn = LogLevel.Warn;
+    let error = LogLevel.Error;
+    assert(trace.severity() < debug.severity());
+    assert(debug.severity() < info.severity());
+    assert(info.severity() < warn.severity());
+    assert(warn.severity() < error.severity());
+}
+
+@test
+fn test_log_level_name_values() {
+    assert_eq(LogLevel.Trace.name(), "TRACE");
+    assert_eq(LogLevel.Debug.name(), "DEBUG");
+    assert_eq(LogLevel.Info.name(), "INFO");
+    assert_eq(LogLevel.Warn.name(), "WARN");
+    assert_eq(LogLevel.Error.name(), "ERROR");
+}
+
+// =============================================================================
+// Section 2: LogRecord construction
+// =============================================================================
+
+@test
+fn test_log_record_new() {
+    let r = LogRecord.new(LogLevel.Info, "hello".to_text());
+    assert_eq(r.message, "hello");
+}
+
+@test
+fn test_log_record_builder_chain() {
+    let r = LogRecord.new(LogLevel.Warn, "msg".to_text())
+        .with_module_path("foo::bar".to_text())
+        .with_file("src/lib.rs".to_text())
+        .with_line(42);
+    assert_eq(r.message, "msg");
+}
+
+fn main() {}

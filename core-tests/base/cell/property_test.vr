@@ -1,0 +1,95 @@
+// =============================================================================
+// core-tests/base/cell/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for cell types.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.cell.{Cell, RefCell, OnceCell};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Cell get/set round-trip.
+// =============================================================================
+
+@property
+fn prop_cell_set_get_round_trip(n: Int) {
+    let c: Cell<Int> = Cell.new(0);
+    c.set(n);
+    assert_eq(c.get(), n);
+}
+
+// =============================================================================
+// §B  Cell replace returns old value, installs new.
+// =============================================================================
+
+@property
+fn prop_cell_replace_returns_old(initial: Int, replacement: Int) {
+    let c: Cell<Int> = Cell.new(initial);
+    let old = c.replace(replacement);
+    assert_eq(old, initial);
+    assert_eq(c.get(), replacement);
+}
+
+// =============================================================================
+// §C  Cell update is functorial: update(f) ∘ update(g) = update(f ∘ g).
+// =============================================================================
+
+@test
+fn law_update_composition() {
+    let c1: Cell<Int> = Cell.new(5);
+    c1.update(|x| x + 1);
+    c1.update(|x| x * 2);
+    // Sequential: (5+1)*2 = 12
+
+    let c2: Cell<Int> = Cell.new(5);
+    c2.update(|x| (x + 1) * 2);
+
+    assert_eq(c1.get(), c2.get());
+}
+
+// =============================================================================
+// §D  RefCell borrow returns same value seen at last borrow_mut.
+// =============================================================================
+
+@test
+fn law_refcell_borrow_observes_borrow_mut_writes() {
+    let rc: RefCell<Int> = RefCell.new(0);
+    {
+        let mut r = rc.borrow_mut();
+        *r = 42;
+    }
+    let r = rc.borrow();
+    assert_eq(*r, 42);
+}
+
+// =============================================================================
+// §E  OnceCell single-set semantics.
+// =============================================================================
+
+@test
+fn law_once_cell_first_init_wins() {
+    let oc: OnceCell<Int> = OnceCell.new();
+    let v1 = oc.get_or_init(|| 1);
+    let v2 = oc.get_or_init(|| 99);
+    let v3 = oc.get_or_init(|| 999);
+    assert_eq(*v1, 1);
+    assert_eq(*v2, 1);
+    assert_eq(*v3, 1);
+}
+
+// =============================================================================
+// §F  @test_case — Cell update truth table.
+// =============================================================================
+
+@test_case(0,  1)
+@test_case(5,  6)
+@test_case(-1, 0)
+fn parametrised_cell_update_increment(start: Int, expected: Int) {
+    let c: Cell<Int> = Cell.new(start);
+    c.update(|x| x + 1);
+    assert_eq(c.get(), expected);
+}
+
+fn main() {}

@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/base/string_distance/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.string_distance` — Levenshtein, Jaro,
+// Jaro-Winkler distance functions for fuzzy string matching.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.string_distance.{levenshtein, levenshtein_bounded, jaro, jaro_winkler, closest};
+mount core.collections.list.List;
+
+fn bytes(s: &str) -> List<Byte> {
+    let mut bs: List<Byte> = [];
+    for c in s.chars() { bs.push(c as Byte); }
+    bs
+}
+
+// =============================================================================
+// Section 1: Levenshtein known fixtures
+// =============================================================================
+
+@test
+fn test_levenshtein_kitten_sitting_is_3() {
+    let a = bytes("kitten");
+    let b = bytes("sitting");
+    assert_eq(levenshtein(&a, &b), 3);
+}
+
+@test
+fn test_levenshtein_saturday_sunday_is_3() {
+    let a = bytes("saturday");
+    let b = bytes("sunday");
+    assert_eq(levenshtein(&a, &b), 3);
+}
+
+@test
+fn test_levenshtein_identical_strings_is_zero() {
+    let a = bytes("hello");
+    assert_eq(levenshtein(&a, &a), 0);
+}
+
+@test
+fn test_levenshtein_empty_string_to_self_is_zero() {
+    let a = bytes("");
+    assert_eq(levenshtein(&a, &a), 0);
+}
+
+@test
+fn test_levenshtein_empty_to_nonempty_is_length() {
+    let a = bytes("");
+    let b = bytes("abc");
+    assert_eq(levenshtein(&a, &b), 3);
+    assert_eq(levenshtein(&b, &a), 3);
+}
+
+// =============================================================================
+// Section 2: Levenshtein bounded — early termination at threshold
+// =============================================================================
+
+@test
+fn test_levenshtein_bounded_within_max() {
+    let a = bytes("kitten");
+    let b = bytes("sitting");
+    let r = levenshtein_bounded(&a, &b, 5);
+    assert_eq(r.unwrap(), 3);
+}
+
+@test
+fn test_levenshtein_bounded_exceeds_max_returns_none() {
+    let a = bytes("kitten");
+    let b = bytes("sitting");
+    let r = levenshtein_bounded(&a, &b, 1);
+    assert(r.is_none());
+}
+
+// =============================================================================
+// Section 3: Jaro — symmetric similarity in [0, 1]
+// =============================================================================
+
+@test
+fn test_jaro_identical_returns_one() {
+    let a = bytes("hello");
+    let v = jaro(&a, &a);
+    assert(v >= 0.999 && v <= 1.001);
+}
+
+@test
+fn test_jaro_completely_different_returns_zero() {
+    let a = bytes("abc");
+    let b = bytes("xyz");
+    let v = jaro(&a, &b);
+    assert(v >= -0.001 && v <= 0.001);
+}
+
+// =============================================================================
+// Section 4: Jaro-Winkler — Jaro + prefix bonus
+// =============================================================================
+
+@test
+fn test_jaro_winkler_identical_returns_one() {
+    let a = bytes("hello");
+    let v = jaro_winkler(&a, &a);
+    assert(v >= 0.999 && v <= 1.001);
+}
+
+fn main() {}

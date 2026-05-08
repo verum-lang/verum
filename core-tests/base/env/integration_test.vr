@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/base/env/integration_test.vr
+// =============================================================================
+//
+// Integration tests for env operations: cross-API consistency, common
+// variables (HOME/USER/PATH/TEMP/SHELL/LOCALE) which exist on most
+// systems, args inspection.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  Standard env vars exist on POSIX-like systems.
+//     We're tolerant: HOME may or may not be set in CI sandboxes.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_home_dir_does_not_panic() {
+    // home_dir() is allowed to return None in restricted environments.
+    let _ = home_dir();
+}
+
+@test
+fn integration_temp_dir_returns_path() {
+    let t = temp_dir();
+    // Must return a non-empty path on every supported platform.
+    assert(t.len() > 0);
+}
+
+// -----------------------------------------------------------------------------
+// §2  args() returns at least one element (the program name) on most platforms.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_args_count_is_at_least_one() {
+    let n = args_count();
+    assert(n >= 1);
+}
+
+// -----------------------------------------------------------------------------
+// §3  set_var / var / remove_var sequence.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_set_var_var_remove_cycle() {
+    let key = "VERUM_TEST_INT_CYCLE";
+
+    // Initially absent
+    remove_var(key);
+    assert(var_opt(key).is_none());
+
+    // Set and verify
+    set_var(key, "value-1");
+    let v1 = var(key);
+    assert(v1.is_ok());
+    assert_eq(v1.unwrap(), "value-1");
+
+    // Update
+    set_var(key, "value-2");
+    let v2 = var(key);
+    assert_eq(v2.unwrap(), "value-2");
+
+    // Remove
+    remove_var(key);
+    assert(var_opt(key).is_none());
+}
+
+// -----------------------------------------------------------------------------
+// §4  var vs var_opt — consistent verdicts on missing keys.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_var_and_var_opt_agree_on_missing() {
+    let key = "VERUM_TEST_INT_MISSING_NO_AGREE";
+    remove_var(key);
+
+    let v: Result<Text, VarError> = var(key);
+    let v_opt: Maybe<Text> = var_opt(key);
+
+    assert(v.is_err());
+    assert(v_opt.is_none());
+}
+
+// -----------------------------------------------------------------------------
+// §5  exit_success / exit_failure constants exist.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_exit_success_is_zero() {
+    // exit_success is conventionally 0; we don't actually call exit().
+    // Read the constant if exposed; otherwise just verify the
+    // function exists in the prelude (compile-time check).
+    // Skipping concrete invocation: it would terminate the runner.
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

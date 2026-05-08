@@ -1,0 +1,272 @@
+// =============================================================================
+// core-tests/base/error/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core/base/error.vr`: StackFrame, Backtrace,
+// ErrorProtocol, ErrorChain, format_error_chain. Companion files:
+//   property_test.vr     — algebraic laws + @property samples
+//   integration_test.vr  — custom error types, ?-operator chains
+//   audit.md             — drift surfaces and language-impl gaps
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.error.{StackFrame, Backtrace, ErrorProtocol, ErrorChain, format_error_chain};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: StackFrame Construction
+// =============================================================================
+
+@test
+fn test_stackframe_new_preserves_fields() {
+    let frame = StackFrame.new("main", "test.vr", 42, 7);
+    assert_eq(frame.function, "main");
+    assert_eq(frame.file, "test.vr");
+    assert_eq(frame.line, 42);
+    assert_eq(frame.column, 7);
+}
+
+@test
+fn test_stackframe_zero_location() {
+    let frame = StackFrame.new("init", "lib.vr", 0, 0);
+    assert_eq(frame.line, 0);
+    assert_eq(frame.column, 0);
+}
+
+@test
+fn test_stackframe_empty_function_name() {
+    let frame = StackFrame.new("", "anonymous", 1, 1);
+    assert_eq(frame.function, "");
+}
+
+// =============================================================================
+// Section 2: StackFrame Eq / Clone
+// =============================================================================
+
+@test
+fn test_stackframe_eq_same_fields() {
+    let a = StackFrame.new("f", "a.vr", 1, 2);
+    let b = StackFrame.new("f", "a.vr", 1, 2);
+    assert(a == b);
+}
+
+@test
+fn test_stackframe_eq_differs_on_line() {
+    let a = StackFrame.new("f", "a.vr", 1, 2);
+    let b = StackFrame.new("f", "a.vr", 99, 2);
+    assert(a != b);
+}
+
+@test
+fn test_stackframe_eq_differs_on_function() {
+    let a = StackFrame.new("f", "a.vr", 1, 2);
+    let b = StackFrame.new("g", "a.vr", 1, 2);
+    assert(a != b);
+}
+
+@test
+fn test_stackframe_clone_preserves_value() {
+    let a = StackFrame.new("f", "a.vr", 10, 20);
+    let b = a.clone();
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// Section 3: StackFrame Display / Debug
+// =============================================================================
+
+@test
+fn test_stackframe_display_format() {
+    let f = StackFrame.new("main", "test.vr", 10, 5);
+    let s = f"{f}";
+    // Format: "  at main (test.vr:10:5)"
+    assert(s.contains("main"));
+    assert(s.contains("test.vr"));
+    assert(s.contains("10"));
+    assert(s.contains("5"));
+}
+
+@test
+fn test_stackframe_debug_includes_struct_name() {
+    let f = StackFrame.new("main", "test.vr", 1, 1);
+    let s = f"{f:?}";
+    assert(s.contains("StackFrame"));
+}
+
+// =============================================================================
+// Section 4: Backtrace Construction
+// =============================================================================
+
+@test
+fn test_backtrace_empty_is_empty() {
+    let bt = Backtrace.empty();
+    assert(bt.is_empty());
+    assert_eq(bt.len(), 0);
+}
+
+@test
+fn test_backtrace_from_frames_preserves_count() {
+    let frames: List<StackFrame> = [
+        StackFrame.new("a", "x.vr", 1, 1),
+        StackFrame.new("b", "y.vr", 2, 2),
+        StackFrame.new("c", "z.vr", 3, 3),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    assert_eq(bt.len(), 3);
+    assert(!bt.is_empty());
+}
+
+@test
+fn test_backtrace_capture_does_not_panic() {
+    // capture() is a runtime-dependent intrinsic; today returns
+    // empty when capture isn't wired. Just verify it doesn't panic
+    // and returns a usable Backtrace.
+    let bt = Backtrace.capture();
+    assert_eq(bt.len(), bt.frames().len());
+}
+
+@test
+fn test_backtrace_frames_accessor_round_trip() {
+    let original: List<StackFrame> = [
+        StackFrame.new("a", "x.vr", 1, 1),
+        StackFrame.new("b", "y.vr", 2, 2),
+    ];
+    let bt = Backtrace.from_frames(original.clone());
+    let recovered = bt.frames();
+    assert_eq(recovered.len(), original.len());
+}
+
+// =============================================================================
+// Section 5: Backtrace Default / Clone
+// =============================================================================
+
+@test
+fn test_backtrace_default_is_empty() {
+    let bt = Backtrace.default();
+    assert(bt.is_empty());
+}
+
+@test
+fn test_backtrace_clone_independence() {
+    let frames: List<StackFrame> = [StackFrame.new("a", "x.vr", 1, 1)];
+    let original = Backtrace.from_frames(frames);
+    let cloned = original.clone();
+    assert_eq(original.len(), cloned.len());
+}
+
+// =============================================================================
+// Section 6: Backtrace Display / Debug
+// =============================================================================
+
+@test
+fn test_backtrace_display_empty_says_no_capture() {
+    let bt = Backtrace.empty();
+    let s = f"{bt}";
+    assert(s.contains("no backtrace captured"));
+}
+
+@test
+fn test_backtrace_display_with_frames_shows_each() {
+    let frames: List<StackFrame> = [
+        StackFrame.new("foo", "a.vr", 1, 1),
+        StackFrame.new("bar", "b.vr", 2, 2),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    let s = f"{bt}";
+    assert(s.contains("foo"));
+    assert(s.contains("bar"));
+    assert(s.contains("a.vr"));
+    assert(s.contains("b.vr"));
+}
+
+@test
+fn test_backtrace_debug_includes_struct_name() {
+    let bt = Backtrace.empty();
+    let s = f"{bt:?}";
+    assert(s.contains("Backtrace"));
+}
+
+// =============================================================================
+// Section 7: ErrorProtocol — custom-type implementation
+// =============================================================================
+
+type MyError is {
+    msg: Text,
+};
+
+implement Describable for MyError {
+    fn description(&self) -> Text {
+        self.msg.clone()
+    }
+}
+
+implement ErrorSource for MyError {
+    fn source(&self) -> Maybe<&dyn Describable> {
+        None
+    }
+}
+
+implement ErrorProtocol for MyError {
+    // message() default is description(); we accept default.
+    // backtrace() default is None; we accept default.
+}
+
+@test
+fn test_error_protocol_default_message_uses_description() {
+    let e = MyError { msg: "boom" };
+    assert_eq(e.message(), "boom");
+}
+
+@test
+fn test_error_protocol_default_backtrace_is_none() {
+    let e = MyError { msg: "x" };
+    assert(e.backtrace().is_none());
+}
+
+// =============================================================================
+// Section 8: format_error_chain
+// =============================================================================
+
+@test
+fn test_format_error_chain_no_source_emits_only_self() {
+    let e = MyError { msg: "leaf error" };
+    let formatted = format_error_chain(&e);
+    assert(formatted.contains("leaf error"));
+    assert(!formatted.contains("caused by"));
+}
+
+// Linked error (with one level of source chain).
+type ChainedError is {
+    msg: Text,
+    inner: MyError,
+};
+
+implement Describable for ChainedError {
+    fn description(&self) -> Text {
+        self.msg.clone()
+    }
+}
+
+implement ErrorSource for ChainedError {
+    fn source(&self) -> Maybe<&dyn Describable> {
+        Some(&self.inner as &dyn Describable)
+    }
+}
+
+@test
+fn test_format_error_chain_with_source_includes_caused_by() {
+    let inner = MyError { msg: "low-level" };
+    let outer = ChainedError { msg: "high-level", inner: inner };
+    let formatted = format_error_chain(&outer);
+    assert(formatted.contains("high-level"));
+    assert(formatted.contains("caused by"));
+    assert(formatted.contains("low-level"));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

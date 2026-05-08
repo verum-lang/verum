@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/base/env/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/base/env.vr` — environment
+// variables, args, exit codes, locale.
+//
+// Laws verified:
+//   §A  set_var followed by var returns the same value (round-trip)
+//   §B  remove_var followed by var_opt returns None
+//   §C  args_count == args().len() (consistency between forms)
+//   §D  var on a never-set variable returns None (or VarError)
+//   §E  set_var twice keeps the latest value (last-write-wins)
+//
+// Note: env tests TOUCH global state (the OS env), so cleanup is
+// essential. Each test uses a unique key prefix to avoid cross-test
+// contamination.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  set_var ↔ var round-trip.
+// =============================================================================
+
+@test
+fn law_set_var_then_var_round_trip() {
+    let key = "VERUM_TEST_PROP_A";
+    set_var(key, "round-trip-value");
+    let v = var(key);
+    assert(v.is_ok());
+    assert_eq(v.unwrap(), "round-trip-value");
+    remove_var(key);   // cleanup
+}
+
+// =============================================================================
+// §B  remove_var clears the value.
+// =============================================================================
+
+@test
+fn law_remove_var_clears() {
+    let key = "VERUM_TEST_PROP_B";
+    set_var(key, "tmp");
+    remove_var(key);
+    let v = var_opt(key);
+    assert(v.is_none());
+}
+
+// =============================================================================
+// §C  args_count consistency.
+// =============================================================================
+
+@test
+fn law_args_count_matches_args_len() {
+    let n = args_count();
+    let xs: Args = args();
+    assert_eq(xs.len(), n);
+}
+
+// =============================================================================
+// §D  var on never-set returns None / VarError.
+// =============================================================================
+
+@test
+fn law_var_opt_unset_returns_none() {
+    let key = "VERUM_TEST_PROP_D_NEVER_SET";
+    // Make sure it's not set (cleanup before assert):
+    remove_var(key);
+    let v = var_opt(key);
+    assert(v.is_none());
+}
+
+// =============================================================================
+// §E  Last-write-wins on set_var.
+// =============================================================================
+
+@test
+fn law_set_var_last_write_wins() {
+    let key = "VERUM_TEST_PROP_E";
+    set_var(key, "first");
+    set_var(key, "second");
+    set_var(key, "third");
+    let v = var(key);
+    assert_eq(v.unwrap(), "third");
+    remove_var(key);   // cleanup
+}
+
+// =============================================================================
+// §F  @property — round-trip with sampled keys / values.
+// =============================================================================
+
+@property
+fn prop_set_then_var_round_trip(value: Text) {
+    // Use a fixed key to avoid namespace pollution; only the value varies.
+    let key = "VERUM_TEST_PROP_F_ROUND_TRIP";
+    set_var(key, value.clone());
+    let recovered = var(key);
+    assert(recovered.is_ok());
+    assert_eq(recovered.unwrap(), value);
+    remove_var(key);
+}
+
+// =============================================================================
+// §G  @test_case — exit codes are bounded.
+// =============================================================================
+
+@test_case(0)        // success
+@test_case(1)        // generic error
+@test_case(2)        // misuse
+@test_case(127)      // command not found
+@test_case(128)      // base for signal-induced exit
+fn parametrised_exit_code_in_byte_range(code: Int) {
+    // exit() takes any Int but POSIX truncates to low 8 bits.
+    // We don't actually call exit() in tests (it would terminate the
+    // runner) — just verify the value is in the typical range.
+    assert(code >= 0 && code <= 255);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

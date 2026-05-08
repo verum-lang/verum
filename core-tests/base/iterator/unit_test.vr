@@ -1,11 +1,13 @@
 // =============================================================================
-// iterator_test.vr - Comprehensive tests for Iterator protocol and adapters
+// core-tests/base/iterator/unit_test.vr
 // =============================================================================
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: iterator, protocol, adapters, transducers, core
-// @description: Tests for Iterator protocol, adapters, construction functions, and transducers
+//
+// Per-method tests for Iterator and its adapters. Companion files:
+//   basic_test.vr               — minimal iterator-protocol smoke tests
+//   protocol_agnostic_test.vr   — type-agnostic protocol dispatch tests
+//   property_test.vr            — fold / map / filter laws + @property
+//   integration_test.vr         — Range / List integration scenarios
+//   audit.md                    — drift surfaces (transducer, fusion paths)
 // =============================================================================
 
 mount core.prelude.*;
@@ -1015,9 +1017,7 @@ fn test_find_first() {
 // Section 30: Search Operations - find_map
 // =============================================================================
 
-// @skip: parse_int method not found on unresolved type (known limitation)
 // /// Test find_map transforms and filters
-// @test
 // fn test_find_map_found() {
 //     let result = ["a", "42", "b"].iter().find_map(|s| {
 //         (*s).parse_int().ok()
@@ -1025,9 +1025,7 @@ fn test_find_first() {
 //     assert_eq(result, Some(42));
 // }
 
-// @skip: parse_int method not found on unresolved type (known limitation)
 // /// Test find_map returns None when all fail
-// @test
 // fn test_find_map_not_found() {
 //     let result = ["a", "b", "c"].iter().find_map(|s| {
 //         (*s).parse_int().ok()

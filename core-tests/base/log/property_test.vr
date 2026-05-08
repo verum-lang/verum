@@ -1,0 +1,68 @@
+// =============================================================================
+// core-tests/base/log/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the log module.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.log.{LogLevel, LogRecord};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Severity is total-ordered: Trace < Debug < Info < Warn < Error.
+// =============================================================================
+
+@test
+fn law_severity_total_order() {
+    let levels: List<LogLevel> = [
+        LogLevel.Trace, LogLevel.Debug, LogLevel.Info,
+        LogLevel.Warn, LogLevel.Error,
+    ];
+    let mut prev = -1;
+    for lvl in levels.iter() {
+        let s = (*lvl).severity();
+        assert(s > prev);
+        prev = s;
+    }
+}
+
+// =============================================================================
+// §B  Name is non-empty and uppercase.
+// =============================================================================
+
+@test
+fn law_name_non_empty_for_all_levels() {
+    let levels: List<LogLevel> = [
+        LogLevel.Trace, LogLevel.Debug, LogLevel.Info,
+        LogLevel.Warn, LogLevel.Error,
+    ];
+    for lvl in levels.iter() {
+        let n = (*lvl).name();
+        assert(n.len() > 0);
+    }
+}
+
+// =============================================================================
+// §C  @test_case truth table for severity values.
+// =============================================================================
+
+@test_case(LogLevel.Trace, 0)
+@test_case(LogLevel.Debug, 1)
+@test_case(LogLevel.Info,  2)
+@test_case(LogLevel.Warn,  3)
+@test_case(LogLevel.Error, 4)
+fn parametrised_severity_values(lvl: LogLevel, expected: Int) {
+    assert_eq(lvl.severity(), expected);
+}
+
+@test_case(LogLevel.Trace, "TRACE")
+@test_case(LogLevel.Debug, "DEBUG")
+@test_case(LogLevel.Info,  "INFO")
+@test_case(LogLevel.Warn,  "WARN")
+@test_case(LogLevel.Error, "ERROR")
+fn parametrised_name_values(lvl: LogLevel, expected: Text) {
+    assert_eq(lvl.name(), expected);
+}
+
+fn main() {}

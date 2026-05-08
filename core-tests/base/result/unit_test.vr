@@ -1,12 +1,13 @@
 // =============================================================================
-// result_test.vr - Comprehensive tests for Result<T, E> and error handling
+// core-tests/base/result/unit_test.vr
 // =============================================================================
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: core, result, error-handling, monad, safety, retry
-// @description: Tests for Result<T, E> type including predicates, unwrapping,
-//               transformations, combinators, retry logic, Exit, Cause, and Validated.
+//
+// Per-method tests for `core.base.result.Result<T, E>`. Companion files:
+//   try_block_test.vr     — try-block syntax tests (migrated)
+//   try_protocol_test.vr  — Try protocol semantics (migrated)
+//   property_test.vr      — monad / functor / Ord laws + @property
+//   integration_test.vr   — Result in Map/Set, ?-chains, error promotion
+//   audit.md              — variant tags, From-conversion, drift surfaces
 //
 // Coverage:
 // - Result<T, E> type definition (Ok(T) | Err(E))

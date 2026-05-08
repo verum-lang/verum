@@ -1,0 +1,429 @@
+// =============================================================================
+// core-tests/base/ordering/property_test.vr
+// =============================================================================
+//
+// Why exhaustive over property? When |D| = 3, exhaustive ≡ property without
+// shrinking, sampling, or seeding. Every law below is a *theorem* over `Ordering`
+// once these tests pass.
+//
+// Laws verified:
+//   §1  Reverse involution            ∀x. reverse(reverse(x)) = x
+//   §2  Reverse anti-symmetry         reverse swaps Less ↔ Greater, fixes Equal
+//   §3  Then identity (left)          ∀x. Equal.then(x) = x
+//   §4  Then absorption (left)        ∀x. Less.then(x) = Less; Greater.then(x) = Greater
+//   §5  Then associativity            ∀a,b,c. (a.then(b)).then(c) = a.then(b.then(c))
+//   §6  Then ↔ then_with equivalence  ∀a,b. a.then(b) = a.then_with(|| b)
+//   §7  Then_with laziness            a ≠ Equal ⇒ closure is not evaluated
+//   §8  to_int monotonicity           Less.to_int() < Equal.to_int() < Greater.to_int()
+//   §9  Round-trip                    ∀x. from_int(to_int(x)) = x
+//   §10 from_int sign-normalisation   ∀n. from_int(n) = from_int(sign(n))
+//   §11 Reverse via integer negation  ∀x. reverse(x).to_int() = -x.to_int()
+//   §12 Predicate disjointness        exactly-one of {is_less, is_equal, is_greater}
+//   §13 is_le / is_ge complementarity is_le(x) = !is_greater(x); is_ge(x) = !is_less(x)
+//   §14 Eq is an equivalence relation reflexivity, symmetry, transitivity (exhaustive)
+//   §15 Default is then-identity      Ordering.default() = Equal
+// =============================================================================
+
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// Helper: the canonical domain enumeration. Used by every exhaustive sweep.
+// -----------------------------------------------------------------------------
+
+fn domain() -> List<Ordering> {
+    [Less, Equal, Greater]
+}
+
+// =============================================================================
+// §1  Reverse involution: ∀x. reverse(reverse(x)) = x
+// =============================================================================
+
+@test
+fn property_reverse_involution_exhaustive() {
+    for x in domain().iter() {
+        let twice = (*x).reverse().reverse();
+        assert_eq(*x, twice);
+    }
+}
+
+// =============================================================================
+// §2  Reverse anti-symmetry: characterises reverse on each variant.
+// =============================================================================
+
+@test
+fn property_reverse_swaps_less_greater() {
+    assert_eq(Less.reverse(), Greater);
+    assert_eq(Greater.reverse(), Less);
+}
+
+@test
+fn property_reverse_fixes_equal() {
+    assert_eq(Equal.reverse(), Equal);
+}
+
+// =============================================================================
+// §3  Then identity (left): ∀x. Equal.then(x) = x
+// =============================================================================
+
+@test
+fn property_then_left_identity_is_equal() {
+    for x in domain().iter() {
+        assert_eq(Equal.then(*x), *x);
+    }
+}
+
+// =============================================================================
+// §4  Then absorption (left): non-Equal absorbs.
+// =============================================================================
+
+@test
+fn property_then_left_absorption() {
+    for x in domain().iter() {
+        assert_eq(Less.then(*x), Less);
+        assert_eq(Greater.then(*x), Greater);
+    }
+}
+
+// =============================================================================
+// §5  Then associativity: ∀a,b,c. (a.then(b)).then(c) = a.then(b.then(c))
+//     27 cases, all checked.
+// =============================================================================
+
+@test
+fn property_then_associativity_exhaustive() {
+    for a in domain().iter() {
+        for b in domain().iter() {
+            for c in domain().iter() {
+                let lhs = (*a).then(*b).then(*c);
+                let rhs = (*a).then((*b).then(*c));
+                assert_eq(lhs, rhs);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §6  then ↔ then_with equivalence in the eager case.
+//     ∀a,b. a.then(b) = a.then_with(|| b)
+// =============================================================================
+
+@test
+fn property_then_with_eager_equivalence() {
+    for a in domain().iter() {
+        for b in domain().iter() {
+            let bv = *b;  // capture by value
+            assert_eq((*a).then(bv), (*a).then_with(|| bv));
+        }
+    }
+}
+
+// =============================================================================
+// §7  then_with laziness: closure must not run when self is Less or Greater.
+// =============================================================================
+
+@test
+fn property_then_with_lazy_when_less() {
+    let mut called = false;
+    let _ = Less.then_with(|| {
+        called = true;
+        Equal
+    });
+    assert(!called, "closure must not run for Less");
+}
+
+@test
+fn property_then_with_lazy_when_greater() {
+    let mut called = false;
+    let _ = Greater.then_with(|| {
+        called = true;
+        Equal
+    });
+    assert(!called, "closure must not run for Greater");
+}
+
+@test
+fn property_then_with_eager_when_equal() {
+    let mut called = false;
+    let _ = Equal.then_with(|| {
+        called = true;
+        Less
+    });
+    assert(called, "closure must run for Equal");
+}
+
+// =============================================================================
+// §8  to_int monotonicity. The total order on Ordering matches the integer order
+//     of its representations.
+// =============================================================================
+
+@test
+fn property_to_int_monotonic() {
+    assert(Less.to_int() < Equal.to_int());
+    assert(Equal.to_int() < Greater.to_int());
+    // Specific values pinned: -1, 0, 1
+    assert_eq(Less.to_int(), -1);
+    assert_eq(Equal.to_int(), 0);
+    assert_eq(Greater.to_int(), 1);
+}
+
+// =============================================================================
+// §9  from_int ∘ to_int round-trip is identity over the domain.
+// =============================================================================
+
+@test
+fn property_from_to_int_round_trip() {
+    for x in domain().iter() {
+        let back = Ordering.from_int((*x).to_int());
+        assert_eq(*x, back);
+    }
+}
+
+// =============================================================================
+// §10 from_int sign-normalisation: only the sign matters.
+//     ∀n. from_int(n) = from_int(sign(n))
+// =============================================================================
+
+@test
+fn property_from_int_depends_only_on_sign() {
+    // Negative range -> Less (representative samples + boundaries)
+    assert_eq(Ordering.from_int(-1), Less);
+    assert_eq(Ordering.from_int(-2), Less);
+    assert_eq(Ordering.from_int(-1_000_000), Less);
+    assert_eq(Ordering.from_int(Int.MIN), Less);
+
+    // Zero -> Equal
+    assert_eq(Ordering.from_int(0), Equal);
+
+    // Positive range -> Greater
+    assert_eq(Ordering.from_int(1), Greater);
+    assert_eq(Ordering.from_int(2), Greater);
+    assert_eq(Ordering.from_int(1_000_000), Greater);
+    assert_eq(Ordering.from_int(Int.MAX), Greater);
+}
+
+// =============================================================================
+// §11 reverse(x).to_int() = -x.to_int()
+//     Reverse on the variant matches negation on the integer view.
+// =============================================================================
+
+@test
+fn property_reverse_via_int_negation() {
+    for x in domain().iter() {
+        let lhs = (*x).reverse().to_int();
+        let rhs = -((*x).to_int());
+        assert_eq(lhs, rhs);
+    }
+}
+
+// =============================================================================
+// §12 Predicate disjointness: exactly-one of {is_less, is_equal, is_greater}.
+//     This is the partition property, encoded as int sum of bools.
+// =============================================================================
+
+@test
+fn property_predicate_partition() {
+    fn count_true(ord: Ordering) -> Int {
+        let mut n = 0;
+        if ord.is_less() { n = n + 1; }
+        if ord.is_equal() { n = n + 1; }
+        if ord.is_greater() { n = n + 1; }
+        n
+    }
+    for x in domain().iter() {
+        assert_eq(count_true(*x), 1);
+    }
+}
+
+// =============================================================================
+// §13 is_le and is_ge are exact complements of the strict opposite predicate.
+//     is_le(x) ⇔ !is_greater(x);  is_ge(x) ⇔ !is_less(x)
+// =============================================================================
+
+@test
+fn property_is_le_complements_is_greater() {
+    for x in domain().iter() {
+        assert_eq((*x).is_le(), !(*x).is_greater());
+    }
+}
+
+@test
+fn property_is_ge_complements_is_less() {
+    for x in domain().iter() {
+        assert_eq((*x).is_ge(), !(*x).is_less());
+    }
+}
+
+// =============================================================================
+// §14 Eq is an equivalence relation: reflexive, symmetric, transitive.
+//     Exhaustive over 3, 3², 3³.
+// =============================================================================
+
+@test
+fn property_eq_reflexive() {
+    for x in domain().iter() {
+        assert(*x == *x);
+    }
+}
+
+@test
+fn property_eq_symmetric() {
+    for a in domain().iter() {
+        for b in domain().iter() {
+            assert_eq(*a == *b, *b == *a);
+        }
+    }
+}
+
+@test
+fn property_eq_transitive() {
+    // a == b ∧ b == c ⇒ a == c (vacuously true when premise false)
+    for a in domain().iter() {
+        for b in domain().iter() {
+            for c in domain().iter() {
+                if (*a == *b) && (*b == *c) {
+                    assert(*a == *c);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §15 Default is the then-identity element.
+// =============================================================================
+
+@test
+fn property_default_is_then_identity() {
+    let id = Ordering.default();
+    assert_eq(id, Equal);
+    for x in domain().iter() {
+        assert_eq(id.then(*x), *x);
+        assert_eq((*x).then(id), *x);   // also right-identity
+    }
+}
+
+// =============================================================================
+// §16 Bonus: then is NOT commutative (sanity check on a non-law).
+//     This guards against accidental refactors that would commute then.
+// =============================================================================
+
+@test
+fn property_then_not_commutative_witness() {
+    // Less.then(Greater) = Less, but Greater.then(Less) = Greater.
+    assert_eq(Less.then(Greater), Less);
+    assert_eq(Greater.then(Less), Greater);
+    assert(Less.then(Greater) != Greater.then(Less));
+}
+
+// =============================================================================
+// §17 Auto-generated property tests via @property.
+//
+// `@test` runs once per definition; `@property` runs N times with random
+// inputs (default 256, configurable via `@property(runs = N)`). Failures
+// are shrunk Hedgehog-style and the failing seed recorded under
+// `target/test/pbt-regressions.json` for replay.
+//
+// Where `Ordering` is a finite 3-domain we already exhaust everything,
+// so @property's *value* here is on the integer side: testing
+// `Ordering.from_int(n)` over a representative random sample of Ints.
+// =============================================================================
+
+/// Property: from_int(n) preserves the sign function of n.
+/// Domain: full Int range, sampled.
+@property
+fn prop_from_int_preserves_sign(n: Int) {
+    let ord = Ordering.from_int(n);
+    if n < 0 { assert_eq(ord, Less); }
+    else if n > 0 { assert_eq(ord, Greater); }
+    else { assert_eq(ord, Equal); }
+}
+
+/// Property: round-trip via to_int ∘ from_int collapses to sign(n).
+/// Iow `Ordering.from_int(n).to_int()` is `sign(n)`.
+@property
+fn prop_to_int_after_from_int_is_sign(n: Int) {
+    let round = Ordering.from_int(n).to_int();
+    let expected_sign = if n < 0 { -1 } else if n > 0 { 1 } else { 0 };
+    assert_eq(round, expected_sign);
+}
+
+/// Property: reverse is sign-flipping when projected through to_int.
+/// `reverse(from_int(n)).to_int() = -sign(n)`.
+@property
+fn prop_reverse_via_int_negation(n: Int) {
+    let ord = Ordering.from_int(n);
+    let lhs = ord.reverse().to_int();
+    let rhs = -(ord.to_int());
+    assert_eq(lhs, rhs);
+}
+
+// =============================================================================
+// §18 Parametrised tests via @test_case.
+//
+// `@test_case(arg, …)` repeats the same body with each tuple of arguments.
+// Useful for table-driven cases when neither exhaustive enumeration nor
+// random generation is the right shape — the test author knows the exact
+// (input → expected) pairs that capture the law.
+// =============================================================================
+
+/// Truth table for `then`: (a, b) → a.then(b). All 9 cells.
+@test_case(Less, Less, Less)
+@test_case(Less, Equal, Less)
+@test_case(Less, Greater, Less)
+@test_case(Equal, Less, Less)
+@test_case(Equal, Equal, Equal)
+@test_case(Equal, Greater, Greater)
+@test_case(Greater, Less, Greater)
+@test_case(Greater, Equal, Greater)
+@test_case(Greater, Greater, Greater)
+fn parametrised_then_truth_table(a: Ordering, b: Ordering, expected: Ordering) {
+    assert_eq(a.then(b), expected);
+}
+
+/// Truth table for `reverse`: x → reverse(x). All 3 cells.
+@test_case(Less, Greater)
+@test_case(Equal, Equal)
+@test_case(Greater, Less)
+fn parametrised_reverse_truth_table(x: Ordering, expected: Ordering) {
+    assert_eq(x.reverse(), expected);
+}
+
+/// Truth table for `to_int`: x → to_int(x).
+@test_case(Less, -1)
+@test_case(Equal, 0)
+@test_case(Greater, 1)
+fn parametrised_to_int_truth_table(x: Ordering, expected: Int) {
+    assert_eq(x.to_int(), expected);
+}
+
+// =============================================================================
+// §19 @ignore — pinning a test that intentionally does not run.
+//
+// Use sparingly: @ignore is the right answer when a test pins a
+// known-broken language feature waiting on a deferred fix. Each
+// ignored test must reference the tracking issue / audit section.
+// =============================================================================
+
+/// PINNED: Iterator-item method dispatch fails to resolve for-loop
+/// iterator items without an explicit dereference. Tracked in audit.md
+/// §3.1; workaround is in regression_test.vr. Re-enable once the
+/// type-inference defect is closed at the language level.
+@ignore
+@test
+fn pinned_iterator_item_method_resolution_currently_broken() {
+    // Once fixed, this should pass without `(*ord)` dereferencing.
+    let xs: List<Ordering> = [Less, Equal, Greater];
+    for ord in xs.iter() {
+        let _ = ord.reverse();   // <-- the bug: method not resolved
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main; this stays as a no-op
+    // so the file is also runnable as a regular Verum binary if needed.
+}

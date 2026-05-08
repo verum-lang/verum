@@ -1,0 +1,292 @@
+// =============================================================================
+// core-tests/base/iterator/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the Iterator protocol and its adapters.
+// Iterator laws are deep — most reduce to the fold/foldl identity and the
+// fusion theorems for map/filter/take/skip.
+//
+// Laws verified:
+//   §A  fold over empty is initial value   xs=[] ⇒ fold(z, f) = z
+//   §B  fold associativity-by-shape         left-fold is the canonical reducer
+//   §C  map preserves length                count(map(xs)) = count(xs)
+//   §D  filter preserves order              elements appear in original order
+//   §E  count == fold via |acc, _| acc + 1
+//   §F  rev() involution                    xs.rev().rev() == xs (over a List)
+//   §G  take + skip are complementary       take(n) ++ skip(n) == xs
+//   §H  zip parity                          length = min(|a|, |b|)
+//   §I  chain length is sum                 (xs ++ ys).count = xs.count + ys.count
+//   §J  enumerate indices are 0..n
+//   §K  sum is fold by addition
+//   §L  any / all duality                   any(p) <=> !all(!p)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §A  fold over empty.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_fold_over_empty_returns_initial() {
+    let xs: List<Int> = [];
+    let r = xs.iter().fold(99, |acc, x| acc + *x);
+    assert_eq(r, 99);
+}
+
+// -----------------------------------------------------------------------------
+// §B  fold (left) reduction matches summation.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_fold_left_sum_matches_iterative() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+
+    let folded = xs.iter().fold(0, |acc, x| acc + *x);
+    let mut iterative = 0;
+    for x in xs.iter() { iterative = iterative + *x; }
+    assert_eq(folded, iterative);
+    assert_eq(folded, 15);
+}
+
+// -----------------------------------------------------------------------------
+// §C  map preserves length.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_map_preserves_length() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let mapped: List<Int> = xs.iter().map(|x| *x * 2).collect();
+    assert_eq(mapped.len(), xs.len());
+}
+
+@test
+fn law_map_empty_is_empty() {
+    let xs: List<Int> = [];
+    let mapped: List<Int> = xs.iter().map(|x| *x * 2).collect();
+    assert_eq(mapped.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// §D  filter preserves relative order.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_filter_preserves_relative_order() {
+    let xs: List<Int> = [1, 5, 3, 7, 4, 9, 2];
+    let evens: List<Int> = xs.iter().filter(|x| **x % 2 == 0).map(|x| *x).collect();
+    // Even values in original order: 4, 2.
+    assert_eq(evens, [4, 2]);
+}
+
+@test
+fn law_filter_idempotent() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let p = |x: &Int| -> Bool { *x > 2 };
+    let once: List<Int> = xs.iter().filter(p).map(|x| *x).collect();
+    let twice: List<Int> = once.iter().filter(p).map(|x| *x).collect();
+    assert_eq(once, twice);
+}
+
+// -----------------------------------------------------------------------------
+// §E  count == fold by 1.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_count_equals_fold_by_one() {
+    let cases: List<List<Int>> = [
+        [],
+        [42],
+        [1, 2, 3],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    ];
+    for xs in cases.iter() {
+        let counted = (*xs).iter().count();
+        let folded = (*xs).iter().fold(0, |acc, _| acc + 1);
+        assert_eq(counted, folded);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §G  take + skip complementarity.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_take_plus_skip_recovers_original() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7];
+    let n = 3;
+    let prefix: List<Int> = xs.iter().take(n).map(|x| *x).collect();
+    let suffix: List<Int> = xs.iter().skip(n).map(|x| *x).collect();
+
+    let mut recombined: List<Int> = [];
+    for v in prefix.iter() { recombined.push(*v); }
+    for v in suffix.iter() { recombined.push(*v); }
+    assert_eq(recombined, xs);
+}
+
+@test
+fn law_take_zero_is_empty() {
+    let xs: List<Int> = [1, 2, 3];
+    let r: List<Int> = xs.iter().take(0).map(|x| *x).collect();
+    assert_eq(r, []);
+}
+
+@test
+fn law_skip_more_than_length_is_empty() {
+    let xs: List<Int> = [1, 2, 3];
+    let r: List<Int> = xs.iter().skip(100).map(|x| *x).collect();
+    assert_eq(r, []);
+}
+
+// -----------------------------------------------------------------------------
+// §H  zip parity.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_zip_length_is_min() {
+    let a: List<Int> = [1, 2, 3, 4, 5];
+    let b: List<Text> = ["a", "b", "c"];
+    let zipped: List<(Int, Text)> = a.iter()
+        .zip(b.iter())
+        .map(|p| { let (x, y) = p; (*x, (*y).clone()) })
+        .collect();
+    assert_eq(zipped.len(), 3);  // min(5, 3) = 3
+}
+
+// -----------------------------------------------------------------------------
+// §I  chain length is sum.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_chain_length_is_sum() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [4, 5];
+    let chained: List<Int> = a.iter().chain(b.iter()).map(|x| *x).collect();
+    assert_eq(chained.len(), a.len() + b.len());
+    assert_eq(chained, [1, 2, 3, 4, 5]);
+}
+
+// -----------------------------------------------------------------------------
+// §J  enumerate indices.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_enumerate_indices_are_0_to_n() {
+    let xs: List<Text> = ["a", "b", "c"];
+    let mut expected_idx = 0;
+    for p in xs.iter().enumerate() {
+        let (i, _) = p;
+        assert_eq(i, expected_idx);
+        expected_idx = expected_idx + 1;
+    }
+    assert_eq(expected_idx, xs.len());
+}
+
+// -----------------------------------------------------------------------------
+// §K  sum equals fold by addition.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_sum_equals_fold_addition() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let folded = xs.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(folded, 15);
+}
+
+// -----------------------------------------------------------------------------
+// §L  any / all duality.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_any_all_duality_via_negation() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let p = |x: &Int| -> Bool { *x > 0 };
+    let np = |x: &Int| -> Bool { !p(x) };
+
+    // any(p) ⇔ !all(¬p)
+    assert_eq(xs.iter().any(p), !xs.iter().all(np));
+}
+
+@test
+fn law_all_on_empty_is_true() {
+    let xs: List<Int> = [];
+    assert(xs.iter().all(|x: &Int| *x > 100));   // vacuous truth
+}
+
+@test
+fn law_any_on_empty_is_false() {
+    let xs: List<Int> = [];
+    assert(!xs.iter().any(|x: &Int| *x > 100));  // vacuous falsity
+}
+
+// =============================================================================
+// §M  Range iterator laws.
+// =============================================================================
+
+@test
+fn law_range_count_matches_arithmetic() {
+    let cases: List<(Int, Int)> = [(0, 0), (0, 1), (0, 5), (-3, 3)];
+    for c in cases.iter() {
+        let (lo, hi) = *c;
+        let n = (lo..hi).count();
+        let expected = if hi > lo { hi - lo } else { 0 };
+        assert_eq(n, expected);
+    }
+}
+
+@test
+fn law_range_inclusive_count_includes_endpoint() {
+    assert_eq((0..=5).count(), 6);   // 0,1,2,3,4,5 = 6
+}
+
+// =============================================================================
+// §N  @property — auto-generated samples on the Int axis.
+// =============================================================================
+
+@property
+fn prop_singleton_count_is_one(n: Int) {
+    let xs: List<Int> = [n];
+    assert_eq(xs.iter().count(), 1);
+}
+
+@property
+fn prop_double_then_halve_round_trip_via_map(n: Int) {
+    // For non-overflow inputs, doubling then halving recovers the value.
+    if n > Int.MIN / 2 && n < Int.MAX / 2 {
+        let xs: List<Int> = [n];
+        let r: List<Int> = xs.iter().map(|x| *x * 2).map(|x| x / 2).collect();
+        assert_eq(r, xs);
+    }
+}
+
+@property
+fn prop_filter_subsetting_does_not_introduce_new_elements(n: Int) {
+    let xs: List<Int> = [n, n + 1, n + 2];
+    let r: List<Int> = xs.iter().filter(|x| **x == n).map(|x| *x).collect();
+    // Every element of r must have been in xs.
+    for v in r.iter() {
+        assert(xs.contains(v));
+    }
+}
+
+// =============================================================================
+// §O  @test_case — truth tables.
+// =============================================================================
+
+@test_case(0, 0)        // empty range → 0 elements
+@test_case(0, 1, 1)     // [0..1) → 1 element
+@test_case(0, 5, 5)     // [0..5) → 5 elements
+@test_case(-3, 3, 6)    // [-3..3) → 6 elements
+fn parametrised_range_count(lo: Int, hi: Int, expected: Int = 0) {
+    let n = (lo..hi).count();
+    assert_eq(n, expected);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

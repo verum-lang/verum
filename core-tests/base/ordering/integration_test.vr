@@ -1,0 +1,328 @@
+// =============================================================================
+// core-tests/base/ordering/integration_test.vr
+// =============================================================================
+//
+// Coverage:
+//   §1  Int.cmp returns Ordering         (primitive Ord protocol contract)
+//   §2  Float / Bool / Char / Text cmp   (other primitive Ord impls)
+//   §3  Maybe<T>.cmp                     (None < Some, Some compares inner)
+//   §4  Ordering used to drive sort      (manual bubble + comparator)
+//   §5  Lexicographic chain via .then()  (idiomatic multi-key sort key)
+//   §6  Lexicographic chain via .then_with() (lazy evaluation guarantee)
+//   §7  Reverse-sort via Ordering.reverse() (inverts comparator output)
+//   §8  Three-way partition (quicksort pivot)  (canonical Ordering consumer)
+//   §9  Binary search via cmp + Ordering match (cross-cuts cmp + match)
+// =============================================================================
+
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  Int.cmp returns Ordering — every numeric primitive must satisfy this.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_int_cmp_returns_ordering() {
+    let a: Int = 1;
+    let b: Int = 2;
+    assert_eq(a.cmp(&b), Less);
+    assert_eq(b.cmp(&a), Greater);
+    assert_eq(a.cmp(&a), Equal);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Float / Bool / Char / Text — Ord is uniform across primitives.
+//     For Float we assume non-NaN; NaN ordering is a separate testable concern.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_float_cmp_returns_ordering() {
+    let a: Float = 1.5;
+    let b: Float = 2.5;
+    assert_eq(a.cmp(&b), Less);
+    assert_eq(b.cmp(&a), Greater);
+    assert_eq(a.cmp(&a), Equal);
+}
+
+@test
+fn integration_bool_cmp_returns_ordering() {
+    // Convention across most stdlibs: false < true.
+    assert_eq(false.cmp(&true), Less);
+    assert_eq(true.cmp(&false), Greater);
+    assert_eq(true.cmp(&true), Equal);
+}
+
+@test
+fn integration_char_cmp_returns_ordering() {
+    let a: Char = 'a';
+    let z: Char = 'z';
+    assert_eq(a.cmp(&z), Less);
+    assert_eq(z.cmp(&a), Greater);
+    assert_eq(a.cmp(&a), Equal);
+}
+
+@test
+fn integration_text_cmp_returns_ordering() {
+    let apple: Text = "apple";
+    let banana: Text = "banana";
+    assert_eq(apple.cmp(&banana), Less);
+    assert_eq(banana.cmp(&apple), Greater);
+    assert_eq(apple.cmp(&apple), Equal);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Maybe<T>.cmp: None < Some, Some compares the inner value.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_maybe_cmp_none_less_than_some() {
+    let none: Maybe<Int> = None;
+    let some = Some(0);
+    assert_eq(none.cmp(&some), Less);
+    assert_eq(some.cmp(&none), Greater);
+}
+
+@test
+fn integration_maybe_cmp_none_equals_none() {
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    assert_eq(a.cmp(&b), Equal);
+}
+
+@test
+fn integration_maybe_cmp_some_compares_inner() {
+    assert_eq(Some(1).cmp(&Some(2)), Less);
+    assert_eq(Some(2).cmp(&Some(1)), Greater);
+    assert_eq(Some(5).cmp(&Some(5)), Equal);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Ordering drives a sort. Implemented as a textbook bubble-sort that
+//     consults `cmp` on every adjacent-pair decision — verifies the contract
+//     of Ordering as a *driver* of imperative control flow.
+// -----------------------------------------------------------------------------
+
+fn bubble_sort_int(xs: &mut List<Int>) {
+    let n = xs.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j + 1 < n - i {
+            // Use cmp to obtain Ordering, then drive swap on Greater.
+            if xs[j].cmp(&xs[j + 1]).is_greater() {
+                let tmp = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_sort_via_cmp_ordering() {
+    let mut xs: List<Int> = [5, 2, 8, 1, 9, 3];
+    bubble_sort_int(&mut xs);
+    assert_eq(xs, [1, 2, 3, 5, 8, 9]);
+}
+
+@test
+fn integration_sort_already_sorted_no_op() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    bubble_sort_int(&mut xs);
+    assert_eq(xs, [1, 2, 3, 4, 5]);
+}
+
+@test
+fn integration_sort_reverse_input_fully_inverted() {
+    let mut xs: List<Int> = [5, 4, 3, 2, 1];
+    bubble_sort_int(&mut xs);
+    assert_eq(xs, [1, 2, 3, 4, 5]);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Lexicographic chain via .then(): idiomatic multi-key comparator.
+//     This is the recommended pattern. audit.md §1.4 promotes .then() over
+//     manual `match { Equal => …, _ => … }` blocks.
+// -----------------------------------------------------------------------------
+
+type Person is { name: Text, age: Int };
+
+fn cmp_person_by_age_then_name(a: &Person, b: &Person) -> Ordering {
+    a.age.cmp(&b.age).then(a.name.cmp(&b.name))
+}
+
+@test
+fn integration_lex_chain_then_primary_decides() {
+    let alice = Person { name: "Alice", age: 30 };
+    let bob = Person { name: "Bob", age: 25 };
+    // 25 < 30, age decides — name is irrelevant.
+    assert_eq(cmp_person_by_age_then_name(&bob, &alice), Less);
+}
+
+@test
+fn integration_lex_chain_then_secondary_decides() {
+    let alice = Person { name: "Alice", age: 30 };
+    let charlie = Person { name: "Charlie", age: 30 };
+    // Same age, name decides: Alice < Charlie.
+    assert_eq(cmp_person_by_age_then_name(&alice, &charlie), Less);
+}
+
+@test
+fn integration_lex_chain_then_full_equality() {
+    let alice1 = Person { name: "Alice", age: 30 };
+    let alice2 = Person { name: "Alice", age: 30 };
+    assert_eq(cmp_person_by_age_then_name(&alice1, &alice2), Equal);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Lexicographic chain via .then_with(): laziness contract is observable.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_lex_chain_then_with_skips_when_primary_decides() {
+    let mut secondary_called = false;
+    let primary: Ordering = Less;
+    let result = primary.then_with(|| {
+        secondary_called = true;
+        Greater
+    });
+    assert_eq(result, Less);
+    assert(!secondary_called, "secondary must not run when primary decides");
+}
+
+@test
+fn integration_lex_chain_then_with_invokes_when_primary_equal() {
+    let mut secondary_called = false;
+    let primary: Ordering = Equal;
+    let result = primary.then_with(|| {
+        secondary_called = true;
+        Greater
+    });
+    assert_eq(result, Greater);
+    assert(secondary_called, "secondary must run when primary is Equal");
+}
+
+// -----------------------------------------------------------------------------
+// §7  Reverse-sort: invert comparator output via `.reverse()`.
+//     Demonstrates the canonical pattern for descending-sort keys.
+// -----------------------------------------------------------------------------
+
+fn bubble_sort_int_descending(xs: &mut List<Int>) {
+    let n = xs.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j + 1 < n - i {
+            // Reverse flips the sort direction. NO custom comparator needed.
+            if xs[j].cmp(&xs[j + 1]).reverse().is_greater() {
+                let tmp = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_reverse_sort_produces_descending() {
+    let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    bubble_sort_int_descending(&mut xs);
+    assert_eq(xs, [9, 6, 5, 4, 3, 2, 1, 1]);
+}
+
+// -----------------------------------------------------------------------------
+// §8  Three-way partition (quicksort pivot step). Canonical Ordering consumer:
+//     match drives < / = / > buckets.
+// -----------------------------------------------------------------------------
+
+fn three_way_partition(xs: &List<Int>, pivot: Int) -> (List<Int>, List<Int>, List<Int>) {
+    let mut less: List<Int> = [];
+    let mut equal: List<Int> = [];
+    let mut greater: List<Int> = [];
+
+    for x in xs.iter() {
+        match (*x).cmp(&pivot) {
+            Less => less.push(*x),
+            Equal => equal.push(*x),
+            Greater => greater.push(*x),
+        }
+    }
+    (less, equal, greater)
+}
+
+@test
+fn integration_three_way_partition_correct_buckets() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+    let (lt, eq, gt) = three_way_partition(&xs, 4);
+    assert_eq(lt, [3, 1, 1, 2, 3]);
+    assert_eq(eq, [4]);
+    assert_eq(gt, [5, 9, 6, 5]);
+}
+
+@test
+fn integration_three_way_partition_preserves_count() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+    let (lt, eq, gt) = three_way_partition(&xs, 4);
+    assert_eq(lt.len() + eq.len() + gt.len(), xs.len());
+}
+
+// -----------------------------------------------------------------------------
+// §9  Binary search written against `cmp + match Ordering`. This is the
+//     reference idiom: the only correct way to consume a three-way comparison.
+// -----------------------------------------------------------------------------
+
+fn binary_search_int(arr: &List<Int>, target: Int) -> Maybe<Int> {
+    if arr.len() == 0 {
+        return None;
+    }
+    let mut low: Int = 0;
+    let mut high: Int = arr.len() - 1;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        match arr[mid].cmp(&target) {
+            Less => low = mid + 1,
+            Greater => {
+                if mid == 0 { return None; }
+                high = mid - 1;
+            }
+            Equal => return Some(mid),
+        }
+    }
+    None
+}
+
+@test
+fn integration_binary_search_finds_element() {
+    let arr: List<Int> = [1, 3, 5, 7, 9, 11, 13];
+    assert_eq(binary_search_int(&arr, 7), Some(3));
+    assert_eq(binary_search_int(&arr, 1), Some(0));
+    assert_eq(binary_search_int(&arr, 13), Some(6));
+}
+
+@test
+fn integration_binary_search_reports_missing() {
+    let arr: List<Int> = [1, 3, 5, 7, 9, 11, 13];
+    assert_eq(binary_search_int(&arr, 6), None);
+    assert_eq(binary_search_int(&arr, 0), None);
+    assert_eq(binary_search_int(&arr, 100), None);
+}
+
+@test
+fn integration_binary_search_empty_input() {
+    let arr: List<Int> = [];
+    assert_eq(binary_search_int(&arr, 42), None);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // All tests dispatched via @test annotation by vtest.
+}

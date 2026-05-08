@@ -1,0 +1,131 @@
+// =============================================================================
+// core-tests/base/memory/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.base.memory` — Heap<T>, Shared<T>, Weak<T>,
+// Cow<T>, Pin<T>, ManuallyDrop<T>, MaybeUninit<T>, drop / forget / swap /
+// replace / take, slice utilities, allocator try_* family. Companion files:
+//   cbgr_test.vr           — CBGR runtime checks (migrated)
+//   property_test.vr       — laws (round-trip, refcount monotonicity)
+//   integration_test.vr    — collections holding heap-allocated values
+//   audit.md               — drift surfaces and CBGR integration notes
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Heap<T> — single-owner heap allocation
+// =============================================================================
+
+@test
+fn test_heap_new_stores_value() {
+    let h: Heap<Int> = Heap.new(42);
+    assert_eq(*h, 42);
+}
+
+@test
+fn test_heap_dereference_produces_value() {
+    let h = Heap.new("hello");
+    assert_eq(*h, "hello");
+}
+
+@test
+fn test_heap_clone_independent() {
+    let h1: Heap<Int> = Heap.new(7);
+    let h2: Heap<Int> = h1.clone();
+    assert_eq(*h1, 7);
+    assert_eq(*h2, 7);
+}
+
+// =============================================================================
+// Section 2: Shared<T> — refcounted shared ownership
+// =============================================================================
+
+@test
+fn test_shared_new_stores_value() {
+    let s: Shared<Int> = Shared.new(42);
+    assert_eq(*s, 42);
+}
+
+@test
+fn test_shared_clone_shares_state() {
+    let s1: Shared<Int> = Shared.new(7);
+    let s2: Shared<Int> = s1.clone();
+    assert_eq(*s1, 7);
+    assert_eq(*s2, 7);
+}
+
+// =============================================================================
+// Section 3: Cow<T> — clone-on-write semantics
+// =============================================================================
+
+@test
+fn test_cow_borrowed_initially() {
+    let original = "borrowed";
+    let cow: Cow<Text> = Cow.borrowed(&original);
+    assert_eq(&*cow, &original);
+}
+
+@test
+fn test_cow_owned_construction() {
+    let cow: Cow<Text> = Cow.owned("owned".to_text());
+    assert_eq(&*cow, &"owned");
+}
+
+// =============================================================================
+// Section 4: ManuallyDrop<T> — opt-out of automatic drop
+// =============================================================================
+
+@test
+fn test_manually_drop_preserves_value() {
+    let md: ManuallyDrop<Int> = ManuallyDrop.new(99);
+    assert_eq(*md, 99);
+}
+
+// =============================================================================
+// Section 5: replace / take / swap
+// =============================================================================
+
+@test
+fn test_replace_returns_old_value() {
+    let mut x = 1;
+    let old = replace(&mut x, 2);
+    assert_eq(old, 1);
+    assert_eq(x, 2);
+}
+
+@test
+fn test_take_returns_value_replacing_with_default() {
+    let mut x: Int = 42;
+    let taken = take(&mut x);
+    assert_eq(taken, 42);
+    assert_eq(x, 0);   // Int.default
+}
+
+@test
+fn test_swap_exchanges_values() {
+    let mut a = 1;
+    let mut b = 2;
+    swap(&mut a, &mut b);
+    assert_eq(a, 2);
+    assert_eq(b, 1);
+}
+
+// =============================================================================
+// Section 6: MaybeUninit<T> — uninitialized memory
+// =============================================================================
+
+@test
+fn test_maybe_uninit_new_uninit() {
+    let _mu: MaybeUninit<Int> = MaybeUninit.uninit();
+    // Cannot read until initialized; this test only verifies construction.
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

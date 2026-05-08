@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/base/data/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Data — JSON parsing/emitting against fixtures,
+// nested object/array structures, DataBuilder fluent API, key/value
+// access patterns.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.data.{Data, DataError, DataBuilder, parse_json};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// -----------------------------------------------------------------------------
+// §1  Parse JSON literal into expected Data shape.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_parse_object_with_primitives() {
+    let json = "{\"name\": \"Alice\", \"age\": 30, \"active\": true}";
+    let r = parse_json(json.to_text());
+    assert(r.is_ok());
+
+    let d = r.unwrap();
+    assert(d.is_object());
+}
+
+@test
+fn integration_parse_nested_array_object() {
+    let json = "[1, 2, {\"k\": \"v\"}]";
+    let r = parse_json(json.to_text());
+    assert(r.is_ok());
+    assert(r.unwrap().is_array());
+}
+
+@test
+fn integration_parse_invalid_json_returns_err() {
+    let json = "{invalid json";
+    let r = parse_json(json.to_text());
+    assert(r.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// §2  DataBuilder — fluent API for constructing Data values.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_builder_object_chain() {
+    let d = DataBuilder.new()
+        .set("a".to_text(), Int(1))
+        .set("b".to_text(), Int(2))
+        .set("c".to_text(), Int(3))
+        .build();
+    assert(d.is_object());
+}
+
+@test
+fn integration_builder_array_chain() {
+    let d = DataBuilder.new_array()
+        .push(Int(1))
+        .push(Int(2))
+        .push(Int(3))
+        .build();
+    assert(d.is_array());
+}
+
+// -----------------------------------------------------------------------------
+// §3  Round-trip via to_json_pretty preserves structure.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_to_json_pretty_round_trip() {
+    let original = DataBuilder.new()
+        .set("name".to_text(), Text("Alice".to_text()))
+        .set("age".to_text(), Int(30))
+        .build();
+
+    let pretty = original.to_json_pretty();
+    let parsed = parse_json(pretty);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), original);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Object keys/values accessors.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_object_keys_returns_some_for_object() {
+    let d = DataBuilder.new()
+        .set("a".to_text(), Int(1))
+        .set("b".to_text(), Int(2))
+        .build();
+    let keys = d.keys();
+    assert(keys.is_some());
+    assert_eq(keys.unwrap().len(), 2);
+}
+
+@test
+fn integration_keys_returns_none_for_non_object() {
+    let d: Data = Int(42);
+    let keys = d.keys();
+    assert(keys.is_none());
+}
+
+// -----------------------------------------------------------------------------
+// §5  Deep merge — combines nested objects.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_deep_merge_combines_disjoint() {
+    let a = DataBuilder.new().set("x".to_text(), Int(1)).build();
+    let b = DataBuilder.new().set("y".to_text(), Int(2)).build();
+    let merged = a.deep_merge(&b);
+    assert(merged.is_object());
+    let keys = merged.keys().unwrap();
+    assert_eq(keys.len(), 2);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

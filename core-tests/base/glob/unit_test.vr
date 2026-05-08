@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/base/glob/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.glob` — shell-style glob: * ** ? [...].
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.glob.{GlobPattern, GlobError, compile, compile_with, matches};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Star (*) matches any sequence of non-separator chars
+// =============================================================================
+
+@test
+fn test_star_matches_any_filename() {
+    assert(matches("*.txt", "foo.txt"));
+    assert(matches("*.txt", "bar.txt"));
+    assert(!matches("*.txt", "foo.md"));
+}
+
+@test
+fn test_star_does_not_cross_path_separator() {
+    assert(!matches("*.txt", "dir/foo.txt"));
+}
+
+// =============================================================================
+// Section 2: Globstar (**) crosses path separators
+// =============================================================================
+
+@test
+fn test_globstar_crosses_separators() {
+    assert(matches("**/*.txt", "foo.txt"));
+    assert(matches("**/*.txt", "dir/foo.txt"));
+    assert(matches("**/*.txt", "dir/sub/foo.txt"));
+}
+
+// =============================================================================
+// Section 3: Question mark (?) matches single char
+// =============================================================================
+
+@test
+fn test_question_mark_matches_single_char() {
+    assert(matches("file?.txt", "file1.txt"));
+    assert(matches("file?.txt", "fileA.txt"));
+    assert(!matches("file?.txt", "file12.txt"));
+    assert(!matches("file?.txt", "file.txt"));
+}
+
+// =============================================================================
+// Section 4: Character classes [...]
+// =============================================================================
+
+@test
+fn test_char_class_alternatives() {
+    assert(matches("file[abc].txt", "filea.txt"));
+    assert(matches("file[abc].txt", "fileb.txt"));
+    assert(matches("file[abc].txt", "filec.txt"));
+    assert(!matches("file[abc].txt", "filed.txt"));
+}
+
+// =============================================================================
+// Section 5: Literal patterns
+// =============================================================================
+
+@test
+fn test_literal_pattern_matches_self() {
+    assert(matches("Cargo.toml", "Cargo.toml"));
+    assert(!matches("Cargo.toml", "Cargo.tomx"));
+}
+
+// =============================================================================
+// Section 6: compile produces a reusable pattern
+// =============================================================================
+
+@test
+fn test_compile_returns_ok_for_valid() {
+    let r = compile("*.rs");
+    assert(r.is_ok());
+}
+
+@test
+fn test_compile_with_case_sensitivity() {
+    let p_ci = compile_with("*.TXT", false).unwrap();
+    assert(p_ci.matches_path("foo.txt"));   // case-insensitive
+
+    let p_cs = compile_with("*.TXT", true).unwrap();
+    assert(!p_cs.matches_path("foo.txt"));  // case-sensitive
+}
+
+fn main() {}

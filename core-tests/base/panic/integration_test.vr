@@ -1,0 +1,171 @@
+// =============================================================================
+// core-tests/base/panic/integration_test.vr
+// =============================================================================
+//
+// Integration tests for the panic surface: catch_unwind round-trips,
+// assert_panics flow, panic propagation through nested callers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  catch_unwind cycle — happy path returns Ok with payload.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_catch_unwind_cycle_no_panic() {
+    let r: Result<Int, Text> = catch_unwind(|| { 42 });
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+// -----------------------------------------------------------------------------
+// §2  catch_unwind around a panicking closure returns Err.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_catch_unwind_cycle_with_panic() {
+    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+        panic("expected");
+    });
+    assert(r.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// §3  catch_unwind isolates panics — surrounding code keeps executing.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_catch_unwind_isolates_panic() {
+    let mut after_panic_executed = false;
+
+    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+        panic("pre-execution panic");
+    });
+    assert(r.is_err());
+
+    after_panic_executed = true;
+    assert(after_panic_executed);
+}
+
+// -----------------------------------------------------------------------------
+// §4  catch_unwind passes Ok payloads through untouched.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_catch_unwind_payload_passthrough() {
+    let n: Int = 12345;
+    let r: Result<Int, Text> = catch_unwind(|| { n });
+    assert_eq(r.unwrap(), n);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Nested catch_unwind: inner catches inner panic, outer sees Ok.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_nested_catch_unwind_inner_catches() {
+    let r: Result<Int, Text> = catch_unwind(|| {
+        let inner: Result<Int, Text> = catch_unwind(|| -> Int {
+            panic("inner");
+        });
+        if inner.is_err() { 99 } else { 0 }
+    });
+    assert_eq(r.unwrap(), 99);
+}
+
+// -----------------------------------------------------------------------------
+// §6  assert_panics sugar: drives the catch_unwind cycle automatically.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_assert_panics_drives_catch_unwind() {
+    let mut closure_called = false;
+
+    assert_panics(|| {
+        closure_called = true;
+        panic("expected");
+    });
+
+    assert(closure_called);
+}
+
+// -----------------------------------------------------------------------------
+// §7  Panic message is preserved through panic_at + assert_panics.
+//
+// Note: the panic *message* itself isn't recoverable through
+// assert_panics today (catch_unwind returns the err *side* but Verum's
+// panic payload is opaque). This test pins the *contract* — the panic
+// occurs and is observable; payload-recovery is a deferred capability
+// (see audit.md §3).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_panic_at_records_location_indirectly() {
+    let r: Result<Int, Text> = catch_unwind(|| -> Int {
+        panic_at("from_test", "panic_test.vr", 42, 7);
+    });
+    assert(r.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// §8  assert composition — assert_eq inside a closure called by another.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_nested_assert_propagates_panic() {
+    fn inner(x: Int) {
+        assert_eq(x, 42);
+    }
+    fn outer(x: Int) {
+        inner(x);
+    }
+
+    // Happy path: must not panic.
+    outer(42);
+
+    // Sad path: assert_eq panic propagates through both callers,
+    // caught by the assert_panics frame here.
+    assert_panics(|| {
+        outer(0);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §9  unreachable() panics deterministically.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_unreachable_panics() {
+    assert_panics(|| {
+        unreachable("verifying unreachable surface");
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §10  todo() and unimplemented() both panic — they're aliases for
+//      "intentionally crashes" markers used during development.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_todo_panics() {
+    assert_panics(|| {
+        let _: Int = todo("not yet implemented");
+    });
+}
+
+@test
+fn integration_unimplemented_panics() {
+    assert_panics(|| {
+        let _: Int = unimplemented("placeholder");
+    });
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

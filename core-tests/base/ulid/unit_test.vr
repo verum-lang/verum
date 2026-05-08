@@ -1,0 +1,87 @@
+// =============================================================================
+// core-tests/base/ulid/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.ulid` — 128-bit time-ordered IDs encoded in
+// 26-char Crockford Base32 (no I/L/O/U).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ulid.{Ulid, UlidError, parse};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_ulid_new_returns_canonical() {
+    let u = Ulid.new();
+    let s = u.to_text();
+    assert_eq(s.len(), 26);
+}
+
+@test
+fn test_ulid_from_parts_pinned_timestamp() {
+    let rand: [Byte; 10] = [0 as Byte; 10];
+    let u = Ulid.from_parts(1234567890_u64, &rand);
+    assert_eq(u.timestamp_ms(), 1234567890_u64);
+}
+
+// =============================================================================
+// Section 2: Parse round-trip
+// =============================================================================
+
+@test
+fn test_parse_round_trip_via_text() {
+    let original = Ulid.new();
+    let s = original.to_text();
+    let parsed = parse(&s);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), original);
+}
+
+@test
+fn test_parse_invalid_string_returns_err() {
+    let s: Text = "not-a-ulid";
+    let r = parse(&s);
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_wrong_length_returns_err() {
+    let s: Text = "01H8XGJWBWBAQ4M";   // 15 chars, should be 26
+    let r = parse(&s);
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 3: Crockford alphabet — no I/L/O/U
+// =============================================================================
+
+@test
+fn test_canonical_form_uses_crockford_alphabet() {
+    let u = Ulid.new();
+    let s = u.to_text();
+    for c in s.chars() {
+        // Crockford excludes I, L, O, U (case-insensitive)
+        let upper = c.to_ascii_uppercase();
+        assert(upper != 'I');
+        assert(upper != 'L');
+        assert(upper != 'O');
+        assert(upper != 'U');
+    }
+}
+
+// =============================================================================
+// Section 4: Time-ordered — sequential calls produce non-decreasing text
+// =============================================================================
+
+@test
+fn test_sequential_ulids_lexicographically_ordered() {
+    let a = Ulid.new();
+    let b = Ulid.new();
+    assert(a.to_text() <= b.to_text());
+}
+
+fn main() {}

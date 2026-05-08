@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/base/protocols/integration_test.vr
+// =============================================================================
+//
+// Coverage:
+//   §1  List<T>.sort consumes Ord                  (Int, Text)
+//   §2  Map<K, V> consumes Hash + Eq               (Text → Int)
+//   §3  Set<T> consumes Hash + Eq                  (Int)
+//   §4  Display / Debug round to consistent text   (primitives, Ordering)
+//   §5  From / Into chains                          (numeric widenings)
+//   §6  Derived protocols on user records          (Eq, Ord, Hash, Clone)
+//   §7  Protocol extension chains                  (Ord ⇒ Eq ⇒ PartialEq)
+// =============================================================================
+
+mount core.base.protocols.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+mount core.collections.set.Set;
+
+// -----------------------------------------------------------------------------
+// §1  List<T>.sort consumes Ord. After sort: ∀ i < j, xs[i] ≤ xs[j].
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_list_sort_int_ascending() {
+    let mut xs: List<Int> = [5, 2, 8, 1, 9, 3];
+    xs.sort();
+    let n = xs.len();
+    let mut i = 0;
+    while i + 1 < n {
+        assert(xs[i] <= xs[i + 1]);
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_list_sort_text_lexicographic() {
+    let mut xs: List<Text> = ["banana", "apple", "cherry", "date"];
+    xs.sort();
+    assert_eq(xs[0], "apple");
+    assert_eq(xs[1], "banana");
+    assert_eq(xs[2], "cherry");
+    assert_eq(xs[3], "date");
+}
+
+@test
+fn integration_list_sort_already_sorted_no_op() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.sort();
+    assert_eq(xs, [1, 2, 3, 4, 5]);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Map<K, V> uses Hash + Eq on K. Insert + lookup must round-trip.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_map_insert_lookup_roundtrip() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+
+    assert_eq(m.get("one"), Some(1));
+    assert_eq(m.get("two"), Some(2));
+    assert_eq(m.get("three"), Some(3));
+    assert_eq(m.get("four"), None);
+}
+
+@test
+fn integration_map_overwrites_on_duplicate_key() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("k", 1);
+    m.insert("k", 99);
+    assert_eq(m.get("k"), Some(99));
+    assert_eq(m.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Set<T> uses Hash + Eq. Membership invariants.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_set_membership_int() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(2);  // duplicate — set semantics says no growth
+
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+    assert(!s.contains(&99));
+    assert_eq(s.len(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Display / Debug formatter output coherence on primitives + Ordering.
+//     Display is user-facing; Debug is for diagnostics. Both must be
+//     deterministic and self-consistent.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_display_int_formats_as_decimal() {
+    let xs: List<Int> = [-1, 0, 1, 42, 1000];
+    let expected: List<Text> = ["-1", "0", "1", "42", "1000"];
+    let n = xs.len();
+    let mut i = 0;
+    while i < n {
+        assert_eq(f"{xs[i]}", expected[i]);
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_debug_ordering_shows_variant_name() {
+    assert_eq(f"{Less:?}", "Less");
+    assert_eq(f"{Equal:?}", "Equal");
+    assert_eq(f"{Greater:?}", "Greater");
+}
+
+@test
+fn integration_display_ordering_shows_operator_glyph() {
+    assert_eq(f"{Less}", "<");
+    assert_eq(f"{Equal}", "=");
+    assert_eq(f"{Greater}", ">");
+}
+
+@test
+fn integration_display_deterministic() {
+    // Repeated formatting yields the same text.
+    let n: Int = 12345;
+    assert_eq(f"{n}", f"{n}");
+    assert_eq(f"{n}", "12345");
+}
+
+// -----------------------------------------------------------------------------
+// §5  From / Into chains — through generic helpers, transparent reflexive
+//     case, basic numeric widenings.
+// -----------------------------------------------------------------------------
+
+fn boxed_into<T, U: From<T>>(x: T) -> U {
+    x.into()
+}
+
+@test
+fn integration_into_through_generic_helper() {
+    let n: Int = 42;
+    let m: Int = boxed_into(n);  // reflexive From<Int> for Int
+    assert_eq(n, m);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Derived protocols on user records.
+//
+// User-defined records get protocol coverage either via @derive(...) or
+// via explicit `implement` blocks. We test that:
+//   - Eq for a record is field-wise structural;
+//   - Clone produces an independent record;
+//   - Ord on a record uses lex chain on declared fields.
+// -----------------------------------------------------------------------------
+
+type Coord is { x: Int, y: Int };
+
+implement Eq for Coord {
+    fn eq(&self, other: &Coord) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+implement Clone for Coord {
+    fn clone(&self) -> Coord {
+        Coord { x: self.x, y: self.y }
+    }
+}
+
+implement Ord for Coord {
+    fn cmp(&self, other: &Coord) -> Ordering {
+        self.x.cmp(&other.x).then(self.y.cmp(&other.y))
+    }
+}
+
+@test
+fn integration_record_eq_field_wise() {
+    let a = Coord { x: 1, y: 2 };
+    let b = Coord { x: 1, y: 2 };
+    let c = Coord { x: 1, y: 3 };
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn integration_record_clone_independent() {
+    let a = Coord { x: 1, y: 2 };
+    let b = a.clone();
+    assert(a == b);
+    // Mutating b should not affect a (records are by-value but exercise
+    // the Clone contract anyway).
+    let c = Coord { x: b.x + 100, y: b.y };
+    assert_eq(a.x, 1);
+    assert_eq(c.x, 101);
+}
+
+@test
+fn integration_record_ord_lex_chain() {
+    let a = Coord { x: 1, y: 5 };
+    let b = Coord { x: 1, y: 6 };
+    let c = Coord { x: 2, y: 0 };
+
+    // Same x, b's y is bigger → a < b.
+    assert_eq(a.cmp(&b), Less);
+    // Different x decides regardless of y.
+    assert_eq(a.cmp(&c), Less);
+    assert_eq(c.cmp(&a), Greater);
+}
+
+// -----------------------------------------------------------------------------
+// §7  Protocol extension chain: Ord extends Eq extends PartialEq.
+//     Generic functions bounded on a leaf protocol must transparently use
+//     all parent-protocol methods.
+// -----------------------------------------------------------------------------
+
+fn three_way_max<T: Ord + Clone>(a: T, b: T, c: T) -> T {
+    let ab = if a.clone().ge(&b) { a } else { b };
+    if ab.clone().ge(&c) { ab } else { c }
+}
+
+@test
+fn integration_generic_over_ord_extension_chain() {
+    assert_eq(three_way_max(1, 2, 3), 3);
+    assert_eq(three_way_max(3, 2, 1), 3);
+    assert_eq(three_way_max(2, 3, 1), 3);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // All tests dispatched via @test annotation by vtest.
+}

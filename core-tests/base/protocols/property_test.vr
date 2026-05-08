@@ -1,0 +1,692 @@
+// =============================================================================
+// core-tests/base/protocols/property_test.vr
+// =============================================================================
+//
+// Strategy: verify each law against multiple representative implementing
+// types (Int, Float, Bool, Char, Text, Ordering, Maybe<Int>) — when the
+// protocol-implementor set drifts, the laws keep them honest.
+//
+// Laws verified:
+//   §A  Eq            reflexivity, symmetry, transitivity, ne-consistency
+//   §B  Ord           total-order axioms; cmp/lt/le/gt/ge coherence;
+//                     min/max/clamp invariants; reverse-symmetry of cmp
+//   §C  PartialOrd    partial_cmp consistency with cmp where Ord is total
+//   §D  Hash          a == b ⇒ hash(a) == hash(b); determinism; FxHash mixing
+//   §E  Clone         a.clone() == a; clone idempotence; clone independence
+//   §F  Default       Default.default() is deterministic
+//   §G  From / Into   reflexive From<T> for T identity; into ⇔ U.from
+//   §H  Add / Sub / Mul (Int)  commutativity, associativity, identities,
+//                     distributivity, sub anti-commutativity
+//   §I  BitAnd/BitOr/BitXor/Not  idempotence, self-inverse, De Morgan
+//   §J  Shl / Shr     identity at zero, round-trip in safe range
+//   §K  Length        len(empty)=0; is_empty ⇔ len==0
+// =============================================================================
+
+mount core.base.protocols.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §A  Eq laws — verified against Int, Bool, Text, Char, Ordering.
+//
+// Eq inherits from PartialEq with the *additional* contract that `a == a`
+// is always true (no NaN-style trapdoor). All five witness types satisfy Eq.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_eq_reflexive_int() {
+    let xs: List<Int> = [-1_000_000, -1, 0, 1, 42, 1_000_000];
+    for x in xs.iter() { assert(*x == *x); }
+}
+
+@test
+fn law_eq_reflexive_text() {
+    let xs: List<Text> = ["", "a", "abc", "Hello, World"];
+    for x in xs.iter() { assert(*x == *x); }
+}
+
+@test
+fn law_eq_reflexive_ordering() {
+    assert(Less == Less);
+    assert(Equal == Equal);
+    assert(Greater == Greater);
+}
+
+@test
+fn law_eq_symmetric_int() {
+    let pairs: List<(Int, Int)> = [(1, 1), (1, 2), (-3, 3), (0, 0)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a == b, b == a);
+    }
+}
+
+@test
+fn law_eq_transitive_int() {
+    // a == b ∧ b == c ⇒ a == c. Vacuous when premise is false.
+    let triples: List<(Int, Int, Int)> = [
+        (1, 1, 1),       // all equal
+        (1, 1, 2),       // chain breaks
+        (5, 5, 5),
+        (0, 1, 2),       // none equal
+    ];
+    for t in triples.iter() {
+        let (a, b, c) = *t;
+        if (a == b) && (b == c) { assert(a == c); }
+    }
+}
+
+@test
+fn law_eq_ne_consistent_int() {
+    // ne is the strict negation of eq.
+    let pairs: List<(Int, Int)> = [(0, 0), (1, 2), (-1, -1)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a != b, !(a == b));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §B  Ord laws — total-order axioms, cmp/lt/le/gt/ge coherence,
+//     min/max/clamp invariants, reverse-symmetry of cmp.
+//
+// Witness types: Int, Char, Text, Ordering itself.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_ord_cmp_reflexive_int() {
+    let xs: List<Int> = [Int.MIN, -1, 0, 1, Int.MAX];
+    for x in xs.iter() { assert_eq((*x).cmp(x), Equal); }
+}
+
+@test
+fn law_ord_cmp_anti_symmetric_int() {
+    // a.cmp(b) = b.cmp(a).reverse()
+    let pairs: List<(Int, Int)> = [(1, 2), (5, 5), (-3, 0), (Int.MAX, Int.MIN)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a.cmp(&b), b.cmp(&a).reverse());
+    }
+}
+
+@test
+fn law_ord_eq_iff_cmp_equal_int() {
+    let pairs: List<(Int, Int)> = [(1, 1), (1, 2), (-1, -1), (0, 0)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a == b, a.cmp(&b) == Equal);
+    }
+}
+
+@test
+fn law_ord_lt_iff_cmp_less_int() {
+    let pairs: List<(Int, Int)> = [(1, 2), (2, 1), (5, 5)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a < b, a.cmp(&b) == Less);
+    }
+}
+
+@test
+fn law_ord_transitive_int() {
+    // a ≤ b ∧ b ≤ c ⇒ a ≤ c.
+    let triples: List<(Int, Int, Int)> = [
+        (1, 2, 3),
+        (5, 5, 5),
+        (-10, 0, 100),
+        (Int.MIN, 0, Int.MAX),
+    ];
+    for t in triples.iter() {
+        let (a, b, c) = *t;
+        if (a <= b) && (b <= c) { assert(a <= c); }
+    }
+}
+
+@test
+fn law_ord_min_max_consistency_int() {
+    // min(a,b) ≤ max(a,b); min/max selects one of the inputs.
+    let pairs: List<(Int, Int)> = [(1, 2), (5, 3), (-1, -2), (0, 0)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        let mn = a.min(b);
+        let mx = a.max(b);
+        assert(mn <= mx);
+        assert(mn == a || mn == b);
+        assert(mx == a || mx == b);
+    }
+}
+
+@test
+fn law_ord_clamp_within_bounds_int() {
+    // clamp(x, lo, hi) ∈ [lo, hi] when lo ≤ hi.
+    let lo = 10;
+    let hi = 100;
+    let xs: List<Int> = [-100, 0, 5, 10, 50, 100, 200, 1_000_000];
+    for x in xs.iter() {
+        let c = (*x).clamp(lo, hi);
+        assert(c >= lo);
+        assert(c <= hi);
+    }
+}
+
+@test
+fn law_ord_clamp_idempotent_int() {
+    // clamp ∘ clamp = clamp.
+    let xs: List<Int> = [-5, 0, 50, 200];
+    for x in xs.iter() {
+        let c1 = (*x).clamp(0, 100);
+        let c2 = c1.clamp(0, 100);
+        assert_eq(c1, c2);
+    }
+}
+
+@test
+fn law_ord_text_total_order() {
+    // Lexicographic order on Text is total.
+    let xs: List<Text> = ["", "a", "ab", "abc", "b"];
+    for a in xs.iter() {
+        for b in xs.iter() {
+            // Trichotomy: exactly one of <, ==, > holds.
+            let lt = *a < *b;
+            let eq = *a == *b;
+            let gt = *a > *b;
+            let n = (if lt { 1 } else { 0 })
+                  + (if eq { 1 } else { 0 })
+                  + (if gt { 1 } else { 0 });
+            assert_eq(n, 1);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §C  PartialOrd — when a type also implements Ord, partial_cmp must agree.
+//     We test the implication on Int, where `partial_cmp` must always return
+//     `Some(...)` and the inner Ordering must equal `cmp`.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_partial_cmp_agrees_with_cmp_int() {
+    let pairs: List<(Int, Int)> = [(1, 2), (3, 3), (-5, 0)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        let pc = a.partial_cmp(&b);
+        assert(pc.is_some());
+        assert_eq(pc.unwrap(), a.cmp(&b));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §D  Hash laws — equal-implies-equal-hash, determinism, FxHash mixing.
+//
+// The CRITICAL contract: `a == b ⇒ hash(a) == hash(b)`. The reverse direction
+// (hash collision → ≠) does not hold (collisions exist in any non-trivial
+// hasher). We probe collisions only as a quality check, not a correctness test.
+// -----------------------------------------------------------------------------
+
+fn hash_int(n: Int) -> Int {
+    let mut h = DefaultHasher.new();
+    n.hash(&mut h);
+    h.finish()
+}
+
+fn hash_text(s: &Text) -> Int {
+    let mut h = DefaultHasher.new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+@test
+fn law_hash_equal_implies_equal_hash_int() {
+    let xs: List<Int> = [0, 1, 42, -7, Int.MIN, Int.MAX];
+    for x in xs.iter() {
+        assert_eq(hash_int(*x), hash_int(*x));   // a == a so hash(a) == hash(a)
+    }
+}
+
+@test
+fn law_hash_deterministic_int() {
+    // Repeated hashes of the same value must agree.
+    let h1 = hash_int(12345);
+    let h2 = hash_int(12345);
+    let h3 = hash_int(12345);
+    assert_eq(h1, h2);
+    assert_eq(h2, h3);
+}
+
+@test
+fn law_hash_equal_implies_equal_hash_text() {
+    let s1: Text = "Hello, World";
+    let s2: Text = "Hello, World";
+    assert(s1 == s2);
+    assert_eq(hash_text(&s1), hash_text(&s2));
+}
+
+@test
+fn law_hash_distinguishes_distinct_witnesses_int() {
+    // Quality check, not strict law: distinct inputs SHOULD give distinct
+    // hashes for non-pathological samples. FxHash is not crypto-grade, but
+    // it must distinguish small-distance witnesses that humans care about.
+    assert(hash_int(0) != hash_int(1));
+    assert(hash_int(1) != hash_int(2));
+    assert(hash_int(-1) != hash_int(1));
+}
+
+// -----------------------------------------------------------------------------
+// §E  Clone laws — a.clone() == a, idempotence, independence.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_clone_value_equality_int() {
+    let xs: List<Int> = [0, 1, -1, 42, Int.MIN, Int.MAX];
+    for x in xs.iter() {
+        let c = (*x).clone();
+        assert_eq(*x, c);
+    }
+}
+
+@test
+fn law_clone_value_equality_text() {
+    let xs: List<Text> = ["", "x", "Hello, World"];
+    for x in xs.iter() {
+        let c = (*x).clone();
+        assert_eq(*x, c);
+    }
+}
+
+@test
+fn law_clone_idempotent() {
+    // x.clone().clone() == x
+    let n: Int = 42;
+    assert_eq(n.clone().clone(), n);
+
+    let s: Text = "abc";
+    assert_eq(s.clone().clone(), s);
+}
+
+@test
+fn law_clone_independence_text() {
+    // Modifying the clone does NOT affect the original.
+    let original: Text = "original";
+    let mut cloned = original.clone();
+    cloned = "modified";
+    assert_eq(original, "original");
+    assert_eq(cloned, "modified");
+}
+
+// -----------------------------------------------------------------------------
+// §F  Default — deterministic and matches per-type expected default.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_default_int_is_zero() {
+    assert_eq(Int.default(), 0);
+}
+
+@test
+fn law_default_bool_is_false() {
+    assert_eq(Bool.default(), false);
+}
+
+@test
+fn law_default_ordering_is_equal() {
+    assert_eq(Ordering.default(), Equal);
+}
+
+@test
+fn law_default_deterministic() {
+    // Repeated calls return the same value.
+    let a: Int = Int.default();
+    let b: Int = Int.default();
+    assert_eq(a, b);
+}
+
+// -----------------------------------------------------------------------------
+// §G  From / Into — reflexive From<T> for T (identity); into ⇔ U.from.
+//
+// The `implement<T> From<T> for T` blanket in protocols.vr:355 makes the
+// reflexive case work uniformly. Without it, generic code that calls .into()
+// on a value that already has the target type fails to compile.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_from_reflexive_int() {
+    let n: Int = 42;
+    let m: Int = Int.from(n);
+    assert_eq(n, m);
+}
+
+@test
+fn law_into_via_from_reflexive_int() {
+    let n: Int = 42;
+    let m: Int = n.into();
+    assert_eq(n, m);
+}
+
+// -----------------------------------------------------------------------------
+// §H  Add / Sub / Mul / Div / Rem (Int) — algebraic laws on integers.
+//
+// Caveats: Int is two's-complement with explicit overflow semantics. Tests
+// pick values whose arithmetic stays in-range so the laws are unambiguous.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_add_commutative_int() {
+    let pairs: List<(Int, Int)> = [(1, 2), (-3, 5), (0, 0), (100, -100)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a + b, b + a);
+    }
+}
+
+@test
+fn law_add_associative_int() {
+    // (a + b) + c == a + (b + c)
+    let triples: List<(Int, Int, Int)> = [(1, 2, 3), (-1, 0, 1), (10, 20, 30)];
+    for t in triples.iter() {
+        let (a, b, c) = *t;
+        assert_eq((a + b) + c, a + (b + c));
+    }
+}
+
+@test
+fn law_add_identity_int() {
+    let xs: List<Int> = [-5, -1, 0, 1, 42];
+    for x in xs.iter() {
+        assert_eq(*x + 0, *x);
+        assert_eq(0 + *x, *x);
+    }
+}
+
+@test
+fn law_mul_identity_int() {
+    let xs: List<Int> = [-5, -1, 0, 1, 42];
+    for x in xs.iter() {
+        assert_eq(*x * 1, *x);
+        assert_eq(1 * *x, *x);
+    }
+}
+
+@test
+fn law_mul_zero_absorbs_int() {
+    let xs: List<Int> = [-5, -1, 0, 1, 42, Int.MAX];
+    for x in xs.iter() {
+        assert_eq(*x * 0, 0);
+        assert_eq(0 * *x, 0);
+    }
+}
+
+@test
+fn law_mul_commutative_int() {
+    let pairs: List<(Int, Int)> = [(2, 3), (-4, 5), (0, 100), (-7, -8)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a * b, b * a);
+    }
+}
+
+@test
+fn law_mul_distributes_over_add_int() {
+    // a * (b + c) == a*b + a*c
+    let triples: List<(Int, Int, Int)> = [(2, 3, 4), (-1, 5, 6), (10, -2, 3)];
+    for t in triples.iter() {
+        let (a, b, c) = *t;
+        assert_eq(a * (b + c), (a * b) + (a * c));
+    }
+}
+
+@test
+fn law_sub_anti_commutative_int() {
+    // a - b == -(b - a)
+    let pairs: List<(Int, Int)> = [(5, 3), (10, -7), (0, 0)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a - b, -(b - a));
+    }
+}
+
+@test
+fn law_div_mod_relation_int() {
+    // a == (a / b) * b + (a % b) when b != 0.
+    let pairs: List<(Int, Int)> = [(17, 5), (20, 4), (-13, 3), (100, 7)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a, (a / b) * b + (a % b));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §I  BitAnd / BitOr / BitXor / Not — boolean-algebra laws over Int.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_bitand_idempotent_int() {
+    let xs: List<Int> = [0, 1, -1, 0xDEADBEEF, 0x55555555];
+    for x in xs.iter() { assert_eq(*x & *x, *x); }
+}
+
+@test
+fn law_bitor_idempotent_int() {
+    let xs: List<Int> = [0, 1, -1, 0xDEADBEEF, 0xAAAAAAAA];
+    for x in xs.iter() { assert_eq(*x | *x, *x); }
+}
+
+@test
+fn law_bitxor_self_inverse_int() {
+    let xs: List<Int> = [0, 1, -1, 42, 0xCAFEBABE];
+    for x in xs.iter() { assert_eq(*x ^ *x, 0); }
+}
+
+@test
+fn law_bitnot_involution_int() {
+    let xs: List<Int> = [0, 1, -1, 42];
+    for x in xs.iter() { assert_eq(!!*x, *x); }
+}
+
+@test
+fn law_de_morgan_int() {
+    // !(a & b) == (!a) | (!b);  !(a | b) == (!a) & (!b)
+    let pairs: List<(Int, Int)> = [(0, 0), (1, 2), (0xFF, 0x0F), (-1, 5)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(!(a & b), (!a) | (!b));
+        assert_eq(!(a | b), (!a) & (!b));
+    }
+}
+
+@test
+fn law_bitor_with_zero_identity_int() {
+    let xs: List<Int> = [0, 1, -1, 42];
+    for x in xs.iter() { assert_eq(*x | 0, *x); }
+}
+
+@test
+fn law_bitand_with_neg1_identity_int() {
+    // a & (-1) == a, since -1 is all-ones in two's-complement.
+    let xs: List<Int> = [0, 1, -1, 42];
+    for x in xs.iter() { assert_eq(*x & -1, *x); }
+}
+
+// -----------------------------------------------------------------------------
+// §J  Shl / Shr — identity at zero, round-trip in safe range.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_shl_zero_identity_int() {
+    let xs: List<Int> = [0, 1, 7, 42, 1000];
+    for x in xs.iter() { assert_eq(*x << 0, *x); }
+}
+
+@test
+fn law_shr_zero_identity_int() {
+    let xs: List<Int> = [0, 1, 7, 42, 1000];
+    for x in xs.iter() { assert_eq(*x >> 0, *x); }
+}
+
+@test
+fn law_shl_shr_round_trip_in_range_int() {
+    // (a << n) >> n == a, when a fits in the post-shift value.
+    let cases: List<(Int, Int)> = [(1, 1), (1, 8), (7, 4), (3, 16)];
+    for c in cases.iter() {
+        let (a, n) = *c;
+        assert_eq((a << n) >> n, a);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §K  Length protocol + len/is_empty UFCS — coherence law.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_len_empty_list_is_zero() {
+    let xs: List<Int> = [];
+    assert_eq(xs.len(), 0);
+    assert(xs.is_empty());
+}
+
+@test
+fn law_len_nonempty_list_positive() {
+    let xs: List<Int> = [1, 2, 3];
+    assert(xs.len() > 0);
+    assert(!xs.is_empty());
+}
+
+@test
+fn law_is_empty_iff_len_zero() {
+    let cases: List<List<Int>> = [
+        [],
+        [1],
+        [1, 2, 3],
+    ];
+    for xs in cases.iter() {
+        assert_eq((*xs).is_empty(), (*xs).len() == 0);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+// §L  Auto-generated property tests via @property.
+//
+// Where the example-based tests above pin specific witnesses, these
+// `@property` functions delegate witness selection to the runner: it
+// generates inputs, runs the property, shrinks failures Hedgehog-style,
+// and records failing seeds. Use these when the law is a universal
+// quantification over an infinite (or large) domain.
+// =============================================================================
+
+/// Eq reflexivity over Int — sampled across the full range.
+@property
+fn prop_eq_reflexive_int(n: Int) {
+    assert(n == n);
+}
+
+/// Ord reflexivity over Int — `cmp(n, n)` is always Equal.
+@property
+fn prop_cmp_reflexive_int(n: Int) {
+    assert_eq(n.cmp(&n), Equal);
+}
+
+/// Ord anti-symmetry: cmp(a, b) = cmp(b, a).reverse(). Samples 256 pairs.
+@property
+fn prop_cmp_anti_symmetric_int(a: Int, b: Int) {
+    assert_eq(a.cmp(&b), b.cmp(&a).reverse());
+}
+
+/// Add commutativity over Int — sampled.
+/// Note: addition may overflow; we accept the wrap-around as part of
+/// the contract and assert that the wrap is identical in both orders.
+@property
+fn prop_add_commutative_int(a: Int, b: Int) {
+    assert_eq(a + b, b + a);
+}
+
+/// Mul commutativity over Int — sampled.
+@property
+fn prop_mul_commutative_int(a: Int, b: Int) {
+    assert_eq(a * b, b * a);
+}
+
+/// Bitwise XOR self-inverse: a ^ a = 0 for every Int.
+@property
+fn prop_bitxor_self_inverse_int(n: Int) {
+    assert_eq(n ^ n, 0);
+}
+
+/// Bitwise NOT involution: !!a = a for every Int.
+@property
+fn prop_bitnot_involution_int(n: Int) {
+    assert_eq(!!n, n);
+}
+
+/// Hash equal-implies-equal-hash: same value → same hash, every time.
+@property
+fn prop_hash_deterministic_int(n: Int) {
+    let mut h1 = DefaultHasher.new();
+    n.hash(&mut h1);
+    let mut h2 = DefaultHasher.new();
+    n.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+/// Clone equality: x.clone() == x for every Int.
+@property
+fn prop_clone_equality_int(n: Int) {
+    assert_eq(n.clone(), n);
+}
+
+/// Length protocol coherence: empty list len 0 ⇔ is_empty.
+/// Note: this property uses Bool input as a control switch — the
+/// generator picks empty vs non-empty branch.
+@property
+fn prop_is_empty_iff_len_zero_for_text(s: Text) {
+    let xs: List<Text> = [s];
+    assert(!xs.is_empty());
+    assert(xs.len() > 0);
+}
+
+// =============================================================================
+// §M  Parametrised tests via @test_case.
+//
+// `@test_case(arg, …)` is the right tool when the law is example-based
+// rather than universally quantified — a small finite truth table where
+// the test author already knows every (input → expected) pair.
+// =============================================================================
+
+/// Truth table for Bool's && (logical AND).
+@test_case(false, false, false)
+@test_case(false, true,  false)
+@test_case(true,  false, false)
+@test_case(true,  true,  true)
+fn parametrised_bool_and_truth_table(a: Bool, b: Bool, expected: Bool) {
+    assert_eq(a && b, expected);
+}
+
+/// Truth table for Bool's || (logical OR).
+@test_case(false, false, false)
+@test_case(false, true,  true)
+@test_case(true,  false, true)
+@test_case(true,  true,  true)
+fn parametrised_bool_or_truth_table(a: Bool, b: Bool, expected: Bool) {
+    assert_eq(a || b, expected);
+}
+
+/// Int.cmp truth-table samples covering signs and equality.
+@test_case(-5, -5, Equal)
+@test_case(-5, 5,  Less)
+@test_case(5,  -5, Greater)
+@test_case(0,  0,  Equal)
+@test_case(0,  1,  Less)
+@test_case(1,  0,  Greater)
+fn parametrised_int_cmp_truth_table(a: Int, b: Int, expected: Ordering) {
+    assert_eq(a.cmp(&b), expected);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

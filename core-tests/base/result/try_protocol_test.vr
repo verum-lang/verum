@@ -1,10 +1,4 @@
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: try, protocol, error-handling, result, maybe
-// @description: Comprehensive tests for the Try protocol implementation
 
-module specs.stdlib.core.try_protocol_test;
 
 mount core.primitives.*;
 mount core.maybe.{Maybe, Some, None};

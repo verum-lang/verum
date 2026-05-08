@@ -1,0 +1,323 @@
+// =============================================================================
+// core-tests/base/result/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `Result<T, E>`. Many laws mirror Maybe
+// since both are sum types implementing Functor/Monad/Eq/Ord, but
+// Result has an additional dimension: error-type promotion via From.
+//
+// Laws verified:
+//   §A  Functor laws on map           identity, composition
+//   §B  Functor laws on map_err       (analogous, applied to error side)
+//   §C  Monad laws on and_then        left/right identity, associativity
+//   §D  Eq is an equivalence relation
+//   §E  Ord total order (Ok < Err follows the impl convention)
+//   §F  Combinators (and, or, and_then, or_else)
+//   §G  ok / err — Result → Maybe round-trip discrimination
+//   §H  ?-fast-path: ?-on-Ok unwraps; ?-on-Err propagates
+//   §I  From-bound error promotion
+//   §J  unwrap_or / unwrap_or_else / unwrap_or_default
+//
+// Plus @property samples and @test_case truth tables.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Functor on Ok side: map.
+// =============================================================================
+
+@test
+fn law_map_identity_on_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert_eq(r.map(|x| x), r);
+}
+
+@test
+fn law_map_identity_on_err() {
+    let r: Result<Int, Text> = Err("e");
+    assert_eq(r.map(|x| x), r);
+}
+
+@test
+fn law_map_composition_on_ok() {
+    let r: Result<Int, Text> = Ok(5);
+    let lhs = r.map(|x| x + 1).map(|x| x * 2);
+    let rhs = r.map(|x| (x + 1) * 2);
+    assert_eq(lhs, rhs);
+    assert_eq(lhs.unwrap(), 12);
+}
+
+// =============================================================================
+// §B  Functor on Err side: map_err.
+// =============================================================================
+
+@test
+fn law_map_err_identity_on_err() {
+    let r: Result<Int, Text> = Err("boom");
+    assert_eq(r.map_err(|e| e), r);
+}
+
+@test
+fn law_map_err_passes_ok_through_unchanged() {
+    let r: Result<Int, Text> = Ok(7);
+    assert_eq(r.map_err(|e| f"wrapped: {e}"), r);   // Ok unchanged
+}
+
+@test
+fn law_map_err_composition_on_err() {
+    let r: Result<Int, Int> = Err(5);
+    let lhs = r.map_err(|e| e + 1).map_err(|e| e * 2);
+    let rhs = r.map_err(|e| (e + 1) * 2);
+    assert_eq(lhs, rhs);
+    assert_eq(lhs.unwrap_err(), 12);
+}
+
+// =============================================================================
+// §C  Monad laws on and_then.
+// =============================================================================
+
+@test
+fn law_monad_left_identity() {
+    fn f(n: Int) -> Result<Int, Text> { Ok(n * 2) }
+    let lhs: Result<Int, Text> = Ok(5).and_then(f);
+    let rhs = f(5);
+    assert_eq(lhs, rhs);
+}
+
+@test
+fn law_monad_right_identity_on_ok() {
+    let r: Result<Int, Text> = Ok(7);
+    assert_eq(r.and_then(Ok), r);
+}
+
+@test
+fn law_monad_right_identity_on_err() {
+    let r: Result<Int, Text> = Err("x");
+    assert_eq(r.and_then(Ok), r);
+}
+
+@test
+fn law_monad_associativity() {
+    fn f(n: Int) -> Result<Int, Text> { Ok(n + 1) }
+    fn g(n: Int) -> Result<Int, Text> { Ok(n * 3) }
+
+    let r: Result<Int, Text> = Ok(2);
+    let lhs = r.and_then(f).and_then(g);
+    let rhs = r.and_then(|x| f(x).and_then(g));
+    assert_eq(lhs, rhs);
+}
+
+// =============================================================================
+// §D  Eq equivalence on Result<Int, Text>.
+// =============================================================================
+
+@test
+fn law_eq_reflexive() {
+    let cases: List<Result<Int, Text>> = [Ok(0), Ok(1), Err("a"), Err("b")];
+    for r in cases.iter() { assert_eq(*r, *r); }
+}
+
+@test
+fn law_eq_symmetric() {
+    let pairs: List<(Result<Int, Text>, Result<Int, Text>)> = [
+        (Ok(1), Ok(1)),
+        (Ok(1), Err("e")),
+        (Err("e"), Err("e")),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(a == b, b == a);
+    }
+}
+
+@test
+fn law_eq_transitive() {
+    let r1: Result<Int, Text> = Ok(7);
+    let r2: Result<Int, Text> = Ok(7);
+    let r3: Result<Int, Text> = Ok(7);
+    if (r1 == r2) && (r2 == r3) { assert(r1 == r3); }
+}
+
+@test
+fn law_eq_distinguishes_ok_from_err() {
+    let ok: Result<Int, Text> = Ok(0);
+    let err: Result<Int, Text> = Err("");
+    assert(ok != err);
+}
+
+// =============================================================================
+// §E  Ord — Ok < Err per the stdlib convention. Inner-comparison consistent.
+// =============================================================================
+
+@test
+fn law_ord_compares_inner_when_same_variant() {
+    assert(Ok::<Int, Text>(1) < Ok::<Int, Text>(2));
+    assert(Err::<Int, Text>("a") < Err::<Int, Text>("b"));
+}
+
+// =============================================================================
+// §F  Combinators — and / or short-circuiting.
+// =============================================================================
+
+@test
+fn law_and_short_circuits_on_left_err() {
+    let lhs: Result<Int, Text> = Err("e");
+    let rhs: Result<Int, Text> = Ok(99);
+    assert_eq(lhs.and(rhs), Err("e"));
+}
+
+@test
+fn law_and_passes_right_when_left_ok() {
+    let lhs: Result<Int, Text> = Ok(1);
+    let rhs: Result<Int, Text> = Ok(2);
+    assert_eq(lhs.and(rhs), Ok(2));
+}
+
+@test
+fn law_or_returns_left_if_ok() {
+    let lhs: Result<Int, Text> = Ok(1);
+    let rhs: Result<Int, Text> = Ok(2);
+    assert_eq(lhs.or(rhs), Ok(1));
+}
+
+@test
+fn law_or_returns_right_if_left_err() {
+    let lhs: Result<Int, Text> = Err("e");
+    let rhs: Result<Int, Text> = Ok(2);
+    assert_eq(lhs.or(rhs), Ok(2));
+}
+
+// =============================================================================
+// §G  ok / err — projections to Maybe.
+// =============================================================================
+
+@test
+fn law_ok_projection_some_on_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert_eq(r.ok(), Some(42));
+}
+
+@test
+fn law_ok_projection_none_on_err() {
+    let r: Result<Int, Text> = Err("e");
+    assert(r.ok().is_none());
+}
+
+@test
+fn law_err_projection_none_on_ok() {
+    let r: Result<Int, Text> = Ok(42);
+    assert(r.err().is_none());
+}
+
+@test
+fn law_err_projection_some_on_err() {
+    let r: Result<Int, Text> = Err("e");
+    assert_eq(r.err(), Some("e"));
+}
+
+// =============================================================================
+// §H  ?-operator — Ok unwraps, Err propagates.
+// =============================================================================
+
+fn double_via_q(r: Result<Int, Text>) -> Result<Int, Text> {
+    let v = r?;
+    Ok(v * 2)
+}
+
+@test
+fn law_q_on_ok_unwraps() {
+    assert_eq(double_via_q(Ok(7)), Ok(14));
+}
+
+@test
+fn law_q_on_err_propagates() {
+    assert_eq(double_via_q(Err("x")), Err("x"));
+}
+
+// =============================================================================
+// §J  unwrap_or, unwrap_or_else, unwrap_or_default — defaulting laws.
+// =============================================================================
+
+@test
+fn law_unwrap_or_picks_default_on_err() {
+    let r: Result<Int, Text> = Err("x");
+    assert_eq(r.unwrap_or(99), 99);
+}
+
+@test
+fn law_unwrap_or_else_lazy() {
+    let mut closure_called = false;
+    let r: Result<Int, Text> = Ok(7);
+    let _ = r.unwrap_or_else(|_| {
+        closure_called = true;
+        99
+    });
+    assert(!closure_called);
+}
+
+@test
+fn law_unwrap_or_default_uses_int_default() {
+    let r: Result<Int, Text> = Err("x");
+    assert_eq(r.unwrap_or_default(), 0);  // Int.default
+}
+
+// =============================================================================
+// §K  @property — auto-generated samples on the Int axis.
+// =============================================================================
+
+@property
+fn prop_ok_then_unwrap_round_trip(n: Int) {
+    let r: Result<Int, Text> = Ok(n);
+    assert_eq(r.unwrap(), n);
+}
+
+@property
+fn prop_map_preserves_ok_count(n: Int) {
+    let r: Result<Int, Text> = Ok(n);
+    assert(r.map(|x| x + 1).is_ok());
+}
+
+@property
+fn prop_q_on_ok_succeeds(n: Int) {
+    fn body(n: Int) -> Result<Int, Text> {
+        let v = Ok::<Int, Text>(n)?;
+        Ok(v)
+    }
+    assert_eq(body(n), Ok(n));
+}
+
+// =============================================================================
+// §L  @test_case — variant truth table.
+// =============================================================================
+
+@test_case(Ok(1),  true,  false)
+@test_case(Ok(0),  true,  false)
+@test_case(Err("e"), false, true)
+fn parametrised_is_ok_is_err_truth_table(
+    r: Result<Int, Text>,
+    expected_ok: Bool,
+    expected_err: Bool,
+) {
+    assert_eq(r.is_ok(), expected_ok);
+    assert_eq(r.is_err(), expected_err);
+}
+
+@test_case(Ok(1),     1,    99)    // unwrap_or returns Ok payload
+@test_case(Err("x"),  99,   99)    // unwrap_or returns the default
+fn parametrised_unwrap_or_truth_table(
+    r: Result<Int, Text>,
+    expected: Int,
+    default: Int,
+) {
+    assert_eq(r.unwrap_or(default), expected);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

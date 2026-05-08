@@ -1,0 +1,72 @@
+// =============================================================================
+// core-tests/base/snowflake/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for snowflake: monotonicity, bit-layout
+// invariants, parse round-trip.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.snowflake.{Snowflake, parse};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Monotonicity within same millisecond.
+// =============================================================================
+
+@test
+fn law_monotonic_within_burst() {
+    let mut sf = Snowflake.using_default_epoch(0_u64).unwrap();
+    let mut last: UInt64 = 0_u64;
+    let mut i = 0;
+    while i < 100 {
+        let id = sf.next_id().unwrap();
+        if i > 0 { assert(id > last); }
+        last = id;
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §B  worker_id round-trip via parse.
+// =============================================================================
+
+@test
+fn law_worker_id_round_trip() {
+    let workers: List<UInt64> = [0_u64, 1_u64, 7_u64, 127_u64, 1023_u64];
+    for w in workers.iter() {
+        let mut sf = Snowflake.using_default_epoch(*w).unwrap();
+        let id = sf.next_id().unwrap();
+        let parts = parse(id, sf.epoch_ms());
+        assert_eq(parts.worker_id, *w);
+    }
+}
+
+// =============================================================================
+// §C  Bit-layout: 41 + 10 + 12 = 63 bits used (1 sign bit reserved).
+//     We don't directly test bit layout; we test that parse extracts
+//     consistent parts.
+// =============================================================================
+
+@test
+fn law_parts_combine_to_full_id() {
+    let mut sf = Snowflake.using_default_epoch(5_u64).unwrap();
+    let id = sf.next_id().unwrap();
+    let parts = parse(id, sf.epoch_ms());
+    // Worker is 5; sequence and timestamp are runtime values.
+    assert_eq(parts.worker_id, 5_u64);
+    assert(parts.sequence < 4096_u64);   // 12-bit
+}
+
+// =============================================================================
+// §D  @test_case — invalid worker IDs fail.
+// =============================================================================
+
+@test_case(2048_u64)    // exceeds 10-bit max (1023)
+@test_case(99999_u64)
+fn parametrised_invalid_worker_id_returns_err(worker: UInt64) {
+    let r = Snowflake.using_default_epoch(worker);
+    assert(r.is_err());
+}
+
+fn main() {}

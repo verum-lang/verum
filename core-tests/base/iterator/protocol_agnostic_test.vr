@@ -1,10 +1,4 @@
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: iterator, protocol, stdlib-agnostic, for-loop
-// @description: Tests Iterator protocol is stdlib-agnostic (no hardcoded List/Array names)
 
-module specs.stdlib.core.iterator_protocol_agnostic_test;
 
 mount core.prelude.*;
 mount core.collections.list.List;
@@ -204,7 +198,6 @@ fn test_continue_in_iteration() {
 
 // BLOCKED: for (n, _) in pairs.iter() fails — iterator yields &(Int, Text)
 // but tuple pattern can't destructure through reference. Use enumerate-style workaround.
-// @test
 // fn test_tuple_iteration() {
 //     let pairs = [(1, "one"), (2, "two"), (3, "three")];
 //     let mut sum = 0;
@@ -362,7 +355,6 @@ fn test_chain() {
 // Section 15: Flat Map
 // =============================================================================
 // BLOCKED: flat_map with nested array iteration — cascading from reference pattern issue
-// @test
 // fn test_flat_map() {
 //     let nested = [[1, 2], [3, 4], [5, 6]];
 //     let mut sum = 0;

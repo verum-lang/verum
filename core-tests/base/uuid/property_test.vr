@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/base/uuid/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for UUID: parse/to_text round-trip,
+// version bits, bytes round-trip, uniqueness over N v4 samples.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.uuid.{Uuid};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+
+// =============================================================================
+// §A  parse ∘ to_text round-trip on every variant.
+// =============================================================================
+
+@test
+fn law_to_text_parse_round_trip_v4() {
+    let mut i = 0;
+    while i < 50 {
+        let u = Uuid.new_v4();
+        let s = u.to_text();
+        let parsed = Uuid.parse(&s);
+        assert(parsed.is_ok());
+        assert_eq(parsed.unwrap(), u);
+        i = i + 1;
+    }
+}
+
+@test
+fn law_to_text_parse_round_trip_v7() {
+    let mut i = 0;
+    while i < 50 {
+        let u = Uuid.new_v7();
+        let s = u.to_text();
+        let parsed = Uuid.parse(&s);
+        assert(parsed.is_ok());
+        assert_eq(parsed.unwrap(), u);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §B  version() returns the version-byte value.
+// =============================================================================
+
+@test
+fn law_v4_version_pinned() {
+    let u = Uuid.new_v4();
+    assert_eq(u.version(), 4);
+}
+
+@test
+fn law_v7_version_pinned() {
+    let u = Uuid.new_v7();
+    assert_eq(u.version(), 7);
+}
+
+@test
+fn law_nil_version_is_zero() {
+    let u = Uuid.nil();
+    assert_eq(u.version(), 0);
+}
+
+// =============================================================================
+// §C  Uniqueness over 1000 v4 samples.
+// =============================================================================
+
+@test
+fn law_v4_uniqueness_over_1000_samples() {
+    let mut seen: Set<Text> = Set.new();
+    let mut i = 0;
+    while i < 1000 {
+        seen.insert(Uuid.new_v4().to_text());
+        i = i + 1;
+    }
+    // 122 bits of entropy → collision prob negligible
+    assert_eq(seen.len(), 1000);
+}
+
+// =============================================================================
+// §D  Canonical form length is 36.
+// =============================================================================
+
+@test
+fn law_canonical_form_length_is_36() {
+    let mut i = 0;
+    while i < 100 {
+        let u = Uuid.new_v4();
+        assert_eq(u.to_text().len(), 36);
+        i = i + 1;
+    }
+}
+
+fn main() {}

@@ -1,0 +1,196 @@
+// =============================================================================
+// core-tests/base/primitives/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for primitive types: Int, Float, Bool, Char,
+// Byte. Where the four migrated unit-test files cover the API surface
+// per-primitive, this file pins the *cross-primitive laws* — properties
+// that EVERY numeric primitive (Int, Float, signed/unsigned widths) must
+// satisfy.
+//
+// Laws verified:
+//   §A  Int identity / inverse / commutative / associative arithmetic
+//   §B  Float NaN-aware comparison semantics (NaN != NaN)
+//   §C  Bool boolean-algebra laws (commutative, associative, distributive)
+//   §D  Char ↔ Int ↔ Char round-trip via `as`
+//   §E  Byte arithmetic mod 256
+//   §F  to_string / parse round-trip on Int
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Int arithmetic laws (subset of protocols/property_test.vr §H, but
+//     specifically grounded on primitive semantics).
+// =============================================================================
+
+@test
+fn law_int_addition_identity() {
+    let xs: List<Int> = [Int.MIN, -1, 0, 1, Int.MAX];
+    for x in xs.iter() {
+        assert_eq(*x + 0, *x);
+    }
+}
+
+@test
+fn law_int_multiplication_identity() {
+    let xs: List<Int> = [-5, 0, 1, 42];
+    for x in xs.iter() {
+        assert_eq(*x * 1, *x);
+    }
+}
+
+@test
+fn law_int_subtract_self_is_zero() {
+    let xs: List<Int> = [0, 1, -1, 100];
+    for x in xs.iter() {
+        assert_eq(*x - *x, 0);
+    }
+}
+
+@property
+fn prop_int_add_commutative(a: Int, b: Int) {
+    assert_eq(a + b, b + a);
+}
+
+@property
+fn prop_int_mul_commutative(a: Int, b: Int) {
+    assert_eq(a * b, b * a);
+}
+
+// =============================================================================
+// §B  Float NaN-aware comparison.
+//     IEEE 754: NaN != NaN, NaN < x is false, NaN > x is false.
+// =============================================================================
+
+@test
+fn law_float_nan_not_equal_to_self() {
+    let nan = 0.0 / 0.0;
+    assert(nan != nan);
+}
+
+@test
+fn law_float_zero_eq_negative_zero() {
+    let pos: Float = 0.0;
+    let neg: Float = -0.0;
+    assert(pos == neg);
+}
+
+@test
+fn law_float_normal_value_eq_self() {
+    let xs: List<Float> = [0.0, 1.0, -1.0, 3.14, -2.71];
+    for x in xs.iter() { assert(*x == *x); }
+}
+
+// =============================================================================
+// §C  Bool boolean-algebra laws.
+// =============================================================================
+
+@test
+fn law_bool_and_idempotent() {
+    assert_eq(true && true, true);
+    assert_eq(false && false, false);
+}
+
+@test
+fn law_bool_or_idempotent() {
+    assert_eq(true || true, true);
+    assert_eq(false || false, false);
+}
+
+@test
+fn law_bool_de_morgan() {
+    let pairs: List<(Bool, Bool)> = [(true, true), (true, false), (false, true), (false, false)];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert_eq(!(a && b), (!a) || (!b));
+        assert_eq(!(a || b), (!a) && (!b));
+    }
+}
+
+@test
+fn law_bool_not_involution() {
+    assert_eq(!!true, true);
+    assert_eq(!!false, false);
+}
+
+// =============================================================================
+// §D  Char ↔ Int round-trip.
+// =============================================================================
+
+@test
+fn law_char_to_int_round_trip() {
+    let cs: List<Char> = ['a', 'A', '0', ' ', 'z', '9'];
+    for c in cs.iter() {
+        let n = *c as Int;
+        let recovered: Char = n as Char;
+        assert_eq(*c, recovered);
+    }
+}
+
+// =============================================================================
+// §E  Byte arithmetic mod 256.
+// =============================================================================
+
+@test
+fn law_byte_addition_wraps_at_256() {
+    let a: Byte = 200 as Byte;
+    let b: Byte = 100 as Byte;
+    // 200 + 100 = 300; mod 256 = 44.
+    let sum: Byte = a + b;
+    let n: Int = sum as Int;
+    assert_eq(n, 44);
+}
+
+// =============================================================================
+// §F  to_string / parse round-trip on Int.
+// =============================================================================
+
+@test
+fn law_int_to_string_round_trip_pinned() {
+    let xs: List<Int> = [0, 1, -1, 42, 1_000_000];
+    for x in xs.iter() {
+        let s = (*x).to_string();
+        let parsed: Result<Int, _> = s.parse();
+        assert(parsed.is_ok());
+        assert_eq(parsed.unwrap(), *x);
+    }
+}
+
+@property
+fn prop_int_to_string_round_trip(n: Int) {
+    let s = n.to_string();
+    let parsed: Result<Int, _> = s.parse();
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), n);
+}
+
+// =============================================================================
+// §G  @test_case — parametrised arithmetic edge cases.
+// =============================================================================
+
+@test_case(0,    0,    0)
+@test_case(1,    1,    2)
+@test_case(-1,   1,    0)
+@test_case(100, -100,  0)
+@test_case(Int.MAX, 0, Int.MAX)   // identity at the boundary
+fn parametrised_int_addition(a: Int, b: Int, expected: Int) {
+    assert_eq(a + b, expected);
+}
+
+@test_case(true,  true,  true)
+@test_case(true,  false, false)
+@test_case(false, true,  false)
+@test_case(false, false, false)
+fn parametrised_bool_and(a: Bool, b: Bool, expected: Bool) {
+    assert_eq(a && b, expected);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

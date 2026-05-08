@@ -1,0 +1,95 @@
+// =============================================================================
+// core-tests/base/cell/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.cell` — Cell<T>, RefCell<T>, OnceCell<T>, LazyCell<T>.
+// Interior mutability primitives. All four sit ABOVE CBGR — they let
+// you get &mut access through &T at controlled cost.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.cell.{Cell, RefCell, OnceCell, LazyCell, BorrowError, BorrowMutError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Cell<T> — get/set/replace
+// =============================================================================
+
+@test
+fn test_cell_new_and_get() {
+    let c: Cell<Int> = Cell.new(42);
+    assert_eq(c.get(), 42);
+}
+
+@test
+fn test_cell_set_overwrites() {
+    let c: Cell<Int> = Cell.new(1);
+    c.set(99);
+    assert_eq(c.get(), 99);
+}
+
+@test
+fn test_cell_replace_returns_old() {
+    let c: Cell<Int> = Cell.new(1);
+    let old = c.replace(2);
+    assert_eq(old, 1);
+    assert_eq(c.get(), 2);
+}
+
+@test
+fn test_cell_take_returns_default() {
+    let c: Cell<Int> = Cell.new(42);
+    let taken = c.take();
+    assert_eq(taken, 42);
+    assert_eq(c.get(), 0);   // Int.default
+}
+
+@test
+fn test_cell_update_applies_function() {
+    let c: Cell<Int> = Cell.new(10);
+    c.update(|x| x * 2);
+    assert_eq(c.get(), 20);
+}
+
+// =============================================================================
+// Section 2: RefCell<T> — borrow / borrow_mut
+// =============================================================================
+
+@test
+fn test_refcell_borrow_returns_value() {
+    let rc: RefCell<Int> = RefCell.new(42);
+    let r = rc.borrow();
+    assert_eq(*r, 42);
+}
+
+@test
+fn test_refcell_borrow_mut_allows_mutation() {
+    let rc: RefCell<Int> = RefCell.new(1);
+    {
+        let mut r = rc.borrow_mut();
+        *r = 99;
+    }
+    let r = rc.borrow();
+    assert_eq(*r, 99);
+}
+
+// =============================================================================
+// Section 3: OnceCell<T> — set-once semantics
+// =============================================================================
+
+@test
+fn test_once_cell_get_or_init_initialises() {
+    let oc: OnceCell<Int> = OnceCell.new();
+    let v = oc.get_or_init(|| 42);
+    assert_eq(*v, 42);
+}
+
+@test
+fn test_once_cell_second_init_returns_first_value() {
+    let oc: OnceCell<Int> = OnceCell.new();
+    let _ = oc.get_or_init(|| 1);
+    let v = oc.get_or_init(|| 99);   // Not called — first wins
+    assert_eq(*v, 1);
+}
+
+fn main() {}

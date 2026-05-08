@@ -1,0 +1,175 @@
+// =============================================================================
+// core-tests/base/iterator/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Iterator: real pipelines combining map/filter/fold,
+// cross-collection (Map keys, Set values, List), Range arithmetic,
+// FromIterator collection, transducer composition.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+mount core.collections.map.Map;
+mount core.collections.set.Set;
+
+// -----------------------------------------------------------------------------
+// §1  Pipeline: filter → map → collect (the standard idiom).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_filter_map_collect_pipeline() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let squared_evens: List<Int> = xs.iter()
+        .filter(|x| **x % 2 == 0)
+        .map(|x| *x * *x)
+        .collect();
+    assert_eq(squared_evens, [4, 16, 36, 64, 100]);
+}
+
+// -----------------------------------------------------------------------------
+// §2  fold-based product of evens.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_product_of_evens_via_fold() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let product = xs.iter()
+        .filter(|x| **x % 2 == 0)
+        .fold(1, |acc, x| acc * *x);
+    assert_eq(product, 8);   // 2 * 4
+}
+
+// -----------------------------------------------------------------------------
+// §3  Map keys/values iteration.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_map_iteration_collects_pairs() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    let total: Int = m.values().fold(0, |acc, v| acc + *v);
+    assert_eq(total, 6);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Set iteration.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_set_iter_collects_unique() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(2);   // duplicate ignored
+
+    let mut total: Int = 0;
+    for x in s.iter() { total = total + *x; }
+    assert_eq(total, 6);   // 1+2+3
+    assert_eq(s.len(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Range arithmetic in pipelines.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_range_sum() {
+    let total: Int = (1..=100).sum();
+    assert_eq(total, 5050);   // n(n+1)/2 for n=100
+}
+
+@test
+fn integration_range_product_for_factorial() {
+    let factorial_5: Int = (1..=5).fold(1, |acc, x| acc * x);
+    assert_eq(factorial_5, 120);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Chain across collections.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_chain_two_lists() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [10, 20, 30];
+    let combined: List<Int> = a.iter().chain(b.iter()).map(|x| *x).collect();
+    assert_eq(combined, [1, 2, 3, 10, 20, 30]);
+}
+
+// -----------------------------------------------------------------------------
+// §7  zip with map: pairwise sum.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_pairwise_sum_via_zip() {
+    let a: List<Int> = [1, 2, 3, 4, 5];
+    let b: List<Int> = [10, 20, 30, 40, 50];
+    let sums: List<Int> = a.iter().zip(b.iter())
+        .map(|p| { let (x, y) = p; *x + *y })
+        .collect();
+    assert_eq(sums, [11, 22, 33, 44, 55]);
+}
+
+// -----------------------------------------------------------------------------
+// §8  enumerate produces (index, value) pairs.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_enumerate_for_indexed_iteration() {
+    let xs: List<Text> = ["a", "b", "c"];
+    let labelled: List<Text> = xs.iter().enumerate()
+        .map(|p| { let (i, v) = p; f"{i}:{v}" })
+        .collect();
+    assert_eq(labelled, ["0:a", "1:b", "2:c"]);
+}
+
+// -----------------------------------------------------------------------------
+// §9  Reverse iteration.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_rev_reverses_order() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let rev: List<Int> = xs.iter().rev().map(|x| *x).collect();
+    assert_eq(rev, [5, 4, 3, 2, 1]);
+}
+
+// -----------------------------------------------------------------------------
+// §10  take_while / skip_while.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_take_while_stops_at_first_false() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let r: List<Int> = xs.iter().take_while(|x| **x < 4).map(|x| *x).collect();
+    assert_eq(r, [1, 2, 3]);
+}
+
+@test
+fn integration_skip_while_starts_at_first_false() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let r: List<Int> = xs.iter().skip_while(|x| **x < 4).map(|x| *x).collect();
+    assert_eq(r, [4, 5, 6]);
+}
+
+// -----------------------------------------------------------------------------
+// §11  count_from generator.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_count_from_with_take() {
+    let r: List<Int> = count_from(10).take(5).collect();
+    assert_eq(r, [10, 11, 12, 13, 14]);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

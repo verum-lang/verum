@@ -1,0 +1,230 @@
+// =============================================================================
+// core-tests/base/ops/integration_test.vr
+// =============================================================================
+//
+// Cross-module integration tests for `core/base/ops`. Where unit_test
+// covers the API and property_test pins algebraic laws, these tests
+// exercise the carriers — `Try`, `FromResidual`, `ControlFlow` — *as
+// consumed by the rest of the standard library*: ?-operator chains
+// through nested fallible calls, cross-type residual conversion
+// (Maybe → Result, Result → Result with error-type promotion),
+// and lex-ordered short-circuit semantics.
+//
+// Coverage:
+//   §1  ?-operator unwraps Some / Ok           single-level happy path
+//   §2  ?-operator early-returns None / Err    single-level failure
+//   §3  ?-chains across multiple calls         nested propagation
+//   §4  Cross-type ?: Maybe value in Result    via FromResidual
+//   §5  Cross-type ?: Result value in Maybe    via FromResidual
+//   §6  Error-type promotion via From          OuterErr from InnerErr
+//   §7  ControlFlow drives explicit pipelines  iterator try_fold-style
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  Happy path: ?-operator unwraps Some / Ok cleanly.
+// -----------------------------------------------------------------------------
+
+fn unwrap_via_question_mark_maybe(x: Maybe<Int>) -> Maybe<Int> {
+    let v = x?;
+    Some(v * 2)
+}
+
+@test
+fn integration_q_mark_unwraps_some() {
+    let r = unwrap_via_question_mark_maybe(Some(21));
+    assert_eq(r, Some(42));
+}
+
+fn unwrap_via_question_mark_result(x: Result<Int, Text>) -> Result<Int, Text> {
+    let v = x?;
+    Ok(v + 100)
+}
+
+@test
+fn integration_q_mark_unwraps_ok() {
+    let r = unwrap_via_question_mark_result(Ok(7));
+    assert_eq(r, Ok(107));
+}
+
+// -----------------------------------------------------------------------------
+// §2  Failure path: ?-operator early-returns None / Err with payload preserved.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_q_mark_propagates_none() {
+    let r = unwrap_via_question_mark_maybe(None);
+    assert_eq(r, None);
+}
+
+@test
+fn integration_q_mark_propagates_err_payload() {
+    let r = unwrap_via_question_mark_result(Err("boom"));
+    assert(r.is_err());
+    assert_eq(r.unwrap_err(), "boom");
+}
+
+// -----------------------------------------------------------------------------
+// §3  ?-chains across multiple calls — propagation traverses every link.
+// -----------------------------------------------------------------------------
+
+fn step_a(x: Int) -> Result<Int, Text> {
+    if x < 0 { Err("step_a: negative") } else { Ok(x + 1) }
+}
+
+fn step_b(x: Int) -> Result<Int, Text> {
+    if x % 2 == 0 { Err("step_b: even") } else { Ok(x * 10) }
+}
+
+fn pipeline(x: Int) -> Result<Int, Text> {
+    let a = step_a(x)?;
+    let b = step_b(a)?;
+    Ok(b + 1)
+}
+
+@test
+fn integration_q_chain_full_success() {
+    // x=2 → step_a → 3 (odd, ok) → step_b → 30 → +1 → 31
+    assert_eq(pipeline(2), Ok(31));
+}
+
+@test
+fn integration_q_chain_short_circuits_on_step_a_failure() {
+    assert_eq(pipeline(-1), Err("step_a: negative"));
+}
+
+@test
+fn integration_q_chain_short_circuits_on_step_b_failure() {
+    // x=1 → step_a → 2 (even) → step_b errors
+    assert_eq(pipeline(1), Err("step_b: even"));
+}
+
+// -----------------------------------------------------------------------------
+// §4  Cross-type ?: a Maybe<Int> inside a Result<T, E>-returning fn.
+//
+// `core/base/maybe.vr` provides `FromResidual<Maybe<Never>> for Result<...>`
+// (and vice-versa). The ?-operator finds the right impl and converts
+// `None → Err(_)` automatically.
+// -----------------------------------------------------------------------------
+
+fn maybe_inside_result(m: Maybe<Int>) -> Result<Int, Text> {
+    let v = m?;                        // None becomes the surrounding Err
+    Ok(v + 1)
+}
+
+@test
+fn integration_cross_q_maybe_in_result_some() {
+    assert_eq(maybe_inside_result(Some(41)), Ok(42));
+}
+
+@test
+fn integration_cross_q_maybe_in_result_none() {
+    let r = maybe_inside_result(None);
+    assert(r.is_err());                // Maybe-None converts to Result-Err
+}
+
+// -----------------------------------------------------------------------------
+// §5  Cross-type ?: a Result<Int, _> inside a Maybe<T>-returning fn.
+// -----------------------------------------------------------------------------
+
+fn result_inside_maybe(r: Result<Int, Text>) -> Maybe<Int> {
+    let v = r?;                        // Err becomes None
+    Some(v * 2)
+}
+
+@test
+fn integration_cross_q_result_in_maybe_ok() {
+    assert_eq(result_inside_maybe(Ok(21)), Some(42));
+}
+
+@test
+fn integration_cross_q_result_in_maybe_err() {
+    let r = result_inside_maybe(Err("ignored"));
+    assert(r.is_none());               // Result-Err converts to Maybe-None
+}
+
+// -----------------------------------------------------------------------------
+// §6  Error-type promotion — OuterErr: From<InnerErr> on ?-propagation.
+//
+// Two error types `InnerErr` and `OuterErr` with `From<InnerErr> for
+// OuterErr`. Inner returns `Result<T, InnerErr>`; outer returns
+// `Result<T, OuterErr>`. The ?-operator picks the From-bound conversion.
+// -----------------------------------------------------------------------------
+
+type InnerErr is { code: Int };
+type OuterErr is { code: Int, source: Text };
+
+implement From<InnerErr> for OuterErr {
+    fn from(e: InnerErr) -> OuterErr {
+        OuterErr { code: e.code, source: "promoted from InnerErr" }
+    }
+}
+
+fn inner_call(x: Int) -> Result<Int, InnerErr> {
+    if x < 0 { Err(InnerErr { code: 42 }) } else { Ok(x) }
+}
+
+fn outer_call(x: Int) -> Result<Int, OuterErr> {
+    let v = inner_call(x)?;            // InnerErr converts via From
+    Ok(v + 1)
+}
+
+@test
+fn integration_error_promotion_success_path() {
+    assert_eq(outer_call(5), Ok(6));
+}
+
+@test
+fn integration_error_promotion_failure_path() {
+    let r = outer_call(-1);
+    assert(r.is_err());
+    let e = r.unwrap_err();
+    assert_eq(e.code, 42);
+    assert_eq(e.source, "promoted from InnerErr");
+}
+
+// -----------------------------------------------------------------------------
+// §7  ControlFlow drives explicit pipelines — iterator try_fold-style.
+//
+// Demonstrates ControlFlow as a first-class user-driven control type
+// for early-termination loops over collections.
+// -----------------------------------------------------------------------------
+
+/// Sum elements until we see one ≥ 100; return Continue(sum) on success,
+/// Break(value-that-tripped) on failure.
+fn sum_until_threshold(xs: &List<Int>, threshold: Int) -> ControlFlow<Int, Int> {
+    let mut acc: Int = 0;
+    for x in xs.iter() {
+        if *x >= threshold {
+            return Break(*x);
+        }
+        acc = acc + *x;
+    }
+    Continue(acc)
+}
+
+@test
+fn integration_controlflow_pipeline_full_success() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let r = sum_until_threshold(&xs, 100);
+    assert(r.is_continue());
+    assert_eq(r.continue_value(), 15);
+}
+
+@test
+fn integration_controlflow_pipeline_short_circuits() {
+    let xs: List<Int> = [1, 2, 3, 200, 4];
+    let r = sum_until_threshold(&xs, 100);
+    assert(r.is_break());
+    assert_eq(r.break_value(), 200);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

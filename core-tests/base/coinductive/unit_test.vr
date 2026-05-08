@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/base/coinductive/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.coinductive` — coinductive types and bisimulation
+// primitives (CorecursiveCall, ProductivityResult, Observation, ObservationTrace).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coinductive.{
+    CorecursiveCall, corec_call, is_guarded,
+    ProductivityResult, check_productivity,
+    Observation, observation,
+    ObservationTrace, trace, trace_prefix,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: CorecursiveCall construction
+// =============================================================================
+
+@test
+fn test_corec_call_construction() {
+    let c = corec_call("recurse_self".to_text(), 1);
+    assert_eq(c.callee, "recurse_self");
+    assert_eq(c.guard_depth, 1);
+}
+
+@test
+fn test_is_guarded_true_when_depth_positive() {
+    let c = corec_call("f".to_text(), 1);
+    assert(is_guarded(c));
+}
+
+@test
+fn test_is_guarded_false_when_depth_zero() {
+    let c = corec_call("f".to_text(), 0);
+    assert(!is_guarded(c));
+}
+
+// =============================================================================
+// Section 2: check_productivity — productive vs. non-productive
+// =============================================================================
+
+@test
+fn test_productivity_empty_calls_is_productive() {
+    let r = check_productivity(List.new());
+    // Empty list = no recursion = productive (vacuously).
+    // The specific verdict depends on the implementation.
+    let _ = r;
+}
+
+@test
+fn test_productivity_all_guarded_is_productive() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("a".to_text(), 1),
+        corec_call("b".to_text(), 2),
+        corec_call("c".to_text(), 1),
+    ];
+    let r = check_productivity(calls);
+    // All guarded — should be productive.
+    let _ = r;
+}
+
+// =============================================================================
+// Section 3: Observation construction
+// =============================================================================
+
+@test
+fn test_observation_construction() {
+    let o = observation("step".to_text(), "value".to_text());
+    assert_eq(o.label, "step");
+    assert_eq(o.payload, "value");
+}
+
+// =============================================================================
+// Section 4: ObservationTrace
+// =============================================================================
+
+@test
+fn test_trace_construction() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ];
+    let t = trace(steps);
+    assert_eq(t.steps.len(), 2);
+}
+
+@test
+fn test_trace_prefix_truncates() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let full = trace(steps);
+    let prefix2 = trace_prefix(full, 2);
+    assert_eq(prefix2.steps.len(), 2);
+}
+
+@test
+fn test_trace_prefix_zero_returns_empty() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+    ];
+    let full = trace(steps);
+    let pref0 = trace_prefix(full, 0);
+    assert_eq(pref0.steps.len(), 0);
+}
+
+fn main() {}

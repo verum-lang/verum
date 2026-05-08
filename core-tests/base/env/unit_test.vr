@@ -1,11 +1,6 @@
 // =============================================================================
 // env_test.vr - Comprehensive tests for core/env.vr
 // =============================================================================
-// @test: typecheck-pass
-// @tier: 0
-// @level: L1
-// @tags: env, process, arguments, environment, system
-// @timeout: 30000
 // =============================================================================
 //
 // Tests for environment and process operations:
