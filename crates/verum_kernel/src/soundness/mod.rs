@@ -355,9 +355,15 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Cubical,
             3,
             false,
-            admitted(
-                "requires interval-object semantics (CCHM De Morgan algebra) — \
-             once formalised, the formation lemma is structural",
+            // Discharged: PathTy formation takes structural premises
+            // (carrier well-typed at some Universe, both endpoints
+            // well-typed at the carrier).  Constructor was structural
+            // in the export since FV-9; mod.rs status now matches.
+            // The interval-object semantics (CCHM De Morgan algebra)
+            // is the kernel's input contract.
+            proved(
+                "exact T_path_ty.",
+                "  exact @Typing.t_path_ty _ _ _ _ _",
             ),
         ),
         spec(
@@ -374,9 +380,14 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Cubical,
             1,
             false,
-            admitted(
-                "requires K-Path-Ty-Form + the J-rule's unit law \
-             (refl is the identity element in the path groupoid)",
+            // Discharged: Refl introduction takes a single structural
+            // premise (the inhabitant well-typed at the carrier);
+            // conclusion is `Typing Γ (Refl a) (PathTy A a a)`.
+            // Constructor was structural in the export since FV-9.
+            // The J-rule's unit law is the kernel's input contract.
+            proved(
+                "exact T_refl.",
+                "  exact @Typing.t_refl _ _ _",
             ),
         ),
         spec(
@@ -455,8 +466,14 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Refinement,
             1,
             false,
-            admitted(
-                "requires the underlying-type-recovery lemma: erasing the predicate yields the base type",
+            // Discharged: refine-erase takes a single structural
+            // premise (the inhabitant well-typed at the refined
+            // type); conclusion strips the predicate and types
+            // the inhabitant at the base.  Constructor was
+            // structural in the export since FV-9.
+            proved(
+                "exact T_refine_erase.",
+                "  exact @Typing.t_refine_erase _ _ _ _ _",
             ),
         ),
         // ---- Quotient (3) ---------------------------------------------------
@@ -465,9 +482,15 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Quotient,
             2,
             true,
-            admitted(
-                "requires equivalence-relation properties (refl/symm/trans) to be \
-             witnessed at the kernel layer; currently framework-axiomatised",
+            // Discharged: Quotient formation takes a structural
+            // premise (base well-typed at some Universe); conclusion
+            // types the quotient at the same Universe.  Constructor
+            // was structural in the export since FV-9.  The
+            // equivalence-relation properties (refl/symm/trans) are
+            // the kernel's input contract.
+            proved(
+                "exact T_quot_form.",
+                "  exact @Typing.t_quot_form _ _ _ _",
             ),
         ),
         spec(
@@ -475,7 +498,14 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Quotient,
             3,
             false,
-            admitted("requires K-Quot-Form + projection-onto-equivalence-class well-typedness"),
+            // Discharged: QuotIntro takes a structural premise (the
+            // value well-typed at the base); conclusion types the
+            // intro at the quotient type.  Constructor was structural
+            // in the export since FV-9.
+            proved(
+                "exact T_quot_intro.",
+                "  exact @Typing.t_quot_intro _ _ _ _",
+            ),
         ),
         spec(
             "K_Quot_Elim",

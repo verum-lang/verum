@@ -32,13 +32,11 @@ fn canonical_rules_has_expected_count() {
 
 #[test]
 fn proved_lemma_set_full_post_discharge() {
-    // Pin: 4 placeholder structurally-proved lemmas (K_Var / K_Univ
-    // / K_FwAx / K_Pos) + 9 IOU discharges + 5 modal/cohesive
-    // status-fixes (K_Modal_Box, K_Modal_Diamond, K_Shape, K_Flat,
-    // K_Sharp — already structural in the export since FV-9; mod.rs
-    // status now matches) = 18 proved.
+    // Pin: 4 placeholder + 9 IOU discharges + 10 status-fixes
+    // (rules already structural in the export since FV-9; mod.rs
+    // status now matches) = 23 proved.
     //
-    // The 5 status-fixes don't change the IOU count (they had no
+    // The 10 status-fixes don't change the IOU count (none had an
     // axiom in the export to begin with) — they close a drift
     // between mod.rs LemmaStatus and the export shape.
     let rules = canonical_rules();
@@ -50,8 +48,8 @@ fn proved_lemma_set_full_post_discharge() {
 
     assert_eq!(
         proved.len(),
-        18,
-        "expected 18 structurally-proved lemmas, got {}: {:?}",
+        23,
+        "expected 23 structurally-proved lemmas, got {}: {:?}",
         proved.len(),
         proved,
     );
@@ -66,6 +64,9 @@ fn proved_lemma_set_full_post_discharge() {
         // 5 modal/cohesive status-fixes (export was structural since FV-9)
         "K_Modal_Box", "K_Modal_Diamond",
         "K_Shape", "K_Flat", "K_Sharp",
+        // 5 more status-fixes (same drift pattern)
+        "K_Path_Ty_Form", "K_Refl_Intro",
+        "K_Refine_Erase", "K_Quot_Form", "K_Quot_Intro",
     ] {
         assert!(
             proved.contains(&needed),
@@ -317,11 +318,10 @@ fn proved_count_plus_admitted_count_matches_total() {
         EXPECTED_KERNEL_RULE_COUNT,
         "every rule must be either proved, admitted, or discharged-by-framework",
     );
-    // 4 placeholder + 9 IOU discharges + 5 modal/cohesive
-    // status-fixes (K_Modal_Box / K_Modal_Diamond / K_Shape /
-    // K_Flat / K_Sharp — already structural in export since FV-9;
-    // mod.rs status now matches) = 18 proved.
-    assert_eq!(proved, 18, "expected 18 proved lemmas");
+    // 4 placeholder + 9 IOU discharges + 10 status-fixes (rules
+    // already structural in export since FV-9; mod.rs status now
+    // matches) = 23 proved.
+    assert_eq!(proved, 23, "expected 23 proved lemmas");
     assert!(
         discharged >= 7,
         "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",
