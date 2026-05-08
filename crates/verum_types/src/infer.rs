@@ -33564,7 +33564,26 @@ impl TypeChecker {
     ///  2. module="math", item="trig.sin" (also tries "cog.math")
     ///
 
-    /// Returns the (module_key, item_name) pair if found.
+    /// **Single-segment item discipline.**  We accept a match ONLY when the
+    /// item suffix is a single segment (no dots).  Multi-segment suffixes
+    /// (e.g. `mount database.postgres.row.Row` matched against an inline
+    /// `database` module) would route through `import_item_from_inline_module`
+    /// which searches the inline module's items list for a literal name
+    /// matching `postgres.row.Row` — never present, since item names are
+    /// single identifiers.  The downstream side returns Ok silently (no
+    /// item found, no work done), and the caller's `if Ok(()) = ...
+    /// return Ok(());` path-arm shortcut consumes the import without ever
+    /// reaching cross-file resolution where the actual stdlib type
+    /// (`core.database.postgres.row.Row`) lives.
+    ///
+    /// By rejecting multi-segment suffixes here we let the cross-file
+    /// dot-split path in `process_import` handle the case correctly:
+    /// `module_path = normalize("database.postgres.row")` → resolves to
+    /// `core.database.postgres.row`; `item_name = "Row"` → cross-file
+    /// `import_item_from_module_with_span` finds it.
+    ///
+    /// Returns the (module_key, item_name) pair if found AND the item is
+    /// a single segment.
     pub(crate) fn find_inline_module_for_import(
         &self,
         path_str: &str,
@@ -33581,6 +33600,17 @@ impl TypeChecker {
         for &dot_pos in dots.iter().rev() {
             let module_part = &path_str[..dot_pos];
             let item_part = &path_str[dot_pos + 1..];
+
+            // Single-segment-item discipline (see doc comment above):
+            // skip splits whose item suffix carries an embedded dot.  The
+            // shortest split (rightmost dot) is the only single-segment
+            // candidate, so the loop's first iteration is the only one
+            // that can return Some — but we keep the loop for shape parity
+            // with the historic surface so callers depending on iter()
+            // don't observe a behavioural surprise.
+            if item_part.contains('.') {
+                continue;
+            }
 
             // Try the module name as-is
             if self
