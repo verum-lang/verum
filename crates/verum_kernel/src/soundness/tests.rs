@@ -539,3 +539,148 @@ fn iou_axiom_rule_names_match_admitted_rule_names() {
         "Admitted rule set must equal IOU-axiom rule set",
     );
 }
+
+// =============================================================================
+// Cross-foundation IOU axiom set consistency (PR-1b)
+// =============================================================================
+//
+// Drift surface that PR-1's mod.rs ↔ aggregate-IOU check doesn't
+// catch: Lean / Coq / Isabelle each carry their own
+// `IOU_AXIOMS_*` string constant.  If a discharge updates Lean
+// but forgets Coq, the two foundations silently diverge — auditor
+// reading the Coq export sees a redundant axiom; Lean sees the
+// discharge.  These tests pin set-equality between
+// `iou_axiom_rule_names()` (single source of truth) and the
+// actual axiom names extracted from each foundation's string
+// constant.
+
+/// Extract `K_<Name>_iou` rule names from a per-foundation
+/// IOU-axiom string constant.  Pattern-matches on the `_iou`
+/// suffix and walks back to the preceding `K_` prefix.  Robust
+/// to per-foundation syntax (`axiom`/`Axiom`/`<name> ::`) since
+/// it doesn't anchor on the leading keyword.
+fn extract_iou_rule_names_from_constant(constant: &str) -> std::collections::BTreeSet<String> {
+    let mut result = std::collections::BTreeSet::new();
+    // Walk byte by byte looking for the "_iou" suffix.  When found,
+    // walk backwards over identifier chars (letters, digits, `_`)
+    // collecting the name.  Then verify it starts with `K_` —
+    // skip false matches.
+    let bytes = constant.as_bytes();
+    let needle = b"_iou";
+    let mut i = 0;
+    while i + needle.len() <= bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            // Found `_iou`.  Walk backwards over identifier chars.
+            let mut start = i;
+            while start > 0 {
+                let c = bytes[start - 1];
+                if c.is_ascii_alphanumeric() || c == b'_' {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            }
+            let name_with_iou: &str = &constant[start..i + needle.len()];
+            // Must start with "K_" to be a kernel rule.
+            if name_with_iou.starts_with("K_") {
+                // Strip "_iou" suffix.
+                let rule_name = &name_with_iou[..name_with_iou.len() - needle.len()];
+                result.insert(rule_name.to_string());
+            }
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    result
+}
+
+#[test]
+fn extractor_finds_axioms_in_lean_constant() {
+    // Sanity: the extractor finds the right names in the Lean constant.
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let names = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
+    // At least one well-known axiom should be found.
+    assert!(
+        names.contains("K_Smt"),
+        "extractor should find K_Smt; got: {:?}",
+        names,
+    );
+    // Number should be exactly the IOU count.
+    assert!(
+        names.len() >= 8,
+        "extractor should find at least 8 IOU axioms; got {}: {:?}",
+        names.len(),
+        names,
+    );
+}
+
+#[test]
+fn lean_constant_iou_axioms_match_source_of_truth() {
+    // Pin: the Lean `IOU_AXIOMS_LEAN` constant declares exactly the
+    // axioms in `iou_axiom_rule_names()`.  Drift here means a
+    // discharge updated mod.rs but forgot to remove the Lean axiom
+    // (or vice versa).
+    use crate::soundness::iou_axiom_rule_names;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
+    let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        extracted, expected,
+        "Lean IOU_AXIOMS_LEAN constant must match iou_axiom_rule_names() set",
+    );
+}
+
+#[test]
+fn coq_constant_iou_axioms_match_source_of_truth() {
+    // Pin: the Coq `IOU_AXIOMS_COQ` constant declares exactly the
+    // axioms in `iou_axiom_rule_names()`.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::iou_axiom_rule_names;
+    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_COQ);
+    let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        extracted, expected,
+        "Coq IOU_AXIOMS_COQ constant must match iou_axiom_rule_names() set",
+    );
+}
+
+#[test]
+fn isabelle_constant_iou_axioms_match_source_of_truth() {
+    // Pin: the Isabelle `IOU_AXIOMS_ISA` constant declares exactly
+    // the axioms in `iou_axiom_rule_names()`.
+    use crate::soundness::iou_axiom_rule_names;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_ISA);
+    let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        extracted, expected,
+        "Isabelle IOU_AXIOMS_ISA constant must match iou_axiom_rule_names() set",
+    );
+}
+
+#[test]
+fn three_foundations_agree_on_iou_axiom_set() {
+    // Pin: Lean and Coq and Isabelle all declare the SAME set of
+    // IOU axioms.  Direct three-way agreement check (no detour
+    // through `iou_axiom_rule_names()`).  If one foundation drifts
+    // from the others, this fires immediately — separating
+    // "axiom name present" drift from "rule status" drift.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let lean_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
+    let coq_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_COQ);
+    let isa_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_ISA);
+    assert_eq!(lean_set, coq_set, "Lean and Coq IOU axiom sets must agree");
+    assert_eq!(coq_set, isa_set, "Coq and Isabelle IOU axiom sets must agree");
+}

@@ -204,7 +204,7 @@ impl SoundnessBackend for CoqBackend {
 //                         ordinal-modal-depth-bound vacuous.
 // ============================================================================
 
-const IOU_AXIOMS_COQ: &str = "\
+pub(crate) const IOU_AXIOMS_COQ: &str = "\
 (* ====== Per-rule IOU axioms (8 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\

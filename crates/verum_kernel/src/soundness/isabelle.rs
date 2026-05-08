@@ -214,7 +214,7 @@ impl SoundnessBackend for IsabelleBackend {
 // Per-rule IOU axiomatizations (17 — one per with-IOU rule).
 // ============================================================================
 
-const IOU_AXIOMS_ISA: &str = "\
+pub(crate) const IOU_AXIOMS_ISA: &str = "\
 (* ====== Per-rule IOU axiomatizations (17 total) ====== *)\n\
 \n\
 axiomatization\n  \
