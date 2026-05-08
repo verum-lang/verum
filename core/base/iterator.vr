@@ -648,6 +648,35 @@ public type Iterator is protocol {
         C.from_iter(self)
     }
 
+    /// Collect `Result<T, E>` items into `Result<C, E>`.
+    ///
+    /// Consumes the iterator and accumulates the `Ok` values into `C`.
+    /// Returns the first `Err` immediately, leaving remaining items unconsumed.
+    /// Returns `Ok(empty)` for an empty iterator.
+    ///
+    /// ```verum
+    /// let v: List<Int> = List.from([1, 2, 3]);
+    /// let ok: Result<List<Int>, Text> = v.iter().map(|x| Ok(x * 2)).try_collect();
+    /// assert(ok == Ok(List.from([2, 4, 6])));
+    ///
+    /// let v2: List<Int> = List.from([1, 2, 3]);
+    /// let err: Result<List<Int>, Text> = v2.iter().map(|x| {
+    ///     if x == 2 { Err(Text.from("found 2")) } else { Ok(x) }
+    /// }).try_collect();
+    /// assert(err == Err(Text.from("found 2")));
+    /// ```
+    fn try_collect<T, E, C: Default + Extend<T>>(mut self) -> Result<C, E>
+    where Self.Item = Result<T, E> {
+        let mut acc = C.default();
+        while let Some(item) = self.next() {
+            match item {
+                Ok(v) => { acc.extend_one(v); }
+                Err(e) => { return Err(e); }
+            }
+        }
+        Ok(acc)
+    }
+
     /// Partition by predicate.
     fn partition<C: Default + Extend<Self.Item>, P: fn(&Self.Item) -> Bool>(
         mut self,

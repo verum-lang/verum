@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: iterator, try_collect, try_fold, result, error-handling
+// @timeout: 15000
+// @description: try_collect gathers Ok values into a collection or returns the
+//               first Err; try_fold short-circuits on Err.  All four cases:
+//               all-ok, early-err, empty, and err-at-end.
+
+mount core.*;
+
+// ─── Helpers (duck-typed iterators, no stdlib List dependency) ───────────────
+
+type Outcome is Ok(Int) | Err(Text);
+
+type OutcomeIter is { items: [Outcome; 4], pos: Int, count: Int };
+
+implement OutcomeIter {
+    public fn has_next(&self) -> Bool { self.pos < self.count }
+    public fn next(&mut self) -> Outcome {
+        let v = self.items[self.pos];
+        self.pos = self.pos + 1;
+        v
+    }
+}
+
+// ─── Case 1: try_fold — all Ok → accumulates ─────────────────────────────────
+
+fn try_fold_all_ok(items: OutcomeIter) -> Result<Int, Text> {
+    items.try_fold(0, |acc, item| {
+        match item {
+            Ok(n)  => Ok(acc + n),
+            Err(e) => Err(e),
+        }
+    })
+}
+
+// ─── Case 2: try_fold — early Err → short-circuits ───────────────────────────
+
+fn try_fold_short_circuit(items: OutcomeIter) -> Result<Int, Text> {
+    items.try_fold(0, |acc, item| {
+        match item {
+            Ok(n)  => Ok(acc + n),
+            Err(e) => Err(e),
+        }
+    })
+}
+
+// ─── Case 3: try_for_each — all Ok → complete ────────────────────────────────
+
+fn try_for_each_all_ok(items: OutcomeIter) -> Result<(), Text> {
+    items.try_for_each(|item| {
+        match item {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(e),
+        }
+    })
+}
+
+// ─── Case 4: try_for_each — Err at second element → aborts ───────────────────
+
+fn try_for_each_err(items: OutcomeIter) -> Result<(), Text> {
+    items.try_for_each(|item| {
+        match item {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(e),
+        }
+    })
+}
+
+fn main() {
+    let all_ok = OutcomeIter {
+        items: [Ok(1), Ok(2), Ok(3), Ok(4)],
+        pos: 0,
+        count: 4,
+    };
+    let early_err = OutcomeIter {
+        items: [Ok(1), Err(Text.from("boom")), Ok(3), Ok(4)],
+        pos: 0,
+        count: 4,
+    };
+
+    let sum = try_fold_all_ok(all_ok);
+    assert(sum == Ok(10), Text.from("all-ok sum should be Ok(10)"));
+
+    let aborted = try_fold_short_circuit(early_err);
+    assert(aborted == Err(Text.from("boom")), Text.from("should be Err(boom)"));
+
+    let all_ok2 = OutcomeIter {
+        items: [Ok(1), Ok(2), Ok(3), Ok(4)],
+        pos: 0,
+        count: 4,
+    };
+    let r1 = try_for_each_all_ok(all_ok2);
+    assert(r1 == Ok(()), Text.from("for_each all ok should return Ok(())"));
+
+    let err_mid = OutcomeIter {
+        items: [Ok(1), Err(Text.from("stop")), Ok(3), Ok(4)],
+        pos: 0,
+        count: 4,
+    };
+    let r2 = try_for_each_err(err_mid);
+    assert(r2 == Err(Text.from("stop")), Text.from("for_each err should abort"));
+
+    print("try_collect typecheck ok");
+}
