@@ -2729,14 +2729,21 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             // `emit_intrinsic_tensor_extended` for the 114
             // `TensorExtendedOpcode`-strategy intrinsics.  Operand
             // bytes pack `[dst:1-2b][arg0:1-2b]…` per the codegen-side
-            // helper.  The wire format is shared with the structured
-            // `Instruction::TensorXxx` encoder arms above (Pool,
-            // Argmin, Solve, BatchNorm, SVD, …), which write their
-            // own per-sub-op operand layouts.  See the registry-
-            // driven decoder dispatch at `Opcode::TensorExtended`
-            // for the unified read path.
+            // helper.
+            //
+            // Wire format aligned with every other extended carrier
+            // (Arith/Math/Simd/Char/Cbgr/Text/Mem/Log):
+            // `opcode + sub_op + varint(operand_byte_count) + operand_bytes`.
+            // The varint length prefix makes the format self-describing
+            // and immune to the registry-driven arity table getting out
+            // of sync (which it had — TENSOR_UNOP at param_count=2 and
+            // TENSOR_SIGMOID at param_count=1 both shared sub_op
+            // UnopFromArgs, so any single-arity decoder mis-decoded
+            // one of them).  See the registry-driven decoder dispatch
+            // at `Opcode::TensorExtended` for the unified read path.
             output.push(Opcode::TensorExtended.to_byte());
             output.push(*sub_op);
+            encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
         Instruction::MathExtended { sub_op, operands } => {
@@ -4020,40 +4027,25 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let sub_opcode_byte = decode_u8(data, offset)?;
             let sub_opcode = TensorSubOpcode::from_byte(sub_opcode_byte);
 
-            // Registry-driven dispatch — every TensorSubOpcode whose
-            // intrinsic registry strategy is `TensorExtendedOpcode(...)`
-            // is emitted by `emit_intrinsic_tensor_extended`, which
-            // packs operands as `[dst:1-2b][arg0:1-2b]…` register-
-            // encoded bytes per the registry's `param_count`.  This
-            // top-level dispatch covers all 114 such sub-ops in one
-            // sweep so sequential decoding doesn't fall into the
-            // structured arms below — those structured arms encode
-            // dead `Instruction::Tensor*` IR variants that codegen
-            // never emits (verified across
-            // `crates/verum_vbc/src/codegen/`).  Letting them match
-            // first caused mis-decoding (e.g. BatchNorm/SVD reading
-            // register-encoded bytes as f32 fields) and broke linker
-            // round trip on real bytecode.
+            // Self-describing wire format: encoder writes
+            // `varint(operand_byte_count) + operand_bytes` after the
+            // sub_op byte.  Reading the length first makes sequential
+            // decoding immune to registry-driven arity drift
+            // (TENSOR_UNOP and TENSOR_SIGMOID share sub_op
+            // UnopFromArgs but with different param_counts; same for
+            // 7 other shared sub_ops — any single-arity table goes
+            // out of sync the moment the registry adds an entry).
             //
-            // When a new sub-op is added to the registry with
-            // `TensorExtendedOpcode` strategy, add (sub_op,
-            // param_count + 1) to `registry_driven_tensor_arity`.
-            // See registry.rs for the source of truth on each
-            // intrinsic's arity.
-            if let Some(arity) =
-                registry_driven_tensor_arity(sub_opcode_byte)
-            {
-                let mut operands = Vec::new();
-                for _ in 0..arity {
-                    let b = decode_u8(data, offset)?;
-                    if b & 0x80 != 0 {
-                        let lo = decode_u8(data, offset)?;
-                        operands.push(b);
-                        operands.push(lo);
-                    } else {
-                        operands.push(b);
-                    }
-                }
+            // Registry-driven dispatch is now used only by the
+            // structured `Instruction::Tensor*` arms below (Pool,
+            // Argmin, Solve, BatchNorm, SVD, …) which still encode
+            // their own per-sub-op operand layouts without a length
+            // prefix.  Those arms are dead code at the codegen level
+            // (verified across `crates/verum_vbc/src/codegen/`) but
+            // are preserved for backwards compatibility with archives
+            // produced by tooling that may exercise them directly.
+            if registry_driven_tensor_arity(sub_opcode_byte).is_some() {
+                let operands = decode_extended_operands(data, offset)?;
                 return Ok(Instruction::TensorExtended {
                     sub_op: sub_opcode_byte,
                     operands,
