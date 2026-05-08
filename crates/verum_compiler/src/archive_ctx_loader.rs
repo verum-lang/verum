@@ -825,9 +825,27 @@ impl ArchiveCtxCache {
             .filter(|n| !n.contains('.'))
             .cloned()
             .collect();
+        // **Cold-start regression guard**: filter out unqualified
+        // names that LOOK like types — bare upper-camel-case tokens
+        // (`Result`, `Maybe`, `Path`, `Text`, …).  Pre-fix, mounting
+        // a stdlib type via `mount core.{Result, Maybe}` added the
+        // bare names to the unqualified-wanted set; the second pass
+        // then decoded EVERY archive module (574 of them) scanning
+        // string tables for these ultra-common names — the single-
+        // pool stdlib refactor pushed each archive module to
+        // ~10 MB decompressed, so the par_iter filter was
+        // materialising ~5 GB of decoded modules in the worst case
+        // before discarding most of them.  Types are loaded via
+        // `import_archive_module_types` from the qualified-prefix
+        // pass; they don't need to drive a function-name probe.
+        // Idiomatic Verum stdlib functions are snake_case so this
+        // filter has zero false positives on real call sites.
         let unqualified_wanted: std::collections::HashSet<String> = unqualified_wanted_full
             .into_iter()
-            .filter(|name| codegen.ctx_mut().lookup_function(name).is_none())
+            .filter(|name| {
+                codegen.ctx_mut().lookup_function(name).is_none()
+                    && !looks_like_type_name(name)
+            })
             .collect();
         if !unqualified_wanted.is_empty() {
             // Parallel decode + match filter for the second pass too.
@@ -1330,6 +1348,29 @@ fn harvest_names_in_path(
     if segs.len() > 1 {
         out.insert(segs.join("."));
     }
+}
+
+/// Heuristic: a bare unqualified name LOOKS like a type when it
+/// starts with an upper-case ASCII letter and contains no
+/// underscores or special chars.  Catches `Result`, `Maybe`,
+/// `Path`, `PathBuf`, `Text`, etc. — every stdlib type name.
+/// Functions in idiomatic Verum stdlib are snake_case (`path_exists`,
+/// `current_dir`, …) so this filter has zero false positives on
+/// real function call sites.  False negatives (an upper-case
+/// function name) only mean we waste one round-trip through the
+/// second pass — no correctness loss.
+fn looks_like_type_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !first.is_ascii_uppercase() {
+        return false;
+    }
+    // Must be entirely alphanumeric (rejects sigils/operators,
+    // `__type_params_*` registry tokens, etc.).
+    name.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn last_path_name(path: &verum_ast::ty::Path) -> Option<String> {
