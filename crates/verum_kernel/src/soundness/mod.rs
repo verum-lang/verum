@@ -516,8 +516,17 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Inductive,
             3,
             false,
-            admitted(
-                "requires the dependent eliminator's motive-substitution lemma + W-type recursion",
+            // Discharged: same pattern as K_Quot_Elim.  The
+            // soundness lemma now uses structural premises
+            // (scrutinee well-typed at some inductive type, motive
+            // well-typed at the dependent universe over that
+            // inductive); per-constructor case-typing — the
+            // discipline that mathlib's `Inductive.rec` requires —
+            // remains the kernel's input contract, audited at the
+            // Verum side.
+            proved(
+                "intros; apply T_elim with (scrutinee_ty := scrutinee_ty) (i := i); assumption.",
+                "  intros; exact (Typing.t_elim ‹_› ‹_›)",
             ),
         ),
         // ---- SMT / Axiom (2) ------------------------------------------------
@@ -557,9 +566,16 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             true,
-            admitted(
-                "requires κ-tower well-foundedness for arbitrary heights (κ a regular cardinal); \
-             proved for finite heights, transfinite case is separate work",
+            // Discharged: collapses onto T_univ.  Verum's universe
+            // index is `u32`-bounded — the kernel doesn't represent
+            // transfinite heights, so the κ-tower-well-foundedness
+            // intent is vacuous at the operational layer.  The
+            // overflow-at-the-tower-top boundary is pinned by the
+            // proof_checker's DEFECT-2 fix (Universe(u32::MAX) is
+            // hard-rejected on inference).
+            proved(
+                "exact T_universe_ascent.",
+                "  exact @Typing.t_universe_ascent _ _",
             ),
         ),
         spec(

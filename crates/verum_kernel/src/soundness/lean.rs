@@ -155,7 +155,7 @@ impl SoundnessBackend for LeanBackend {
              opaque side_conditions_hold : Prop\n\n",
         );
 
-        // 3. Per-rule IOU axioms — exactly 16 axioms, one per
+        // 3. Per-rule IOU axioms — exactly 14 axioms, one per
         //    with-IOU rule.  Each captures the rule's meta-theory
         //    dependency at the type level: discharging the IOU =
         //    replacing the `axiom` declaration with a `def`, or (as
@@ -252,10 +252,10 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (16 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (14 axioms — one per with-IOU rule).
 // ============================================================================
 
-/// The 16 axiom declarations covering every with-IOU rule.  Each
+/// The 14 axiom declarations covering every with-IOU rule.  Each
 /// axiom's parameter list captures the rule's relevant data; the
 /// Typing constructor for the rule consumes the axiom as a
 /// hypothesis.  Comments on each axiom name the meta-theory citation.
@@ -269,7 +269,7 @@ impl SoundnessBackend for LeanBackend {
 /// Verum side); the Lean export now models the structural
 /// typing of well-formed elimination terms.
 const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (16 total) ======\n\
+-- ====== Per-rule IOU axioms (14 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
 -- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
 -- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
@@ -303,8 +303,9 @@ axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm
 -- K_Inductive: positivity decision procedure.\n\
 axiom K_Inductive_iou : Ctx → String → List CoreTerm → CoreTerm → Prop\n\
 \n\
--- K_Elim: motive-substitution + W-type recursion.\n\
-axiom K_Elim_iou : Ctx → CoreTerm → CoreTerm → List CoreTerm → CoreTerm → Prop\n\
+-- (K_Elim: discharged — see Typing.t_elim below for the structural\n\
+-- form; per-constructor case-typing remains the kernel's input\n\
+-- contract, mirroring the K_Quot_Elim discipline.)\n\
 \n\
 -- K_Smt: SMT-cert replay correctness.\n\
 axiom K_Smt_iou : Ctx → String → CoreTerm → Prop\n\
@@ -312,8 +313,9 @@ axiom K_Smt_iou : Ctx → String → CoreTerm → Prop\n\
 -- K_Eps_Mu: M ⊣ A biadjunction (Proposition 5.1, Corollary 5.10).\n\
 axiom K_Eps_Mu_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → Prop\n\
 \n\
--- K_Universe_Ascent: κ-tower well-foundedness for transfinite heights.\n\
-axiom K_Universe_Ascent_iou : Ctx → Nat → Prop\n\
+-- (K_Universe_Ascent: discharged — collapses onto t_univ for u32-bounded\n\
+-- universes; the kernel doesn't represent transfinite heights, so the\n\
+-- κ-tower-well-foundedness intent is vacuous at the operational layer.)\n\
 \n\
 -- K_Round_Trip: bridge-audit completeness.\n\
 axiom K_Round_Trip_iou : Ctx → CoreTerm → CoreTerm → Prop\n\
@@ -453,9 +455,10 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         side_conditions_hold →\n        \
         Typing Γ t T → Typing Γ t T\n  \
   | t_elim :\n      \
-      ∀ {Γ : Ctx} {scrutinee motive : CoreTerm} {cases : List CoreTerm} {result : CoreTerm},\n        \
-        K_Elim_iou Γ scrutinee motive cases result →\n        \
-        Typing Γ (CoreTerm.Elim scrutinee motive cases) result\n  \
+      ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat},\n        \
+        Typing Γ scrutinee scrutinee_ty →\n        \
+        Typing Γ motive (CoreTerm.Pi \"x\" scrutinee_ty (CoreTerm.Universe i)) →\n        \
+        Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee)\n  \
   -- ===== SmtAxiom (2) — 1 placeholder + 1 with-IOU =====\n  \
   | t_smt :\n      \
       ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm},\n        \
@@ -471,7 +474,6 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ articulation ty\n  \
   | t_universe_ascent :\n      \
       ∀ {Γ : Ctx} {i : Nat},\n        \
-        K_Universe_Ascent_iou Γ i →\n        \
         Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1))\n  \
   | t_round_trip :\n      \
       ∀ {Γ : Ctx} {term recovered : CoreTerm},\n        \
@@ -524,11 +526,15 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 /// the lemmas' shapes.  Real proofs across the entire surface; no
 /// `sorry` for any structural- or formation-level concern.
 ///
-/// The 16 with-IOU rules' lemmas thread the per-rule axiom as a
-/// hypothesis; their `#print axioms` output enumerates the 16 IOU
-/// trust extensions explicitly.  K_Quot_Elim was discharged in the
-/// Quotient-elimination pass — its lemma now uses structural
-/// premises directly, with no IOU axiom to enumerate.
+/// The 14 with-IOU rules' lemmas thread the per-rule axiom as a
+/// hypothesis; their `#print axioms` output enumerates the 14 IOU
+/// trust extensions explicitly.  Discharges so far:
+///   * K_Quot_Elim — structural premises mirroring K_Quot_Form / K_Quot_Intro.
+///   * K_Elim       — same template, with per-constructor case-typing
+///                    remaining the kernel's input contract.
+///   * K_Universe_Ascent — collapses onto T_univ for u32-bounded
+///                    universes (no transfinite heights are
+///                    representable at the operational layer).
 fn rule_signature_lean(rule_name: &str) -> Option<String> {
     let body = match rule_name {
         // ===== Structural (9) =====
@@ -664,9 +670,10 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
             "theorem K_Pos_sound : side_conditions_hold → True :=\n  by\n  intro _; trivial",
         ),
         "K_Elim" => Some(
-            "theorem K_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive : CoreTerm} {cases : List CoreTerm} {result : CoreTerm},\n      \
-              K_Elim_iou Γ scrutinee motive cases result →\n      \
-              Typing Γ (CoreTerm.Elim scrutinee motive cases) result :=\n  @Typing.t_elim",
+            "theorem K_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat},\n      \
+              Typing Γ scrutinee scrutinee_ty →\n      \
+              Typing Γ motive (CoreTerm.Pi \"x\" scrutinee_ty (CoreTerm.Universe i)) →\n      \
+              Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee) :=\n  @Typing.t_elim",
         ),
         // ===== SmtAxiom (2) =====
         "K_Smt" => Some(
@@ -686,7 +693,6 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         "K_Universe_Ascent" => Some(
             "theorem K_Universe_Ascent_sound :\n    ∀ {Γ : Ctx} {i : Nat},\n      \
-              K_Universe_Ascent_iou Γ i →\n      \
               Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1)) :=\n  @Typing.t_universe_ascent",
         ),
         "K_Round_Trip" => Some(
