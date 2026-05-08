@@ -274,19 +274,19 @@ implement Money {
     }
 
     public fn eq(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(matches_eq(self.compare(other)?))
+        Ok(self.compare(other)? is Equal)
     }
     public fn lt(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(matches_lt(self.compare(other)?))
+        Ok(self.compare(other)? is Less)
     }
     public fn gt(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(matches_gt(self.compare(other)?))
+        Ok(self.compare(other)? is Greater)
     }
     public fn le(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(!matches_gt(self.compare(other)?))
+        Ok(!(self.compare(other)? is Greater))
     }
     public fn ge(&self, other: &Money) -> Result<Bool, MoneyError> {
-        Ok(!matches_lt(self.compare(other)?))
+        Ok(!(self.compare(other)? is Less))
     }
 
     // -------------------------------------------------------------------------
@@ -351,6 +351,3 @@ fn clone_currency(c: &Currency) -> Currency {
     Currency { code: c.code.clone(), minor_units: c.minor_units }
 }
 
-fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
-fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
-fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }

@@ -446,11 +446,11 @@ implement Decimal {
         }
     }
 
-    public fn eq(&self, other: &Decimal) -> Bool { matches_equal(self.compare(other)) }
-    public fn lt(&self, other: &Decimal) -> Bool { matches_less(self.compare(other))  }
-    public fn gt(&self, other: &Decimal) -> Bool { matches_greater(self.compare(other)) }
-    public fn le(&self, other: &Decimal) -> Bool { !matches_greater(self.compare(other)) }
-    public fn ge(&self, other: &Decimal) -> Bool { !matches_less(self.compare(other))    }
+    public fn eq(&self, other: &Decimal) -> Bool { self.compare(other) is Equal }
+    public fn lt(&self, other: &Decimal) -> Bool { self.compare(other) is Less }
+    public fn gt(&self, other: &Decimal) -> Bool { self.compare(other) is Greater }
+    public fn le(&self, other: &Decimal) -> Bool { !(self.compare(other) is Greater) }
+    public fn ge(&self, other: &Decimal) -> Bool { !(self.compare(other) is Less) }
 
     // -------------------------------------------------------------------------
     // Render
@@ -748,17 +748,6 @@ fn checked_mul(a: Int, b: Int) -> Maybe<Int> {
 // Internal helpers — text conversion
 // =============================================================================
 
-fn matches_equal(o: Ordering) -> Bool {
-    match o { Equal => true, _ => false }
-}
-
-fn matches_less(o: Ordering) -> Bool {
-    match o { Less => true, _ => false }
-}
-
-fn matches_greater(o: Ordering) -> Bool {
-    match o { Greater => true, _ => false }
-}
 
 /// Render an unsigned magnitude as decimal-digit bytes (most
 /// significant first).  Caller must pass `n >= 0` (usually by
