@@ -318,6 +318,34 @@ pub const ORDERING_VARIANT_LAYOUT: &[(&str, u32)] = &[
     ("Greater", 2),
 ];
 
+/// Canonical layout of the variants of `core::base::data::Data`.
+///
+/// **Single source of truth.** Any VBC codegen or runtime code that constructs
+/// or pattern-matches `Data` values must read tag numbers from this constant
+/// rather than hardcoding them.
+///
+/// **Drift contract:** the slice's order MUST match `core/base/data.vr`:
+/// ```text
+///     public type Data is
+///         | Null
+///         | Bool(Bool)
+///         | Int(Int)
+///         | Float(Float)
+///         | Text(Text)
+///         | Array(List<Data>)
+///         | Object(Map<Text, Data>);
+/// ```
+/// — which produces tags 0–6 in declaration order.
+pub const DATA_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("Null", 0),
+    ("Bool", 1),
+    ("Int", 2),
+    ("Float", 3),
+    ("Text", 4),
+    ("Array", 5),
+    ("Object", 6),
+];
+
 /// Canonical layout of the variants of `core::base::ops::ControlFlow<B, C>`.
 ///
 /// **Single source of truth.** `compile_try` in VBC codegen reads this constant
@@ -429,6 +457,19 @@ mod ordering_layout_tests {
         assert_eq!(RESULT_VARIANT_LAYOUT[1], ("Err", 1));
     }
 
+    /// Pins `Data` variant order: Null=0, Bool=1, Int=2, Float=3, Text=4, Array=5, Object=6.
+    #[test]
+    fn data_variant_layout_pinned() {
+        assert_eq!(DATA_VARIANT_LAYOUT.len(), 7);
+        assert_eq!(DATA_VARIANT_LAYOUT[0], ("Null", 0));
+        assert_eq!(DATA_VARIANT_LAYOUT[1], ("Bool", 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[2], ("Int", 2));
+        assert_eq!(DATA_VARIANT_LAYOUT[3], ("Float", 3));
+        assert_eq!(DATA_VARIANT_LAYOUT[4], ("Text", 4));
+        assert_eq!(DATA_VARIANT_LAYOUT[5], ("Array", 5));
+        assert_eq!(DATA_VARIANT_LAYOUT[6], ("Object", 6));
+    }
+
     /// Pins `ControlFlow<B,C>` variant order: Continue=0, Break=1.
     #[test]
     fn controlflow_variant_layout_pinned() {
@@ -530,20 +571,24 @@ mod ordering_layout_tests {
         );
     }
 
-    /// All three layout constants together: each has exactly 2 entries,
-    /// each entry has a unique tag within the type, and no duplicate names.
+    /// All canonical layout constants must be internally consistent: unique tags
+    /// and unique variant names within each constant.
     #[test]
     fn operator_fastpath_drift_all_layouts_well_formed() {
-        for &(layout, name) in &[
-            (MAYBE_VARIANT_LAYOUT, "MAYBE"),
-            (RESULT_VARIANT_LAYOUT, "RESULT"),
-            (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW"),
-        ] {
-            assert_eq!(layout.len(), 2, "{} layout must have exactly 2 variants", name);
+        let two_variant = &[
+            (MAYBE_VARIANT_LAYOUT, "MAYBE", 2usize),
+            (RESULT_VARIANT_LAYOUT, "RESULT", 2),
+            (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW", 2),
+        ];
+        let n_variant: &[(&[(&str, u32)], &str, usize)] =
+            &[(DATA_VARIANT_LAYOUT, "DATA", 7)];
+
+        for &(layout, name, expected_len) in two_variant.iter().chain(n_variant.iter()) {
+            assert_eq!(layout.len(), expected_len, "{} layout must have {} variants", name, expected_len);
             let tags: std::collections::HashSet<u32> = layout.iter().map(|&(_, t)| t).collect();
-            assert_eq!(tags.len(), 2, "{} layout must have unique tags", name);
+            assert_eq!(tags.len(), expected_len, "{} layout must have unique tags", name);
             let names: std::collections::HashSet<&str> = layout.iter().map(|&(n, _)| n).collect();
-            assert_eq!(names.len(), 2, "{} layout must have unique variant names", name);
+            assert_eq!(names.len(), expected_len, "{} layout must have unique variant names", name);
         }
     }
 }
