@@ -252,6 +252,35 @@ implement Ed25519 {
 }
 
 // =============================================================================
+// Module-level free function exports
+// =============================================================================
+//
+// `Ed25519.sign(...)` / `Ed25519.public_key(...)` / `Ed25519.verify(...)`
+// are the inherent-method API.  These free-function wrappers expose
+// the same surface at the module top level so consumers can write:
+//
+//     mount core.security.ecc.ed25519.{sign as ed25519_sign, public_key};
+//
+// without having to bring `Ed25519` (the unit-marker type) into scope
+// just to call its statics.
+
+public fn sign(seed: &Ed25519Seed, message: &[Byte]) -> Ed25519Signature {
+    Ed25519.sign(seed, message)
+}
+
+public fn public_key(seed: &Ed25519Seed) -> Ed25519PublicKey {
+    Ed25519.public_key(seed)
+}
+
+public fn verify(
+    pubkey:    &Ed25519PublicKey,
+    message:   &[Byte],
+    signature: &Ed25519Signature,
+) -> Result<(), Ed25519Error> {
+    Ed25519.verify(pubkey, message, signature)
+}
+
+// =============================================================================
 // Internal RNG binding
 // =============================================================================
 

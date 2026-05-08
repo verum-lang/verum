@@ -52,3 +52,10 @@ public mount self.h3_priority.*;     // RFC 9218 priority extractor
 public mount self.json_extractor.*;  // Json<T> handler-arg extractor
 public mount self.metrics_otlp.*;    // OTLP/HTTP push exporter
 public mount self.zero_rtt_gate.*;   // 0-RTT replay-defence gate
+
+// Convenience re-exports of the http surface that user code uniformly
+// expects to be available via the weft umbrella (Response builder,
+// StatusCode constants, Method enum) without needing a parallel
+// `mount core.net.http.{Response, StatusCode}` next to every weft
+// import.
+public mount core.net.http.{Response, StatusCode, Method, Headers, Version};

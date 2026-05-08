@@ -383,6 +383,6 @@ fn argon2id_derive(
         params.memory_kib,
         params.iterations,
         params.parallelism,
-        tag_len,
+        tag_len
     )
 }

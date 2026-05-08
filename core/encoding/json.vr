@@ -657,6 +657,31 @@ public fn stringify_pretty(value: &JsonValue) -> Text {
     out
 }
 
+// =============================================================================
+// Conventional encode/decode aliases
+// =============================================================================
+//
+// `encode` / `decode` are the names most call sites reach for first;
+// they're thin re-spellings of `stringify` (compact wire form) and
+// `parse` so consumers can write the conventional pair without an
+// extra import block.
+
+/// Compact JSON encode. Alias for `stringify`.
+public fn encode(value: &JsonValue) -> Text {
+    stringify(value)
+}
+
+/// Parse a JSON document from a Text source. Alias for `parse`.
+public fn decode(source: &Text) -> Result<JsonValue, JsonError> {
+    parse(source)
+}
+
+/// Decode a JSON document from a byte slice. Convenience helper for
+/// HTTP request bodies / file reads which arrive as `&[Byte]`.
+public fn decode_bytes(source: &[Byte]) -> Result<JsonValue, JsonError> {
+    parse(&Text.from_utf8_lossy(source))
+}
+
 fn emit(value: &JsonValue, out: &mut Text) {
     match value {
         JsonNull       => out.push_str("null"),

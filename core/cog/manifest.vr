@@ -92,18 +92,18 @@ public fn parse_language_profile(s: &Text) -> Maybe<LanguageProfile> {
     }
 }
 
+public type GitRevision is
+      Branch(Text)
+    | Tag(Text)
+    | Commit(Text)
+    | Default;
+
 // Dependency source: registry / path / git / heap (workspace).
 public type DependencySource is
       Registry { registry_url: Maybe<Text> }
     | Path     { rel_path: Text }
     | Git      { url: Text, revision: GitRevision }
     | Workspace;
-
-public type GitRevision is
-      Branch(Text)
-    | Tag(Text)
-    | Commit(Text)
-    | Default;
 
 public type DependencySpec is {
     /// Version constraint. `None` for non-registry sources where the

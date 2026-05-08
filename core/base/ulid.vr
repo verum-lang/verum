@@ -155,6 +155,21 @@ implement Ulid {
         pack(ts, &buf)
     }
 
+    /// Alias of `Ulid.new()` — reads naturally at call sites that
+    /// emphasise "generate a ULID for the current instant" (audit
+    /// rows, request ids, …).
+    public fn now() -> Ulid {
+        Ulid.new()
+    }
+
+    /// Parse a 26-char Crockford Base32 ULID. Static-method form so
+    /// callers can write `Ulid.parse(s)?` instead of pulling the
+    /// free function `parse` into scope under a non-conflicting
+    /// alias.
+    public fn parse(s: &Text) -> Result<Ulid, UlidError> {
+        super.parse(s)
+    }
+
     /// Construct from an explicit timestamp + 10-byte random payload.
     /// Useful for reproducible tests and batch generation where the
     /// caller wants a monotone seed.

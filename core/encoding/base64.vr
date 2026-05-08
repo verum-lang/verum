@@ -125,6 +125,15 @@ public fn encode_url(input: &[Byte]) -> Text {
     encode_with(input, &URL_ALPHABET, false)
 }
 
+// Convenience alias clarifying that `encode_url` already omits the
+// '=' padding (per RFC 4648 §5 url-safe form).  Several callers
+// reach for the explicit `_no_pad` spelling rather than relying on
+// the implicit no-pad default of `encode_url`.
+@inline(always)
+public fn encode_url_no_pad(input: &[Byte]) -> Text {
+    encode_with(input, &URL_ALPHABET, false)
+}
+
 fn encode_with(input: &[Byte], alpha: &[Byte; 64], pad: Bool) -> Text {
     let n = input.len();
     // Output length: ceil(n/3) * 4. Pad-or-not affects the tail
@@ -169,6 +178,12 @@ public fn decode(input: &Text) -> Result<List<Byte>, Base64Error> {
 // Decode a URL-safe base64 string. Padding is optional.
 @inline(always)
 public fn decode_url(input: &Text) -> Result<List<Byte>, Base64Error> {
+    decode_with(input, true)
+}
+
+// Alias of `decode_url` — see `encode_url_no_pad` for rationale.
+@inline(always)
+public fn decode_url_no_pad(input: &Text) -> Result<List<Byte>, Base64Error> {
     decode_with(input, true)
 }
 
