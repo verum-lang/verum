@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, error-chain, ErrorSource, format_error_chain, multi-level
+// @timeout: 15000
+// @description: Verifies that core.base.error.format_error_chain traverses a
+//               multi-level ErrorSource chain correctly.  Tests 1-, 2-, and
+//               3-level deep chains, including the empty-source (root) case.
+//
+// Regression guard for: format_error_chain must walk the full chain via
+// ErrorSource.source(), not just report the top-level description.  A 3-level
+// chain must produce exactly three lines joined by "\ncaused by: ".
+
+mount core.*;
+mount core.base.error.{format_error_chain, ErrorChain};
+mount core.base.protocols.{Describable, ErrorSource};
+
+// ─── Leaf error (no source) ───────────────────────────────────────────────────
+
+type LeafError is { msg: Text };
+
+implement Describable for LeafError {
+    public fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for LeafError {
+    public fn source(&self) -> Maybe<&dyn ErrorSource> { None }
+}
+
+// ─── Mid-level error (wraps one source) ──────────────────────────────────────
+
+type MidError is { msg: Text, cause: LeafError };
+
+implement Describable for MidError {
+    public fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for MidError {
+    public fn source(&self) -> Maybe<&dyn ErrorSource> {
+        Some(&self.cause as &dyn ErrorSource)
+    }
+}
+
+// ─── Top-level error (wraps MidError) ────────────────────────────────────────
+
+type TopError is { msg: Text, cause: MidError };
+
+implement Describable for TopError {
+    public fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for TopError {
+    public fn source(&self) -> Maybe<&dyn ErrorSource> {
+        Some(&self.cause as &dyn ErrorSource)
+    }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+fn test_root_only() {
+    let leaf = LeafError { msg: Text.from("root cause") };
+    let chain = format_error_chain(&leaf as &dyn ErrorSource);
+    assert_eq(chain, Text.from("root cause"), Text.from("single-level chain"));
+}
+
+fn test_two_level_chain() {
+    let leaf = LeafError { msg: Text.from("disk full") };
+    let mid = MidError { msg: Text.from("write failed"), cause: leaf };
+    let chain = format_error_chain(&mid as &dyn ErrorSource);
+    let expected = Text.from("write failed\ncaused by: disk full");
+    assert_eq(chain, expected, Text.from("two-level chain format"));
+}
+
+fn test_three_level_chain() {
+    let leaf = LeafError { msg: Text.from("ENOSPC") };
+    let mid = MidError { msg: Text.from("write syscall failed"), cause: leaf };
+    let top = TopError { msg: Text.from("save transaction aborted"), cause: mid };
+    let chain = format_error_chain(&top as &dyn ErrorSource);
+    let expected = Text.from(
+        "save transaction aborted\ncaused by: write syscall failed\ncaused by: ENOSPC"
+    );
+    assert_eq(chain, expected, Text.from("three-level chain format"));
+}
+
+fn test_error_chain_iterator_depth() {
+    let leaf = LeafError { msg: Text.from("ENOSPC") };
+    let mid = MidError { msg: Text.from("write failed"), cause: leaf };
+    let top = TopError { msg: Text.from("save aborted"), cause: mid };
+
+    let mut chain = ErrorChain.new(&top as &dyn ErrorSource);
+    let d0 = chain.next();
+    let d1 = chain.next();
+    let d2 = chain.next();
+    let d3 = chain.next();
+
+    assert(d0 == Some(Text.from("save aborted")),    Text.from("depth 0"));
+    assert(d1 == Some(Text.from("write failed")),    Text.from("depth 1"));
+    assert(d2 == Some(Text.from("ENOSPC")),          Text.from("depth 2"));
+    assert(d3 == None,                               Text.from("chain exhausted"));
+}
+
+fn main() {
+    test_root_only();
+    test_two_level_chain();
+    test_three_level_chain();
+    test_error_chain_iterator_depth();
+    print("format_error_chain multi-level typecheck ok");
+}
