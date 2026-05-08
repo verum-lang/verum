@@ -231,10 +231,10 @@ axiomatization\n  \
   K_Smt_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Eps_Mu_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   (* (K_Universe_Ascent: discharged — collapses onto T_univ.) *) \n  \
-  K_Round_Trip_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Epsilon_Of_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Alpha_Of_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Modal_Big_And_iou :: \"Ctx \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\"";
+  (* (K_Epsilon_Of: discharged — see T_epsilon_of below.) *)\n  \
+  (* (K_Alpha_Of: discharged — see T_alpha_of below.) *)\n  \
+  (* (K_Modal_Big_And: discharged — see T_modal_big_and below.) *)\n  \
+  K_Round_Trip_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\"";
 
 // ============================================================================
 // The Typing inductive — 38 introduction rules.
@@ -275,11 +275,11 @@ where\n\
 | T_eps_mu:       \"K_Eps_Mu_iou \\<Gamma> articulation enactment ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
 | T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
 | T_round_trip:   \"K_Round_Trip_iou \\<Gamma> term recovered \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
-| T_epsilon_of:   \"K_Epsilon_Of_iou \\<Gamma> articulation result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
-| T_alpha_of:     \"K_Alpha_Of_iou \\<Gamma> enactment result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
+| T_epsilon_of:   \"\\<Gamma> \\<turnstile> articulation : result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
+| T_alpha_of:     \"\\<Gamma> \\<turnstile> enactment : result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
 | T_modal_box:    \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBox inner : T\"\n\
 | T_modal_diamond:\"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalDiamond inner : T\"\n\
-| T_modal_big_and:\"K_Modal_Big_And_iou \\<Gamma> components result \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n\
+| T_modal_big_and:\"\\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n\
 | T_shape:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Shape inner : T\"\n\
 | T_flat:         \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Flat inner : T\"\n\
 | T_sharp:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Sharp inner : T\"";
@@ -473,13 +473,13 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Epsilon_Of" => Some(
             "lemma K_Epsilon_Of_sound:\n  \
-              assumes \"K_Epsilon_Of_iou \\<Gamma> articulation result\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> articulation : result\"\n  \
               shows \"\\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n  \
               using assms by (rule T_epsilon_of)",
         ),
         "K_Alpha_Of" => Some(
             "lemma K_Alpha_Of_sound:\n  \
-              assumes \"K_Alpha_Of_iou \\<Gamma> enactment result\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> enactment : result\"\n  \
               shows \"\\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n  \
               using assms by (rule T_alpha_of)",
         ),
@@ -495,9 +495,8 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Modal_Big_And" => Some(
             "lemma K_Modal_Big_And_sound:\n  \
-              assumes \"K_Modal_Big_And_iou \\<Gamma> components result\"\n  \
               shows \"\\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n  \
-              using assms by (rule T_modal_big_and)",
+              by (rule T_modal_big_and)",
         ),
         "K_Shape" => Some(
             "lemma K_Shape_sound:\n  \
