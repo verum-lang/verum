@@ -60,6 +60,7 @@ module core.time.rfc3339;
 
 mount core.*;
 mount core.collections.List;
+mount core.time.system_time.SystemTime;
 
 // =============================================================================
 // Parsed value
@@ -334,4 +335,36 @@ fn push_padded(dst: &mut List<Byte>, n: Int, width: Int) {
     while buf.len() < width { buf.push('0' as Byte); }
     let mut i: Int = buf.len() - 1;
     while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}
+
+// =============================================================================
+// Now / time-arithmetic helpers
+// =============================================================================
+
+/// Snapshot the wall-clock as an Rfc3339Time in UTC.  Convenience for
+/// audit-row creation, certificate validity windows, replication
+/// timestamps, etc.
+public fn now_utc() -> Rfc3339Time {
+    let st = SystemTime.now();
+    Rfc3339Time {
+        unix_seconds:   st.secs,
+        nanos:          st.nanos,
+        offset_minutes: 0,
+    }
+}
+
+/// Add `delta` seconds to an Rfc3339Time, preserving the original
+/// offset and sub-second fraction.  Negative values subtract.
+public fn add_seconds(t: &Rfc3339Time, delta: Int) -> Rfc3339Time {
+    Rfc3339Time {
+        unix_seconds:   t.unix_seconds + delta,
+        nanos:          t.nanos,
+        offset_minutes: t.offset_minutes,
+    }
+}
+
+/// Difference in seconds between two Rfc3339 timestamps (`later - earlier`),
+/// ignoring sub-second precision.  Negative when `later < earlier`.
+public fn diff_seconds(later: &Rfc3339Time, earlier: &Rfc3339Time) -> Int {
+    later.unix_seconds - earlier.unix_seconds
 }

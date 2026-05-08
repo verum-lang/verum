@@ -94,3 +94,15 @@ public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
         i = i + 1;
     }
 }
+
+/// Allocate and return `n` cryptographically secure random bytes as a
+/// fresh `List<Byte>`.  Convenience for one-shot uses (challenge ids,
+/// salts, nonces) where the caller doesn't already own a destination
+/// buffer.
+public fn secure_random_bytes(n: Int) -> List<Byte> {
+    let mut buf: List<Byte> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { buf.push(0_u8); i = i + 1; }
+    fill_secure(&mut buf);
+    buf
+}

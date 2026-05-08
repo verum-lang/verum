@@ -369,3 +369,16 @@ implement Sha256 {
         s.finalize()
     }
 }
+
+// Free function shorthand for `Sha256.digest(data)`.  Mirrors the
+// established stdlib pattern of providing module-level wrappers next
+// to inherent-method APIs so consumers can write
+//
+//     mount core.security.hash.sha256.{digest as sha256_digest};
+//
+// without needing to bring the unit-marker `Sha256` into scope just
+// to call its static.
+@inline
+public fn digest(data: &[Byte]) -> [Byte; 32] {
+    Sha256.digest(data)
+}
