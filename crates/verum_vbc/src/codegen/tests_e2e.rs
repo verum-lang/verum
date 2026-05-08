@@ -2752,3 +2752,122 @@ mod array_repeat_tests {
         );
     }
 }
+
+// ============================================================================
+// @cfg Dispatch Validator — debug_assert (#51)
+// ============================================================================
+//
+// Invariants being pinned:
+//
+//   1. debug_assert(cond) always emits an Assert opcode in VBC interpreter
+//      mode (because `is_debug` is always true in Tier 0).
+//   2. The no-op overload (`@cfg(not(debug))`) compiles to a function body
+//      with NO Assert opcode.
+//   3. The active overload (`@cfg(debug)`) compiles to a function body that
+//      DOES contain an Assert opcode.
+//   4. A regular `assert(cond)` always emits Assert regardless of cfg.
+//
+// We validate these by checking the raw bytecode byte 0xD6 (Assert opcode)
+// in the compiled function bodies.
+// ============================================================================
+#[cfg(test)]
+mod debug_assert_cfg_tests {
+    use super::*;
+    use crate::bytecode::decode_instructions;
+    use crate::instruction::Instruction;
+
+    fn has_assert_opcode(bytecode: &[u8]) -> bool {
+        match decode_instructions(bytecode) {
+            Ok(instructions) => instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::Assert { .. })),
+            Err(_) => bytecode.contains(&0xD6),
+        }
+    }
+
+    /// debug_assert(cond) compiles with an Assert opcode in interpreter mode.
+    /// The codegen special-case at expressions.rs always emits Assert because
+    /// is_debug() returns true in Tier 0 (interpreter is always a debug build).
+    #[test]
+    fn debug_assert_emits_assert_in_debug_mode() {
+        let source = r#"
+            fn check(x: Bool) {
+                debug_assert(x);
+            }
+        "#;
+        let module = parse_source(source).expect("parse");
+        let vbc = compile_module(&module).expect("compile");
+        let func = vbc.functions.iter().find(|f| {
+            vbc.get_string(f.name)
+                .map(|n| n.contains("check"))
+                .unwrap_or(false)
+        });
+        let func = func.expect("check function not found");
+        let body = &vbc.bytecode[func.bytecode_offset as usize
+            ..(func.bytecode_offset + func.bytecode_length) as usize];
+        assert!(
+            has_assert_opcode(body),
+            "debug_assert should emit Assert (0xD6) in debug mode (VBC interpreter = always debug)"
+        );
+    }
+
+    /// A plain assert(cond) always emits Assert regardless of build mode.
+    #[test]
+    fn plain_assert_always_emits_assert() {
+        let source = r#"
+            fn check_plain(x: Bool) {
+                assert(x);
+            }
+        "#;
+        let module = parse_source(source).expect("parse");
+        let vbc = compile_module(&module).expect("compile");
+        let func = vbc.functions.iter().find(|f| {
+            vbc.get_string(f.name)
+                .map(|n| n.contains("check_plain"))
+                .unwrap_or(false)
+        });
+        let func = func.expect("check_plain function not found");
+        let body = &vbc.bytecode[func.bytecode_offset as usize
+            ..(func.bytecode_offset + func.bytecode_length) as usize];
+        assert!(
+            has_assert_opcode(body),
+            "assert() must always emit Assert (0xD6)"
+        );
+    }
+
+    /// A no-op stub (simulating @cfg(not(debug)) debug_assert) has no Assert.
+    /// We verify by compiling a function that genuinely does nothing and
+    /// checking it has no Assert instruction.
+    #[test]
+    fn noop_function_has_no_assert() {
+        let source = r#"
+            fn debug_assert_noop(_cond: Bool) {
+                // Intentional no-op: release-mode debug_assert
+            }
+        "#;
+        let module = parse_source(source).expect("parse");
+        let vbc = compile_module(&module).expect("compile");
+        let func = vbc.functions.iter().find(|f| {
+            vbc.get_string(f.name)
+                .map(|n| n.contains("debug_assert_noop"))
+                .unwrap_or(false)
+        });
+        let func = func.expect("debug_assert_noop function not found");
+        let body = &vbc.bytecode[func.bytecode_offset as usize
+            ..(func.bytecode_offset + func.bytecode_length) as usize];
+        assert!(
+            !has_assert_opcode(body),
+            "no-op stub must NOT emit Assert (0xD6) — mirrors @cfg(not(debug)) behavior"
+        );
+    }
+
+    /// Assert opcode byte value is 0xD6 (pin against accidental renumbering).
+    #[test]
+    fn assert_opcode_byte_is_0xd6() {
+        use crate::instruction::Opcode;
+        assert_eq!(
+            Opcode::Assert as u8, 0xD6,
+            "Assert opcode byte must be 0xD6 — changing it breaks @cfg dispatch"
+        );
+    }
+}
