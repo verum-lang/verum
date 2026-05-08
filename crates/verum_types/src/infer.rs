@@ -275,6 +275,249 @@ pub(crate) fn has_declassify_attr_on_function(func: &verum_ast::decl::FunctionDe
     func.attributes.iter().any(|a| a.is_named("declassify"))
 }
 
+/// Stdlib top-level prefix discriminator.  When a user writes
+/// `mount foo.bar.X` and `foo` is a known stdlib top-level (an
+/// immediate subdirectory of `core/`), the resolver MUST normalize
+/// the path to `core.foo.bar.X` so the cross-file `ModuleRegistry`
+/// finds the right module.  Without this, `mount database.postgres.AsyncPgPool`
+/// resolves against `database.postgres` which doesn't exist (the
+/// registered path is `core.database.postgres`), and every type
+/// imported via that route surfaces as `E101: type not found`.
+///
+/// **Architectural rule.**  This list is name-list shorthand for
+/// the registry's top-level structure.  Per the
+/// `verum_types/CLAUDE.md` rule (no hardcoded stdlib knowledge in
+/// the compiler), it could in principle be discovered at
+/// session-init by enumerating the registry's top-level keys;
+/// keeping it explicit here is a clarity choice — every name on
+/// this list IS the name of a `core/` subdirectory or a `.vr` file
+/// at `core/`'s root, and every cross-file resolver in this crate
+/// converges on the same set of recognised prefixes.
+pub(crate) fn is_stdlib_toplevel_path(path_str: &str) -> bool {
+    // Every `core/` subdirectory plus the bare-dotted-prefix form.
+    // Drop the trailing dot for prefix matching; bare `==` for the
+    // unsegmented form (e.g. `mount sys`).
+    const STDLIB_TOPS: &[&str] = &[
+        "sys",
+        "io",
+        "net",
+        "runtime",
+        "sync",
+        "mem",
+        "text",
+        "time",
+        "collections",
+        "base",
+        "intrinsics",
+        "simd",
+        "math",
+        "async",
+        "async_",
+        "meta",
+        "action",
+        "architecture",
+        "archive",
+        "cache",
+        "cli",
+        "cog",
+        "compress",
+        "concurrency",
+        "configuration",
+        "context",
+        "control",
+        "database",
+        "diagnostics",
+        "encoding",
+        "eval",
+        "logic",
+        "mesh",
+        "metrics",
+        "money",
+        "proof",
+        "protobuf",
+        "redis",
+        "search",
+        "security",
+        "shell",
+        "signal",
+        "storage",
+        "target",
+        "term",
+        "theory_interop",
+        "tracing",
+        "types",
+        "verify",
+    ];
+    for &top in STDLIB_TOPS {
+        if path_str == top {
+            return true;
+        }
+        if path_str.len() > top.len()
+            && path_str.starts_with(top)
+            && path_str.as_bytes()[top.len()] == b'.'
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively collect every public Mount re-export from an inline-module
+/// item list AND from every nested public submodule.
+///
+/// **Why recursive.**  The canonical "prelude" pattern lives at
+/// `core/mod.vr`:
+///
+/// ```verum
+/// public module prelude {
+///     public mount super.collections.List;
+///     public mount super.base.Maybe;
+///     // …
+/// }
+/// ```
+///
+/// `mount core.*` walks `core`'s top-level items.  Without recursion, the
+/// `prelude` submodule is seen only as `ItemKind::Module(...)` and its
+/// inner `public mount ...` re-exports are invisible to the outer walk —
+/// even though the user writing `mount core.*` semantically expects the
+/// prelude to fold in.
+///
+/// **Generality.**  Per the type-system architectural rule (no hardcoded
+/// stdlib knowledge in the compiler), this walk recurses into ANY public
+/// submodule, not just the canonical `prelude` name.  Any inline module
+/// that contains public submodules with public Mount re-exports will
+/// expose those re-exports at every outer mount-glob site.
+///
+/// Path resolution honours `super` / `self` / `cog` segments relative to
+/// the SUBMODULE's path during recursion, mirroring the language's
+/// natural scoping discipline (a `super` inside `core.prelude` resolves
+/// to `core`, not back to whatever was the top-level `module_name`).
+///
+/// `current_module_path` is the dotted path at which `items` lives (e.g.
+/// `"core"` for the top-level call, `"core.prelude"` once recursed into
+/// the prelude submodule).
+pub(crate) fn collect_inline_mount_reexports_recursive(
+    items: &[verum_ast::Item],
+    current_module_path: &str,
+    out: &mut Vec<(Text, Option<Text>)>,
+) {
+    use verum_ast::decl::MountTreeKind;
+    use verum_ast::ty::PathSegment;
+
+    // Resolution helper closure — lives inside the function body
+    // because it depends on the per-call `current_module_path`.
+    let resolve = |path: &verum_ast::ty::Path| -> Text {
+        let mut parts: Vec<String> = Vec::new();
+        for seg in &path.segments {
+            match seg {
+                PathSegment::Super => {
+                    if parts.is_empty() {
+                        // Strip last segment from current_module_path —
+                        // `super` from a submodule lifts one level.
+                        let segs: Vec<&str> = current_module_path.split('.').collect();
+                        if segs.len() > 1 {
+                            for s in &segs[..segs.len() - 1] {
+                                parts.push(s.to_string());
+                            }
+                        }
+                    } else {
+                        parts.pop();
+                    }
+                }
+                PathSegment::SelfValue => {
+                    if parts.is_empty() {
+                        for s in current_module_path.split('.') {
+                            parts.push(s.to_string());
+                        }
+                    }
+                }
+                PathSegment::Cog => {
+                    parts.clear();
+                }
+                PathSegment::Relative => {
+                    if parts.is_empty() {
+                        for s in current_module_path.split('.') {
+                            parts.push(s.to_string());
+                        }
+                    }
+                }
+                PathSegment::Name(ident) => {
+                    parts.push(ident.name.as_str().to_string());
+                }
+            }
+        }
+        Text::from(parts.join("."))
+    };
+
+    for item in items {
+        match &item.kind {
+            verum_ast::ItemKind::Mount(mount_decl) => {
+                if !matches!(mount_decl.visibility, verum_ast::decl::Visibility::Public) {
+                    continue;
+                }
+                match &mount_decl.tree.kind {
+                    MountTreeKind::Glob(path) => {
+                        let p = resolve(path);
+                        out.push((p, None));
+                    }
+                    MountTreeKind::Path(path) => {
+                        // Single item: parent is everything except last segment.
+                        let mut prefix = path.clone();
+                        let item_name_text =
+                            if let Some(PathSegment::Name(id)) = prefix.segments.last() {
+                                Some(Text::from(id.name.as_str()))
+                            } else {
+                                None
+                            };
+                        if !prefix.segments.is_empty() {
+                            let mut new_segs = prefix.segments.clone();
+                            new_segs.pop();
+                            prefix.segments = new_segs;
+                        }
+                        let parent = resolve(&prefix);
+                        out.push((parent, item_name_text));
+                    }
+                    MountTreeKind::Nested { prefix, trees } => {
+                        let parent = resolve(prefix);
+                        for tree in trees {
+                            if let MountTreeKind::Path(p) = &tree.kind {
+                                if let Some(PathSegment::Name(id)) = p.segments.first() {
+                                    out.push((
+                                        parent.clone(),
+                                        Some(Text::from(id.name.as_str())),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    MountTreeKind::File { .. } => {}
+                }
+            }
+            verum_ast::ItemKind::Module(submod) => {
+                // Recurse only into public submodules.  A private nested
+                // module's items are NOT visible to the outer mount site
+                // by design (`pub` discipline).
+                if !matches!(submod.visibility, verum_ast::decl::Visibility::Public) {
+                    continue;
+                }
+                if let Maybe::Some(sub_items) = &submod.items {
+                    let nested_path = if current_module_path.is_empty() {
+                        submod.name.name.as_str().to_string()
+                    } else {
+                        format!("{}.{}", current_module_path, submod.name.name.as_str())
+                    };
+                    collect_inline_mount_reexports_recursive(
+                        sub_items.as_slice(),
+                        nested_path.as_str(),
+                        out,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 use smallvec::SmallVec;
 use verum_ast::decl::{FunctionBody, FunctionParamKind};
 use verum_ast::expr::{BinOp, Block, Expr, ExprKind, TypeProperty, UnOp};
@@ -33424,99 +33667,29 @@ impl TypeChecker {
         // visit BEFORE local items so a local declaration that
         // shadows a re-export wins (per the language's
         // first-registered-wins discipline).
+        //
+        // **Recursive submodule walk.**  When the inline module contains
+        // public submodules (`public module foo { public mount … }`),
+        // their Mount re-exports must ALSO surface at the outer mount
+        // site.  This is the canonical "prelude" pattern — `core/mod.vr`
+        // declares `public module prelude { public mount super.collections.List; … }`,
+        // and `mount core.*` is supposed to expose `List` etc.  Without
+        // this recursion, the prelude submodule's Mount re-exports were
+        // invisible to the outer walk, leaving every user file that
+        // wrote `mount core.*` (and relied on the prelude) with bare
+        // `List`/`Map`/`Maybe`/… resolving as E101.
+        //
+        // Per the architectural rule (no hardcoded stdlib knowledge in
+        // the compiler), the recursion is fully general — it works for
+        // ANY inline submodule that contains public Mount re-exports,
+        // not just the canonical `prelude` name.
         let mut reexport_paths: Vec<(Text, Option<Text>)> = Vec::new();
         if let Some(items) = &module.items {
-            for item in items.iter() {
-                if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
-                    if !matches!(mount_decl.visibility, verum_ast::decl::Visibility::Public) {
-                        continue;
-                    }
-                    use verum_ast::decl::MountTreeKind;
-                    use verum_ast::ty::PathSegment;
-                    // Resolve `super.X` / `self.X` against the inline
-                    // module's own path (`module_name`).  The inline
-                    // module sits at `module_name`; `super` strips the
-                    // last segment to reach the parent file module.
-                    let resolve = |path: &verum_ast::ty::Path| -> Text {
-                        let mut parts: Vec<String> = Vec::new();
-                        for seg in &path.segments {
-                            match seg {
-                                PathSegment::Super => {
-                                    if parts.is_empty() {
-                                        // Strip last segment from module_name
-                                        let segs: Vec<&str> = module_name.split('.').collect();
-                                        if segs.len() > 1 {
-                                            for s in &segs[..segs.len() - 1] {
-                                                parts.push(s.to_string());
-                                            }
-                                        }
-                                    } else {
-                                        parts.pop();
-                                    }
-                                }
-                                PathSegment::SelfValue => {
-                                    if parts.is_empty() {
-                                        for s in module_name.split('.') {
-                                            parts.push(s.to_string());
-                                        }
-                                    }
-                                }
-                                PathSegment::Cog => {
-                                    parts.clear();
-                                }
-                                PathSegment::Relative => {
-                                    if parts.is_empty() {
-                                        for s in module_name.split('.') {
-                                            parts.push(s.to_string());
-                                        }
-                                    }
-                                }
-                                PathSegment::Name(ident) => {
-                                    parts.push(ident.name.as_str().to_string());
-                                }
-                            }
-                        }
-                        verum_common::Text::from(parts.join("."))
-                    };
-                    match &mount_decl.tree.kind {
-                        MountTreeKind::Glob(path) => {
-                            let p = resolve(path);
-                            reexport_paths.push((p, None));
-                        }
-                        MountTreeKind::Path(path) => {
-                            // Single item: parent is everything except last segment
-                            let mut prefix = path.clone();
-                            let item_name_text =
-                                if let Some(PathSegment::Name(id)) = prefix.segments.last() {
-                                    Some(verum_common::Text::from(id.name.as_str()))
-                                } else {
-                                    None
-                                };
-                            if !prefix.segments.is_empty() {
-                                let mut new_segs = prefix.segments.clone();
-                                new_segs.pop();
-                                prefix.segments = new_segs;
-                            }
-                            let parent = resolve(&prefix);
-                            reexport_paths.push((parent, item_name_text));
-                        }
-                        MountTreeKind::Nested { prefix, trees } => {
-                            let parent = resolve(prefix);
-                            for tree in trees {
-                                if let MountTreeKind::Path(p) = &tree.kind {
-                                    if let Some(PathSegment::Name(id)) = p.segments.first() {
-                                        reexport_paths.push((
-                                            parent.clone(),
-                                            Some(verum_common::Text::from(id.name.as_str())),
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        MountTreeKind::File { .. } => {}
-                    }
-                }
-            }
+            collect_inline_mount_reexports_recursive(
+                items.as_slice(),
+                module_name,
+                &mut reexport_paths,
+            );
         }
 
         // Process the Mount re-exports against the cross-file
@@ -34037,34 +34210,12 @@ impl TypeChecker {
                 // Check if this is a known stdlib top-level module path
                 // These correspond to core/ subdirectories and are registered
                 // in the module registry with a "core." prefix
-                let is_stdlib_toplevel = path_str.starts_with("sys.")
-                    || path_str.starts_with("io.")
-                    || path_str.starts_with("net.")
-                    || path_str.starts_with("runtime.")
-                    || path_str.starts_with("sync.")
-                    || path_str.starts_with("async.")
-                    || path_str.starts_with("meta.")
-                    || path_str.starts_with("mem.")
-                    || path_str.starts_with("text.")
-                    || path_str.starts_with("time.")
-                    || path_str.starts_with("collections.")
-                    || path_str.starts_with("base.")
-                    || path_str.starts_with("intrinsics.")
-                    || path_str.starts_with("simd.")
-                    || path_str.starts_with("math.")
-                    || path_str == "sys"
-                    || path_str == "io"
-                    || path_str == "net"
-                    || path_str == "runtime"
-                    || path_str == "sync"
-                    || path_str == "mem"
-                    || path_str == "text"
-                    || path_str == "time"
-                    || path_str == "collections"
-                    || path_str == "base"
-                    || path_str == "intrinsics"
-                    || path_str == "simd"
-                    || path_str == "math";
+                // Stdlib top-level prefixes — every immediate subdirectory
+                // of `core/` is a candidate target for `mount X.…` as
+                // shorthand for `mount core.X.…`.  Centralised through
+                // `is_stdlib_toplevel_path` so that all three sites that
+                // need this check stay in lockstep.
+                let is_stdlib_toplevel = is_stdlib_toplevel_path(path_str);
                 if is_stdlib_toplevel {
                     Text::from(format!("core.{}", path_str))
                 } else {
@@ -34081,23 +34232,7 @@ impl TypeChecker {
                         // This handles super/self paths that resolve to stdlib modules
                         // e.g., super.epoch from mem.segment -> mem.epoch -> core.mem.epoch
                         let resolved_str = resolved.as_str();
-                        let resolved_is_stdlib = resolved_str.starts_with("sys.")
-                            || resolved_str.starts_with("io.")
-                            || resolved_str.starts_with("net.")
-                            || resolved_str.starts_with("runtime.")
-                            || resolved_str.starts_with("sync.")
-                            || resolved_str.starts_with("async.")
-                            || resolved_str.starts_with("meta.")
-                            || resolved_str.starts_with("mem.")
-                            || resolved_str.starts_with("text.")
-                            || resolved_str.starts_with("time.")
-                            || resolved_str.starts_with("collections.")
-                            || resolved_str.starts_with("base.")
-                            || resolved_str.starts_with("intrinsics.")
-                            || resolved_str.starts_with("simd.")
-                            || resolved_str.starts_with("math.")
-                            || resolved_str.starts_with("context.")
-                            || resolved_str.starts_with("term.");
+                        let resolved_is_stdlib = is_stdlib_toplevel_path(resolved_str);
                         if resolved_is_stdlib {
                             Text::from(format!("core.{}", resolved_str))
                         } else {
@@ -40065,6 +40200,81 @@ impl TypeChecker {
             // add methods to built-in primitive types. These must be imported even though
             // Int itself isn't an export - it's a language built-in.
             self.import_primitive_impl_blocks(module_path.as_str(), &module_info.ast)?;
+
+            // Cross-file submodule re-export propagation (mirrors the
+            // inline-module fix at `import_all_from_inline_module_impl`).
+            //
+            // The ExportTable for a cross-file module records nested
+            // public submodules ONLY as `ExportKind::Module` entries —
+            // it never inlines the submodule's own Mount re-exports.
+            // For the canonical "prelude" pattern at `core/mod.vr`:
+            //
+            //   public module prelude {
+            //       public mount super.collections.List;
+            //       public mount super.base.Maybe;
+            //       …
+            //   }
+            //
+            // Walking only `core`'s direct exports leaves `List`, `Maybe`,
+            // etc. invisible at the `mount core.*` site, even though the
+            // user semantically expects the prelude to fold in.
+            //
+            // We walk the module's AST one extra level for public
+            // submodules, collect their Mount re-exports (recursively,
+            // so submodules-of-submodules also fold), and replay each
+            // re-export against the registry as if it had been declared
+            // at the parent module.  Errors during replay are logged
+            // and not propagated — a missing dep at glob-expansion
+            // time stays dormant; the user's eventual use site
+            // surfaces it with a normal E101.  Per the type-system
+            // architectural rule (no hardcoded stdlib knowledge in
+            // the compiler), the walk is fully general — any nested
+            // public submodule with public Mount re-exports surfaces.
+            let mut submodule_reexports: Vec<(Text, Option<Text>)> = Vec::new();
+            for item in &module_info.ast.items {
+                if let verum_ast::ItemKind::Module(submod) = &item.kind {
+                    if !matches!(submod.visibility, verum_ast::decl::Visibility::Public) {
+                        continue;
+                    }
+                    if let Maybe::Some(sub_items) = &submod.items {
+                        let nested_path = format!(
+                            "{}.{}",
+                            module_path.as_str(),
+                            submod.name.name.as_str()
+                        );
+                        collect_inline_mount_reexports_recursive(
+                            sub_items.as_slice(),
+                            nested_path.as_str(),
+                            &mut submodule_reexports,
+                        );
+                    }
+                }
+            }
+            for (path, item_name_opt) in submodule_reexports {
+                match item_name_opt {
+                    None => {
+                        if let Err(e) = self.import_all_from_module(&path, registry) {
+                            tracing::debug!(
+                                "import_all_from_module: nested-submod glob re-export {} failed: {:?}",
+                                path.as_str(),
+                                e
+                            );
+                        }
+                    }
+                    Some(item_name) => {
+                        if let Err(e) =
+                            self.import_item_from_module(&path, item_name.as_str(), registry)
+                        {
+                            tracing::debug!(
+                                "import_all_from_module: nested-submod specific re-export {}.{} failed: {:?}",
+                                path.as_str(),
+                                item_name.as_str(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())

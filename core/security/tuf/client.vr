@@ -619,6 +619,17 @@ fn parse_root(bytes: &[Byte]) -> Result<(RootMetadata, List<Byte>, List<Signatur
     Ok((root, payload, env.signatures))
 }
 
+/// Public wrapper: parse a TUF `root.json` envelope's bytes into a
+/// `RootMetadata` record without performing signature verification.
+///
+/// Callers that bootstrap from a content-pinned root (e.g.,
+/// downstream supply-chain anchors) use this to seed
+/// `trusted_state_new(root)` before running `update`, which
+/// re-validates the root against its own keys + chains forward.
+public fn parse_root_public(bytes: &[Byte]) -> Result<RootMetadata, TufClientError> {
+    parse_root(bytes).map(|(root, _, _)| root)
+}
+
 fn parse_timestamp(bytes: &[Byte]) -> Result<(TimestampMetadata, List<Byte>, List<Signature>), TufClientError> {
     let env = decode_envelope(bytes)?;
     let payload = canonical_signing_payload(&env.signed_value).map_err(|e| Canonical(e))?;

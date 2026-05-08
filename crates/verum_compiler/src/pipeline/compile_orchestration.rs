@@ -935,16 +935,65 @@ impl<'s> CompilationPipeline<'s> {
                 // Pass 0: Process imports to register imported types and functions
                 // This must happen before type declarations to handle cross-file types
                 // Cross-module name resolution: process imports before type declarations.
-                for item in &module.items {
-                    if let verum_ast::ItemKind::Mount(import) = &item.kind {
-                        if let Err(type_error) =
-                            checker.process_import(import, path.as_str(), &registry.read())
-                        {
-                            let diag = type_error_to_diagnostic(&type_error, Some(self.session));
-                            self.session.emit_diagnostic(diag);
+                //
+                // **Recursive walk.**  Earlier this pass iterated only the
+                // top level of `module.items`, so any `mount X.Y.Z`
+                // declaration that the parser placed INSIDE a nested
+                // `ItemKind::Module(...)` body — which happens whenever
+                // the user file's own `module foo;` declaration produces
+                // a wrapper that absorbs subsequent items — was silently
+                // skipped, and the imported names never landed in the
+                // checker's environment.  The recursive walk fixes this
+                // class of multi-file-only "type not found" failures
+                // without changing single-file semantics.
+                fn process_imports_recursive(
+                    checker: &mut TypeChecker,
+                    items: &[verum_ast::Item],
+                    current_module_path: &str,
+                    registry: &verum_modules::ModuleRegistry,
+                    session: &crate::session::Session,
+                ) {
+                    for item in items {
+                        match &item.kind {
+                            verum_ast::ItemKind::Mount(import) => {
+                                if let Err(type_error) =
+                                    checker.process_import(import, current_module_path, registry)
+                                {
+                                    let diag = type_error_to_diagnostic(&type_error, Some(session));
+                                    session.emit_diagnostic(diag);
+                                }
+                            }
+                            verum_ast::ItemKind::Module(m) => {
+                                if let verum_common::Maybe::Some(inner_items) = &m.items {
+                                    // Recurse into nested module bodies so
+                                    // mounts inside a wrapping `module foo {
+                                    // ... }` block are processed too.  The
+                                    // nested module's own canonical path is
+                                    // `current.<name>` but for IMPORT
+                                    // purposes (resolving `super` / `self`)
+                                    // we keep the OUTER current_module_path
+                                    // so relative imports stay anchored to
+                                    // the file's identity.
+                                    process_imports_recursive(
+                                        checker,
+                                        inner_items.as_slice(),
+                                        current_module_path,
+                                        registry,
+                                        session,
+                                    );
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
+                process_imports_recursive(
+                    &mut checker,
+                    module.items.as_slice(),
+                    path.as_str(),
+                    &registry.read(),
+                    self.session,
+                );
 
                 // Pass 0: Pre-register all inline modules
                 // This enables cross-module imports even when modules are declared after

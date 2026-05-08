@@ -11,7 +11,7 @@ use crate::path::ModuleId;
 use crate::refinement_info::{RefinementContract, RefinementInfo};
 use serde::{Deserialize, Serialize};
 use verum_ast::{Span, Visibility};
-use verum_common::{Map, Maybe, Text};
+use verum_common::{List, Map, Maybe, Text};
 
 /// An item exported by a module.
 /// Includes refinement and contract information for cross-module verification.
@@ -749,6 +749,36 @@ pub fn extract_exports_from_module(
                         item.span,
                     );
                     export_table.add_export(exported)?;
+
+                    // Public-submodule Path-style re-export propagation.
+                    //
+                    // When the submodule contains `public mount X.{Item}`
+                    // or `public mount X.Item` re-exports, surface those
+                    // items in the OUTER module's export table too.  This
+                    // is the canonical "prelude" pattern at `core/mod.vr`:
+                    //
+                    //   public module prelude {
+                    //       public mount super.collections.List;
+                    //       public mount super.base.Maybe;
+                    //   }
+                    //
+                    // Without this propagation, the outer `core` ExportTable
+                    // shows only `prelude` (as ExportKind::Module) and never
+                    // lists `List`/`Maybe`/etc. — making `mount core.*`
+                    // (which iterates the outer table) silently miss every
+                    // prelude-routed name.
+                    //
+                    // Glob-style submodule re-exports (`public mount super.X.*`)
+                    // remain deferred to link-resolution time; we surface
+                    // only the explicit names because those are the ones
+                    // the static-time export table can record.
+                    if let Maybe::Some(sub_items) = &mod_decl.items {
+                        propagate_submodule_reexports(
+                            sub_items,
+                            &mut export_table,
+                            module_id,
+                        )?;
+                    }
                 }
             }
 
@@ -987,6 +1017,71 @@ fn add_reexports_from_link(
         MountTreeKind::File { .. } => {
             // Top-level `pub mount ./foo.vr` — same as the nested case:
             // file-mount resolution lives in the session loader, not here.
+        }
+    }
+    Ok(())
+}
+
+/// Propagate explicit re-exports from a public submodule into the parent
+/// module's `ExportTable`.
+///
+/// **Why this exists.**  `extract_exports_from_module` records each
+/// public submodule only as a single `ExportKind::Module` entry — it
+/// never inlines the submodule's own Mount re-exports.  Consumers that
+/// iterate `module.public_exports()` (e.g. `mount core.*` glob expansion)
+/// therefore miss every name the submodule re-exports under itself.
+///
+/// The canonical "prelude" pattern at `core/mod.vr`:
+///
+/// ```verum
+/// public module prelude {
+///     public mount super.collections.List;
+///     public mount super.base.Maybe;
+/// }
+/// ```
+///
+/// Without this propagator, the outer `core` ExportTable shows only
+/// `prelude` and never lists `List`/`Maybe`.  With propagation, the
+/// outer table additionally records `List` and `Maybe` as Type
+/// re-exports.
+///
+/// **Glob suppression.**  `public mount super.foo.*` cannot be
+/// statically expanded at this stage — the target module's exports
+/// are not yet known.  Such Glob mounts are intentionally skipped here
+/// (they get resolved later via `resolve_glob_reexports`).  Only
+/// explicit `Path` and `Nested` re-exports are surfaced.
+///
+/// **Recursion.**  A submodule may itself contain a public submodule
+/// that re-exports — recurse to surface those names too.  Per the
+/// type-system architectural rule (no hardcoded stdlib knowledge),
+/// the walk is fully general.
+fn propagate_submodule_reexports(
+    sub_items: &List<verum_ast::Item>,
+    export_table: &mut ExportTable,
+    module_id: ModuleId,
+) -> ModuleResult<()> {
+    use verum_ast::ItemKind;
+
+    for sub_item in sub_items.iter() {
+        match &sub_item.kind {
+            ItemKind::Mount(mount_decl) => {
+                if mount_decl.visibility == verum_ast::decl::Visibility::Public {
+                    add_reexports_from_link(
+                        &mount_decl.tree,
+                        module_id,
+                        sub_item.span,
+                        export_table,
+                    )?;
+                }
+            }
+            ItemKind::Module(nested) => {
+                if nested.visibility == verum_ast::decl::Visibility::Public {
+                    if let Maybe::Some(deeper_items) = &nested.items {
+                        propagate_submodule_reexports(deeper_items, export_table, module_id)?;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
