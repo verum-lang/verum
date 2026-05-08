@@ -1,0 +1,708 @@
+// =============================================================================
+// core/database/postgres/row.vr — typed row façade for postgres queries
+// =============================================================================
+// Layer: 5 (Database — adapter result API)
+// Dependencies:
+//   core, core.collections, core.base.{Result, Maybe, Text, Int},
+//   core.database.common.{types, error},
+//   core.database.postgres.wire.{backend, codec},
+//   core.time.rfc3339
+// =============================================================================
+//
+// **Purpose.** A column-name-keyed view over `(RowDescription, &List<WireValue>)`
+// pairs.  Higher-level code (the `Database` context, the `AsyncTypedDatabase`
+// wrapper, registry persistence layers) gets ORM-style getters
+// (`row.get_text("col")`, `row.get_bool("active")`, …) without each caller
+// having to thread `RowDescription` lookups + per-OID decoders by hand.
+//
+// **Thin façade.**  `Row` borrows the underlying `RowDescription` and
+// `List<WireValue>` slices; it never copies the bytes.  Each `get_*`
+// method walks the column list once (column counts are typically <30
+// for registry tables, so linear search is competitive with indexing
+// + caches better) and decodes the wire bytes on demand.
+//
+// **Type guards.**  Every getter validates the column's `type_oid`
+// against the requested family (TEXT/VARCHAR for text, INT4/INT8 for
+// int, BOOL for bool, BYTEA for bytes, TIMESTAMP/TIMESTAMPTZ for
+// timestamps, _text array for text-array).  Wire-format mismatches
+// (binary-format columns when the caller assumed text-format, or the
+// OID doesn't match the requested family) surface as
+// `DbError.DecodeFailed` with a populated `DecodeFault`.  Out-of-range
+// columns surface as `Adapter("PG_ROW_COL_NOT_FOUND")`.
+//
+// **Null discipline.**  `get_X` returns `Err(DbError)` when the
+// column is SQL-NULL; `get_X_opt` returns `Ok(None)`.  Callers that
+// query nullable columns MUST use the `_opt` form — using `get_text`
+// on a NULL column is a programmer error.
+//
+// **Format coverage.**  All adapter rows arrive in TEXT format
+// (`format == 0`) by default — that's the wire-default for
+// `PgConnection.simple_query` / `simple_query_arena`.  Binary-format
+// support (`format == 1`) is added on a per-column basis: getters that
+// see a binary-format wire value redirect to the binary decoder in
+// `wire/typed.vr`.  This keeps the surface compatible with both the
+// simple-query path and the prepared-statement-typed path without
+// callers having to know which one was used.
+// =============================================================================
+
+@arch_module(
+    foundation:    Foundation.ZfcTwoInacc,
+    stratum:       MsfsStratum.LCls,
+    lifecycle:     Lifecycle.Theorem("v0.1"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "postgres typed row façade — column-name-keyed getters over wire values",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    },
+)
+module core.database.postgres.row;
+
+mount core.*;
+mount core.base.{Result, Ok, Err, Maybe, Some, None, Text, Int, Bool};
+mount core.collections.List;
+mount core.database.common.types.{WireValue, WvNull, WvPresent, WireFormat, WfText, WfBinary};
+mount core.database.common.error.{
+    DbError, DecodeFault, AdapterSpecific, AdapterId, AdPostgres,
+};
+mount core.database.postgres.wire.backend.{ColumnDesc, RowDescription};
+mount core.database.postgres.wire.codec.{
+    PG_TYPE_BOOL, PG_TYPE_BYTEA, PG_TYPE_INT2, PG_TYPE_INT4, PG_TYPE_INT8,
+    PG_TYPE_TEXT, PG_TYPE_BPCHAR, PG_TYPE_VARCHAR,
+    PG_TYPE_TIMESTAMP, PG_TYPE_TIMESTAMPTZ,
+};
+mount core.time.rfc3339.{Rfc3339Time, parse as parse_rfc3339};
+
+// =============================================================================
+// PG_TYPE_*ARRAY OIDs not exported by codec.vr — keep local consts
+// scoped to the few methods that use them (text[] only for now;
+// extending to other arrays is per-getter incremental work).
+// =============================================================================
+
+const PG_TYPE_TEXT_ARRAY:    Int = 1009; // _text   (text-array)
+const PG_TYPE_VARCHAR_ARRAY: Int = 1015; // _varchar
+const PG_TYPE_BPCHAR_ARRAY:  Int = 1014; // _bpchar
+
+// =============================================================================
+// Row — façade over (RowDescription, &List<WireValue>)
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Row is {
+    /// Borrowed reference into the result's RowDescription.  Cloned
+    /// at row-construction time (cheap — RowDescription is a thin
+    /// `List<ColumnDesc>` wrapper).
+    description: RowDescription,
+    /// One WireValue per column.  Position-aligned with
+    /// `description.columns`.
+    values: List<WireValue>,
+}
+
+implement Row {
+    /// Construct a Row from a wire-level `(RowDescription, values)`
+    /// pair.  Used internally by `Database.query*` methods on the
+    /// adapter side.
+    public fn new(description: RowDescription, values: List<WireValue>) -> Row {
+        Row { description, values }
+    }
+
+    /// Number of columns.
+    public fn column_count(&self) -> Int {
+        self.description.columns.len() as Int
+    }
+
+    /// Lookup a column index by name.  Returns the first match
+    /// (postgres permits duplicate column aliases in SELECT lists;
+    /// callers should disambiguate via aliases when this matters).
+    pub fn column_index(&self, name: &str) -> Maybe<Int> {
+        let mut i: Int = 0;
+        let cols = &self.description.columns;
+        while i < cols.len() as Int {
+            if cols[i].name.as_str() == name {
+                return Some(i);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Whether `name` is SQL-NULL (or out of range — caller
+    /// disambiguates via `column_index`).
+    pub fn is_null(&self, name: &str) -> Bool {
+        match self.column_index(name) {
+            None    => true,
+            Some(i) => self.values[i] is WvNull,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Text family — TEXT, VARCHAR, BPCHAR
+    // -------------------------------------------------------------------------
+
+    /// Decode a text-family column.  Errors on NULL OR if the column's
+    /// `type_oid` doesn't match the text family.
+    public fn get_text(&self, name: &str) -> Result<Text, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_text_family(&col, name)?;
+        decode_text_value(&self.values[col_idx], col_idx, name)
+    }
+
+    /// Nullable text — `Ok(None)` if the column is SQL-NULL.
+    public fn get_text_opt(&self, name: &str) -> Result<Maybe<Text>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_text_family(&col, name)?;
+        if self.values[col_idx] is WvNull {
+            return Ok(None);
+        }
+        decode_text_value(&self.values[col_idx], col_idx, name).map(Some)
+    }
+
+    // -------------------------------------------------------------------------
+    // Boolean — BOOL OID
+    // -------------------------------------------------------------------------
+
+    /// Decode a BOOLEAN column.  Postgres TEXT format is `t`/`f`;
+    /// BINARY format is one byte (`0x00`/`0x01`).
+    public fn get_bool(&self, name: &str) -> Result<Bool, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
+        match &self.values[col_idx] {
+            WvNull => Err(null_decode_failed(col_idx, name, "bool")),
+            WvPresent { bytes, format } => match format {
+                WfText => {
+                    if bytes.len() == 1 {
+                        match bytes[0] {
+                            b't' => Ok(true),
+                            b'f' => Ok(false),
+                            _    => Err(text_decode_failed(col_idx, name, "bool",
+                                f"unexpected byte 0x{bytes[0]:x} for BOOL")),
+                        }
+                    } else {
+                        Err(text_decode_failed(col_idx, name, "bool",
+                            f"expected 1 byte for BOOL TEXT, got {bytes.len()}"))
+                    }
+                }
+                WfBinary => {
+                    if bytes.len() == 1 {
+                        Ok(bytes[0] != 0)
+                    } else {
+                        Err(text_decode_failed(col_idx, name, "bool",
+                            f"expected 1 byte for BOOL BINARY, got {bytes.len()}"))
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Integer — INT2, INT4, INT8
+    // -------------------------------------------------------------------------
+
+    /// Decode an integer column (INT2 / INT4 / INT8).  All three
+    /// converge on `Int`.  Errors on NULL or non-integer OID.
+    public fn get_int(&self, name: &str) -> Result<Int, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_int_family(&col, name)?;
+        decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid)
+    }
+
+    /// Nullable integer.
+    public fn get_int_opt(&self, name: &str) -> Result<Maybe<Int>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_int_family(&col, name)?;
+        if self.values[col_idx] is WvNull {
+            return Ok(None);
+        }
+        decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid).map(Some)
+    }
+
+    // -------------------------------------------------------------------------
+    // Bytes — BYTEA
+    // -------------------------------------------------------------------------
+
+    /// Decode a BYTEA column.  TEXT format uses `\x` hex prefix per
+    /// `bytea_output=hex` (postgres default); BINARY format is direct
+    /// byte stream.
+    public fn get_bytes(&self, name: &str) -> Result<List<Byte>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
+        match &self.values[col_idx] {
+            WvNull => Err(null_decode_failed(col_idx, name, "bytea")),
+            WvPresent { bytes, format } => match format {
+                WfBinary => Ok(bytes.clone()),
+                WfText => decode_bytea_hex(bytes, col_idx, name),
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Timestamp — TIMESTAMP, TIMESTAMPTZ
+    // -------------------------------------------------------------------------
+
+    /// Decode a TIMESTAMP / TIMESTAMPTZ column to RFC 3339.
+    public fn get_timestamp(&self, name: &str) -> Result<Rfc3339Time, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_timestamp_family(&col, name)?;
+        decode_timestamp_value(&self.values[col_idx], col_idx, name)
+    }
+
+    /// Nullable timestamp.
+    public fn get_timestamp_opt(&self, name: &str) -> Result<Maybe<Rfc3339Time>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_timestamp_family(&col, name)?;
+        if self.values[col_idx] is WvNull {
+            return Ok(None);
+        }
+        decode_timestamp_value(&self.values[col_idx], col_idx, name).map(Some)
+    }
+
+    // -------------------------------------------------------------------------
+    // Text array — _text, _varchar, _bpchar
+    // -------------------------------------------------------------------------
+
+    /// Decode a text-array column.  Postgres TEXT format is the
+    /// `{a,b,"with space"}` literal form; BINARY format wraps the
+    /// element wire-encoding with array dimensions/lower-bounds.
+    /// Supports the three interchangeable text-family array OIDs.
+    public fn get_text_array(&self, name: &str) -> Result<List<Text>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        let oid = col.type_oid;
+        if oid != PG_TYPE_TEXT_ARRAY
+           && oid != PG_TYPE_VARCHAR_ARRAY
+           && oid != PG_TYPE_BPCHAR_ARRAY {
+            return Err(DbError.DecodeFailed {
+                fault: DecodeFault {
+                    column_index: col_idx,
+                    column_name:  name.to_text(),
+                    expected_type: "_text|_varchar|_bpchar".to_text(),
+                    found_oid:    oid,
+                    detail:       "column is not a text-array OID".to_text(),
+                },
+            });
+        }
+        match &self.values[col_idx] {
+            WvNull => Err(null_decode_failed(col_idx, name, "text[]")),
+            WvPresent { bytes, format } => match format {
+                WfText   => parse_text_array_text(bytes, col_idx, name),
+                WfBinary => parse_text_array_binary(bytes, col_idx, name),
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    fn column_or_error(&self, name: &str) -> Result<(Int, ColumnDesc), DbError> {
+        match self.column_index(name) {
+            Some(i) => Ok((i, self.description.columns[i].clone())),
+            None    => Err(column_not_found(name)),
+        }
+    }
+}
+
+// =============================================================================
+// OID guards — surface mismatches as `DbError.DecodeFailed`
+// =============================================================================
+
+fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &str, col_name: &str)
+    -> Result<(), DbError>
+{
+    if col.type_oid != expected_oid {
+        Err(DbError.DecodeFailed {
+            fault: DecodeFault {
+                column_index: 0,
+                column_name:  col_name.to_text(),
+                expected_type: expected_name.to_text(),
+                found_oid:    col.type_oid,
+                detail: f"OID mismatch: column has OID {col.type_oid}, getter expects {expected_oid}",
+            },
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn guard_text_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+    let oid = col.type_oid;
+    if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR || oid == PG_TYPE_BPCHAR {
+        Ok(())
+    } else {
+        Err(DbError.DecodeFailed {
+            fault: DecodeFault {
+                column_index: 0,
+                column_name:  col_name.to_text(),
+                expected_type: "text|varchar|bpchar".to_text(),
+                found_oid:    oid,
+                detail:       "column not in text family".to_text(),
+            },
+        })
+    }
+}
+
+fn guard_int_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+    let oid = col.type_oid;
+    if oid == PG_TYPE_INT2 || oid == PG_TYPE_INT4 || oid == PG_TYPE_INT8 {
+        Ok(())
+    } else {
+        Err(DbError.DecodeFailed {
+            fault: DecodeFault {
+                column_index: 0,
+                column_name:  col_name.to_text(),
+                expected_type: "int2|int4|int8".to_text(),
+                found_oid:    oid,
+                detail:       "column not in integer family".to_text(),
+            },
+        })
+    }
+}
+
+fn guard_timestamp_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+    let oid = col.type_oid;
+    if oid == PG_TYPE_TIMESTAMP || oid == PG_TYPE_TIMESTAMPTZ {
+        Ok(())
+    } else {
+        Err(DbError.DecodeFailed {
+            fault: DecodeFault {
+                column_index: 0,
+                column_name:  col_name.to_text(),
+                expected_type: "timestamp|timestamptz".to_text(),
+                found_oid:    oid,
+                detail:       "column not in timestamp family".to_text(),
+            },
+        })
+    }
+}
+
+// =============================================================================
+// Decoders — wire bytes → typed values
+// =============================================================================
+
+fn decode_text_value(v: &WireValue, col_idx: Int, name: &str) -> Result<Text, DbError> {
+    match v {
+        WvNull => Err(null_decode_failed(col_idx, name, "text")),
+        WvPresent { bytes, format: _ } => {
+            // Both TEXT and BINARY format for text-family columns
+            // are UTF-8 byte sequences.  Postgres guarantees valid
+            // UTF-8 when the connection encoding is UTF8 (the default
+            // and what the driver advertises at startup).
+            match Text.from_bytes(bytes.as_slice()) {
+                Ok(t)  => Ok(t),
+                Err(e) => Err(text_decode_failed(col_idx, name, "text", f"UTF-8: {e}")),
+            }
+        }
+    }
+}
+
+fn decode_int_value(v: &WireValue, col_idx: Int, name: &str, oid: Int) -> Result<Int, DbError> {
+    match v {
+        WvNull => Err(null_decode_failed(col_idx, name, "int")),
+        WvPresent { bytes, format } => match format {
+            WfText => match Text.from_bytes(bytes.as_slice()) {
+                Ok(t) => match t.parse_int() {
+                    Ok(n) => Ok(n),
+                    Err(e) => Err(text_decode_failed(col_idx, name, "int", f"parse: {e}")),
+                },
+                Err(_) => Err(text_decode_failed(col_idx, name, "int", "non-UTF-8 in INT TEXT".to_text())),
+            },
+            WfBinary => decode_int_binary(bytes, col_idx, name, oid),
+        }
+    }
+}
+
+fn decode_int_binary(bytes: &List<Byte>, col_idx: Int, name: &str, oid: Int) -> Result<Int, DbError> {
+    // Network byte order (big-endian) per postgres binary spec.
+    if oid == PG_TYPE_INT2 {
+        if bytes.len() != 2 {
+            return Err(text_decode_failed(col_idx, name, "int2",
+                f"expected 2 bytes, got {bytes.len()}"));
+        }
+        let v = ((bytes[0] as Int) << 8) | (bytes[1] as Int);
+        // Sign-extend from 16-bit
+        let v = if v >= 0x8000 { v - 0x10000 } else { v };
+        Ok(v)
+    } else if oid == PG_TYPE_INT4 {
+        if bytes.len() != 4 {
+            return Err(text_decode_failed(col_idx, name, "int4",
+                f"expected 4 bytes, got {bytes.len()}"));
+        }
+        let mut v: Int = 0;
+        let mut i: Int = 0;
+        while i < 4 { v = (v << 8) | (bytes[i] as Int); i = i + 1; }
+        let v = if v >= 0x80000000 { v - 0x100000000 } else { v };
+        Ok(v)
+    } else {
+        // INT8
+        if bytes.len() != 8 {
+            return Err(text_decode_failed(col_idx, name, "int8",
+                f"expected 8 bytes, got {bytes.len()}"));
+        }
+        let mut v: Int = 0;
+        let mut i: Int = 0;
+        while i < 8 { v = (v << 8) | (bytes[i] as Int); i = i + 1; }
+        Ok(v)
+    }
+}
+
+fn decode_bytea_hex(bytes: &List<Byte>, col_idx: Int, name: &str)
+    -> Result<List<Byte>, DbError>
+{
+    // Postgres `bytea_output=hex` format: `\x<hex>`.
+    if bytes.len() < 2 || bytes[0] != b'\\' || bytes[1] != b'x' {
+        // Fallback: legacy `escape` format.  Reject for now;
+        // configure server `bytea_output=hex`.
+        return Err(text_decode_failed(col_idx, name, "bytea",
+            "bytea TEXT format must be hex (\\x...); legacy escape format not supported".to_text()));
+    }
+    let hex_part = bytes.as_slice().sub_slice(2, bytes.len());
+    let mut out: List<Byte> = List.with_capacity(hex_part.len() / 2);
+    let mut i: Int = 0;
+    while i + 1 < hex_part.len() as Int {
+        let hi = hex_nibble(hex_part[i]);
+        let lo = hex_nibble(hex_part[i + 1]);
+        match (hi, lo) {
+            (Some(h), Some(l)) => out.push(((h << 4) | l) as Byte),
+            _ => return Err(text_decode_failed(col_idx, name, "bytea",
+                f"invalid hex byte at offset {i + 2}")),
+        }
+        i = i + 2;
+    }
+    Ok(out)
+}
+
+fn hex_nibble(b: Byte) -> Maybe<Int> {
+    if b >= b'0' && b <= b'9' { Some((b - b'0') as Int) }
+    else if b >= b'a' && b <= b'f' { Some((b - b'a' + 10) as Int) }
+    else if b >= b'A' && b <= b'F' { Some((b - b'A' + 10) as Int) }
+    else { None }
+}
+
+fn decode_timestamp_value(v: &WireValue, col_idx: Int, name: &str)
+    -> Result<Rfc3339Time, DbError>
+{
+    match v {
+        WvNull => Err(null_decode_failed(col_idx, name, "timestamp")),
+        WvPresent { bytes, format: _ } => {
+            // Both TEXT and BINARY paths converge on RFC 3339 string
+            // post-decode.  The TEXT format from postgres is e.g.
+            // `2026-05-08 19:35:42.123456+00` — close to RFC 3339
+            // but uses ' ' instead of 'T'.  We normalise via a
+            // small adapter then reuse `core.time.rfc3339.parse`.
+            match Text.from_bytes(bytes.as_slice()) {
+                Ok(t) => {
+                    let normalised = normalise_pg_timestamp(&t);
+                    parse_rfc3339(&normalised).map_err(|e|
+                        text_decode_failed(col_idx, name, "timestamp", f"rfc3339 parse: {e}"))
+                },
+                Err(_) => Err(text_decode_failed(col_idx, name, "timestamp",
+                    "non-UTF-8 in TIMESTAMP TEXT".to_text())),
+            }
+        }
+    }
+}
+
+/// Convert postgres' `2026-05-08 19:35:42.123+00` to RFC 3339's
+/// `2026-05-08T19:35:42.123+00:00`.  Idempotent if input is already
+/// RFC 3339.
+fn normalise_pg_timestamp(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.with_capacity(bytes.len() + 4);
+    let mut i: Int = 0;
+    let mut replaced_t = false;
+    while i < bytes.len() as Int {
+        let b = bytes[i];
+        // `YYYY-MM-DD ` (10-char date + space) → swap space for 'T' once.
+        if !replaced_t && i == 10 && b == b' ' {
+            out.push(b'T');
+            replaced_t = true;
+        } else {
+            out.push(b);
+        }
+        i = i + 1;
+    }
+    // Append `:00` if the timezone offset is `+HH` (no minutes).
+    let n = out.len() as Int;
+    if n >= 3 {
+        let last = out[n - 1];
+        let third_last = out[n - 3];
+        if (third_last == b'+' || third_last == b'-')
+           && last >= b'0' && last <= b'9' {
+            // Form is "+HH" — append ":00".
+            out.push(b':');
+            out.push(b'0');
+            out.push(b'0');
+        }
+    }
+    Text.from_bytes_lossy(out.as_slice())
+}
+
+fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &str)
+    -> Result<List<Text>, DbError>
+{
+    // Minimal `{a,b,"c with comma","d \"escaped\""}` parser.
+    let raw = match Text.from_bytes(bytes.as_slice()) {
+        Ok(t)  => t,
+        Err(_) => return Err(text_decode_failed(col_idx, name, "text[]",
+            "non-UTF-8 in text-array TEXT".to_text())),
+    };
+    let s = raw.as_str();
+    if s.is_empty() || s.as_bytes()[0] != b'{' || s.as_bytes()[s.len() - 1] != b'}' {
+        return Err(text_decode_failed(col_idx, name, "text[]",
+            "text-array TEXT must be wrapped in braces".to_text()));
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut out: List<Text> = List.new();
+    if inner.is_empty() {
+        return Ok(out);
+    }
+    let bs = inner.as_bytes();
+    let mut i: Int = 0;
+    let n = bs.len() as Int;
+    while i < n {
+        let mut buf: List<Byte> = List.new();
+        if bs[i] == b'"' {
+            // Quoted field.
+            i = i + 1;
+            while i < n && bs[i] != b'"' {
+                if bs[i] == b'\\' && i + 1 < n {
+                    buf.push(bs[i + 1]);
+                    i = i + 2;
+                } else {
+                    buf.push(bs[i]);
+                    i = i + 1;
+                }
+            }
+            i = i + 1; // skip closing "
+        } else {
+            while i < n && bs[i] != b',' {
+                buf.push(bs[i]);
+                i = i + 1;
+            }
+        }
+        // Convert "NULL" sentinel to empty text — postgres emits
+        // bare NULL for null array elements.  Caller can detect via
+        // a dedicated nullable-array variant; for plain text[] we
+        // collapse NULL to "" and document that the registry's
+        // text-array columns are NOT NULL by convention.
+        match Text.from_bytes(buf.as_slice()) {
+            Ok(t) => {
+                if t.as_str() == "NULL" {
+                    out.push("".to_text());
+                } else {
+                    out.push(t);
+                }
+            }
+            Err(_) => return Err(text_decode_failed(col_idx, name, "text[]",
+                "non-UTF-8 in text-array element".to_text())),
+        }
+        if i < n && bs[i] == b',' { i = i + 1; }
+    }
+    Ok(out)
+}
+
+fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &str)
+    -> Result<List<Text>, DbError>
+{
+    // Postgres binary array format:
+    //   int32  ndim                          (number of dimensions)
+    //   int32  has_nulls                     (0 / 1)
+    //   int32  element_oid
+    //   for each dim:
+    //       int32 length
+    //       int32 lower_bound
+    //   for each element:
+    //       int32  byte_length (-1 for NULL)
+    //       bytes  element_bytes
+    let r = bytes.as_slice();
+    if r.len() < 12 {
+        return Err(text_decode_failed(col_idx, name, "text[]",
+            "binary text-array too short".to_text()));
+    }
+    let ndim = read_i32_be(r, 0);
+    if ndim != 1 {
+        return Err(text_decode_failed(col_idx, name, "text[]",
+            f"binary text-array supports only 1-dimensional arrays; got ndim={ndim}"));
+    }
+    // Skip has_nulls (offset 4) + element_oid (offset 8).
+    let length = read_i32_be(r, 12);
+    // Skip lower_bound (offset 16).
+    let mut off: Int = 20;
+    let mut out: List<Text> = List.with_capacity(length);
+    let mut i: Int = 0;
+    while i < length {
+        if off + 4 > r.len() as Int {
+            return Err(text_decode_failed(col_idx, name, "text[]",
+                "binary text-array truncated at element header".to_text()));
+        }
+        let elen = read_i32_be(r, off);
+        off = off + 4;
+        if elen < 0 {
+            // NULL element — match TEXT-format collapse semantics.
+            out.push("".to_text());
+        } else {
+            if off + elen > r.len() as Int {
+                return Err(text_decode_failed(col_idx, name, "text[]",
+                    "binary text-array truncated at element bytes".to_text()));
+            }
+            let elem = r.sub_slice(off, off + elen);
+            match Text.from_bytes(elem) {
+                Ok(t)  => out.push(t),
+                Err(_) => return Err(text_decode_failed(col_idx, name, "text[]",
+                    "non-UTF-8 in binary text-array element".to_text())),
+            }
+            off = off + elen;
+        }
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn read_i32_be(buf: &[Byte], off: Int) -> Int {
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 { v = (v << 8) | (buf[off + i] as Int); i = i + 1; }
+    if v >= 0x80000000 { v - 0x100000000 } else { v }
+}
+
+// =============================================================================
+// Error builders — keep the surface uniform across getters
+// =============================================================================
+
+fn null_decode_failed(col_idx: Int, name: &str, expected: &str) -> DbError {
+    DbError.DecodeFailed {
+        fault: DecodeFault {
+            column_index: col_idx,
+            column_name:  name.to_text(),
+            expected_type: expected.to_text(),
+            found_oid:    0,
+            detail:       "column is SQL-NULL; use the *_opt variant".to_text(),
+        },
+    }
+}
+
+fn text_decode_failed(col_idx: Int, name: &str, expected: &str, detail: Text) -> DbError {
+    DbError.DecodeFailed {
+        fault: DecodeFault {
+            column_index: col_idx,
+            column_name:  name.to_text(),
+            expected_type: expected.to_text(),
+            found_oid:    0,
+            detail,
+        },
+    }
+}
+
+fn column_not_found(name: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter:   AdPostgres,
+        code:      "PG_ROW_COL_NOT_FOUND".to_text(),
+        message:   f"row has no column named '{name}'",
+        retryable: false,
+    })
+}
