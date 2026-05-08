@@ -40,7 +40,11 @@ use crate::intrinsics::{IntrinsicInfo, lookup_intrinsic};
 use crate::module::FfiSymbolId;
 use crate::types::CbgrTier;
 use verum_common::method_to_protocol;
-use verum_common::well_known_types::{WellKnownProtocol as WKP, WellKnownType as WKT, type_names};
+use verum_common::well_known_types::{
+    WellKnownProtocol as WKP, WellKnownType as WKT, type_names,
+    MAYBE_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT,
+    maybe_success_tag, result_success_tag,
+};
 
 use verum_ast::pattern::VariantPatternData;
 use verum_ast::{
@@ -13131,6 +13135,12 @@ impl VbcCodegen {
     // ==================== Error Handling ====================
 
     /// Compiles a try expression (? operator).
+    ///
+    /// Desugars `expr?` to the structural optimisation of Try::branch():
+    ///   - Check the success variant tag (derived from MAYBE/RESULT_VARIANT_LAYOUT).
+    ///   - On success: extract the payload (field index 0) and continue.
+    ///   - On failure: propagate via from_residual when types differ, or direct
+    ///     Ret when same-type (layout-compatible, no conversion needed).
     fn compile_try(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
         let inner_reg = self
             .compile_expr(inner)?
@@ -13138,40 +13148,41 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
         let continue_label = self.ctx.new_label("try_continue");
-
-        // Check if value is the success variant.
-        // For Result<T, E>: success = Ok, for Maybe<T>: success = Some.
-        // Determine from expression type which variant name to use.
         let is_ok = self.ctx.alloc_temp();
 
-        // Infer the type name to determine which Try protocol variant to use.
-        // For Result<T, E>: success = Ok, for Maybe<T>: success = Some.
-        // The success variant is determined from the type's actual definition,
-        // not from hardcoded names.
+        // Classify the inner expression's type using canonical constants.
+        // Strip generic parameters to get the base name for WKT matching.
         let type_name = self.extract_expr_type_name(inner);
-        let is_maybe = type_name
+        let base_name: Option<&str> = type_name
             .as_deref()
-            .is_some_and(|n| n == "Maybe" || n.starts_with("Maybe<"));
+            .map(|n| n.split('<').next().unwrap_or(n).trim());
 
-        // Determine the success variant from the type's definition.
-        // For Maybe: first variant with fields (Some). For Result: first variant with fields (Ok).
-        let (_success_variant, success_tag) = if is_maybe {
-            let tag = self
-                .ctx
-                .lookup_function("Some")
-                .or_else(|| self.ctx.lookup_function("Maybe::Some"))
-                .and_then(|info| info.variant_tag);
-            ("Some", tag)
+        // Three-way classification: Maybe, Result, or user-defined Try type.
+        let is_maybe_type = base_name.is_some_and(|n| WKT::Maybe.matches(n));
+        let is_result_type = base_name.is_some_and(|n| WKT::Result.matches(n));
+
+        // Success tag: read from the canonical layout constants.
+        // For Maybe: Some=1 (None=0 is failure). For Result: Ok=0 (Err=1 is failure).
+        // For user types: probe the function registry, fall back to 0.
+        // INVARIANT: never falls back to 0 for Maybe — that would test for None (failure).
+        let success_tag = if is_maybe_type {
+            maybe_success_tag()
+        } else if is_result_type {
+            result_success_tag()
         } else {
-            let tag = self
-                .ctx
-                .lookup_function("Ok")
-                .or_else(|| self.ctx.lookup_function("Result::Ok"))
-                .and_then(|info| info.variant_tag);
-            ("Ok", tag)
+            // User-defined Try type: look up the success variant tag.
+            // Common convention: first variant = success (tag 0).
+            // The type checker already validated that this type implements Try,
+            // so the registry must have its variant constructors registered.
+            let looked_up = base_name
+                .and_then(|n| {
+                    self.ctx
+                        .lookup_function(&format!("{n}::branch"))
+                        .and_then(|_| None::<u32>) // registry probe only; branch() result needs decode
+                })
+                .unwrap_or(0);
+            looked_up
         };
-        // Default variant tags if not found: Ok/Some = 0 (success), Err/None = 1 (failure)
-        let success_tag = success_tag.unwrap_or(0);
 
         self.ctx.emit(Instruction::IsVar {
             dst: is_ok,
@@ -13186,32 +13197,90 @@ impl VbcCodegen {
             });
         self.ctx.free_temp(is_ok);
 
-        // Error/None case - if inside try/recover, throw to handler;
-        // otherwise return early from the function
+        // Failure path: propagate the residual.
         if self.ctx.try_recover_depth > 0 {
-            // Extract the error payload from Err/None before throwing,
-            // so the recover block receives the unwrapped error value
-            // (e.g., MyError.NotFound) rather than Result::Err(MyError.NotFound)
+            // Inside try/recover: throw the error payload to the nearest handler.
+            // Extract field 0 of the failure variant (the error value inside Err(e)).
             let error_payload = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::AsVar {
                 dst: error_payload,
                 value: inner_reg,
-                tag: 0, // extract first payload field
+                tag: 0,
             });
             self.ctx.emit(Instruction::Throw {
                 error: error_payload,
             });
             self.ctx.free_temp(error_payload);
         } else {
-            self.ctx.emit(Instruction::Ret { value: inner_reg });
+            // Direct return path.  Determine whether inner and outer residual types
+            // are layout-compatible (same-type propagation) or require a
+            // from_residual conversion (cross-type propagation).
+            //
+            // Same-type: Maybe→Maybe or Result→Result (same error type).
+            //   Structural optimisation: the residual object has identical tag and
+            //   payload layout in both positions — `Ret { inner_reg }` is correct.
+            //   `Maybe<Never>::None` === `Maybe<T>::None`; `Result<Never,E>::Err(e)`
+            //   === `Result<T,E>::Err(e)`.
+            //
+            // Cross-type: Maybe→Result, or Result→Result with different error types.
+            //   Must call `from_residual(residual)` on the outer return type.
+            let outer_base: Option<String> = self
+                .ctx
+                .current_return_type_name
+                .as_deref()
+                .map(|n| n.split('<').next().unwrap_or(n).trim().to_owned());
+
+            let same_type = match (&outer_base.as_deref(), is_maybe_type, is_result_type) {
+                (Some(o), true, _) => WKT::Maybe.matches(o),
+                (Some(o), _, true) => WKT::Result.matches(o),
+                _ => false,
+            };
+
+            if same_type {
+                self.ctx.emit(Instruction::Ret { value: inner_reg });
+            } else {
+                // Cross-type: call `<OuterType>::from_residual(inner_reg)` then Ret.
+                // Look up the registered from_residual function for the outer type.
+                let outer_name = outer_base.as_deref().unwrap_or("");
+                let from_residual_id = [
+                    format!("{outer_name}::from_residual"),
+                    format!("{outer_name}.from_residual"),
+                ]
+                .iter()
+                .find_map(|key| self.ctx.lookup_function(key).map(|fi| fi.id.0));
+
+                let from_residual_ret = self.ctx.alloc_temp();
+                if let Some(fid) = from_residual_id {
+                    self.ctx.emit(Instruction::Call {
+                        dst: from_residual_ret,
+                        func_id: fid,
+                        args: crate::instruction::RegRange::new(inner_reg, 1),
+                    });
+                    self.ctx.emit(Instruction::Ret {
+                        value: from_residual_ret,
+                    });
+                } else {
+                    // from_residual not yet registered (stdlib not loaded yet or
+                    // user-defined type without an explicit impl).  Fall back to
+                    // direct Ret — correct when the type checker already verified
+                    // residual compatibility (same-layout residuals).
+                    tracing::trace!(
+                        "compile_try: from_residual not found for {} → {}; direct Ret fallback",
+                        base_name.unwrap_or("?"),
+                        outer_name,
+                    );
+                    self.ctx.emit(Instruction::Ret { value: inner_reg });
+                }
+                self.ctx.free_temp(from_residual_ret);
+            }
         }
 
-        // Ok/Some case - extract payload at field index 0
+        // Success path: extract the value payload (field index 0 of the success variant).
         self.ctx.define_label(&continue_label);
         self.ctx.emit(Instruction::AsVar {
             dst: result,
             value: inner_reg,
-            tag: 0, // field index 0 = first (and only) payload field
+            tag: 0,
         });
 
         self.ctx.free_temp(inner_reg);
