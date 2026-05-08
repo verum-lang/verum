@@ -906,3 +906,166 @@ fn isabelle_constant_arities_match_source_of_truth() {
         );
     }
 }
+
+// =============================================================================
+// Verum-side theorems.vr ↔ Rust mod.rs status parity (PR-1e)
+// =============================================================================
+//
+// The .vr corpus at `core/verify/kernel_soundness/theorems.vr`
+// carries `lemma_status(KernelRule.K<Name>) => LemmaStatus.<X>`
+// per-rule entries.  This was synced manually in PR-5e + PR-5g +
+// PR-5h but had no automatic check — drift surface uncovered.
+// PR-1e closes the loop: parse the .vr file, assert per-rule
+// status agreement with `canonical_rules()`.
+
+/// Status keyword (`Proved` / `Admitted` / `DischargedByFramework`).
+/// Stored as a stable string for lightweight comparison.
+type VrStatusKind = &'static str;
+
+/// Parse `KernelRule.K<Name> => LemmaStatus.<Status>` lines from a
+/// .vr file.  Returns a map from the .vr-format rule name (no
+/// underscores, e.g. `KQuotElim`) to the status keyword.  Robust
+/// to surrounding whitespace and the optional `{ reason: ... }` /
+/// `{ lemma_path: ..., framework: ..., citation: ... }` body
+/// after the status keyword.
+fn parse_vr_lemma_status(
+    text: &str,
+) -> std::collections::BTreeMap<String, VrStatusKind> {
+    let mut result: std::collections::BTreeMap<String, VrStatusKind> =
+        std::collections::BTreeMap::new();
+    for line in text.lines() {
+        // Strip leading whitespace.
+        let trimmed = line.trim_start();
+        // Match `KernelRule.K<Name> => LemmaStatus.<Status>`.
+        let prefix = "KernelRule.K";
+        if !trimmed.starts_with(prefix) {
+            continue;
+        }
+        let rest = &trimmed[prefix.len()..];
+        // Walk identifier chars (alphanumeric / `_`) — stop at the
+        // first non-ident char.  This collects the `<Name>` part.
+        let name_end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        let name = &rest[..name_end];
+        if name.is_empty() {
+            continue;
+        }
+        let after_name = &rest[name_end..].trim_start();
+        // Expect `=>`.
+        if !after_name.starts_with("=>") {
+            continue;
+        }
+        let after_arrow = after_name[2..].trim_start();
+        // Expect `LemmaStatus.<Status>`.
+        let status_prefix = "LemmaStatus.";
+        if !after_arrow.starts_with(status_prefix) {
+            continue;
+        }
+        let status_rest = &after_arrow[status_prefix.len()..];
+        // Walk identifier chars to extract status name.
+        let status_end = status_rest
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(status_rest.len());
+        let status: VrStatusKind = match &status_rest[..status_end] {
+            "Proved" => "Proved",
+            "Admitted" => "Admitted",
+            "DischargedByFramework" => "DischargedByFramework",
+            other => panic!(
+                "unexpected LemmaStatus variant '{}' in .vr file",
+                other
+            ),
+        };
+        // Re-prepend `K` (the prefix we stripped earlier).
+        let full_name = format!("K{}", name);
+        result.insert(full_name, status);
+    }
+    result
+}
+
+/// Convert a Rust rule name (snake-cased like `K_Quot_Elim`) to
+/// the .vr camelCase form (`KQuotElim`).  Rule: drop all
+/// underscores.  Verified by inspection against the 38 entries in
+/// `canonical_rules()`.
+fn rust_rule_name_to_vr(rust: &str) -> String {
+    rust.replace('_', "")
+}
+
+#[test]
+fn rust_to_vr_name_conversion_round_trip() {
+    // Pin: the conversion is correct on every canonical rule
+    // name.  Catches a future rule name with non-underscore
+    // word-break punctuation that breaks the simple replace.
+    let exporter = SoundnessExporter::new();
+    for rule in exporter.rules() {
+        let vr = rust_rule_name_to_vr(&rule.rule_name);
+        // Sanity: the .vr name starts with K and is alphanumeric.
+        assert!(
+            vr.starts_with('K') && vr.chars().all(|c| c.is_ascii_alphanumeric()),
+            "{} → {} fails the .vr-name-shape pin",
+            rule.rule_name,
+            vr,
+        );
+    }
+}
+
+#[test]
+fn vr_corpus_has_one_entry_per_kernel_rule() {
+    // Pin: theorems.vr declares exactly 38 lemma_status entries
+    // — one per kernel rule.
+    let vr_text = include_str!(
+        "../../../../core/verify/kernel_soundness/theorems.vr"
+    );
+    let parsed = parse_vr_lemma_status(vr_text);
+    assert_eq!(
+        parsed.len(),
+        EXPECTED_KERNEL_RULE_COUNT,
+        "theorems.vr should have exactly {} lemma_status entries; got {}",
+        EXPECTED_KERNEL_RULE_COUNT,
+        parsed.len(),
+    );
+}
+
+#[test]
+fn vr_corpus_status_matches_rust_mod_rs() {
+    // Pin: per-rule LemmaStatus parity between Rust mod.rs and
+    // .vr theorems.vr.  This is the load-bearing PR-1e check —
+    // catches manual sync omissions like the PR-5e drift before
+    // it accumulates across 15 rules.
+    let vr_text = include_str!(
+        "../../../../core/verify/kernel_soundness/theorems.vr"
+    );
+    let vr_status_map = parse_vr_lemma_status(vr_text);
+
+    let exporter = SoundnessExporter::new();
+    let mut errors: Vec<String> = Vec::new();
+    for rule in exporter.rules() {
+        let vr_name = rust_rule_name_to_vr(&rule.rule_name);
+        let vr_status = match vr_status_map.get(&vr_name) {
+            Some(s) => *s,
+            None => {
+                errors.push(format!(
+                    "rule {} (vr: {}) has no entry in theorems.vr",
+                    rule.rule_name, vr_name,
+                ));
+                continue;
+            }
+        };
+        let rust_status: VrStatusKind = match rule.status {
+            LemmaStatus::Proved { .. } => "Proved",
+            LemmaStatus::Admitted { .. } => "Admitted",
+            LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
+        };
+        if rust_status != vr_status {
+            errors.push(format!(
+                "rule {} drift: mod.rs={}, theorems.vr={}",
+                rule.rule_name, rust_status, vr_status,
+            ));
+        }
+    }
+    assert!(
+        errors.is_empty(),
+        "Verum-side theorems.vr drift from Rust mod.rs:\n{}",
+        errors.join("\n"),
+    );
+}
