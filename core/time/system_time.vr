@@ -328,3 +328,30 @@ implement Display for SystemTime {
         f.write_str(f"{self.secs}.{ms:03}s")
     }
 }
+
+// =============================================================================
+// Module-level free function exports
+// =============================================================================
+
+/// Wall-clock timestamp in nanoseconds since the Unix epoch.
+/// Convenience for `SystemTime.now().duration_since_epoch().as_nanos()`
+/// without bringing the unit-marker `SystemTime` into scope.
+public fn now_unix_ns() -> Int {
+    let st = SystemTime.now();
+    st.secs * NANOS_PER_SEC + st.nanos
+}
+
+/// Wall-clock timestamp in microseconds since the Unix epoch.
+public fn now_unix_us() -> Int {
+    now_unix_ns() / 1_000
+}
+
+/// Wall-clock timestamp in milliseconds since the Unix epoch.
+public fn now_unix_ms() -> Int {
+    now_unix_ns() / 1_000_000
+}
+
+/// Wall-clock timestamp in seconds since the Unix epoch.
+public fn now_unix_s() -> Int {
+    SystemTime.now().secs
+}

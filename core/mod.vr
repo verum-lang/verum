@@ -511,6 +511,17 @@ public module prelude {
         // Linear algebra
         Vector, Matrix,
     };
+
+    // From context.standard (DI contexts that read like ambient services
+    // when consumers write `using [Logger]` / `Logger.info(...)`).  These
+    // are intentionally surfaced at the prelude level so request-handling
+    // code does not have to repeat `mount context.standard.{...}` in
+    // every middleware / handler file.
+    public mount super.context.standard.{
+        Logger, Database, Auth, Config, Cache, Metrics, Tracer,
+        Clock, Random, FileSystem,
+        ContextLogLevel, ContextLogRecord,
+    };
 }
 
 // =============================================================================

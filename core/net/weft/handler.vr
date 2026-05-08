@@ -340,3 +340,54 @@ implement<F> Handler for ClosureHandler<F>
         (self.f)(req)
     }
 }
+
+// -----------------------------------------------------------------------------
+// Middleware / Next
+// -----------------------------------------------------------------------------
+//
+// Conventional ASGI/tower-style middleware: a `Middleware` wraps the
+// request/response cycle.  It receives an opaque `Next` continuation
+// representing "everything that comes after" — when invoked via
+// `next.call(req).await`, the inner middleware chain runs and returns
+// the downstream `Response`.  The middleware may inspect/replace the
+// request beforehand and/or post-process the response.
+//
+// `Next` is an opaque newtype over a runtime-managed continuation
+// handle.  Call sites only interact with it through `next.call(req)`;
+// the runtime threads the chain through a per-request stack so each
+// middleware can be `&self` and the Service surface stays type-safe.
+//
+// Spec: internal/specs/net-framework.md §5.5 (middleware contract).
+
+/// Opaque continuation passed to a `Middleware` invocation.  Calling
+/// `next.call(req).await` advances to the next middleware (or to the
+/// terminal route handler) and returns its `Response`.
+public type Next is {
+    chain: Int,
+};
+
+implement Next {
+    /// Forward `req` to the remainder of the middleware chain.
+    public async fn call(self, req: WeftRequest) -> Response {
+        @intrinsic("verum.weft.next.call", self, req)
+    }
+}
+
+/// Composable HTTP middleware.  An impl wraps the inner request/
+/// response flow exposed by `next` and may perform pre- and
+/// post-processing (logging, metrics, auth, headers, panic-catching,
+/// rate-limiting, …).
+public type Middleware is protocol {
+    async fn call(&self, req: WeftRequest, next: Next) -> Response;
+};
+
+/// Runtime hook used by the listener to catch unwinding panics
+/// surfaced from a middleware/handler chain and return a 500 response
+/// instead of letting the request task die.  The actual implementation
+/// lives in the runtime; this declaration is the visible Verum
+/// surface that middleware authors invoke.
+public async fn catch_panic<F>(f: F) -> Result<Response, Text>
+    where F: async fn() -> Response
+{
+    @intrinsic("verum.weft.catch_panic", f)
+}

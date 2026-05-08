@@ -605,6 +605,25 @@ implement Response {
     public fn is_error(&self) -> Bool {
         self.status.is_client_error() || self.status.is_server_error()
     }
+
+    /// Builder: replace the status code, returning a new Response.
+    /// Useful for adapter functions that produce a Response with a
+    /// default status which the caller wants to override (e.g.
+    /// `render_error(...).status(StatusCode.InternalServerError)`).
+    public fn status(self, code: StatusCode) -> Response {
+        Response { status: code, ..self }
+    }
+
+    /// Builder: replace the body, returning a new Response.
+    public fn body(self, body: List<Byte>) -> Response {
+        Response { body: body, ..self }
+    }
+
+    /// Builder: insert/replace a single header, returning a new Response.
+    public fn header(mut self, name: Text, value: Text) -> Response {
+        self.headers.insert(name, value);
+        self
+    }
 }
 
 implement Debug for Response {
