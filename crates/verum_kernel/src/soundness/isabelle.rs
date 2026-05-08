@@ -227,10 +227,10 @@ axiomatization\n  \
   K_Refine_Intro_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   (* (K_Quot_Elim: discharged — see T_quot_elim below for the structural form.) *) \n  \
   K_Inductive_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Elim_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
+  (* (K_Elim: discharged — see T_elim below for the structural form.) *)\n  \
   K_Smt_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Eps_Mu_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Universe_Ascent_iou :: \"Ctx \\<Rightarrow> nat \\<Rightarrow> bool\" and\n  \
+  (* (K_Universe_Ascent: discharged — collapses onto T_univ.) *) \n  \
   K_Round_Trip_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Epsilon_Of_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Alpha_Of_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
@@ -269,11 +269,11 @@ where\n\
 | T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
 | T_inductive:    \"K_Inductive_iou \\<Gamma> path args result \\<Longrightarrow> \\<Gamma> \\<turnstile> InductiveT path args : result\"\n\
 | T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
-| T_elim:         \"K_Elim_iou \\<Gamma> scrutinee motive cases result \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : result\"\n\
+| T_elim:         \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
 | T_smt:          \"K_Smt_iou \\<Gamma> solver_tag T \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
 | T_fwax:         \"\\<Gamma> \\<turnstile> AxiomT name ty framework : ty\"\n\
 | T_eps_mu:       \"K_Eps_Mu_iou \\<Gamma> articulation enactment ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
-| T_universe_ascent: \"K_Universe_Ascent_iou \\<Gamma> i \\<Longrightarrow> \\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
+| T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
 | T_round_trip:   \"K_Round_Trip_iou \\<Gamma> term recovered \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
 | T_epsilon_of:   \"K_Epsilon_Of_iou \\<Gamma> articulation result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
 | T_alpha_of:     \"K_Alpha_Of_iou \\<Gamma> enactment result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
@@ -436,8 +436,9 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Elim" => Some(
             "lemma K_Elim_sound:\n  \
-              assumes \"K_Elim_iou \\<Gamma> scrutinee motive cases result\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Elim scrutinee motive cases : result\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty\"\n  \
+              and \"\\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\"\n  \
+              shows \"\\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n  \
               using assms by (rule T_elim)",
         ),
         // SmtAxiom (2)
@@ -460,9 +461,8 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Universe_Ascent" => Some(
             "lemma K_Universe_Ascent_sound:\n  \
-              assumes \"K_Universe_Ascent_iou \\<Gamma> i\"\n  \
               shows \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n  \
-              using assms by (rule T_universe_ascent)",
+              by (rule T_universe_ascent)",
         ),
         "K_Round_Trip" => Some(
             "lemma K_Round_Trip_sound:\n  \

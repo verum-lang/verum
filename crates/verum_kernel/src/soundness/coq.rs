@@ -192,16 +192,17 @@ impl SoundnessBackend for CoqBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (16 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (14 axioms — one per with-IOU rule).
 //
-// K_Quot_Elim was discharged in the Quotient-elimination pass: its
-// constructor now takes structural premises directly, mirroring the
-// shape of T_quot_form / T_quot_intro.  The respect-of-equivalence
-// side condition is the kernel's input contract.
+// Discharged so far (each removed an axiom):
+//   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
+//   * K_Elim            — same template, with per-constructor case-typing
+//                         remaining the kernel's input contract.
+//   * K_Universe_Ascent — collapses onto T_univ for u32-bounded universes.
 // ============================================================================
 
 const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (16 total) ====== *)\n\
+(* ====== Per-rule IOU axioms (14 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
 Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
@@ -231,8 +232,8 @@ Axiom K_Refine_Intro_iou : Ctx -> CoreTerm -> CoreTerm -> string -> CoreTerm -> 
 (* K_Inductive: positivity decision procedure. *)\n\
 Axiom K_Inductive_iou : Ctx -> string -> list CoreTerm -> CoreTerm -> Prop.\n\
 \n\
-(* K_Elim: motive-substitution + W-type recursion. *)\n\
-Axiom K_Elim_iou : Ctx -> CoreTerm -> CoreTerm -> list CoreTerm -> CoreTerm -> Prop.\n\
+(* (K_Elim: discharged — see T_elim below for the structural form;\n\
+   per-constructor case-typing remains the kernel's input contract.) *)\n\
 \n\
 (* K_Smt: SMT-cert replay correctness. *)\n\
 Axiom K_Smt_iou : Ctx -> string -> CoreTerm -> Prop.\n\
@@ -240,8 +241,8 @@ Axiom K_Smt_iou : Ctx -> string -> CoreTerm -> Prop.\n\
 (* K_Eps_Mu: M ⊣ A biadjunction (Proposition 5.1, Corollary 5.10). *)\n\
 Axiom K_Eps_Mu_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
 \n\
-(* K_Universe_Ascent: κ-tower well-foundedness for transfinite heights. *)\n\
-Axiom K_Universe_Ascent_iou : Ctx -> nat -> Prop.\n\
+(* (K_Universe_Ascent: discharged — collapses onto T_univ for u32-bounded\n\
+   universes; no transfinite heights are representable.) *)\n\
 \n\
 (* K_Round_Trip: bridge-audit completeness. *)\n\
 Axiom K_Round_Trip_iou : Ctx -> CoreTerm -> CoreTerm -> Prop.\n\
@@ -375,9 +376,10 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         side_conditions_hold ->\n        \
         Typing Gamma t T -> Typing Gamma t T\n  \
   | T_elim :\n      \
-      forall (Gamma : Ctx) (scrutinee motive : CoreTerm) (cases : list CoreTerm) (result : CoreTerm),\n        \
-        K_Elim_iou Gamma scrutinee motive cases result ->\n        \
-        Typing Gamma (Elim scrutinee motive cases) result\n  \
+      forall (Gamma : Ctx) (scrutinee motive scrutinee_ty : CoreTerm) (cases : list CoreTerm) (i : nat),\n        \
+        Typing Gamma scrutinee scrutinee_ty ->\n        \
+        Typing Gamma motive (Pi \"x\" scrutinee_ty (Universe i)) ->\n        \
+        Typing Gamma (Elim scrutinee motive cases) (App motive scrutinee)\n  \
   (* ===== SmtAxiom (2) ===== *)\n  \
   | T_smt :\n      \
       forall (Gamma : Ctx) (solver_tag : string) (T : CoreTerm),\n        \
@@ -393,7 +395,6 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma articulation ty\n  \
   | T_universe_ascent :\n      \
       forall (Gamma : Ctx) (i : nat),\n        \
-        K_Universe_Ascent_iou Gamma i ->\n        \
         Typing Gamma (Universe i) (Universe (S i))\n  \
   | T_round_trip :\n      \
       forall (Gamma : Ctx) (term recovered : CoreTerm),\n        \
@@ -610,10 +611,11 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         "K_Elim" => Some(
             "Lemma K_Elim_sound :\n  \
-              forall (Gamma : Ctx) (scrutinee motive : CoreTerm) (cases : list CoreTerm) (result : CoreTerm),\n    \
-                K_Elim_iou Gamma scrutinee motive cases result ->\n    \
-                Typing Gamma (Elim scrutinee motive cases) result.\n\
-              Proof. exact T_elim. Qed.",
+              forall (Gamma : Ctx) (scrutinee motive scrutinee_ty : CoreTerm) (cases : list CoreTerm) (i : nat),\n    \
+                Typing Gamma scrutinee scrutinee_ty ->\n    \
+                Typing Gamma motive (Pi \"x\"%string scrutinee_ty (Universe i)) ->\n    \
+                Typing Gamma (Elim scrutinee motive cases) (App motive scrutinee).\n\
+              Proof. intros; apply T_elim with (scrutinee_ty := scrutinee_ty) (i := i); assumption. Qed.",
         ),
         // ===== SmtAxiom (2) =====
         "K_Smt" => Some(
@@ -639,7 +641,6 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         "K_Universe_Ascent" => Some(
             "Lemma K_Universe_Ascent_sound :\n  \
               forall (Gamma : Ctx) (i : nat),\n    \
-                K_Universe_Ascent_iou Gamma i ->\n    \
                 Typing Gamma (Universe i) (Universe (S i)).\n\
               Proof. exact T_universe_ascent. Qed.",
         ),
