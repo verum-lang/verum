@@ -2863,15 +2863,15 @@ fn resolve_path(path: Option<&Text>) -> Result<PathTarget> {
 }
 
 fn run_command(cli: Cli) -> Result<()> {
- // After --vva-version short-circuit in main_inner, command is
- // required. Anything reaching here without one is a clap mis-
- // configuration; surface it as a user error rather than panic.
+ // No subcommand → print top-level help and exit cleanly. Matches the
+ // historical behaviour and avoids surfacing a confusing error for the
+ // bare `verum` invocation.
     let command = match cli.command {
         Some(c) => c,
         None => {
-            return Err(CliError::InvalidArgument(
-                "no subcommand given (run with --help or --vva-version)".into(),
-            ));
+            let _ = Cli::command().print_help();
+            println!();
+            return Ok(());
         }
     };
     match command {
