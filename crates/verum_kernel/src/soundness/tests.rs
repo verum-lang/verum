@@ -1029,9 +1029,8 @@ fn vr_corpus_has_one_entry_per_kernel_rule() {
 #[test]
 fn vr_corpus_status_matches_rust_mod_rs() {
     // Pin: per-rule LemmaStatus parity between Rust mod.rs and
-    // .vr theorems.vr.  This is the load-bearing PR-1e check —
-    // catches manual sync omissions like the PR-5e drift before
-    // it accumulates across 15 rules.
+    // .vr theorems.vr.  Catches manual sync omissions before
+    // they accumulate.
     let vr_text = include_str!(
         "../../../../core/verify/kernel_soundness/theorems.vr"
     );
@@ -1066,6 +1065,263 @@ fn vr_corpus_status_matches_rust_mod_rs() {
     assert!(
         errors.is_empty(),
         "Verum-side theorems.vr drift from Rust mod.rs:\n{}",
+        errors.join("\n"),
+    );
+}
+
+// =============================================================================
+// Citation-parity for DischargedByFramework rules
+// =============================================================================
+//
+// `vr_corpus_status_matches_rust_mod_rs` checks the status keyword
+// only.  Extend coverage to the citation triple
+// `(lemma_path, framework, citation)` for `DischargedByFramework`
+// rules — the framework attribution can drift independently of the
+// status keyword.
+
+/// Normalize a string by collapsing all whitespace runs to a single
+/// space and trimming.  Used to compare strings that may have
+/// different line-continuation formatting between Rust source and
+/// .vr source.
+fn normalize_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Parsed citation triple for a DischargedByFramework rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VrCitation {
+    lemma_path: String,
+    framework: String,
+    citation: String,
+}
+
+/// Extract `Text.from("…")` body — handles both single-line and
+/// multi-line forms.  Returns the literal string content (stripped
+/// of surrounding quotes and `\`-newline-whitespace continuations).
+fn extract_text_from_arg(text: &str, key: &str) -> Option<String> {
+    // Find the key followed by `: Text.from(`.
+    let needle = format!("{}: Text.from(", key);
+    let start = text.find(&needle)? + needle.len();
+    let rest = &text[start..];
+    // Find the opening `"`.
+    let q1 = rest.find('"')? + 1;
+    let after_q1 = &rest[q1..];
+    // Scan forward for the closing `"` that isn't escaped.  The
+    // .vr source uses `\<newline><whitespace>` continuations
+    // *inside* the string (Verum's line-continuation in strings),
+    // and double-quotes inside the body would be escaped — but
+    // none of the actual citation strings contain `\"`.  So a
+    // simple scan for the next `"` works.
+    let mut depth = 0;
+    let bytes = after_q1.as_bytes();
+    while depth < bytes.len() {
+        if bytes[depth] == b'"' {
+            // Found closing quote.  The body is bytes[..depth].
+            let body = &after_q1[..depth];
+            // Strip `\<newline><ws>` continuations: replace each
+            // such sequence with a single space.
+            let mut cleaned = String::with_capacity(body.len());
+            let mut chars = body.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c == '\\' && chars.peek() == Some(&'\n') {
+                    chars.next(); // consume the \n
+                    // Skip leading whitespace on the next line.
+                    while let Some(&c2) = chars.peek() {
+                        if c2 == ' ' || c2 == '\t' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    cleaned.push(' '); // continuation = one space
+                } else {
+                    cleaned.push(c);
+                }
+            }
+            return Some(cleaned);
+        }
+        if bytes[depth] == b'\\' && depth + 1 < bytes.len() {
+            depth += 2;
+            continue;
+        }
+        depth += 1;
+    }
+    None
+}
+
+/// Parse `KernelRule.K<Name> => LemmaStatus.DischargedByFramework
+/// { lemma_path: …, framework: …, citation: …, }` blocks from the
+/// .vr file.  Returns a map from .vr-format rule name to parsed
+/// citation triple.
+fn parse_vr_discharged_citations(
+    text: &str,
+) -> std::collections::BTreeMap<String, VrCitation> {
+    let mut result = std::collections::BTreeMap::new();
+    // Find each `KernelRule.K<Name> => LemmaStatus.DischargedByFramework {`
+    // header, then the matching closing `},`.
+    let header_pattern = "=> LemmaStatus.DischargedByFramework {";
+    let mut search_start = 0;
+    while let Some(header_pos) = text[search_start..].find(header_pattern) {
+        let abs_header = search_start + header_pos;
+        // Walk back to find the rule name `KernelRule.K<Name>`.
+        // The pattern: `KernelRule.K<Name> ` precedes `=>`.
+        let prefix = &text[..abs_header];
+        let kernel_rule_marker = "KernelRule.K";
+        let krm_pos = match prefix.rfind(kernel_rule_marker) {
+            Some(p) => p,
+            None => {
+                search_start = abs_header + header_pattern.len();
+                continue;
+            }
+        };
+        let after_krm = &text[krm_pos + kernel_rule_marker.len()..abs_header];
+        // Walk forward over identifier chars to extract the name.
+        let name_end = after_krm
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(after_krm.len());
+        let name = &after_krm[..name_end];
+        if name.is_empty() {
+            search_start = abs_header + header_pattern.len();
+            continue;
+        }
+        let vr_name = format!("K{}", name);
+
+        // Find the matching closing brace.  The body is between
+        // the `{` after the header and the next balanced `},` or
+        // `}\n`.  Use brace counting.
+        let body_start = abs_header + header_pattern.len();
+        let body_bytes = text.as_bytes();
+        let mut brace_depth = 1;
+        let mut body_end = body_start;
+        while body_end < body_bytes.len() && brace_depth > 0 {
+            match body_bytes[body_end] {
+                b'{' => brace_depth += 1,
+                b'}' => brace_depth -= 1,
+                _ => {}
+            }
+            body_end += 1;
+        }
+        if brace_depth != 0 {
+            break; // malformed
+        }
+        let body = &text[body_start..body_end - 1]; // exclude closing `}`
+
+        if let (Some(lp), Some(fw), Some(c)) = (
+            extract_text_from_arg(body, "lemma_path"),
+            extract_text_from_arg(body, "framework"),
+            extract_text_from_arg(body, "citation"),
+        ) {
+            result.insert(
+                vr_name,
+                VrCitation {
+                    lemma_path: lp,
+                    framework: fw,
+                    citation: c,
+                },
+            );
+        }
+        search_start = body_end;
+    }
+    result
+}
+
+#[test]
+fn extract_text_from_arg_handles_single_line() {
+    let body = r#"
+        lemma_path: Text.from("core.verify.kernel_v0.lemmas.subst.subst_preserves_typing"),
+        framework: Text.from("mathlib4"),
+        citation: Text.from("Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing"),
+    "#;
+    assert_eq!(
+        extract_text_from_arg(body, "framework"),
+        Some("mathlib4".to_string()),
+    );
+    assert_eq!(
+        extract_text_from_arg(body, "lemma_path"),
+        Some("core.verify.kernel_v0.lemmas.subst.subst_preserves_typing".to_string()),
+    );
+}
+
+#[test]
+fn vr_corpus_has_seven_discharged_by_framework_entries() {
+    // Pin: theorems.vr declares exactly 7 DischargedByFramework
+    // entries — matches the count of such rules in
+    // canonical_rules() (the structural-fragment subset:
+    // K_Pi_Form / K_Lam_Intro / K_App_Elim / K_Sigma_Form /
+    // K_Pair_Intro / K_Fst_Elim / K_Snd_Elim).
+    let vr_text = include_str!(
+        "../../../../core/verify/kernel_soundness/theorems.vr"
+    );
+    let citations = parse_vr_discharged_citations(vr_text);
+    assert_eq!(
+        citations.len(),
+        7,
+        "expected 7 DischargedByFramework entries in theorems.vr; got {}",
+        citations.len(),
+    );
+}
+
+#[test]
+fn vr_corpus_citation_triples_match_rust_mod_rs() {
+    // Pin: per-rule citation triple parity between mod.rs and
+    // theorems.vr.  Catches drift in the (lemma_path, framework,
+    // citation) attribution that the status-keyword check missed.
+    let vr_text = include_str!(
+        "../../../../core/verify/kernel_soundness/theorems.vr"
+    );
+    let vr_citations = parse_vr_discharged_citations(vr_text);
+
+    let exporter = SoundnessExporter::new();
+    let mut errors: Vec<String> = Vec::new();
+    for rule in exporter.rules() {
+        let (rust_lp, rust_fw, rust_cit) = match &rule.status {
+            LemmaStatus::DischargedByFramework {
+                lemma_path,
+                framework,
+                citation,
+            } => (lemma_path, framework, citation),
+            _ => continue, // not DischargedByFramework — skip
+        };
+        let vr_name = rust_rule_name_to_vr(&rule.rule_name);
+        let vr_cite = match vr_citations.get(&vr_name) {
+            Some(c) => c,
+            None => {
+                errors.push(format!(
+                    "rule {} (vr: {}) is DischargedByFramework in mod.rs but \
+                     has no DischargedByFramework entry in theorems.vr",
+                    rule.rule_name, vr_name,
+                ));
+                continue;
+            }
+        };
+        if normalize_ws(rust_lp) != normalize_ws(&vr_cite.lemma_path) {
+            errors.push(format!(
+                "rule {} lemma_path drift:\n  mod.rs: {}\n  vr:     {}",
+                rule.rule_name,
+                normalize_ws(rust_lp),
+                normalize_ws(&vr_cite.lemma_path),
+            ));
+        }
+        if normalize_ws(rust_fw) != normalize_ws(&vr_cite.framework) {
+            errors.push(format!(
+                "rule {} framework drift: mod.rs={}, vr={}",
+                rule.rule_name,
+                normalize_ws(rust_fw),
+                normalize_ws(&vr_cite.framework),
+            ));
+        }
+        if normalize_ws(rust_cit) != normalize_ws(&vr_cite.citation) {
+            errors.push(format!(
+                "rule {} citation drift:\n  mod.rs: {}\n  vr:     {}",
+                rule.rule_name,
+                normalize_ws(rust_cit),
+                normalize_ws(&vr_cite.citation),
+            ));
+        }
+    }
+    assert!(
+        errors.is_empty(),
+        "Verum-side theorems.vr citation drift from Rust mod.rs:\n{}",
         errors.join("\n"),
     );
 }
