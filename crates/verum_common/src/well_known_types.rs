@@ -267,6 +267,125 @@ pub mod variant_tags {
     }
 }
 
+/// Canonical layout of the variants of `core::base::maybe::Maybe<T>`.
+///
+/// Source-of-truth: `core/base/maybe.vr`:
+/// ```text
+///     public type Maybe<T> is None | Some(T);
+/// ```
+/// Tags follow declaration order: `None = 0`, `Some = 1`.
+///
+/// **Drift contract:** any reorder in the .vr file MUST be reflected here,
+/// and the matrix-pinning test in `tests::maybe_variant_layout_pinned`
+/// catches the divergence at test time.
+pub const MAYBE_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("None", 0),
+    ("Some", 1),
+];
+
+/// Canonical layout of the variants of `core::base::result::Result<T, E>`.
+///
+/// Source-of-truth: `core/base/result.vr`:
+/// ```text
+///     public type Result<T, E> is Ok(T) | Err(E);
+/// ```
+/// Tags follow declaration order: `Ok = 0`, `Err = 1`.
+pub const RESULT_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("Ok", 0),
+    ("Err", 1),
+];
+
+/// Canonical layout of the variants of `core::base::ordering::Ordering`.
+///
+/// **Single source of truth.** Both VBC codegen (the builtin variant registry
+/// in `verum_vbc/src/codegen/mod.rs`) and the runtime constructor (`make_ordering`
+/// in `verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`)
+/// consult this constant — neither hardcodes its own copy of the variant
+/// order. If anybody edits the source-of-truth `core/base/ordering.vr` to
+/// declare the variants in a different order without updating this constant
+/// (or vice versa), the load-time validator (`ordering_layout::validate`)
+/// catches the drift and refuses to load the module.
+///
+/// **Drift contract:** the slice's order MUST match the order in
+/// `core/base/ordering.vr`:
+/// ```text
+///     public type Ordering is Less | Equal | Greater;
+/// ```
+/// — which produces variant tags 0, 1, 2 in declaration order.
+pub const ORDERING_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("Less", 0),
+    ("Equal", 1),
+    ("Greater", 2),
+];
+
+/// Look up the canonical Verum tag for a Rust `std::cmp::Ordering` value.
+///
+/// Translates `std::cmp::Ordering` → variant name → tag from the canonical
+/// layout. Panics with a structured message if the layout is missing a
+/// well-known variant — that would indicate `ORDERING_VARIANT_LAYOUT` was
+/// edited in a way that drops a variant, which is a programming error
+/// rather than a recoverable runtime condition.
+pub fn ordering_tag_for_std(ord: std::cmp::Ordering) -> u32 {
+    let name = match ord {
+        std::cmp::Ordering::Less => "Less",
+        std::cmp::Ordering::Equal => "Equal",
+        std::cmp::Ordering::Greater => "Greater",
+    };
+    ORDERING_VARIANT_LAYOUT
+        .iter()
+        .find_map(|(n, t)| if *n == name { Some(*t) } else { None })
+        .unwrap_or_else(|| {
+            panic!(
+                "ORDERING_VARIANT_LAYOUT is missing variant `{}` — \
+                 check core/base/ordering.vr and the layout constant in \
+                 verum_common/src/well_known_types.rs",
+                name
+            )
+        })
+}
+
+#[cfg(test)]
+mod ordering_layout_tests {
+    use super::*;
+
+    #[test]
+    fn layout_pins_canonical_three_variants() {
+        // Three variants, in canonical order. If this asserts, either the .vr
+        // file changed and the constant must follow, or vice versa — but the
+        // load-time validator will already have refused to load.
+        assert_eq!(ORDERING_VARIANT_LAYOUT.len(), 3);
+        assert_eq!(ORDERING_VARIANT_LAYOUT[0], ("Less", 0));
+        assert_eq!(ORDERING_VARIANT_LAYOUT[1], ("Equal", 1));
+        assert_eq!(ORDERING_VARIANT_LAYOUT[2], ("Greater", 2));
+    }
+
+    #[test]
+    fn ordering_tag_for_std_matches_layout() {
+        assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Less), 0);
+        assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Equal), 1);
+        assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Greater), 2);
+    }
+
+    /// Pins the canonical layout of `Maybe<T>`. Mirrors the
+    /// Ordering pattern: any change to the variant order in
+    /// `core/base/maybe.vr` must be reflected here, and vice versa.
+    /// Codegen builtin variant registration consults this constant.
+    #[test]
+    fn maybe_variant_layout_pinned() {
+        assert_eq!(MAYBE_VARIANT_LAYOUT.len(), 2);
+        assert_eq!(MAYBE_VARIANT_LAYOUT[0], ("None", 0));
+        assert_eq!(MAYBE_VARIANT_LAYOUT[1], ("Some", 1));
+    }
+
+    /// Pins the canonical layout of `Result<T, E>`.
+    #[test]
+    fn result_variant_layout_pinned() {
+        assert_eq!(RESULT_VARIANT_LAYOUT.len(), 2);
+        assert_eq!(RESULT_VARIANT_LAYOUT[0], ("Ok", 0));
+        assert_eq!(RESULT_VARIANT_LAYOUT[1], ("Err", 1));
+    }
+}
+
 /// Convenience constants for the most commonly referenced type names.
 pub mod type_names {
     // Primitives
@@ -807,5 +926,119 @@ mod tests {
         assert!(WellKnownProtocol::is_fat_ref_protocol("Clone"));
         assert!(WellKnownProtocol::is_fat_ref_protocol("Iterator"));
         assert!(!WellKnownProtocol::is_fat_ref_protocol("MyCustomProtocol"));
+    }
+
+    /// Pins the full (primitive × protocol) matrix from
+    /// `primitive_implements_protocol`. Each row encodes the EXACT set of
+    /// protocols a primitive must satisfy. Anyone editing the function above
+    /// must update this matrix, and vice versa — silent drift is impossible.
+    ///
+    /// The truth table is the matching one in
+    /// `core-tests/base/protocols/audit.md §2.1`:
+    ///
+    ///   | Primitive | Copy | Clone | Eq | Ord | Hash | Default |
+    ///   |-----------|:----:|:-----:|:--:|:---:|:----:|:-------:|
+    ///   | Int       |  ✓   |   ✓   |  ✓ |  ✓  |   ✓  |    ✓    |
+    ///   | Float     |  ✓   |   ✓   |  ✗ |  ✗  |   ✗  |    ✓    |  (NaN)
+    ///   | Bool      |  ✓   |   ✓   |  ✓ |  ✓  |   ✓  |    ✓    |
+    ///   | Char      |  ✓   |   ✓   |  ✓ |  ✓  |   ✓  |    ✗    |
+    ///   | Text      |  ✗   |   ✓   |  ✓ |  ✓  |   ✓  |    ✓    |  (heap)
+    ///   | Unit      |  ✓   |   ✓   |  ✓ |  ✓  |   ✓  |    ✓    |
+    #[test]
+    fn primitive_protocol_matrix_pinned() {
+        // (type, [(protocol_name, implemented?)])
+        let matrix: &[(&str, &[(&str, bool)])] = &[
+            (
+                "Int",
+                &[
+                    ("Copy", true),
+                    ("Clone", true),
+                    ("Eq", true),
+                    ("Ord", true),
+                    ("Hash", true),
+                    ("Default", true),
+                ],
+            ),
+            (
+                "Float",
+                &[
+                    ("Copy", true),
+                    ("Clone", true),
+                    ("Eq", false),
+                    ("Ord", false),
+                    ("Hash", false),
+                    ("Default", true),
+                ],
+            ),
+            (
+                "Bool",
+                &[
+                    ("Copy", true),
+                    ("Clone", true),
+                    ("Eq", true),
+                    ("Ord", true),
+                    ("Hash", true),
+                    ("Default", true),
+                ],
+            ),
+            (
+                "Char",
+                &[
+                    ("Copy", true),
+                    ("Clone", true),
+                    ("Eq", true),
+                    ("Ord", true),
+                    ("Hash", true),
+                    ("Default", false),
+                ],
+            ),
+            (
+                "Text",
+                &[
+                    ("Copy", false),
+                    ("Clone", true),
+                    ("Eq", true),
+                    ("Ord", true),
+                    ("Hash", true),
+                    ("Default", true),
+                ],
+            ),
+            (
+                "Unit",
+                &[
+                    ("Copy", true),
+                    ("Clone", true),
+                    ("Eq", true),
+                    ("Ord", true),
+                    ("Hash", true),
+                    ("Default", true),
+                ],
+            ),
+        ];
+
+        for (ty, rows) in matrix {
+            for (proto, expected) in *rows {
+                let got = primitive_implements_protocol(ty, proto);
+                assert_eq!(
+                    got,
+                    Some(*expected),
+                    "matrix drift: primitive_implements_protocol({:?}, {:?}) \
+                     returned {:?}, audit.md §2.1 says {:?}",
+                    ty,
+                    proto,
+                    got,
+                    expected
+                );
+            }
+        }
+
+        // `()` should resolve identically to `Unit`.
+        assert_eq!(primitive_implements_protocol("()", "Copy"), Some(true));
+        assert_eq!(primitive_implements_protocol("()", "Default"), Some(true));
+
+        // Unknown primitive → None (caller should check other sources).
+        assert_eq!(primitive_implements_protocol("UInt128", "Copy"), None);
+        // Unknown protocol → None.
+        assert_eq!(primitive_implements_protocol("Int", "NotAProtocol"), None);
     }
 }
