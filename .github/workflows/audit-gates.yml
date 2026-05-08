@@ -1,0 +1,204 @@
+name: Audit gates
+
+# Runs the kernel-soundness band of `verum audit` on every push to main
+# and every PR.  Three job tiers:
+#
+#   1. In-process gates (cheap, no external tools — runs on every push):
+#      --differential-kernel, --differential-kernel-fuzz, --kernel-soundness,
+#      --kernel-rules, --kernel-recheck.
+#
+#   2. Cross-language gate with Lean 4 toolchain (medium cost — runs on
+#      every push but caches Lake build artefacts):
+#      --differential-lean-checker.
+#
+#   3. Tri-prover replay across Lean / Coq / Isabelle (expensive — runs
+#      on push to main only, caches heap files):
+#      --external-prover-replay.
+#
+# The drift guard added in PR-1 fires inside `--kernel-soundness` and
+# is the architectural backstop for status drift between mod.rs and the
+# Lean / Coq / Isabelle exports.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Tier 1: in-process audit gates.  No external toolchain needed.
+  # ---------------------------------------------------------------------------
+  in-process-gates:
+    name: In-process audit gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-audit-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-audit-${{ runner.os }}-
+
+      - name: Build verum CLI
+        run: cargo build --release --bin verum
+
+      - name: kernel-soundness (drift guard + cross-export emit)
+        run: |
+          cd core
+          ../target/release/verum audit --kernel-soundness
+
+      - name: kernel-rules + kernel-recheck
+        run: |
+          cd core
+          ../target/release/verum audit --kernel-rules
+          ../target/release/verum audit --kernel-recheck
+
+      - name: differential-kernel (3-way agreement on canonical battery)
+        run: |
+          cd core
+          ../target/release/verum audit --differential-kernel
+
+      - name: differential-kernel-fuzz (500-iter property fuzz)
+        run: |
+          cd core
+          ../target/release/verum audit --differential-kernel-fuzz
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: in-process-audit-reports
+          path: core/target/audit-reports/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Tier 2: cross-language differential — Rust kernel ↔ Lean ReferenceChecker.
+  # Caches Lake build artefacts so re-runs are fast after the first build.
+  # ---------------------------------------------------------------------------
+  differential-lean:
+    name: Differential Lean checker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lean 4 (elan)
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Cache cargo + Lake
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            verification/external/lean/.lake
+          key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
+          restore-keys: cargo-lean-${{ runner.os }}-
+
+      - name: Build verum CLI
+        run: cargo build --release --bin verum
+
+      - name: differential-lean-checker (24-cert battery, Rust ↔ Lean unanimity)
+        run: |
+          cd core
+          ../target/release/verum audit --differential-lean-checker
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-lean-audit-reports
+          path: core/target/audit-reports/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Tier 3: tri-prover replay — Lean / Coq / Isabelle.  Heaviest gate;
+  # runs on push to main only.  Caches Isabelle heap files (the slowest
+  # part — 8-12 minute first build, ~30-second incremental).
+  # ---------------------------------------------------------------------------
+  external-prover-replay:
+    name: External-prover replay (Lean / Coq / Isabelle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lean 4
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Install Coq / Rocq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y coq rocq-prover
+
+      - name: Cache Isabelle distribution + HOL heap
+        id: cache-isabelle
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/Isabelle2025-2
+            ~/.isabelle
+          key: isabelle-2025-2-hol-${{ runner.os }}-${{ hashFiles('verification/external/isabelle/ROOT', 'verification/external/isabelle/KernelSoundness.thy') }}
+          restore-keys: isabelle-2025-2-hol-${{ runner.os }}-
+
+      - name: Install Isabelle 2025-2
+        if: steps.cache-isabelle.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL https://isabelle.in.tum.de/dist/Isabelle2025-2_linux.tar.gz \
+            | sudo tar xz -C /opt
+          # Pre-build HOL heap (the cache-miss expensive part).
+          /opt/Isabelle2025-2/bin/isabelle build -b HOL
+
+      - name: Add Isabelle to PATH
+        run: echo "/opt/Isabelle2025-2/bin" >> $GITHUB_PATH
+
+      - name: Cache cargo + Lake
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            verification/external/lean/.lake
+          key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
+          restore-keys: cargo-lean-${{ runner.os }}-
+
+      - name: Build verum CLI
+        run: cargo build --release --bin verum
+
+      - name: external-prover-replay (tri-prover, --strict)
+        run: |
+          cd core
+          ../target/release/verum audit --external-prover-replay --strict
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-prover-audit-reports
+          path: core/target/audit-reports/
+          retention-days: 30
