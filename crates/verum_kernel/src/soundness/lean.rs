@@ -268,7 +268,7 @@ impl SoundnessBackend for LeanBackend {
 /// contract (audited via `verum audit --proof-honesty` at the
 /// Verum side); the Lean export now models the structural
 /// typing of well-formed elimination terms.
-const IOU_AXIOMS_LEAN: &str = "\
+pub(crate) const IOU_AXIOMS_LEAN: &str = "\
 -- ====== Per-rule IOU axioms (8 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
 -- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
