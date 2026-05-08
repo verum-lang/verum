@@ -5893,13 +5893,30 @@ impl VbcCodegen {
         }
 
         // Check if receiver is a type path (for static method calls like List.new())
-        // If so, try to look up Type::method as a registered function
+        // If so, try to look up Type::method as a registered function.
+        //
+        // Wrapped in a labeled block so we can early-exit and fall through to
+        // value method dispatch when the receiver is a local variable. This
+        // prevents `r.stdout()` (where `r` is a local) from being miscompiled
+        // as `stdout()` (a free function brought in by `mount core.io.stdio`).
+        'static_resolution: {
         if let ExprKind::Path(ref path) = receiver.kind
             && path.segments.len() == 1
             && let PathSegment::Name(ref type_ident) = path.segments[0]
         {
             let type_name = type_ident.name.to_string();
             let method_name = method.name.to_string();
+
+            // Gate: if the receiver name is a local variable AND not a known
+            // type name, dispatch as value method — never as static. Without
+            // this, a `mount`-imported free function whose simple name matches
+            // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
+            // method dispatch on the local.
+            let receiver_is_local_value =
+                !is_type_name(&type_name) && self.ctx.registers.contains(&type_name);
+            if receiver_is_local_value {
+                break 'static_resolution;
+            }
 
             // Intercept builtin collection constructors — emit CallM with the
             // type name string as receiver so the interpreter's builtin handler
@@ -6140,6 +6157,7 @@ impl VbcCodegen {
                 return self.compile_type_param_method_call(&type_name, method, args);
             }
         }
+        } // 'static_resolution
 
         // Compile receiver as value
         let receiver_reg = self
