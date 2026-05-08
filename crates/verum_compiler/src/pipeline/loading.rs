@@ -90,31 +90,21 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("[phase] load_stdlib_modules: enter");
         }
 
-        // T2-extended single-path: when the precompile metadata
-        // sidecar is embedded, the typecheck phase consumes it
-        // directly via `self.stdlib_metadata` (set at pipeline
-        // construction).  Stdlib AST is no longer load-bearing —
-        // skip the parse-and-walk path entirely.  This eliminates
-        // the ~9.6s `disk-cache HIT 2444 modules` cold-start cost
-        // that dominated runtime before T2.
+        // T2-extended single-path: typecheck consumes embedded
+        // CoreMetadata directly, but `mount` resolution still needs
+        // a populated `ModuleRegistry` to walk stdlib paths
+        // (`mount core.base.{Maybe}` looks up `core.base` in the
+        // registry, not in CoreMetadata).
         //
-        // Only the bootstrap path (no embedded metadata) still
-        // walks stdlib source — covered by a separate explicit
-        // mode, not a fallback.
-        if crate::embedded_stdlib_metadata::has_runtime_metadata()
-            && self.stdlib_metadata.is_some()
-        {
-            if trace {
-                eprintln!(
-                    "[phase] load_stdlib_modules: SKIPPED (embedded core_metadata sidecar present)"
-                );
-            }
-            tracing::debug!(
-                target: "load_stdlib_modules",
-                "skipped: typecheck consumes embedded CoreMetadata directly"
-            );
-            return Ok(());
-        }
+        // The earlier skip-on-metadata-present early-return left
+        // the registry empty, so any user-code mount of a stdlib
+        // submodule resolved as `module not found` despite the
+        // typechecker having full type info.
+        //
+        // Fall through to the in-memory / disk / source cache
+        // chain below; the in-memory cache hit is ~1ms after the
+        // first run, and subsequent runs reuse `STDLIB_REGISTRY`
+        // via `global_stdlib_registry_cache()`.
 
         // FAST PATH: Try to use cached fully-populated registry
         // This is the key optimization: deep_clone a cached registry (~1ms)
