@@ -25,6 +25,9 @@ pub(in super::super) fn handle_gpu_extended(
     use crate::instruction::GpuSubOpcode;
 
     let sub_op_byte = read_u8(state)?;
+    // Skip the length-prefix that the carrier encoder writes after sub_op
+    // (same convention as FfiExtended/MathExtended/…).
+    let _operand_len = read_varint(state)?;
     let sub_op = GpuSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
