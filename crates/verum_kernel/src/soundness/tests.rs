@@ -410,3 +410,132 @@ fn rule_categories_partition_the_corpus() {
     let total: usize = counts.values().sum();
     assert_eq!(total, EXPECTED_KERNEL_RULE_COUNT);
 }
+
+// =============================================================================
+// Drift-guard tests (PR-1): mod.rs LemmaStatus ↔ export IOU axiom presence
+// =============================================================================
+
+#[test]
+fn drift_check_passes_at_baseline() {
+    // Pin: in the as-shipped state, drift_check passes — every
+    // mod.rs `Admitted` rule has a corresponding `<Rule>_iou`
+    // axiom in the export, and every `Proved` /
+    // `DischargedByFramework` rule does NOT.
+    let exporter = SoundnessExporter::new();
+    let result = exporter.drift_check();
+    assert!(
+        result.is_ok(),
+        "drift_check must pass at baseline; got: {:?}",
+        result,
+    );
+}
+
+#[test]
+fn drift_check_catches_admitted_without_iou_axiom() {
+    // Pin: a rule that's Admitted in mod.rs but has no IOU axiom
+    // in the export (PR-5g/PR-5h drift pattern) is caught by
+    // drift_check.
+    use crate::soundness::{
+        LemmaStatus, RuleCategory, RuleSpec, SoundnessExporter,
+    };
+    let mut rules: Vec<RuleSpec> = canonical_rules();
+    // K_Quot_Elim has no IOU axiom (discharged in PR-5).  Flipping
+    // it back to Admitted should trigger a drift error.
+    for r in rules.iter_mut() {
+        if r.rule_name == "K_Quot_Elim" {
+            r.status = LemmaStatus::Admitted {
+                reason: "synthetic drift to test the guard".to_string(),
+            };
+        }
+    }
+    let _ = RuleCategory::Quotient; // imports
+    let exporter = SoundnessExporter::with_rules(rules);
+    let err = exporter
+        .drift_check()
+        .expect_err("drift_check should reject Admitted-without-axiom");
+    assert!(
+        err.contains("K_Quot_Elim"),
+        "drift error should name K_Quot_Elim; got: {}",
+        err,
+    );
+    assert!(
+        err.contains("no") && err.contains("axiom"),
+        "drift error should name the missing axiom; got: {}",
+        err,
+    );
+}
+
+#[test]
+fn drift_check_catches_proved_with_orphan_iou_axiom() {
+    // Pin: a rule that's Proved in mod.rs but still has an IOU
+    // axiom in the export (orphan-axiom drift) is caught.
+    use crate::soundness::{
+        LemmaStatus, RuleSpec, SoundnessExporter,
+    };
+    let mut rules: Vec<RuleSpec> = canonical_rules();
+    // K_Smt has an IOU axiom and is currently Admitted.  Flipping
+    // it to Proved without removing the axiom should trigger a
+    // drift error.
+    for r in rules.iter_mut() {
+        if r.rule_name == "K_Smt" {
+            r.status = LemmaStatus::Proved {
+                coq_tactics: "exact T_smt.".to_string(),
+                lean_tactics: "  exact @Typing.t_smt _ _ _".to_string(),
+            };
+        }
+    }
+    let exporter = SoundnessExporter::with_rules(rules);
+    let err = exporter
+        .drift_check()
+        .expect_err("drift_check should reject Proved-with-orphan-axiom");
+    assert!(
+        err.contains("K_Smt"),
+        "drift error should name K_Smt; got: {}",
+        err,
+    );
+    assert!(
+        err.contains("orphan"),
+        "drift error should call out the orphan axiom; got: {}",
+        err,
+    );
+}
+
+#[test]
+fn iou_axiom_rule_names_count_matches_admitted_count() {
+    // Pin: the IOU-axiom-source-of-truth list is the same length
+    // as the count of Admitted rules in mod.rs.  This is the
+    // partner pin to drift_check: it catches a state where the
+    // two sides have correct membership but a mis-counted total.
+    use crate::soundness::iou_axiom_rule_names;
+    let exporter = SoundnessExporter::new();
+    let admitted_count = exporter.admitted_count();
+    let iou_count = iou_axiom_rule_names().len();
+    assert_eq!(
+        admitted_count, iou_count,
+        "Admitted-count ({}) and IOU-axiom-count ({}) must match — \
+         every Admitted rule contributes one IOU axiom",
+        admitted_count, iou_count,
+    );
+}
+
+#[test]
+fn iou_axiom_rule_names_match_admitted_rule_names() {
+    // Pin: the IOU-axiom rule names match the rule names of every
+    // Admitted lemma — set equality.
+    use crate::soundness::iou_axiom_rule_names;
+    let exporter = SoundnessExporter::new();
+    let admitted_names: std::collections::BTreeSet<String> = exporter
+        .rules()
+        .iter()
+        .filter(|r| matches!(r.status, LemmaStatus::Admitted { .. }))
+        .map(|r| r.rule_name.clone())
+        .collect();
+    let iou_names: std::collections::BTreeSet<String> = iou_axiom_rule_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        admitted_names, iou_names,
+        "Admitted rule set must equal IOU-axiom rule set",
+    );
+}

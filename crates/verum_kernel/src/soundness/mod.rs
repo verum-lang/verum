@@ -760,6 +760,42 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
 /// Inductive 3 + SmtAxiom 2 + Diakrisis 11 = **38**.
 pub const EXPECTED_KERNEL_RULE_COUNT: usize = 38;
 
+/// Source of truth for which kernel rules currently ship with an
+/// `axiom <Rule>_iou` declaration in the Lean / Coq / Isabelle
+/// kernel-soundness export.  Returned in canonical (Rust-enum)
+/// order so audit reports + drift checks see a stable ordering.
+///
+/// **Discharge protocol**: removing a rule from this list also
+/// requires removing the corresponding `axiom` line from
+/// `IOU_AXIOMS_LEAN` / `IOU_AXIOMS_COQ` / `IOU_AXIOMS_ISA` and
+/// converting the corresponding `Typing.t_<rule>` constructor's
+/// IOU-premise into structural premises (or premise-free) per the
+/// established discharge templates.  [`SoundnessExporter::drift_check`]
+/// cross-validates that the per-rule [`LemmaStatus`] in `mod.rs`
+/// agrees with this list — every `Admitted` rule must appear here,
+/// every `Proved` / `DischargedByFramework` rule must not.
+///
+/// **Current count**: 8 axioms after the
+/// PR-5 / PR-5b / PR-5c / PR-5d / PR-5f / PR-5g / PR-5h discharge
+/// + status-fix sequence (was 17 pre-FV-9, then 17 → 16 → 14 →
+/// 12 → 11 → 8 across the structural-premises template applications).
+pub fn iou_axiom_rule_names() -> Vec<&'static str> {
+    vec![
+        // Cubical (4): CCHM machinery
+        "K_Path_Over_Form",
+        "K_HComp",
+        "K_Transp",
+        "K_Glue",
+        // Refinement (1): predicate-decidability oracle
+        "K_Refine_Intro",
+        // SMT (1): solver-specific replay
+        "K_Smt",
+        // Diakrisis (2): biadjunction algebra + bridge-audit
+        "K_Eps_Mu",
+        "K_Round_Trip",
+    ]
+}
+
 /// The protocol every cross-export backend implements. See module
 /// docs for the architectural rationale (one trait, multiple instances).
 ///
@@ -872,9 +908,27 @@ impl SoundnessExporter {
         out
     }
 
-    /// Audit-side drift check. Returns `Err(reason)` if the rule
-    /// list disagrees with [`EXPECTED_KERNEL_RULE_COUNT`] — the
-    /// gate fails on this so a one-sided edit can't slip through.
+    /// Audit-side drift check.  Returns `Err(reason)` on any of:
+    ///
+    /// 1. **Rule-count drift**: `rules.len()` disagrees with
+    ///    [`EXPECTED_KERNEL_RULE_COUNT`].  A one-sided edit
+    ///    (Rust grows a rule, .vr doesn't, or vice versa) fails
+    ///    immediately.
+    /// 2. **Status ↔ export drift** (added in PR-1): per-rule
+    ///    [`LemmaStatus`] in `mod.rs` disagrees with the export's
+    ///    actual IOU axiom presence.  Three failure modes:
+    ///    - Rule is `Admitted` but no `<Rule>_iou` axiom exists in
+    ///      the export — the constructor must be structurally
+    ///      provable, so mod.rs status is stale.  This is the drift
+    ///      pattern PR-5g and PR-5h cleaned up by hand.
+    ///    - Rule is `Proved` or `DischargedByFramework` but a
+    ///      `<Rule>_iou` axiom is *still* in the export — orphan
+    ///      axiom; remove from `IOU_AXIOMS_*` and the corresponding
+    ///      `Typing` constructor's premise list.
+    ///
+    /// The drift guard turns "status drift accumulates silently for
+    /// dozens of commits" (the historical failure mode) into a CI-
+    /// time hard error.
     pub fn drift_check(&self) -> Result<(), String> {
         if self.rules.len() != EXPECTED_KERNEL_RULE_COUNT {
             return Err(format!(
@@ -883,6 +937,47 @@ impl SoundnessExporter {
                 self.rules.len(),
                 EXPECTED_KERNEL_RULE_COUNT
             ));
+        }
+
+        // Per-rule status ↔ IOU-axiom-presence consistency.
+        let iou_rule_names: std::collections::BTreeSet<&'static str> =
+            iou_axiom_rule_names().into_iter().collect();
+        let mut errors: Vec<String> = Vec::new();
+        for rule in &self.rules {
+            let has_iou_axiom = iou_rule_names.contains(rule.rule_name.as_str());
+            match (&rule.status, has_iou_axiom) {
+                (LemmaStatus::Admitted { .. }, true) => {} // expected pairing
+                (LemmaStatus::Admitted { .. }, false) => {
+                    errors.push(format!(
+                        "drift: rule {} is Admitted in mod.rs but the export has no \
+                         {}_iou axiom — status drift (the constructor must be \
+                         structurally provable; flip mod.rs to Proved or \
+                         DischargedByFramework)",
+                        rule.rule_name, rule.rule_name,
+                    ));
+                }
+                (LemmaStatus::Proved { .. }, false) => {} // expected
+                (LemmaStatus::Proved { .. }, true) => {
+                    errors.push(format!(
+                        "drift: rule {} is Proved in mod.rs but the export still has a \
+                         {}_iou axiom — orphan axiom (remove from IOU_AXIOMS_* and the \
+                         corresponding Typing constructor's premise list)",
+                        rule.rule_name, rule.rule_name,
+                    ));
+                }
+                (LemmaStatus::DischargedByFramework { .. }, false) => {} // expected
+                (LemmaStatus::DischargedByFramework { .. }, true) => {
+                    errors.push(format!(
+                        "drift: rule {} is DischargedByFramework but the export has a \
+                         {}_iou axiom — the framework citation makes the IOU axiom \
+                         redundant (remove the axiom)",
+                        rule.rule_name, rule.rule_name,
+                    ));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
         }
         Ok(())
     }
