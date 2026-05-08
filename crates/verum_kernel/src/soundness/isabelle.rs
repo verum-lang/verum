@@ -246,28 +246,23 @@ impl SoundnessBackend for IsabelleBackend {
 
     fn render_main_theorem(&self, rules: &[RuleSpec]) -> String {
         let _ = rules;
-        // The main meta-circular soundness statement: a conjunction
-        // of all nine structural-fragment lemmas, fully proved by
-        // direct rule application.  Mirrors lean.rs and coq.rs.
-        //
-        // The conjunction body lives on a single line so Isabelle's
-        // inner-term parser doesn't trip on embedded `\n` escapes.
+        // The structural-fragment soundness statements are already
+        // proved as the nine `K_*_sound` per-rule lemmas above (each
+        // discharged by `by (rule T_*)` in milliseconds).  We expose
+        // a `kernel_structural_soundness_holds` aggregate as a
+        // `lemmas` declaration that simply *names* the nine lemmas
+        // — there is nothing to prove.  This avoids `auto`'s
+        // exponential search over the bundled 9-conjunct goal which
+        // would otherwise dominate the audit-gate runtime.
         String::from(
-            "(* **Structural-fragment kernel soundness** — bundles the *)\n\
-             (* nine structural rules' per-rule lemmas into a single *)\n\
-             (* statement.  Fully proved by `auto intro` against all *)\n\
-             (* nine introduction rules of Typing. *)\n\
-             theorem kernel_structural_soundness:\n  \
-               \"(\\<forall>\\<Gamma> x T. (x, T) \\<in> set \\<Gamma> \\<longrightarrow> \\<Gamma> \\<turnstile> Var x : T) \
-               \\<and> (\\<forall>\\<Gamma> i. \\<Gamma> \\<turnstile> Universe i : Universe (Suc i)) \
-               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow> \\<Gamma> \\<turnstile> Pi x A B : Universe i) \
-               \\<and> (\\<forall>\\<Gamma> x A b B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> b : B \\<longrightarrow> \\<Gamma> \\<turnstile> Lam x A b : Pi x A B) \
-               \\<and> (\\<forall>\\<Gamma> f a x A B. \\<Gamma> \\<turnstile> f : Pi x A B \\<longrightarrow> \\<Gamma> \\<turnstile> a : A \\<longrightarrow> \\<Gamma> \\<turnstile> App f a : subst x a B) \
-               \\<and> (\\<forall>\\<Gamma> x A B i. \\<Gamma> \\<turnstile> A : Universe i \\<longrightarrow> ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i \\<longrightarrow> \\<Gamma> \\<turnstile> Sigma x A B : Universe i) \
-               \\<and> (\\<forall>\\<Gamma> x A B a b. \\<Gamma> \\<turnstile> a : A \\<longrightarrow> \\<Gamma> \\<turnstile> b : subst x a B \\<longrightarrow> \\<Gamma> \\<turnstile> Pair a b : Sigma x A B) \
-               \\<and> (\\<forall>\\<Gamma> p x A B. \\<Gamma> \\<turnstile> p : Sigma x A B \\<longrightarrow> \\<Gamma> \\<turnstile> Fst p : A) \
-               \\<and> (\\<forall>\\<Gamma> p x A B. \\<Gamma> \\<turnstile> p : Sigma x A B \\<longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B)\"\n  \
-               by (auto intro: T_var T_univ T_pi T_lam T_app T_sigma T_pair T_fst T_snd)\n\n\
+            "(* **Structural-fragment kernel soundness** — names the nine *)\n\
+             (* per-rule lemmas above as a single bundle.  The lemmas are *)\n\
+             (* already individually proved by direct introduction-rule *)\n\
+             (* application; this declaration is bookkeeping. *)\n\
+             lemmas kernel_structural_soundness =\n  \
+               K_Var_sound K_Univ_sound K_Pi_Form_sound K_Lam_Intro_sound\n  \
+               K_App_Elim_sound K_Sigma_Form_sound K_Pair_Intro_sound\n  \
+               K_Fst_Elim_sound K_Snd_Elim_sound\n\n\
              (* **Admit roster** — for the 29 non-structural rules whose *)\n\
              (* proofs remain IOUs.  Trivially `True`; auditors should *)\n\
              (* consult the per-rule lemmas above for the IOU reasons. *)\n\

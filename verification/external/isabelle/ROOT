@@ -1,4 +1,7 @@
 session "KernelSoundness" = HOL +
-  options [document = false, timeout = 600]
+  (* timeout 1800s — accommodates cold builds where the HOL heap
+     must be re-elaborated from scratch.  Warm builds (HOL already
+     in ~/.isabelle/Isabelle2025-2/heaps/) finish in ≈80s. *)
+  options [document = false, timeout = 1800]
   theories
     KernelSoundness
