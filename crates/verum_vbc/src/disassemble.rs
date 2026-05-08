@@ -487,23 +487,26 @@ fn write_instruction(
             arr,
             type_hint: _,
         } => write!(out, "LEN       {}, {}", r(dst), r(arr)),
-        NewList { dst } => write!(out, "NEW_LIST  {}", r(dst)),
+        NewList { dst, capacity_hint } => {
+            write!(out, "NEW_LIST  {}, cap={}", r(dst), capacity_hint)
+        }
         ListPush { list, val } => write!(out, "LIST_PUSH {}, {}", r(list), r(val)),
         ListPop { dst, list } => write!(out, "LIST_POP  {}, {}", r(dst), r(list)),
-        NewMap { dst } => write!(out, "NEW_MAP   {}", r(dst)),
+        NewMap { dst, capacity_hint } => {
+            write!(out, "NEW_MAP   {}, cap={}", r(dst), capacity_hint)
+        }
         MapGet { dst, map, key } => write!(out, "MAP_GET   {}, {}[{}]", r(dst), r(map), r(key)),
         MapSet { map, key, val } => write!(out, "MAP_SET   {}[{}], {}", r(map), r(key), r(val)),
         MapContains { dst, map, key } => {
             write!(out, "MAP_HAS   {}, {}[{}]", r(dst), r(map), r(key))
         }
         Clone { dst, src } => write!(out, "CLONE     {}, {}", r(dst), r(src)),
-        MakeList { dst, len } => write!(out, "MAKE_LIST {}, len={}", r(dst), len),
-        MakeMap { dst, capacity } => write!(out, "MAKE_MAP  {}, cap={}", r(dst), capacity),
-        MakeSet { dst, capacity } => write!(out, "MAKE_SET  {}, cap={}", r(dst), capacity),
         MapInsert { map, key, value } => {
             write!(out, "MAP_INS   {}[{}], {}", r(map), r(key), r(value))
         }
-        NewSet { dst } => write!(out, "NEW_SET   {}", r(dst)),
+        NewSet { dst, capacity_hint } => {
+            write!(out, "NEW_SET   {}, cap={}", r(dst), capacity_hint)
+        }
         SetInsert { set, elem } => write!(out, "SET_INS   {}, {}", r(set), r(elem)),
         SetContains { dst, set, elem } => {
             write!(out, "SET_HAS   {}, {}, {}", r(dst), r(set), r(elem))

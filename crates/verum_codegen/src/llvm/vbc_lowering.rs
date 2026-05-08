@@ -3036,7 +3036,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         Instruction::New { dst, type_id, .. } => {
                             reg_types.insert(dst.0, TypeRef::Concrete(TypeId(*type_id)));
                         }
-                        Instruction::NewList { dst } => {
+                        Instruction::NewList { dst, .. } => {
                             reg_types.insert(dst.0, TypeRef::Concrete(TypeId::LIST));
                         }
                         Instruction::Mov { dst, src } => {
@@ -3174,7 +3174,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         Instruction::New { dst, type_id, .. } => {
                             flow_types.insert(dst.0, TypeRef::Concrete(TypeId(*type_id)));
                         }
-                        Instruction::NewList { dst } => {
+                        Instruction::NewList { dst, .. } => {
                             flow_types.insert(dst.0, TypeRef::Concrete(TypeId::LIST));
                             ever_list_regs.insert(dst.0);
                         }
@@ -3363,7 +3363,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             },
                         );
                     }
-                    Instruction::NewList { dst } => {
+                    Instruction::NewList { dst, .. } => {
                         ctx.reg_types_mut().set(
                             dst.0,
                             super::register_types::RegisterType::List { element: None },

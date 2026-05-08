@@ -3111,7 +3111,7 @@ pub fn lower_instruction<'ctx>(
             type_hint,
         } => lower_len(ctx, *dst, *arr, *type_hint),
 
-        Instruction::NewList { dst } => {
+        Instruction::NewList { dst, .. } => {
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let list_ptr = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
             ctx.set_register(dst.0, list_ptr.into());
@@ -3174,7 +3174,7 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
-        Instruction::NewMap { dst } => {
+        Instruction::NewMap { dst, .. } => {
             // Route through compiled Map.new() from map.vr.
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
@@ -4949,7 +4949,7 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
         // Set Operations: NewSet, SetInsert, SetContains, SetRemove
         // ====================================================================
-        Instruction::NewSet { dst } => {
+        Instruction::NewSet { dst, .. } => {
             // Route through compiled Set.new() from set.vr
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
@@ -5030,7 +5030,7 @@ pub fn lower_instruction<'ctx>(
         // explicit AOT lowering. NewDeque is emitted by the VBC codegen for
         // `Deque.new()` and `Deque.with_capacity(n)` (the capacity arg has
         // already been dropped at the VBC level — heap auto-grows).
-        Instruction::NewDeque { dst } => {
+        Instruction::NewDeque { dst, .. } => {
             // Deque.new() is intercepted by the VBC codegen (see
             // verum_vbc/src/codegen/expressions.rs) so it emits the
             // NewDeque opcode rather than a function Call. That
@@ -5165,64 +5165,14 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
-        // ====================================================================
-        // Collection Construction (MakeList, MakeMap, MakeSet, MapInsert, etc.)
-        // ====================================================================
-        Instruction::MakeList { dst, len } => {
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let module = ctx.get_module();
-            let list_ptr = runtime.lower_new_list(ctx.builder(), &module)?;
-            let _ = len;
-            ctx.set_register(dst.0, list_ptr.into());
-            ctx.mark_list_register(dst.0);
-            Ok(())
-        }
-
-        Instruction::MakeMap { dst, capacity } => {
-            // Route through compiled Map.new() from map.vr.
-            // This creates a properly laid-out Map object with 24-byte object header.
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let _ = capacity;
-            if let Some(new_fn) = module.get_function("Map.new") {
-                let result = ctx
-                    .builder()
-                    .build_call(new_fn, &[], "map_new")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-            } else {
-                // Fallback: use lower_new_map (for cases where map.vr isn't compiled)
-                let runtime = RuntimeLowering::new(ctx.llvm_context());
-                let map_ptr = runtime.lower_new_map(ctx.builder(), &module)?;
-                ctx.set_register(dst.0, map_ptr.into());
-            }
-            ctx.mark_map_register(dst.0);
-            Ok(())
-        }
-
-        Instruction::MakeSet { dst, capacity } => {
-            // Route through compiled Set.new() from set.vr
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-            let _ = capacity;
-            if let Some(new_fn) = module.get_function("Set.new") {
-                let result = ctx
-                    .builder()
-                    .build_call(new_fn, &[], "set_new")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| LlvmLoweringError::internal("Set.new should return value"))?;
-                ctx.set_register(dst.0, result);
-            } else {
-                ctx.set_register(dst.0, i64_type.const_int(0, false).into());
-            }
-            ctx.mark_set_register(dst.0);
-            Ok(())
-        }
+        // The legacy MakeList/MakeMap/MakeSet arms here used to handle the
+        // capacity-hint-bearing variant.  Both forms are now `NewList /
+        // NewMap / NewSet { dst, capacity_hint }` and the earlier arms
+        // above already cover both — see lines ~3114 (NewList), ~3177
+        // (NewMap), ~4952 (NewSet).  Capacity is currently ignored at the
+        // LLVM lowering level (the compiled stdlib `*.new()` doesn't take
+        // a capacity arg yet); when stdlib `with_capacity()` lands we can
+        // route here on `capacity_hint > 0`.
 
         Instruction::MapInsert { map, key, value } => {
             // Route through compiled Map.insert (from map.vr).

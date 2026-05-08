@@ -5599,23 +5599,23 @@ impl VbcCodegen {
                     });
                     self.ctx.free_temp(cap_reg);
                 } else {
-                    self.ctx.emit(Instruction::NewList { dst: dest });
+                    self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
                 }
                 return Ok(Some(dest));
             }
             if tn == type_names::MAP {
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewMap { dst: dest });
+                self.ctx.emit(Instruction::NewMap { dst: dest , capacity_hint: 0 });
                 return Ok(Some(dest));
             }
             if tn == type_names::SET {
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewSet { dst: dest });
+                self.ctx.emit(Instruction::NewSet { dst: dest , capacity_hint: 0 });
                 return Ok(Some(dest));
             }
             if tn == type_names::DEQUE {
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewDeque { dst: dest });
+                self.ctx.emit(Instruction::NewDeque { dst: dest , capacity_hint: 0 });
                 return Ok(Some(dest));
             }
         }
@@ -5656,13 +5656,13 @@ impl VbcCodegen {
                 return Ok(Some(dest));
             }
             let opcode = if tn == type_names::LIST {
-                Some(Instruction::NewList { dst: Reg(0) })
+                Some(Instruction::NewList { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::MAP {
-                Some(Instruction::NewMap { dst: Reg(0) })
+                Some(Instruction::NewMap { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::SET {
-                Some(Instruction::NewSet { dst: Reg(0) })
+                Some(Instruction::NewSet { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::DEQUE {
-                Some(Instruction::NewDeque { dst: Reg(0) })
+                Some(Instruction::NewDeque { dst: Reg(0) , capacity_hint: 0 })
             } else {
                 None
             };
@@ -5675,10 +5675,10 @@ impl VbcCodegen {
                 }
                 let dest = self.ctx.alloc_temp();
                 let instr = match template {
-                    Instruction::NewList { .. } => Instruction::NewList { dst: dest },
-                    Instruction::NewMap { .. } => Instruction::NewMap { dst: dest },
-                    Instruction::NewSet { .. } => Instruction::NewSet { dst: dest },
-                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest },
+                    Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: 0 },
+                    Instruction::NewMap { .. } => Instruction::NewMap { dst: dest , capacity_hint: 0 },
+                    Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
+                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: 0 },
                     other => other,
                 };
                 self.ctx.emit(instr);
@@ -11329,7 +11329,7 @@ impl VbcCodegen {
                 let result = self.ctx.alloc_temp();
 
                 // Create list
-                self.ctx.emit(Instruction::NewList { dst: result });
+                self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: 0 });
 
                 // Push all elements
                 for elem in elements.iter() {
@@ -11354,7 +11354,7 @@ impl VbcCodegen {
                     .ok_or_else(|| CodegenError::internal("array size has no value"))?;
 
                 // Create list
-                self.ctx.emit(Instruction::NewList { dst: result });
+                self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: 0 });
 
                 // Compile value template
                 let val_reg = self
@@ -11448,7 +11448,7 @@ impl VbcCodegen {
                 if elements.is_empty() {
                     // Empty stream: stream[] - create empty iterator
                     // Use GenCreate with a special empty generator function
-                    self.ctx.emit(Instruction::NewList { dst: result });
+                    self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: 0 });
                     // Create iterator from empty list
                     let iter_reg = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::IterNew {
@@ -11469,7 +11469,7 @@ impl VbcCodegen {
 
                     // First, create the backing list
                     let list_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::NewList { dst: list_reg });
+                    self.ctx.emit(Instruction::NewList { dst: list_reg , capacity_hint: 0 });
 
                     for elem in elements.iter() {
                         let elem_reg = self
@@ -11499,7 +11499,7 @@ impl VbcCodegen {
                     // Finite stream: stream[1, 2, 3]
                     // Create a list and then create an iterator from it
                     let list_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::NewList { dst: list_reg });
+                    self.ctx.emit(Instruction::NewList { dst: list_reg , capacity_hint: 0 });
 
                     for elem in elements.iter() {
                         let elem_reg = self
@@ -17675,7 +17675,7 @@ impl VbcCodegen {
             }
             "list_with_capacity" => {
                 // @list_with_capacity(N) — create an empty list (capacity hint ignored at Tier 0)
-                self.ctx.emit(Instruction::NewList { dst: dest });
+                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
             }
             "byte_list_with_capacity" => {
                 // @byte_list_with_capacity(N) — create an empty
@@ -19278,7 +19278,7 @@ impl VbcCodegen {
             InlineSequenceId::ToLeBytes => {
                 let width = byte_width as usize;
                 let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::NewList { dst: dest });
+                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
                 let shift_reg = self.ctx.alloc_temp();
                 let byte_reg = self.ctx.alloc_temp();
                 let mask_reg = self.ctx.alloc_temp();
@@ -19326,7 +19326,7 @@ impl VbcCodegen {
             InlineSequenceId::ToBeBytes => {
                 let width = byte_width as usize;
                 let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::NewList { dst: dest });
+                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
                 let shift_reg = self.ctx.alloc_temp();
                 let byte_reg = self.ctx.alloc_temp();
                 let mask_reg = self.ctx.alloc_temp();
@@ -23732,7 +23732,7 @@ impl VbcCodegen {
             "list_with_capacity" => {
                 // @list_with_capacity(N) → create empty list (capacity is optimization hint)
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewList { dst: dest });
+                self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
                 Ok(Some(dest))
             }
             "byte_list_with_capacity" => {
@@ -23880,10 +23880,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result list
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeList {
+        self.ctx.emit(Instruction::NewList {
             dst: result,
-            len: 0,
-        });
+            capacity_hint: 0,
+            });
 
         // Recursively compile clauses
         self.compile_comprehension_clauses(expr, clauses, 0, result)?;
@@ -24032,10 +24032,10 @@ impl VbcCodegen {
         // Early return for empty clauses - create empty iterator
         if clauses.is_empty() {
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::MakeList {
+            self.ctx.emit(Instruction::NewList {
                 dst: result,
-                len: 0,
-            });
+                capacity_hint: 0,
+                });
             // Create iterator from empty list
             let iter_result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Iter {
@@ -24596,10 +24596,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result map
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeMap {
+        self.ctx.emit(Instruction::NewMap {
             dst: result,
-            capacity: 0,
-        });
+            capacity_hint: 0,
+            });
 
         // Recursively compile clauses
         self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, 0, result)?;
@@ -24754,10 +24754,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result set
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeSet {
+        self.ctx.emit(Instruction::NewSet {
             dst: result,
-            capacity: 0,
-        });
+            capacity_hint: 0,
+            });
 
         // Recursively compile clauses
         self.compile_set_comprehension_clauses(expr, clauses, 0, result)?;
@@ -25268,10 +25268,10 @@ impl VbcCodegen {
         entries: &verum_common::List<(Expr, Expr)>,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeMap {
+        self.ctx.emit(Instruction::NewMap {
             dst: dest,
-            capacity: entries.len() as u16,
-        });
+            capacity_hint: entries.len() as u16,
+            });
 
         for (key, value) in entries.iter() {
             let key_reg = self
@@ -25300,10 +25300,10 @@ impl VbcCodegen {
         elements: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeSet {
+        self.ctx.emit(Instruction::NewSet {
             dst: dest,
-            capacity: elements.len() as u16,
-        });
+            capacity_hint: elements.len() as u16,
+            });
 
         for elem in elements.iter() {
             let elem_reg = self

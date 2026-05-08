@@ -1311,9 +1311,12 @@ pub(in super::super) fn handle_new_list(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
+    // Wire format: opcode + dst + varint(capacity_hint).
+    // capacity_hint == 0 → runtime default; non-zero → pre-allocate.
+    let capacity_hint = read_varint(state)? as usize;
 
     // List layout: [len: Value, cap: Value, backing_ptr: Value]
-    let cap: usize = 16; // Default capacity
+    let cap: usize = if capacity_hint > 0 { capacity_hint } else { 16 };
 
     let obj = state
         .heap
