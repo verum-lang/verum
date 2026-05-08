@@ -415,9 +415,9 @@ pub use projection::{
     check_associated_type_bound, parse_projection,
 };
 pub use protocol::{
-    AssociatedConst, AssociatedType, MethodResolution, MethodSource, Protocol, ProtocolBound,
-    ProtocolChecker, ProtocolError, ProtocolImpl, ProtocolMethod, UnifiedProtocolError, VTable,
-    VTableLayout, WhereClause,
+    AssociatedConst, AssociatedType, ConformanceError, MethodResolution, MethodSource, Protocol,
+    ProtocolBound, ProtocolChecker, ProtocolError, ProtocolImpl, ProtocolMethod,
+    UnifiedProtocolError, VTable, VTableLayout, WhereClause,
 };
 pub use refinement::{
     CounterExample, NamedPredicate, RefinementChecker, RefinementConfig, RefinementError,
