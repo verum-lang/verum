@@ -25,6 +25,13 @@ mount core.database.common.error.{
 };
 mount core.database.postgres.wire.backend.Diagnostic;
 
+// Convenience alias.  Postgres-side errors are surfaced via the
+// unified `DbError` taxonomy, but registry / repository code reads
+// more naturally against a `PgError` synonym.  The alias keeps the
+// two names structurally identical (no translation step) while
+// preserving the "this is a Postgres error" intent at call sites.
+public type PgError is DbError;
+
 /// Fold a Postgres `Diagnostic` into a Spindle `DbError`.
 ///
 

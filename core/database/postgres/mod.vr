@@ -232,7 +232,7 @@ public mount .async_listener.{
     DEFAULT_SUBSCRIBER_CAPACITY,
 };
 public mount .adapter.PgAdapter;
-public mount .error.dberr_from_pg;
+public mount .error.{dberr_from_pg, PgError};
 public mount .stmt_cache.{StmtCache, CacheEntry};
 public mount .extended.{
     ExtendedQueryResult, PipelineEntry, PipelineBatch, ExtendedResultBuilder,
