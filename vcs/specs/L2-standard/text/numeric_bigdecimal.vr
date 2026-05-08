@@ -149,18 +149,14 @@ fn check_compare() {
     let b = BigDecimal.from_int(10);
     let c = BigDecimal.from_int(5);
 
-    assert(matches_less(a.compare(&b)));
-    assert(matches_equal(a.compare(&c)));
-    assert(matches_greater(b.compare(&a)));
+    assert(a.compare(&b).is_less());
+    assert(a.compare(&c).is_equal());
+    assert(b.compare(&a).is_greater());
 
     assert(a.lt(&b));
     assert(b.gt(&a));
     assert(a.eq(&c));
 }
-
-fn matches_equal(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
-fn matches_less(o: Ordering)  -> Bool { match o { Less => true,  _ => false } }
-fn matches_greater(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
 
 fn check_render() -> Result<Bool, BigDecimalError> {
     let zero = BigDecimal.zero();
