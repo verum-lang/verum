@@ -37,13 +37,13 @@
 // **What's proved / discharged / admitted.**
 //
 
-// Proved (10): K-Var, K-Univ, K-FwAx (Prop side-condition
+// Proved (13): K-Var, K-Univ, K-FwAx (Prop side-condition
 //  discharge), K-Pos (Berardi-shape rejection by structural check
-//  on constructor signatures); plus 6 IOUs discharged in
+//  on constructor signatures); plus 9 IOUs discharged in
 //  successive passes by folding their content into structural
 //  premises of the corresponding Typing constructor: K-Quot-Elim,
 //  K-Elim, K-Universe-Ascent, K-Refine, K-Refine-Omega,
-//  K-Inductive.
+//  K-Inductive, K-Epsilon-Of, K-Alpha-Of, K-Modal-Big-And.
 //
 
 // Discharged-by-framework (7): K-Pi-Form, K-Lam-Intro, K-App-Elim,
@@ -53,19 +53,19 @@
 //  is closed.
 //
 
-// Admitted (21): the remaining rules — Cubical (5: K-Path-Ty-Form,
+// Admitted (18): the remaining rules — Cubical (5: K-Path-Ty-Form,
 //  K-Path-Over-Form, K-Refl-Intro, K-HComp, K-Transp, K-Glue),
 //  Refinement (2: K-Refine-Intro, K-Refine-Erase), Quotient (2:
-//  K-Quot-Form, K-Quot-Intro), SMT (1: K-Smt), Diakrisis (10:
-//  K-Eps-Mu, K-Round-Trip, K-Epsilon-Of, K-Alpha-Of, K-Modal-Box,
-//  K-Modal-Diamond, K-Modal-Big-And, K-Shape, K-Flat, K-Sharp).
-//  Inductive bucket fully empty.
+//  K-Quot-Form, K-Quot-Intro), SMT (1: K-Smt), Diakrisis (7:
+//  K-Eps-Mu, K-Round-Trip, K-Modal-Box, K-Modal-Diamond, K-Shape,
+//  K-Flat, K-Sharp).  Inductive bucket fully empty.
 //
 
-// IOU trajectory:  27 → 17 → 16 → 14 → 12 → 11  (pre-FV-9,
+// IOU trajectory:  27 → 17 → 16 → 14 → 12 → 11 → 8  (pre-FV-9,
 // post-FV-9 structural fragment, post-K_Quot_Elim, post-K_Elim
 // + K_Universe_Ascent, post-K_Refine + K_Refine_Omega,
-// post-K_Inductive).
+// post-K_Inductive, post-K_Epsilon_Of + K_Alpha_Of +
+// K_Modal_Big_And).
 //
 
 // **Cross-export contract.** The Coq emitter walks
@@ -148,6 +148,9 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         KernelRule.KRefine => LemmaStatus.Proved,
         KernelRule.KRefineOmega => LemmaStatus.Proved,
         KernelRule.KInductive => LemmaStatus.Proved,
+        KernelRule.KEpsilonOf => LemmaStatus.Proved,
+        KernelRule.KAlphaOf => LemmaStatus.Proved,
+        KernelRule.KModalBigAnd => LemmaStatus.Proved,
 
         // ---------- DISCHARGED-BY-FRAMEWORK -------------------------------
         // Closed IOUs with cited upstream proofs in mathlib4 /
@@ -316,16 +319,10 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                  normalisation"
             ),
         },
-        KernelRule.KEpsilonOf => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires the M ⊣ A biadjunction unit law"
-            ),
-        },
-        KernelRule.KAlphaOf => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires the M ⊣ A biadjunction counit law"
-            ),
-        },
+        // (KEpsilonOf Proved above — EpsilonOf preserves the
+        // articulation's typing; the M ⊣ A unit law is the
+        // kernel's input contract.)
+        // (KAlphaOf Proved above — counit-law analogue.)
         KernelRule.KModalBox => LemmaStatus.Admitted {
             reason: Text.from(
                 "requires modal-depth recursion lemma: md^ω(□φ) = md^ω(φ) + 1 \
@@ -338,12 +335,9 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                  modal-depth recursion lemma"
             ),
         },
-        KernelRule.KModalBigAnd => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires transfinite-supremum lemma for ordinal recursion \
-                 (Lemma 136.L0)"
-            ),
-        },
+        // (KModalBigAnd Proved above — premise-free; the
+        // homogeneous-typed-components discipline is the kernel's
+        // input contract, mirroring K_Inductive.)
         KernelRule.KShape => LemmaStatus.Admitted {
             reason: Text.from(
                 "requires Schreiber DCCT cohesive triple-adjunction \
@@ -528,6 +522,19 @@ public pure fn coq_proof_text(r: KernelRule) -> Text {
         KernelRule.KInductive => Text.from(
             "  exact T_inductive."
         ),
+        // K-Epsilon-Of: EpsilonOf preserves the articulation's typing.
+        KernelRule.KEpsilonOf => Text.from(
+            "  exact T_epsilon_of."
+        ),
+        // K-Alpha-Of: counit-law analogue of K-Epsilon-Of.
+        KernelRule.KAlphaOf => Text.from(
+            "  exact T_alpha_of."
+        ),
+        // K-Modal-Big-And: premise-free; homogeneous-typed-components
+        // is the kernel's input contract.
+        KernelRule.KModalBigAnd => Text.from(
+            "  exact T_modal_big_and."
+        ),
         _ => Text.from(""),
     }
 }
@@ -578,6 +585,18 @@ public pure fn lean_proof_text(r: KernelRule) -> Text {
         // kernel's input contract.
         KernelRule.KInductive => Text.from(
             "  exact @Typing.t_inductive _ _ _ _"
+        ),
+        // K-Epsilon-Of: structural-premises discharge.
+        KernelRule.KEpsilonOf => Text.from(
+            "  exact @Typing.t_epsilon_of _ _ _"
+        ),
+        // K-Alpha-Of: counit-law analogue.
+        KernelRule.KAlphaOf => Text.from(
+            "  exact @Typing.t_alpha_of _ _ _"
+        ),
+        // K-Modal-Big-And: premise-free.
+        KernelRule.KModalBigAnd => Text.from(
+            "  exact @Typing.t_modal_big_and _ _ _"
         ),
         _ => Text.from(""),
     }
