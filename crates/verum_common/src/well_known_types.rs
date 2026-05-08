@@ -400,6 +400,22 @@ pub fn varerror_not_unicode_tag() -> u32 {
         .expect("VARERROR_VARIANT_LAYOUT must contain 'NotUnicode'")
 }
 
+/// Canonical list of marker protocol names in `core::base::protocols`.
+///
+/// **Definition:** A *marker protocol* is a protocol with zero required or
+/// provided methods, zero associated types, and zero associated constants.
+/// Its sole purpose is to express a compile-time capability constraint at
+/// the type level (e.g., thread-safety, pinning, sizedness).
+///
+/// **Single source of truth.** Code that registers, queries, or validates
+/// marker protocols (in `verum_types/send_sync.rs` and test suites) must
+/// iterate this slice rather than duplicating the name list.
+///
+/// **Drift contract:** any new marker protocol added to `core/base/protocols.vr`
+/// MUST be appended here; the `all_marker_protocols_are_registered` test will
+/// catch the gap.
+pub const MARKER_PROTOCOL_NAMES: &[&str] = &["Sized", "Send", "Sync", "Unpin"];
+
 /// Returns the canonical success variant tag for `Maybe<T>` (the tag for `Some`).
 ///
 /// Derived from `MAYBE_VARIANT_LAYOUT` — same source of truth used by

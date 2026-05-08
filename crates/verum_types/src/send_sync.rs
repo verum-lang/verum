@@ -632,35 +632,24 @@ impl<'a> SendSyncDerivation<'a> {
 /// This should be called during protocol checker initialization to register
 /// the standard Send and Sync protocols.
 pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
-    // Register Send protocol
-    let send = Protocol {
-        name: "Send".into(),
-        kind: crate::protocol::ProtocolKind::Constraint,
-        type_params: List::new(),
-        methods: Map::new(), // Marker protocol - no methods
-        associated_types: Map::new(),
-        associated_consts: Map::new(),
-        super_protocols: List::new(),
-        specialization_info: Maybe::None,
-        defining_crate: Maybe::Some("stdlib".into()),
-        span: Span::default(),
-    };
-    let _ = checker.register_protocol(send);
-
-    // Register Sync protocol
-    let sync = Protocol {
-        name: "Sync".into(),
-        kind: crate::protocol::ProtocolKind::Constraint,
-        type_params: List::new(),
-        methods: Map::new(), // Marker protocol - no methods
-        associated_types: Map::new(),
-        associated_consts: Map::new(),
-        super_protocols: List::new(),
-        specialization_info: Maybe::None,
-        defining_crate: Maybe::Some("stdlib".into()),
-        span: Span::default(),
-    };
-    let _ = checker.register_protocol(sync);
+    // All four marker protocols use the same shape: zero methods, zero
+    // associated types, zero super-protocols.  The names are the
+    // canonical list from MARKER_PROTOCOL_NAMES in verum_common.
+    for name in verum_common::well_known_types::MARKER_PROTOCOL_NAMES {
+        let proto = Protocol {
+            name: (*name).into(),
+            kind: crate::protocol::ProtocolKind::Constraint,
+            type_params: List::new(),
+            methods: Map::new(), // marker: zero methods by definition
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            super_protocols: List::new(),
+            specialization_info: Maybe::None,
+            defining_crate: Maybe::Some("stdlib".into()),
+            span: Span::default(),
+        };
+        let _ = checker.register_protocol(proto);
+    }
 }
 
 /// Register Send/Sync implementations for standard types
