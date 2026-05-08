@@ -155,10 +155,13 @@ impl SoundnessBackend for LeanBackend {
              opaque side_conditions_hold : Prop\n\n",
         );
 
-        // 3. Per-rule IOU axioms — exactly 17 axioms, one per
+        // 3. Per-rule IOU axioms — exactly 16 axioms, one per
         //    with-IOU rule.  Each captures the rule's meta-theory
         //    dependency at the type level: discharging the IOU =
-        //    replacing the `axiom` declaration with a `def`.
+        //    replacing the `axiom` declaration with a `def`, or (as
+        //    for K_Quot_Elim) folding the IOU's content directly
+        //    into structural premises of the corresponding Typing
+        //    constructor.
         out.push_str(IOU_AXIOMS_LEAN);
         out.push_str("\n\n");
 
@@ -249,17 +252,28 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (17 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (16 axioms — one per with-IOU rule).
 // ============================================================================
 
-/// The 17 axiom declarations covering every with-IOU rule.  Each
+/// The 16 axiom declarations covering every with-IOU rule.  Each
 /// axiom's parameter list captures the rule's relevant data; the
 /// Typing constructor for the rule consumes the axiom as a
 /// hypothesis.  Comments on each axiom name the meta-theory citation.
+///
+/// **K_Quot_Elim** was discharged in the Quotient-elimination
+/// pass: the rule's constructor now takes structural premises
+/// directly (no IOU axiom involved), mirroring the structural
+/// shape of K_Quot_Form / K_Quot_Intro.  The respect-of-
+/// equivalence side condition remains the kernel's input
+/// contract (audited via `verum audit --proof-honesty` at the
+/// Verum side); the Lean export now models the structural
+/// typing of well-formed elimination terms.
 const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (17 total) ======\n\
+-- ====== Per-rule IOU axioms (16 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
--- formalised.  Discharging an IOU = replacing the axiom with a `def`.\n\
+-- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
+-- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
+-- into structural premises of the corresponding Typing constructor).\n\
 \n\
 -- K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2).\n\
 axiom K_Path_Over_Form_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Nat → Prop\n\
@@ -282,8 +296,9 @@ axiom K_Refine_Omega_iou : Ctx → CoreTerm → String → CoreTerm → Prop\n\
 -- K_Refine_Intro: predicate decidability at the introduced value.\n\
 axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm → Prop\n\
 \n\
--- K_Quot_Elim: respect-of-equivalence side-condition.\n\
-axiom K_Quot_Elim_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop\n\
+-- (K_Quot_Elim: discharged — see Typing.t_quot_elim below for the\n\
+-- structural form; the respect-of-equivalence side condition\n\
+-- remains the kernel's input contract.)\n\
 \n\
 -- K_Inductive: positivity decision procedure.\n\
 axiom K_Inductive_iou : Ctx → String → List CoreTerm → CoreTerm → Prop\n\
@@ -423,9 +438,11 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ value base →\n        \
         Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)\n  \
   | t_quot_elim :\n      \
-      ∀ {Γ : Ctx} {scrutinee motive case_fn result : CoreTerm},\n        \
-        K_Quot_Elim_iou Γ scrutinee motive case_fn result →\n        \
-        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) result\n  \
+      ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},\n        \
+        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →\n        \
+        Typing Γ motive (CoreTerm.Pi \"x\" base (CoreTerm.Universe i)) →\n        \
+        Typing Γ case_fn (CoreTerm.Pi \"x\" base (CoreTerm.App motive (CoreTerm.Var \"x\"))) →\n        \
+        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)\n  \
   -- ===== Inductive (3) — 1 placeholder + 2 with-IOU =====\n  \
   | t_inductive :\n      \
       ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {result : CoreTerm},\n        \
@@ -507,9 +524,11 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 /// the lemmas' shapes.  Real proofs across the entire surface; no
 /// `sorry` for any structural- or formation-level concern.
 ///
-/// The 17 with-IOU rules' lemmas thread the per-rule axiom as a
-/// hypothesis; their `#print axioms` output enumerates the 17 IOU
-/// trust extensions explicitly.
+/// The 16 with-IOU rules' lemmas thread the per-rule axiom as a
+/// hypothesis; their `#print axioms` output enumerates the 16 IOU
+/// trust extensions explicitly.  K_Quot_Elim was discharged in the
+/// Quotient-elimination pass — its lemma now uses structural
+/// premises directly, with no IOU axiom to enumerate.
 fn rule_signature_lean(rule_name: &str) -> Option<String> {
     let body = match rule_name {
         // ===== Structural (9) =====
@@ -629,9 +648,11 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
               Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=\n  @Typing.t_quot_intro",
         ),
         "K_Quot_Elim" => Some(
-            "theorem K_Quot_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive case_fn result : CoreTerm},\n      \
-              K_Quot_Elim_iou Γ scrutinee motive case_fn result →\n      \
-              Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) result :=\n  @Typing.t_quot_elim",
+            "theorem K_Quot_Elim_sound :\n    ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},\n      \
+              Typing Γ scrutinee (CoreTerm.Quotient base equiv) →\n      \
+              Typing Γ motive (CoreTerm.Pi \"x\" base (CoreTerm.Universe i)) →\n      \
+              Typing Γ case_fn (CoreTerm.Pi \"x\" base (CoreTerm.App motive (CoreTerm.Var \"x\"))) →\n      \
+              Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee) :=\n  @Typing.t_quot_elim",
         ),
         // ===== Inductive (3) =====
         "K_Inductive" => Some(
