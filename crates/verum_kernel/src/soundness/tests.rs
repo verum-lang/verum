@@ -1261,6 +1261,167 @@ fn vr_corpus_has_seven_discharged_by_framework_entries() {
     );
 }
 
+// =============================================================================
+// Per-position arg-type agreement across foundations
+// =============================================================================
+//
+// Existing arity drift guard verifies all three foundations agree
+// on the number of arguments per axiom, but doesn't catch the
+// drift class where one foundation has the args in a different
+// position than another (e.g. K_Refine_Intro_iou: same arity 5
+// but [CoreTerm, CoreTerm, String, CoreTerm] in Lean vs
+// [CoreTerm, String, CoreTerm, CoreTerm] in Coq).  This drift
+// would silently change which positional argument the IOU
+// witnesses; soundness lemmas using positional pattern matching
+// would type-check vacuously.
+
+/// Extract the type-name sequence per axiom from a foundation's
+/// IOU-axiom string constant.  Returns map from rule_name to a
+/// `Vec<String>` of type tokens (excluding `Ctx` and the return
+/// type), normalized to lowercase for cross-foundation comparison
+/// (Lean uses `CoreTerm`/`String`/`Nat`, Coq uses
+/// `CoreTerm`/`string`/`nat`, Isabelle uses `CoreTerm`/`string`/
+/// `nat`).
+fn extract_iou_arg_types_from_constant(
+    constant: &str,
+    separator: &str,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut result = std::collections::BTreeMap::new();
+    for line in constant.lines() {
+        let iou_pos = match line.find("_iou") {
+            Some(p) => p,
+            None => continue,
+        };
+        let bytes = line.as_bytes();
+        let mut start = iou_pos;
+        while start > 0 {
+            let c = bytes[start - 1];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+        let name_with_iou = &line[start..iou_pos + "_iou".len()];
+        if !name_with_iou.starts_with("K_") {
+            continue;
+        }
+        let rule_name = &name_with_iou[..name_with_iou.len() - "_iou".len()];
+        // Find the part after `:` (Lean/Coq) or `::` (Isabelle).
+        // For Isabelle, the type expression is enclosed in `"..."`;
+        // strip the quotes.  For Lean/Coq, the expression continues
+        // to end of line.
+        let after_colon_idx = match line.find("::") {
+            Some(p) => p + 2,
+            None => match line.find(": ") {
+                Some(p) => p + 2,
+                None => continue,
+            },
+        };
+        let mut sig = line[after_colon_idx..].trim().to_string();
+        // Strip surrounding quotes (Isabelle).
+        if sig.starts_with('"') {
+            if let Some(end) = sig[1..].find('"') {
+                sig = sig[1..=end].to_string();
+            }
+        }
+        // Split by the separator.  Trim each piece.  Skip empty.
+        let pieces: Vec<&str> = sig.split(separator).collect();
+        if pieces.len() < 2 {
+            continue; // not a real signature
+        }
+        // First arg is `Ctx`, last is `Prop` / `bool` — drop both.
+        // Middle pieces are the rule-specific arg types.
+        let arg_types: Vec<String> = pieces[1..pieces.len() - 1]
+            .iter()
+            .map(|s| s.trim().trim_end_matches(',').to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        result.insert(rule_name.to_string(), arg_types);
+    }
+    result
+}
+
+#[test]
+fn extractor_finds_arg_types_in_lean() {
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let arg_types = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
+    // K_Smt: Ctx → String → CoreTerm → Prop
+    // → arg_types = ["string", "coreterm"]
+    assert_eq!(
+        arg_types.get("K_Smt"),
+        Some(&vec!["string".to_string(), "coreterm".to_string()]),
+        "K_Smt arg types: {:?}",
+        arg_types.get("K_Smt"),
+    );
+    // K_Path_Over_Form: Ctx → CoreTerm × 5 → Nat → Prop
+    // → arg_types = ["coreterm" × 5, "nat"]
+    let path_over = arg_types.get("K_Path_Over_Form").unwrap();
+    assert_eq!(path_over.len(), 6);
+    assert_eq!(path_over[5], "nat");
+    assert!(path_over[..5].iter().all(|s| s == "coreterm"));
+}
+
+#[test]
+fn lean_coq_arg_types_agree_per_position() {
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let lean = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
+    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
+    assert_eq!(
+        lean, coq,
+        "Lean and Coq arg-type sequences must match per position",
+    );
+}
+
+#[test]
+fn coq_isabelle_arg_types_agree_per_position() {
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
+    let isa = extract_iou_arg_types_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    assert_eq!(
+        coq, isa,
+        "Coq and Isabelle arg-type sequences must match per position",
+    );
+}
+
+#[test]
+fn three_foundations_agree_on_iou_axiom_arg_types() {
+    // Pin: direct three-way arg-type-sequence agreement.  This
+    // catches the drift class where one foundation permutes args
+    // (same arity, different positional order) — invisible to
+    // arity-only checks.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let lean = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
+    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
+    let isa = extract_iou_arg_types_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    assert_eq!(lean, coq);
+    assert_eq!(coq, isa);
+    // Sanity: every spec'd rule has a non-empty arg-type sequence.
+    use crate::soundness::iou_axiom_specs;
+    for spec in iou_axiom_specs() {
+        let types = lean.get(spec.rule_name);
+        assert!(
+            types.is_some(),
+            "rule {} has no arg-type sequence parsed from Lean",
+            spec.rule_name,
+        );
+        // The parsed length should equal the spec's arity minus 1
+        // (we drop Ctx but keep the other args).
+        assert_eq!(
+            types.unwrap().len(),
+            spec.arity - 1,
+            "rule {} arg-type sequence length {} ≠ spec arity {} - 1",
+            spec.rule_name,
+            types.unwrap().len(),
+            spec.arity,
+        );
+    }
+}
+
 #[test]
 fn vr_corpus_citation_triples_match_rust_mod_rs() {
     // Pin: per-rule citation triple parity between mod.rs and
