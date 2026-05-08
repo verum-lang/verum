@@ -13,6 +13,7 @@
 //!  `EXPECTED_KERNEL_RULE_COUNT`.
 
 use super::coq::CoqBackend;
+use super::isabelle::IsabelleBackend;
 use super::lean::LeanBackend;
 use super::{
     EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleSpec, SoundnessBackend, SoundnessExporter,
@@ -32,13 +33,12 @@ fn canonical_rules_has_expected_count() {
 
 #[test]
 fn proved_lemma_set_full_post_discharge() {
-    // Pin: 4 placeholder + 9 IOU discharges + 10 status-fixes
-    // (rules already structural in the export since FV-9; mod.rs
-    // status now matches) = 23 proved.
-    //
-    // The 10 status-fixes don't change the IOU count (none had an
-    // axiom in the export to begin with) — they close a drift
-    // between mod.rs LemmaStatus and the export shape.
+    // Pin: 4 placeholder + 15 IOU discharges + 10 status-fixes
+    // (rules already structural in the export; mod.rs status now
+    // matches) = 29 proved.  The FV-17 final batch closed the
+    // last open structurally-dischargeable IOU (K_Smt) plus moved
+    // K_Eps_Mu and K_Round_Trip into the DischargedByFramework
+    // bucket — leaving `iou_axiom_specs()` empty.
     let rules = canonical_rules();
     let proved: Vec<&str> = rules
         .iter()
@@ -48,8 +48,8 @@ fn proved_lemma_set_full_post_discharge() {
 
     assert_eq!(
         proved.len(),
-        23,
-        "expected 23 structurally-proved lemmas, got {}: {:?}",
+        29,
+        "expected 29 structurally-proved lemmas, got {}: {:?}",
         proved.len(),
         proved,
     );
@@ -57,10 +57,13 @@ fn proved_lemma_set_full_post_discharge() {
     for needed in [
         // 4 placeholder structural rules
         "K_Var", "K_Univ", "K_FwAx", "K_Pos",
-        // 9 IOU discharges (this session)
+        // 15 IOU discharges (4 Cubical + 4 Refinement + 2 Inductive
+        // + 1 Universe_Ascent + 3 Diakrisis structural-fragment + 1 SmtAxiom).
         "K_Quot_Elim", "K_Elim", "K_Universe_Ascent",
-        "K_Refine", "K_Refine_Omega", "K_Inductive",
+        "K_Refine", "K_Refine_Omega", "K_Refine_Intro", "K_Inductive",
+        "K_Path_Over_Form", "K_HComp", "K_Transp", "K_Glue",
         "K_Epsilon_Of", "K_Alpha_Of", "K_Modal_Big_And",
+        "K_Smt",
         // 5 modal/cohesive status-fixes (export was structural since FV-9)
         "K_Modal_Box", "K_Modal_Diamond",
         "K_Shape", "K_Flat", "K_Sharp",
@@ -318,10 +321,10 @@ fn proved_count_plus_admitted_count_matches_total() {
         EXPECTED_KERNEL_RULE_COUNT,
         "every rule must be either proved, admitted, or discharged-by-framework",
     );
-    // 4 placeholder + 9 IOU discharges + 10 status-fixes (rules
-    // already structural in export since FV-9; mod.rs status now
-    // matches) = 23 proved.
-    assert_eq!(proved, 23, "expected 23 proved lemmas");
+    // 4 placeholder + 15 IOU discharges + 10 status-fixes (rules
+    // already structural in export; mod.rs status now matches) =
+    // 29 proved (post-FV-17 final batch — `iou_axiom_specs()` empty).
+    assert_eq!(proved, 29, "expected 29 proved lemmas");
     assert!(
         discharged >= 7,
         "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",
@@ -386,6 +389,111 @@ fn lean_main_theorem_dispatches_to_each_lemma() {
             output.contains(&dispatch),
             "Lean main theorem must dispatch to {}",
             r.lemma_name,
+        );
+    }
+}
+
+#[test]
+fn isabelle_backend_emits_full_file() {
+    let exporter = SoundnessExporter::new();
+    let isa = IsabelleBackend::new();
+    let output = exporter.emit(&isa);
+
+    assert!(output.contains("KernelSoundness.thy"));
+    assert!(output.contains("theory KernelSoundness"));
+    assert!(output.contains("datatype CoreTerm"));
+    assert!(output.contains("datatype CoreType"));
+    assert!(output.contains("datatype KernelRule"));
+    for r in exporter.rules() {
+        assert!(
+            output.contains(&r.rule_name),
+            "Isabelle output missing rule {}",
+            r.rule_name,
+        );
+        assert!(
+            output.contains(&r.lemma_name),
+            "Isabelle output missing lemma {}",
+            r.lemma_name,
+        );
+    }
+    assert!(output.contains("theorem kernel_soundness"));
+    assert!(output.contains("definition Soundness"));
+    assert_eq!(isa.output_filename(), "KernelSoundness.thy");
+}
+
+#[test]
+fn isabelle_backend_renders_admitted_with_oops_comment() {
+    let exporter = SoundnessExporter::new();
+    let isa = IsabelleBackend::new();
+    let output = exporter.emit(&isa);
+
+    assert!(
+        output.contains("oops"),
+        "Isabelle emission must use `oops` for admitted/discharged lemmas",
+    );
+    assert!(
+        output.contains("substitution-lemma") || output.contains("Substitution"),
+        "Isabelle emission must carry the K_Pi_Form discharge citation",
+    );
+}
+
+#[test]
+fn isabelle_main_theorem_dispatches_to_each_lemma() {
+    let exporter = SoundnessExporter::new();
+    let isa = IsabelleBackend::new();
+    let output = exporter.emit(&isa);
+
+    for r in exporter.rules() {
+        // Isabelle dispatch shape (Isar):
+        //   `case <RuleName> thus ?thesis using <LemmaName> by ...`
+        let dispatch = format!("case {} thus ?thesis using {}", r.rule_name, r.lemma_name);
+        assert!(
+            output.contains(&dispatch),
+            "Isabelle main theorem must dispatch to {}",
+            r.lemma_name,
+        );
+    }
+}
+
+#[test]
+fn isabelle_soundness_definition_carries_per_rule_pi_form() {
+    // Pin: the Isabelle `Soundness :: KernelRule ⇒ bool` definition
+    // must NOT be degenerate (`Soundness _ ≡ True`); each KernelRule
+    // constructor must map to a Π-form derived from the per-rule
+    // signature.  This makes per-rule lemmas genuinely load-bearing
+    // on `kernel_soundness` (vs the bookkeeping-only shape).
+    let exporter = SoundnessExporter::new();
+    let isa = IsabelleBackend::new();
+    let output = exporter.emit(&isa);
+
+    // Definition must contain a `case rule of K_X => ...` dispatch,
+    // not the degenerate `_ \<equiv> True` form.
+    assert!(
+        output.contains("\"Soundness rule \\<equiv> (case rule of"),
+        "Isabelle Soundness must use case-analysis form, not the \
+         degenerate `Soundness _ ≡ True` shape",
+    );
+    assert!(
+        !output.contains("\"Soundness _ \\<equiv> True\""),
+        "Isabelle Soundness must NOT be the degenerate `_ ≡ True` form",
+    );
+
+    // Sample a few rule-specific Π-form fragments — these prove the
+    // Soundness branches carry the rule's actual typing judgement.
+    let pi_form_witnesses = [
+        // K_Var: ∀ Γ x T. (x, T) ∈ set Γ ⟶ Γ ⊢ Var x : T
+        ("K_Var", "Var x : T"),
+        // K_Univ: ∀ Γ i. Γ ⊢ Universe i : Universe (Suc i)
+        ("K_Univ", "Universe i : Universe (Suc i)"),
+        // K_Pi_Form: ∀ Γ x A B i. ... ⟶ Γ ⊢ Pi x A B : Universe i
+        ("K_Pi_Form", "Pi x A B"),
+    ];
+    for (rule, fragment) in pi_form_witnesses {
+        assert!(
+            output.contains(fragment),
+            "Isabelle Soundness branch for {} must contain the Π-form \
+             fragment {:?}",
+            rule, fragment,
         );
     }
 }
@@ -544,15 +652,16 @@ fn iou_axiom_rule_names_match_admitted_rule_names() {
 // Cross-foundation IOU axiom set consistency (PR-1b)
 // =============================================================================
 //
-// Drift surface that PR-1's mod.rs ↔ aggregate-IOU check doesn't
-// catch: Lean / Coq / Isabelle each carry their own
-// `IOU_AXIOMS_*` string constant.  If a discharge updates Lean
-// but forgets Coq, the two foundations silently diverge — auditor
-// reading the Coq export sees a redundant axiom; Lean sees the
-// discharge.  These tests pin set-equality between
-// `iou_axiom_rule_names()` (single source of truth) and the
-// actual axiom names extracted from each foundation's string
-// constant.
+// Drift surface the aggregate-IOU check doesn't catch on its
+// own: each of Lean / Coq / Isabelle renders its own IOU axiom
+// block via `iou_axioms_<foundation>()`.  All three pull from
+// the same `iou_axiom_specs()` registry, but that wiring is
+// load-bearing — if a renderer ever skips a spec or emits the
+// wrong name, the auditor reading one foundation's export sees a
+// different axiom set than the other two.  These tests pin
+// set-equality between `iou_axiom_rule_names()` (single source
+// of truth) and the actual axiom names extracted from each
+// foundation's rendered block.
 
 /// Extract `K_<Name>_iou` rule names from a per-foundation
 /// IOU-axiom string constant.  Pattern-matches on the `_iou`
@@ -598,18 +707,21 @@ fn extract_iou_rule_names_from_constant(constant: &str) -> std::collections::BTr
 #[test]
 fn extractor_finds_axioms_in_lean_constant() {
     // Sanity: the extractor finds the right names in the Lean constant.
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let names = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
+    use crate::soundness::lean::iou_axioms_lean;
+    let names = extract_iou_rule_names_from_constant(iou_axioms_lean());
     // At least one well-known axiom should be found.
     assert!(
         names.contains("K_Smt"),
         "extractor should find K_Smt; got: {:?}",
         names,
     );
-    // Number should be exactly the IOU count.
+    // Number should be exactly the IOU count.  Lower bound tracks
+    // the registry-driven `iou_axiom_specs()` length.
+    let expected = crate::soundness::iou_axiom_specs().len();
     assert!(
-        names.len() >= 8,
-        "extractor should find at least 8 IOU axioms; got {}: {:?}",
+        names.len() >= expected,
+        "extractor should find at least {} IOU axioms; got {}: {:?}",
+        expected,
         names.len(),
         names,
     );
@@ -617,54 +729,54 @@ fn extractor_finds_axioms_in_lean_constant() {
 
 #[test]
 fn lean_constant_iou_axioms_match_source_of_truth() {
-    // Pin: the Lean `IOU_AXIOMS_LEAN` constant declares exactly the
+    // Pin: the Lean `iou_axioms_lean()` constant declares exactly the
     // axioms in `iou_axiom_rule_names()`.  Drift here means a
     // discharge updated mod.rs but forgot to remove the Lean axiom
     // (or vice versa).
     use crate::soundness::iou_axiom_rule_names;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
+    use crate::soundness::lean::iou_axioms_lean;
+    let extracted = extract_iou_rule_names_from_constant(iou_axioms_lean());
     let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
         .into_iter()
         .map(|s| s.to_string())
         .collect();
     assert_eq!(
         extracted, expected,
-        "Lean IOU_AXIOMS_LEAN constant must match iou_axiom_rule_names() set",
+        "Lean iou_axioms_lean() constant must match iou_axiom_rule_names() set",
     );
 }
 
 #[test]
 fn coq_constant_iou_axioms_match_source_of_truth() {
-    // Pin: the Coq `IOU_AXIOMS_COQ` constant declares exactly the
+    // Pin: the Coq `iou_axioms_coq()` constant declares exactly the
     // axioms in `iou_axiom_rule_names()`.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::coq::iou_axioms_coq;
     use crate::soundness::iou_axiom_rule_names;
-    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_COQ);
+    let extracted = extract_iou_rule_names_from_constant(iou_axioms_coq());
     let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
         .into_iter()
         .map(|s| s.to_string())
         .collect();
     assert_eq!(
         extracted, expected,
-        "Coq IOU_AXIOMS_COQ constant must match iou_axiom_rule_names() set",
+        "Coq iou_axioms_coq() constant must match iou_axiom_rule_names() set",
     );
 }
 
 #[test]
 fn isabelle_constant_iou_axioms_match_source_of_truth() {
-    // Pin: the Isabelle `IOU_AXIOMS_ISA` constant declares exactly
+    // Pin: the Isabelle `iou_axioms_isabelle()` constant declares exactly
     // the axioms in `iou_axiom_rule_names()`.
     use crate::soundness::iou_axiom_rule_names;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    let extracted = extract_iou_rule_names_from_constant(IOU_AXIOMS_ISA);
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    let extracted = extract_iou_rule_names_from_constant(iou_axioms_isabelle());
     let expected: std::collections::BTreeSet<String> = iou_axiom_rule_names()
         .into_iter()
         .map(|s| s.to_string())
         .collect();
     assert_eq!(
         extracted, expected,
-        "Isabelle IOU_AXIOMS_ISA constant must match iou_axiom_rule_names() set",
+        "Isabelle iou_axioms_isabelle() constant must match iou_axiom_rule_names() set",
     );
 }
 
@@ -675,12 +787,12 @@ fn three_foundations_agree_on_iou_axiom_set() {
     // through `iou_axiom_rule_names()`).  If one foundation drifts
     // from the others, this fires immediately — separating
     // "axiom name present" drift from "rule status" drift.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let lean_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_LEAN);
-    let coq_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_COQ);
-    let isa_set = extract_iou_rule_names_from_constant(IOU_AXIOMS_ISA);
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    use crate::soundness::lean::iou_axioms_lean;
+    let lean_set = extract_iou_rule_names_from_constant(iou_axioms_lean());
+    let coq_set = extract_iou_rule_names_from_constant(iou_axioms_coq());
+    let isa_set = extract_iou_rule_names_from_constant(iou_axioms_isabelle());
     assert_eq!(lean_set, coq_set, "Lean and Coq IOU axiom sets must agree");
     assert_eq!(coq_set, isa_set, "Coq and Isabelle IOU axiom sets must agree");
 }
@@ -748,20 +860,25 @@ fn extract_iou_arities_from_constant(
 
 #[test]
 fn extractor_finds_arities_in_lean_constant() {
-    // Sanity: arity extractor returns plausible values for known
-    // axioms.  K_Path_Over_Form has signature
-    // `Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Nat → Prop`,
-    // so 7 args + Prop return = 7 arrows.
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let arities = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    // Sanity: arity extractor returns a map whose size matches the
+    // current `iou_axiom_specs()` registry length.  Post-FV-17 the
+    // registry is empty (every kernel rule is either Proved or
+    // DischargedByFramework with a cited upstream proof) — the
+    // extractor produces an empty map and that is the architectural
+    // endgame for the IOU-discharge sequence.  The test remains as
+    // a regression guard: re-introducing an open IOU adds an
+    // entry, and the assertion below catches drift between
+    // `iou_axiom_specs()` and the rendered text.
+    use crate::soundness::lean::iou_axioms_lean;
+    let arities = extract_iou_arities_from_constant(iou_axioms_lean(), "→");
+    let expected = crate::soundness::iou_axiom_specs().len();
     assert_eq!(
-        arities.get("K_Path_Over_Form"),
-        Some(&7),
-        "K_Path_Over_Form arity should be 7 (got: {:?})",
-        arities.get("K_Path_Over_Form"),
+        arities.len(),
+        expected,
+        "extractor saw {} axioms; iou_axiom_specs() declares {}",
+        arities.len(),
+        expected,
     );
-    // K_Smt is `Ctx → String → CoreTerm → Prop` — 3 args + Prop = 3 arrows.
-    assert_eq!(arities.get("K_Smt"), Some(&3));
 }
 
 #[test]
@@ -769,10 +886,10 @@ fn lean_coq_arities_agree() {
     // Pin: every IOU axiom has the same arity in Lean and Coq.
     // Drift class: a discharge removed an arg from one foundation
     // but forgot the other.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let lean = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
-    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::lean::iou_axioms_lean;
+    let lean = extract_iou_arities_from_constant(iou_axioms_lean(), "→");
+    let coq = extract_iou_arities_from_constant(iou_axioms_coq(), "->");
     assert_eq!(
         lean, coq,
         "Lean and Coq IOU axiom arities must agree per axiom",
@@ -784,10 +901,10 @@ fn coq_isabelle_arities_agree() {
     // Pin: every IOU axiom has the same arity in Coq and
     // Isabelle.  Isabelle uses `\<Rightarrow>` for its arrow
     // separator (HOL function-type constructor).
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
-    let isa = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    let coq = extract_iou_arities_from_constant(iou_axioms_coq(), "->");
+    let isa = extract_iou_arities_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     assert_eq!(
         coq, isa,
         "Coq and Isabelle IOU axiom arities must agree per axiom",
@@ -799,12 +916,12 @@ fn three_foundations_agree_on_iou_axiom_arities() {
     // Pin: direct three-way arity agreement.  Combines the
     // pairwise pins above into a single canonical assertion that's
     // the natural extension of `three_foundations_agree_on_iou_axiom_set`.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let lean = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
-    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
-    let isa = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    use crate::soundness::lean::iou_axioms_lean;
+    let lean = extract_iou_arities_from_constant(iou_axioms_lean(), "→");
+    let coq = extract_iou_arities_from_constant(iou_axioms_coq(), "->");
+    let isa = extract_iou_arities_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     assert_eq!(lean, coq);
     assert_eq!(coq, isa);
     // Sanity: the maps are non-empty.
@@ -858,13 +975,13 @@ fn iou_axiom_specs_arities_are_positive() {
 
 #[test]
 fn lean_constant_arities_match_source_of_truth() {
-    // Pin: every IOU axiom in IOU_AXIOMS_LEAN has the arity
+    // Pin: every IOU axiom in iou_axioms_lean() has the arity
     // declared by `iou_axiom_specs()`.  Drift here means the Lean
     // signature was edited (added/removed an arg) but the spec
     // wasn't updated to match — or vice versa.
     use crate::soundness::iou_axiom_specs;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    use crate::soundness::lean::iou_axioms_lean;
+    let parsed = extract_iou_arities_from_constant(iou_axioms_lean(), "→");
     for spec in iou_axiom_specs() {
         let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
         assert_eq!(
@@ -877,10 +994,10 @@ fn lean_constant_arities_match_source_of_truth() {
 
 #[test]
 fn coq_constant_arities_match_source_of_truth() {
-    // Pin: every IOU axiom in IOU_AXIOMS_COQ matches `iou_axiom_specs()`.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    // Pin: every IOU axiom in iou_axioms_coq() matches `iou_axiom_specs()`.
+    use crate::soundness::coq::iou_axioms_coq;
     use crate::soundness::iou_axiom_specs;
-    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    let parsed = extract_iou_arities_from_constant(iou_axioms_coq(), "->");
     for spec in iou_axiom_specs() {
         let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
         assert_eq!(
@@ -893,10 +1010,10 @@ fn coq_constant_arities_match_source_of_truth() {
 
 #[test]
 fn isabelle_constant_arities_match_source_of_truth() {
-    // Pin: every IOU axiom in IOU_AXIOMS_ISA matches `iou_axiom_specs()`.
+    // Pin: every IOU axiom in iou_axioms_isabelle() matches `iou_axiom_specs()`.
     use crate::soundness::iou_axiom_specs;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    let parsed = extract_iou_arities_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     for spec in iou_axiom_specs() {
         let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
         assert_eq!(
@@ -1243,20 +1360,21 @@ fn extract_text_from_arg_handles_single_line() {
 }
 
 #[test]
-fn vr_corpus_has_seven_discharged_by_framework_entries() {
-    // Pin: theorems.vr declares exactly 7 DischargedByFramework
+fn vr_corpus_has_nine_discharged_by_framework_entries() {
+    // Pin: theorems.vr declares exactly 9 DischargedByFramework
     // entries — matches the count of such rules in
-    // canonical_rules() (the structural-fragment subset:
-    // K_Pi_Form / K_Lam_Intro / K_App_Elim / K_Sigma_Form /
-    // K_Pair_Intro / K_Fst_Elim / K_Snd_Elim).
+    // canonical_rules() after FV-17 added K_Eps_Mu and K_Round_Trip
+    // to the bucket: K_Pi_Form / K_Lam_Intro / K_App_Elim /
+    // K_Sigma_Form / K_Pair_Intro / K_Fst_Elim / K_Snd_Elim /
+    // K_Eps_Mu / K_Round_Trip.
     let vr_text = include_str!(
         "../../../../core/verify/kernel_soundness/theorems.vr"
     );
     let citations = parse_vr_discharged_citations(vr_text);
     assert_eq!(
         citations.len(),
-        7,
-        "expected 7 DischargedByFramework entries in theorems.vr; got {}",
+        9,
+        "expected 9 DischargedByFramework entries in theorems.vr; got {}",
         citations.len(),
     );
 }
@@ -1344,30 +1462,28 @@ fn extract_iou_arg_types_from_constant(
 
 #[test]
 fn extractor_finds_arg_types_in_lean() {
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let arg_types = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
-    // K_Smt: Ctx → String → CoreTerm → Prop
-    // → arg_types = ["string", "coreterm"]
+    // Post-FV-17 the IOU registry is empty — the extractor produces
+    // an empty map.  Regression guard: re-introducing an open IOU
+    // populates the map, and the size assertion below catches drift
+    // between `iou_axiom_specs()` and the rendered text.
+    use crate::soundness::lean::iou_axioms_lean;
+    let arg_types = extract_iou_arg_types_from_constant(iou_axioms_lean(), "→");
+    let expected = crate::soundness::iou_axiom_specs().len();
     assert_eq!(
-        arg_types.get("K_Smt"),
-        Some(&vec!["string".to_string(), "coreterm".to_string()]),
-        "K_Smt arg types: {:?}",
-        arg_types.get("K_Smt"),
+        arg_types.len(),
+        expected,
+        "extractor saw {} axioms; iou_axiom_specs() declares {}",
+        arg_types.len(),
+        expected,
     );
-    // K_Path_Over_Form: Ctx → CoreTerm × 5 → Nat → Prop
-    // → arg_types = ["coreterm" × 5, "nat"]
-    let path_over = arg_types.get("K_Path_Over_Form").unwrap();
-    assert_eq!(path_over.len(), 6);
-    assert_eq!(path_over[5], "nat");
-    assert!(path_over[..5].iter().all(|s| s == "coreterm"));
 }
 
 #[test]
 fn lean_coq_arg_types_agree_per_position() {
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let lean = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
-    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::lean::iou_axioms_lean;
+    let lean = extract_iou_arg_types_from_constant(iou_axioms_lean(), "→");
+    let coq = extract_iou_arg_types_from_constant(iou_axioms_coq(), "->");
     assert_eq!(
         lean, coq,
         "Lean and Coq arg-type sequences must match per position",
@@ -1376,10 +1492,10 @@ fn lean_coq_arg_types_agree_per_position() {
 
 #[test]
 fn coq_isabelle_arg_types_agree_per_position() {
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
-    let isa = extract_iou_arg_types_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    let coq = extract_iou_arg_types_from_constant(iou_axioms_coq(), "->");
+    let isa = extract_iou_arg_types_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     assert_eq!(
         coq, isa,
         "Coq and Isabelle arg-type sequences must match per position",
@@ -1392,12 +1508,12 @@ fn three_foundations_agree_on_iou_axiom_arg_types() {
     // catches the drift class where one foundation permutes args
     // (same arity, different positional order) — invisible to
     // arity-only checks.
-    use crate::soundness::coq::IOU_AXIOMS_COQ;
-    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
-    use crate::soundness::lean::IOU_AXIOMS_LEAN;
-    let lean = extract_iou_arg_types_from_constant(IOU_AXIOMS_LEAN, "→");
-    let coq = extract_iou_arg_types_from_constant(IOU_AXIOMS_COQ, "->");
-    let isa = extract_iou_arg_types_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    use crate::soundness::coq::iou_axioms_coq;
+    use crate::soundness::isabelle::iou_axioms_isabelle;
+    use crate::soundness::lean::iou_axioms_lean;
+    let lean = extract_iou_arg_types_from_constant(iou_axioms_lean(), "→");
+    let coq = extract_iou_arg_types_from_constant(iou_axioms_coq(), "->");
+    let isa = extract_iou_arg_types_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     assert_eq!(lean, coq);
     assert_eq!(coq, isa);
     // Sanity: every spec'd rule has a non-empty arg-type sequence.

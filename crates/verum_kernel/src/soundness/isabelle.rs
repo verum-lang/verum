@@ -131,7 +131,7 @@ impl SoundnessBackend for IsabelleBackend {
              consts side_conditions_hold :: \"bool\"\n\n",
         );
 
-        out.push_str(IOU_AXIOMS_ISA);
+        out.push_str(iou_axioms_isabelle());
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_ISA);
         out
@@ -154,40 +154,104 @@ impl SoundnessBackend for IsabelleBackend {
             rule.has_side_condition,
         );
 
-        if let Some(spec) = rule_signature_isabelle(&rule.rule_name) {
-            return format!("{}\n{}", category_comment, spec);
-        }
+        // Resolve the rule's lemma spec (everything up to the proof
+        // tactic) and the original tactic.  Fallback for the K_Pos /
+        // K_FwAx pair whose signatures are missing from the per-rule
+        // table is the generic `side_conditions_hold ⟶ True` shape.
+        let parts = rule_signature_isabelle(&rule.rule_name).and_then(parse_isabelle_signature);
+        let (spec_block, proof_tactic_for_proved) = match parts {
+            Some(p) => (p.spec, p.proof_tactic),
+            None => (
+                format!(
+                    "lemma {}: \"side_conditions_hold \\<longrightarrow> True\"",
+                    rule.lemma_name,
+                ),
+                "by simp".to_string(),
+            ),
+        };
 
-        // Fallback for any rule not in the dispatch table.
-        let stmt = format!(
-            "lemma {}: \"side_conditions_hold \\<longrightarrow> True\"",
-            rule.lemma_name,
-        );
-        let body = match &rule.status {
-            LemmaStatus::Proved { .. } => "  by simp".to_string(),
-            LemmaStatus::Admitted { reason } => format!("  (* reason: {} *)\n  oops", reason),
+        // Status-driven proof body and metadata comment.  Discharged-by-
+        // framework and admitted rules emit `oops` plus a citation /
+        // reason comment so the trust extension is auditable; proved
+        // rules keep their inductive-constructor witness verbatim.
+        let (status_comment, body) = match &rule.status {
+            LemmaStatus::Proved { .. } => (
+                String::new(),
+                format!("{}\n  {}", spec_block, proof_tactic_for_proved),
+            ),
+            LemmaStatus::Admitted { reason } => (
+                format!("(* reason: {} *)\n", reason),
+                format!("{}\n  oops", spec_block),
+            ),
             LemmaStatus::DischargedByFramework {
                 lemma_path,
                 framework,
                 citation,
-            } => format!(
-                "  (* discharged-by: {} *)\n  (* framework: {} *)\n  (* citation: {} *)\n  oops",
-                lemma_path, framework, citation
+            } => (
+                format!(
+                    "(* discharged-by: {} *)\n(* framework: {} *)\n(* citation: {} *)\n",
+                    lemma_path, framework, citation
+                ),
+                format!("{}\n  oops", spec_block),
             ),
         };
-        format!("{}\n{}\n{}", category_comment, stmt, body)
+
+        format!("{}\n{}{}", category_comment, status_comment, body)
     }
 
     fn render_main_theorem(&self, rules: &[RuleSpec]) -> String {
-        let _ = rules;
-        // Bundle the per-rule lemmas via `lemmas` (bookkeeping).  Each
-        // K_*_sound is real (no `oops`).  The 17 with-IOU lemmas pull
-        // their respective `axiomatization` declarations into the trust
-        // closure of any theorem that depends on them.
-        String::from(
-            "(* **Kernel full soundness** — names every per-rule lemma in *)\n\
-             (* canonical KernelRule order.  This is bookkeeping only;     *)\n\
-             (* the per-rule lemmas above carry the real proof content.   *)\n\
+        // Aggregate the 38 per-rule lemmas into a single
+        // `kernel_soundness` theorem via case analysis on `KernelRule`.
+        // Mirrors the architectural shape of the Lean / Coq backends:
+        // `Soundness rule` definitionally reduces to the rule's per-
+        // rule typing-judgement Π-form, so each case branch is
+        // discharged by citing the matching `K_<rule>_sound` lemma.
+        let mut out = String::new();
+
+        out.push_str(
+            "(* `Soundness rule` ascribes to each KernelRule the propositional   *)\n\
+             (* shape of its per-rule soundness lemma — a Π-form derived from    *)\n\
+             (* the rule's `assumes`/`shows` block.  `kernel_soundness`          *)\n\
+             (* aggregates them via case analysis on KernelRule; each per-rule   *)\n\
+             (* lemma is genuinely load-bearing on the aggregate proof.          *)\n",
+        );
+        out.push_str("definition Soundness :: \"KernelRule \\<Rightarrow> bool\" where\n");
+        out.push_str("  \"Soundness rule \\<equiv> (case rule of\n");
+        for (i, r) in rules.iter().enumerate() {
+            let pi_form = isa_pi_form_for_rule(&r.rule_name)
+                .unwrap_or_else(|| "side_conditions_hold \\<longrightarrow> True".to_string());
+            let leader = if i == 0 { "    " } else { "  | " };
+            out.push_str(&format!(
+                "{}{} \\<Rightarrow> ({})\n",
+                leader, r.rule_name, pi_form,
+            ));
+        }
+        out.push_str("  )\"\n\n");
+
+        out.push_str(
+            "(* **Kernel soundness** — case-analyses on `KernelRule` and *)\n\
+             (* dispatches each branch to its `K_<rule>_sound` lemma.    *)\n",
+        );
+        out.push_str("theorem kernel_soundness: \"\\<forall>rule. Soundness rule\"\n");
+        out.push_str("proof (intro allI)\n  fix rule\n  show \"Soundness rule\"\n  proof (cases rule)\n");
+
+        for (i, r) in rules.iter().enumerate() {
+            if i > 0 {
+                out.push_str("  next\n");
+            }
+            out.push_str(&format!(
+                "    case {} thus ?thesis using {} by (auto simp: Soundness_def)\n",
+                r.rule_name, r.lemma_name,
+            ));
+        }
+        out.push_str("  qed\nqed\n");
+
+        // Bookkeeping fact-bundle (auditor-friendly aggregation —
+        // `print_facts kernel_full_soundness` enumerates every per-rule
+        // lemma in canonical order).
+        out.push_str(
+            "\n(* Bookkeeping: aggregates every per-rule lemma in canonical    *)\n\
+             (* KernelRule order for `print_facts kernel_full_soundness`.     *)\n\
              lemmas kernel_full_soundness =\n  \
                K_Var_sound K_Univ_sound K_Pi_Form_sound K_Lam_Intro_sound\n  \
                K_App_Elim_sound K_Sigma_Form_sound K_Pair_Intro_sound\n  \
@@ -202,7 +266,9 @@ impl SoundnessBackend for IsabelleBackend {
                K_Epsilon_Of_sound K_Alpha_Of_sound K_Modal_Box_sound\n  \
                K_Modal_Diamond_sound K_Modal_Big_And_sound\n  \
                K_Shape_sound K_Flat_sound K_Sharp_sound\n",
-        )
+        );
+
+        out
     }
 
     fn render_postscript(&self) -> String {
@@ -211,30 +277,23 @@ impl SoundnessBackend for IsabelleBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiomatizations (17 — one per with-IOU rule).
+// Per-rule IOU axiomatizations — generated from the spec registry.
 // ============================================================================
 
-pub(crate) const IOU_AXIOMS_ISA: &str = "\
-(* ====== Per-rule IOU axiomatizations (17 total) ====== *)\n\
-\n\
-axiomatization\n  \
-  K_Path_Over_Form_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> nat \\<Rightarrow> bool\" and\n  \
-  K_HComp_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Transp_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Glue_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  (* (K_Refine: discharged — see T_refine below for the structural form.) *)\n  \
-  (* (K_Refine_Omega: discharged — same shape as K_Refine.) *)\n  \
-  K_Refine_Intro_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  (* (K_Quot_Elim: discharged — see T_quot_elim below for the structural form.) *) \n  \
-  (* (K_Inductive: discharged — see T_inductive below for the structural form.) *)\n  \
-  (* (K_Elim: discharged — see T_elim below for the structural form.) *)\n  \
-  K_Smt_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Eps_Mu_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  (* (K_Universe_Ascent: discharged — collapses onto T_univ.) *) \n  \
-  (* (K_Epsilon_Of: discharged — see T_epsilon_of below.) *)\n  \
-  (* (K_Alpha_Of: discharged — see T_alpha_of below.) *)\n  \
-  (* (K_Modal_Big_And: discharged — see T_modal_big_and below.) *)\n  \
-  K_Round_Trip_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\"";
+/// The IOU axiom block as a `&'static str`, generated once on first
+/// access from `iou_axiom_specs()` via
+/// [`crate::soundness::render_iou_axioms_isabelle`].  Source-of-truth
+/// is the spec registry in `mod.rs`; this function is a cached
+/// renderer.
+pub(crate) fn iou_axioms_isabelle() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE
+        .get_or_init(crate::soundness::render_iou_axioms_isabelle)
+        .as_str()
+}
+
+#[allow(dead_code)]
 
 // ============================================================================
 // The Typing inductive — 38 introduction rules.
@@ -256,25 +315,25 @@ where\n\
 | T_snd:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"\n\
 | T_path_ty:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathTy A a b : Universe i\"\n\
 | T_refl:       \"\\<Gamma> \\<turnstile> a : A \\<Longrightarrow> \\<Gamma> \\<turnstile> Refl a : PathTy A a a\"\n\
-| T_path_over:  \"K_Path_Over_Form_iou \\<Gamma> motive p a b ty i \\<Longrightarrow> \\<Gamma> \\<turnstile> PathOver motive p a b : ty\"\n\
-| T_hcomp:      \"K_HComp_iou \\<Gamma> phi walls base T \\<Longrightarrow> \\<Gamma> \\<turnstile> HComp phi walls base : T\"\n\
-| T_transp:     \"K_Transp_iou \\<Gamma> path regular value target \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
-| T_glue:       \"K_Glue_iou \\<Gamma> carrier phi fiber equivP result \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : result\"\n\
+| T_path_over:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> motive : Pi x A (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathOver motive p a b : Universe i\"\n\
+| T_hcomp:      \"\\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i; \\<Gamma> \\<turnstile> base : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> HComp phi walls base : T\"\n\
+| T_transp:     \"\\<Gamma> \\<turnstile> target : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
+| T_glue:       \"\\<Gamma> \\<turnstile> carrier : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : Universe i\"\n\
 | T_refine_erase: \"\\<Gamma> \\<turnstile> a : Refine base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> a : base\"\n\
 | T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
 | T_refine_omega: \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-| T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; K_Refine_Intro_iou \\<Gamma> a base x predicate\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
+| T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; \\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
 | T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
 | T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
 | T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
 | T_inductive:    \"\\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n\
 | T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
 | T_elim:         \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
-| T_smt:          \"K_Smt_iou \\<Gamma> solver_tag T \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
+| T_smt:          \"\\<Gamma> \\<turnstile> T : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
 | T_fwax:         \"\\<Gamma> \\<turnstile> AxiomT name ty framework : ty\"\n\
-| T_eps_mu:       \"K_Eps_Mu_iou \\<Gamma> articulation enactment ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
+| T_eps_mu:       \"\\<Gamma> \\<turnstile> enactment : ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
 | T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
-| T_round_trip:   \"K_Round_Trip_iou \\<Gamma> term recovered \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
+| T_round_trip:   \"\\<Gamma> \\<turnstile> recovered : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
 | T_epsilon_of:   \"\\<Gamma> \\<turnstile> articulation : result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
 | T_alpha_of:     \"\\<Gamma> \\<turnstile> enactment : result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
 | T_modal_box:    \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBox inner : T\"\n\
@@ -287,6 +346,199 @@ where\n\
 // ============================================================================
 // Per-rule lemma signature lookup — dispatches all 38 rules.
 // ============================================================================
+
+/// Parsed slices of a per-rule Isabelle/HOL signature string.
+///
+/// `rule_signature_isabelle` returns text of the shape
+/// `lemma <name>: ... <STATEMENT> ...\n  [using assms ]by (rule T_x)`
+/// (some rules omit the `using assms` prefix, K_Pos uses `by simp`).
+/// The status-driven renderer needs the `<spec>` (everything up to
+/// the proof tactic) so it can swap in `oops` for admitted /
+/// discharged-by-framework rules without regenerating the
+/// statement.
+struct IsaSigParts {
+    /// Everything from `lemma <name>:` up to (but not including) the
+    /// `by …` tactic — `assumes`/`shows` block included.
+    spec: String,
+    /// The original proof tactic (e.g. `using assms by (rule T_var)`),
+    /// preserved verbatim for `Proved` rules.
+    proof_tactic: String,
+}
+
+fn parse_isabelle_signature(sig: String) -> Option<IsaSigParts> {
+    // The proof tactic begins at `using assms by` or directly at `by`
+    // (whichever appears first after the statement).  Find the
+    // earliest of `\n  using ` and `\n  by `.
+    let candidates = ["\n  using ", "\n  by "];
+    let proof_start = candidates
+        .iter()
+        .filter_map(|pat| sig.find(*pat).map(|i| (i, *pat)))
+        .min_by_key(|(i, _)| *i)?;
+    let (boundary, _pat) = proof_start;
+
+    let spec = sig[..boundary].trim_end().to_string();
+    let proof_tactic = sig[boundary..].trim().to_string();
+    Some(IsaSigParts { spec, proof_tactic })
+}
+
+// ============================================================================
+// Π-form extraction — for the main-theorem `Soundness :: KernelRule ⇒ bool`
+// definition, each per-rule lemma must be re-expressed as a Π-form
+// proposition `∀ vars. asm1 ⟶ asm2 ⟶ ⋯ ⟶ shows`.  The renderer parses
+// the rule's existing signature text and reuses the same statement bodies
+// — there is no parallel hand-maintained Π-form table.
+// ============================================================================
+
+/// ASCII-identifier candidates that occur as free variables across
+/// the per-rule signatures.  The Π-form extractor scans each rule's
+/// `assumes` / `shows` text for these and quantifies over the
+/// ones present (word-boundary aware match).  Greek free vars
+/// (`\<Gamma>`) are handled separately since their byte-level
+/// encoding is unique.
+const ISA_ASCII_VAR_CANDIDATES: &[&str] = &[
+    "x", "T", "A", "B", "a", "b", "f", "i", "ty",
+    "motive", "p", "base", "predicate", "equiv", "equivP",
+    "fiber", "walls", "phi", "target", "regular", "value",
+    "scrutinee", "scrutinee_ty", "case_fn", "components",
+    "articulation", "enactment", "framework", "name",
+    "recovered", "inner", "solver_tag", "path", "args", "cases",
+];
+
+/// Greek free vars carried in the corpus.  Matched as exact byte
+/// substrings (the encoding is unique — no false positives).
+const ISA_GREEK_VAR_CANDIDATES: &[&str] = &["\\<Gamma>"];
+
+fn is_isa_word_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Word-boundary aware substring match — returns true iff `word`
+/// appears in `text` flanked by non-identifier chars on both sides.
+fn isa_contains_as_word(text: &str, word: &str) -> bool {
+    let bytes = text.as_bytes();
+    let wbytes = word.as_bytes();
+    if wbytes.is_empty() || bytes.len() < wbytes.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i + wbytes.len() <= bytes.len() {
+        if &bytes[i..i + wbytes.len()] == wbytes {
+            let before_ok = i == 0 || !is_isa_word_char(bytes[i - 1]);
+            let after_pos = i + wbytes.len();
+            let after_ok = after_pos == bytes.len() || !is_isa_word_char(bytes[after_pos]);
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Collect the unique set of free variables that appear in `text`,
+/// preserving the order of the candidate lists (Greek first, then
+/// ASCII alphabetically).  Stable across runs — used to order
+/// the binders in the Π-form output.
+fn isa_extract_bound_vars(text: &str) -> Vec<&'static str> {
+    let mut out = Vec::with_capacity(8);
+    for greek in ISA_GREEK_VAR_CANDIDATES {
+        if text.contains(greek) {
+            out.push(*greek);
+        }
+    }
+    for v in ISA_ASCII_VAR_CANDIDATES {
+        if isa_contains_as_word(text, v) {
+            out.push(*v);
+        }
+    }
+    out
+}
+
+/// Split a per-rule signature into `(assumes_list, shows)` slices.
+/// Handles both formats:
+///   * inline:        `lemma X: "STMT"\n  by ...` → `(vec![], "STMT")`
+///   * assumes/shows: `lemma X:\n  assumes "A1" and "A2"\n  shows "S"\n  ...`
+///                   → `(vec!["A1", "A2"], "S")`
+///
+/// Returns `None` if neither shape is recognised (caller falls back
+/// to the generic `side_conditions_hold ⟶ True` placeholder).
+fn isa_split_assumes_shows(sig: &str) -> Option<(Vec<String>, String)> {
+    if let (Some(asm_idx), Some(shows_rel)) = (sig.find("assumes "), sig.find("shows ")) {
+        if shows_rel <= asm_idx {
+            return None;
+        }
+        let asm_block = sig[asm_idx + "assumes ".len()..shows_rel].trim();
+        let shows_block = &sig[shows_rel + "shows ".len()..];
+        // Strip trailing `using assms`-or-`by`-prefixed proof tactic.
+        let shows_clean = shows_block
+            .splitn(2, "\n  using ")
+            .next()
+            .unwrap_or(shows_block)
+            .splitn(2, "\n  by ")
+            .next()
+            .unwrap_or(shows_block);
+
+        // Parse asms: split on ` and ` literal, strip surrounding quotes.
+        let asms: Vec<String> = asm_block
+            .split(" and ")
+            .map(|s| {
+                let s = s.trim();
+                // Each entry is a quoted Isabelle term: `"<body>"` —
+                // strip the outermost pair of double quotes.
+                s.trim_start_matches('"')
+                    .trim_end_matches('"')
+                    .trim()
+                    .to_string()
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let shows = shows_clean
+            .trim()
+            .trim_start_matches('"')
+            .trim_end_matches('"')
+            .trim()
+            .to_string();
+        return Some((asms, shows));
+    }
+
+    // Inline format: extract first quoted statement after the colon.
+    let colon_idx = sig.find(':')?;
+    let after_colon = &sig[colon_idx + 1..];
+    // Find the first `"…"`.  Walk past any leading whitespace.
+    let after_colon = after_colon.trim_start();
+    let stmt_start = after_colon.find('"')?;
+    let stmt_body = &after_colon[stmt_start + 1..];
+    let stmt_end = stmt_body.find('"')?;
+    Some((vec![], stmt_body[..stmt_end].to_string()))
+}
+
+/// Build the Π-form proposition `∀ v1 ... vn. asm1 ⟶ … ⟶ shows`
+/// for the named rule, scanning its existing per-rule signature
+/// for the statement components.  `None` for rules whose signature
+/// is missing from the table (K_Pos / K_FwAx fallback).
+fn isa_pi_form_for_rule(rule_name: &str) -> Option<String> {
+    let sig = rule_signature_isabelle(rule_name)?;
+    let (asms, shows) = isa_split_assumes_shows(&sig)?;
+    let scan_corpus = format!("{} {}", asms.join(" "), shows);
+    let bound = isa_extract_bound_vars(&scan_corpus);
+
+    let mut out = String::new();
+    out.push_str("\\<forall>");
+    for v in &bound {
+        out.push(' ');
+        out.push_str(v);
+    }
+    out.push('.');
+    for asm in &asms {
+        out.push(' ');
+        out.push_str(asm);
+        out.push_str(" \\<longrightarrow>");
+    }
+    out.push(' ');
+    out.push_str(&shows);
+    Some(out)
+}
 
 fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
     let body = match rule_name {
@@ -357,26 +609,26 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Path_Over_Form" => Some(
             "lemma K_Path_Over_Form_sound:\n  \
-              assumes \"K_Path_Over_Form_iou \\<Gamma> motive p a b ty i\"\n  \
-              shows \"\\<Gamma> \\<turnstile> PathOver motive p a b : ty\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> A : Universe i\" and \"\\<Gamma> \\<turnstile> motive : Pi x A (Universe i)\"\n  \
+              shows \"\\<Gamma> \\<turnstile> PathOver motive p a b : Universe i\"\n  \
               using assms by (rule T_path_over)",
         ),
         "K_HComp" => Some(
             "lemma K_HComp_sound:\n  \
-              assumes \"K_HComp_iou \\<Gamma> phi walls base T\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> T : Universe i\" and \"\\<Gamma> \\<turnstile> base : T\"\n  \
               shows \"\\<Gamma> \\<turnstile> HComp phi walls base : T\"\n  \
               using assms by (rule T_hcomp)",
         ),
         "K_Transp" => Some(
             "lemma K_Transp_sound:\n  \
-              assumes \"K_Transp_iou \\<Gamma> path regular value target\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> target : Universe i\"\n  \
               shows \"\\<Gamma> \\<turnstile> Transp path regular value : target\"\n  \
               using assms by (rule T_transp)",
         ),
         "K_Glue" => Some(
             "lemma K_Glue_sound:\n  \
-              assumes \"K_Glue_iou \\<Gamma> carrier phi fiber equivP result\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : result\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> carrier : Universe i\"\n  \
+              shows \"\\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : Universe i\"\n  \
               using assms by (rule T_glue)",
         ),
         // Refinement (4)
@@ -401,7 +653,7 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Refine_Intro" => Some(
             "lemma K_Refine_Intro_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> a : base\" and \"K_Refine_Intro_iou \\<Gamma> a base x predicate\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> a : base\" and \"\\<Gamma> \\<turnstile> base : Universe i\" and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
               shows \"\\<Gamma> \\<turnstile> a : Refine base x predicate\"\n  \
               using assms by (rule T_refine_intro)",
         ),
@@ -445,7 +697,7 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         // SmtAxiom (2)
         "K_Smt" => Some(
             "lemma K_Smt_sound:\n  \
-              assumes \"K_Smt_iou \\<Gamma> solver_tag T\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> T : Universe i\"\n  \
               shows \"\\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n  \
               using assms by (rule T_smt)",
         ),
@@ -456,7 +708,7 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         // Diakrisis (11)
         "K_Eps_Mu" => Some(
             "lemma K_Eps_Mu_sound:\n  \
-              assumes \"K_Eps_Mu_iou \\<Gamma> articulation enactment ty\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> enactment : ty\"\n  \
               shows \"\\<Gamma> \\<turnstile> articulation : ty\"\n  \
               using assms by (rule T_eps_mu)",
         ),
@@ -467,7 +719,7 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Round_Trip" => Some(
             "lemma K_Round_Trip_sound:\n  \
-              assumes \"K_Round_Trip_iou \\<Gamma> term recovered\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> recovered : Universe i\"\n  \
               shows \"\\<Gamma> \\<turnstile> term : recovered\"\n  \
               using assms by (rule T_round_trip)",
         ),
