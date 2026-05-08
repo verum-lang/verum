@@ -265,10 +265,7 @@ implement Eq for MetaSpan {
 // Implement ordering (by position)
 implement Ord for MetaSpan {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.start().cmp(&other.start()) {
-            Ordering.Equal => self.end().cmp(&other.end()),
-            ord => ord,
-        }
+        self.start().cmp(&other.start()).then(self.end().cmp(&other.end()))
     }
 }
 

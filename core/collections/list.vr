@@ -2770,18 +2770,9 @@ implement<T: Ord> List<T> {
             let a: &T = unsafe { &*self.ptr.offset(i) };
             let b: &T = unsafe { &*other.ptr.offset(i) };
             let c = a.cmp(b);
-            match c {
-                Ordering.Equal => {}
-                _ => { return c; }
-            }
+            if c != Equal { return c; }
         }
-        if self.len < other.len {
-            Ordering.Less
-        } else if self.len > other.len {
-            Ordering.Greater
-        } else {
-            Ordering.Equal
-        }
+        Ordering.from_int(self.len - other.len)
     }
 }
 
