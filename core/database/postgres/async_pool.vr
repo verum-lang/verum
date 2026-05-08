@@ -435,27 +435,27 @@ fn typed_row_to_wire_values(
 fn typed_value_to_wire_text(
     v: &core.database.postgres.wire.typed.TypedValue,
 ) -> core.database.common.types.WireValue {
-    use core.database.postgres.wire.typed.{
-        TvNull, TvBool, TvInt2, TvInt4, TvInt8, TvText, TvBytea,
-        TvTimestamp, TvTimestamptz,
-    };
-    use core.database.common.types.{WireValue, WvNull as WvN, WvPresent, WfText};
-
     let bytes_opt: Maybe<List<Byte>> = match v {
-        TvNull              => None,
-        TvBool(b)           => Some(if *b { "t".as_bytes().to_list() } else { "f".as_bytes().to_list() }),
-        TvInt2(n)           => Some(format_int_text(*n as Int)),
-        TvInt4(n)           => Some(format_int_text(*n as Int)),
-        TvInt8(n)           => Some(format_int_text(*n as Int)),
-        TvText(s)           => Some(s.as_bytes().to_list()),
-        TvBytea(b)          => Some(format_bytea_hex_text(b)),
-        TvTimestamp(us)     => Some(format_pg_timestamp_text(*us, false)),
-        TvTimestamptz(us)   => Some(format_pg_timestamp_text(*us, true)),
-        _                   => None,
+        core.database.postgres.wire.typed.TvNull => None,
+        core.database.postgres.wire.typed.TvBool(b) =>
+            Some(if *b { "t".as_bytes().to_list() } else { "f".as_bytes().to_list() }),
+        core.database.postgres.wire.typed.TvInt2(n) => Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvInt4(n) => Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvInt8(n) => Some(format_int_text(*n as Int)),
+        core.database.postgres.wire.typed.TvText(s) => Some(s.as_bytes().to_list()),
+        core.database.postgres.wire.typed.TvBytea(b) => Some(format_bytea_hex_text(b)),
+        core.database.postgres.wire.typed.TvTimestamp(us) =>
+            Some(format_pg_timestamp_text(*us, false)),
+        core.database.postgres.wire.typed.TvTimestamptz(us) =>
+            Some(format_pg_timestamp_text(*us, true)),
+        _ => None,
     };
     match bytes_opt {
-        None    => WvN,
-        Some(b) => WvPresent { bytes: b, format: WfText },
+        None => core.database.common.types.WvNull,
+        Some(bs) => core.database.common.types.WvPresent {
+            bytes: bs,
+            format: core.database.common.types.WfText,
+        },
     }
 }
 
