@@ -227,6 +227,18 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Backtrace.capture() intercept (#48): walk the VBC call stack
+            // and return a Verum Backtrace { frames: List<StackFrame> } value.
+            if let Some(result) = super::backtrace_runtime::try_intercept_backtrace(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 

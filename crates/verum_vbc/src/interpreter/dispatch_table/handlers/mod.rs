@@ -104,6 +104,11 @@ pub(super) mod runtime_bridge;
 // the value directly. AOT keeps the full Future-poll dispatch.
 pub(super) mod async_runtime;
 
+// Backtrace.capture() intercept (#48): walk the VBC call stack and
+// build a Verum Backtrace { frames: List<StackFrame> } value.
+// Uses SourceMap entries for file/line/column when present.
+pub(super) mod backtrace_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
