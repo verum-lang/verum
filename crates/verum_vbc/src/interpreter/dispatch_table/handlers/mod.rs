@@ -109,6 +109,11 @@ pub(super) mod async_runtime;
 // Uses SourceMap entries for file/line/column when present.
 pub(super) mod backtrace_runtime;
 
+// catch_unwind(f) intercept (#50): run `f` via execute_table, catch
+// InterpreterError::Panic and turn it into Result.Err(PanicInfo).
+// Normal returns become Result.Ok(val). Non-panic errors propagate.
+pub(super) mod panic_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
