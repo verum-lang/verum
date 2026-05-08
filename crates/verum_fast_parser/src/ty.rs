@@ -2995,7 +2995,10 @@ impl<'a> RecursiveParser<'a> {
 
         let mut segments = Vec::new();
 
-        // Parse first segment
+        // Parse first segment.  Path-leading keywords (`self`, `super`,
+        // `cog`) only carry their special "navigation" semantics when
+        // they appear at position 0 — `super.foo` reaches into the
+        // parent module, `cog.foo` resets to the cog root, etc.
         segments.push(self.parse_path_segment()?);
 
         // Parse remaining segments: .foo.bar
@@ -3007,13 +3010,32 @@ impl<'a> RecursiveParser<'a> {
         // This prevents `.` from being consumed when it's used as a separator in
         // forall/exists expressions (e.g., `forall i: T . body`), where the `.`
         // separates the quantifier binding from the body expression.
+        //
+        // Continuation segments are pure module-name identifiers — the
+        // navigation keywords `cog` / `super` / `self` are NOT valid
+        // here (you cannot navigate to "the cog root in the middle of
+        // an absolute path", and `mount core.cog.manifest.X` would
+        // otherwise have its `cog` keyword silently reset the whole
+        // path to ["manifest"] via `extract_path`'s `Cog =>
+        // parts.clear()` arm, breaking every `core.cog.<sub>.<item>`
+        // mount).  Use `consume_ident_or_any_keyword` so the literal
+        // keyword spellings are accepted as identifier names instead.
         while self.stream.check(&TokenKind::Dot) && self.is_dot_followed_by_ident() {
             self.stream.advance(); // consume '.'
-            segments.push(self.parse_path_segment()?);
+            segments.push(self.parse_path_continuation_segment()?);
         }
 
         let span = self.stream.make_span(start_pos);
         Ok(Path::new(segments.into_iter().collect::<List<_>>(), span))
+    }
+
+    /// Parse a non-leading path segment.  Treats `cog` / `super` /
+    /// `self` / `Self` as ordinary module-name identifiers; only the
+    /// FIRST segment of a path can carry their navigation semantics.
+    pub(crate) fn parse_path_continuation_segment(&mut self) -> ParseResult<PathSegment> {
+        let name = self.consume_ident_or_any_keyword()?;
+        let span = self.stream.current_span();
+        Ok(PathSegment::Name(Ident::new(name, span)))
     }
 
     /// Parse a path segment
