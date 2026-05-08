@@ -105,6 +105,7 @@ pub mod proof_checker;
 pub mod proof_checker_nbe; // NbE-based second algorithmic kernel
 pub mod proof_checker_meta; // universe-lift mechanism for meta-mode
 pub mod kernel_registry; // N-kernel registry for differential testing
+pub mod canonical_battery; // canonical 24-cert battery shared by every kernel-differential gate
 pub mod differential_fuzz; // mutation-based property fuzzing over the registry
 pub mod reflection_tower; // MSFS-grounded meta-soundness reflection tower
 pub mod verdict; // canonical VerificationVerdict + DischargeMethod (ATS-V foundation)

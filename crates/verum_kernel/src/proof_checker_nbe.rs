@@ -419,7 +419,16 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             .cloned()
             .ok_or_else(|| CheckError::UnboundVariable(*i)),
 
-        Term::Universe(n) => Ok(Value::VUniverse(n + 1)),
+        // T-Univ.  Mirrors the trusted base's universe-overflow
+        // check: a `Universe(u32::MAX)` would wrap to 0 in release
+        // builds and produce the unsound judgement
+        // `Universe(u32::MAX) : Universe(0)`; reject explicitly
+        // instead.  The corresponding rule in the bidirectional
+        // kernel lives at `proof_checker.rs::infer` Term::Universe.
+        Term::Universe(n) => match n.checked_add(1) {
+            Some(succ) => Ok(Value::VUniverse(succ)),
+            None => Err(CheckError::UniverseOverflow { level: *n }),
+        },
 
         Term::Pi(a, b) => {
             let a_ty = infer_value(ctx, a)?;
@@ -496,11 +505,33 @@ fn expect_universe(value: &Value) -> Option<u32> {
 
 /// Verify a [`Certificate`](crate::proof_checker::Certificate) using
 /// the NbE kernel.  Architectural twin of
-/// [`crate::proof_checker::Certificate::verify`].
+/// [`crate::proof_checker::Certificate::verify`] — mirrors its
+/// claimed-type well-formedness check (claimed_type must itself be
+/// a type) plus the universe-tower-top escape hatch (a
+/// claimed_type at the very top of the universe tower triggers
+/// `UniverseOverflow` on its successor's kind-check, but is still a
+/// valid type — swallow the overflow there and let the structural
+/// check downstream catch any genuine type mismatch).
 pub fn verify_certificate(
     cert: &crate::proof_checker::Certificate,
 ) -> Result<(), CheckError> {
     let ctx = NbeContext::new();
+    match infer(&ctx, &cert.claimed_type) {
+        Ok(claimed_kind) => {
+            let claimed_kind_value = eval(&claimed_kind, ctx.env());
+            if expect_universe(&claimed_kind_value).is_none() {
+                return Err(CheckError::ClaimedTypeNotAType {
+                    claimed_type: cert.claimed_type.clone(),
+                    actual: claimed_kind,
+                });
+            }
+        }
+        Err(CheckError::UniverseOverflow { .. }) => {
+            // claimed_type lives at the top of the universe tower
+            // — still a type.  Mirrors proof_checker.rs::verify.
+        }
+        Err(other) => return Err(other),
+    }
     check(&ctx, &cert.term, &cert.claimed_type)
 }
 

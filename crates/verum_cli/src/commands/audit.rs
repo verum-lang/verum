@@ -2437,180 +2437,20 @@ struct LeanVerdictBundle {
     verdicts: Vec<DifferentialVerdict>,
 }
 
-/// Load the canonical battery — covers the structural fragment of
-/// `proof_checker.rs` (Var / Universe / Pi / Lam / App), each of the
-/// kernel-audit-2026 defects (DEFECT-1..4), plus a handful of
-/// nested / polymorphic / negative-shape cases.  Every cert has a
-/// stable `id` that survives the JSON round-trip and is the key for
-/// cross-prover verdict comparison.
+/// Load the canonical battery — projection of
+/// [`verum_kernel::canonical_battery::canonical_battery`] into the
+/// CLI-side `DifferentialCert` shape.  Single source of truth lives
+/// in the kernel crate; both this Lean-replay gate and the
+/// in-process N-kernel `--differential-kernel` gate consume it.
 fn load_differential_battery() -> Vec<DifferentialCert> {
-    use verum_kernel::proof_checker::Term as T;
-
-    // Helpers — keep cert construction terse.
-    let univ = |n: u32| T::Universe(n);
-    let var = |i: usize| T::Var(i);
-    let pi = |a: T, b: T| T::Pi(Box::new(a), Box::new(b));
-    let lam = |a: T, b: T| T::Lam(Box::new(a), Box::new(b));
-    let app = |a: T, b: T| T::App(Box::new(a), Box::new(b));
-
-    vec![
-        // ---- 1. Universe formation (T-Univ) -------------------------------
-        DifferentialCert {
-            id: "univ-0-in-1",
-            term: univ(0),
-            claimed_type: univ(1),
-        },
-        DifferentialCert {
-            id: "univ-5-in-6",
-            term: univ(5),
-            claimed_type: univ(6),
-        },
-        DifferentialCert {
-            id: "univ-mismatch",
-            term: univ(0),
-            claimed_type: univ(2),
-        },
-        // ---- 2. Var (T-Var) — empty ctx → unbound -------------------------
-        DifferentialCert {
-            id: "var0-empty-ctx-fails",
-            term: var(0),
-            claimed_type: univ(0),
-        },
-        // ---- 3. Identity at Universe(0) (T-Lam-Intro + T-Var) -------------
-        DifferentialCert {
-            id: "id-at-univ0",
-            term: lam(univ(0), var(0)),
-            claimed_type: pi(univ(0), univ(0)),
-        },
-        DifferentialCert {
-            id: "id-at-univ0-wrong-claim",
-            term: lam(univ(0), var(0)),
-            claimed_type: univ(0),
-        },
-        // ---- 4. Identity at Universe(3) -----------------------------------
-        DifferentialCert {
-            id: "id-at-univ3",
-            term: lam(univ(3), var(0)),
-            claimed_type: pi(univ(3), univ(3)),
-        },
-        // ---- 5. Polymorphic identity (Π A. Π _:A. A) ----------------------
-        DifferentialCert {
-            id: "poly-id-shape",
-            term: lam(univ(0), lam(var(0), var(0))),
-            claimed_type: pi(univ(0), pi(var(0), var(1))),
-        },
-        // ---- 6. Pi formation (T-Pi-Form) ----------------------------------
-        DifferentialCert {
-            id: "pi-univ-univ",
-            term: pi(univ(0), univ(0)),
-            claimed_type: univ(1),
-        },
-        DifferentialCert {
-            id: "pi-takes-max",
-            term: pi(univ(2), univ(5)),
-            claimed_type: univ(6),
-        },
-        // ---- 7. App-Elim (β-reduction) ------------------------------------
-        // ((λ_:U(0). Var(0)) U(0))    — but U(0):U(1), Pi expects U(0):? — type-fail.
-        DifferentialCert {
-            id: "app-domain-mismatch",
-            term: app(lam(univ(0), var(0)), univ(5)),
-            claimed_type: univ(0),
-        },
-        // ---- 8. App on non-function ---------------------------------------
-        DifferentialCert {
-            id: "app-non-function",
-            term: app(univ(0), univ(0)),
-            claimed_type: univ(0),
-        },
-        // ---- 9. DEFECT-2: universe overflow rejection ---------------------
-        DifferentialCert {
-            id: "defect-2-univ-max-overflows",
-            term: univ(u32::MAX),
-            claimed_type: univ(0),
-        },
-        DifferentialCert {
-            id: "defect-2-univ-max-minus-one-ok",
-            term: univ(u32::MAX - 1),
-            claimed_type: univ(u32::MAX),
-        },
-        // ---- 10. DEFECT-4: claimed_type must be a type --------------------
-        DifferentialCert {
-            id: "defect-4-claimed-is-value",
-            term: lam(univ(0), var(0)),
-            claimed_type: lam(univ(0), var(0)),
-        },
-        // ---- 11. Nested identity ((λx.x)((λx.x)U(0))) reduces ok ---------
-        // The body Var(0) gets the type the lambda captures.
-        // Argument U(0) has type U(1); the outer λ expects U(0). Mismatch.
-        DifferentialCert {
-            id: "nested-app-domain-mismatch",
-            term: app(
-                lam(univ(0), var(0)),
-                app(lam(univ(0), var(0)), univ(0)),
-            ),
-            claimed_type: univ(0),
-        },
-        // ---- 12. Const function (λ_:A. λ_:B. Var(1)) ----------------------
-        // Type: Π(_:A). Π(_:B). A
-        DifferentialCert {
-            id: "const-fn",
-            term: lam(univ(0), lam(univ(0), var(1))),
-            claimed_type: pi(univ(0), pi(univ(0), univ(0))),
-        },
-        // ---- 13. Higher universe Pi (Type 2 → Type 7 lives in Type 8) ----
-        DifferentialCert {
-            id: "high-pi",
-            term: pi(univ(2), univ(7)),
-            claimed_type: univ(8),
-        },
-        // ---- 14. Identity-arrow at Universe(0) — tests T-Lam ---------------
-        DifferentialCert {
-            id: "id-arrow",
-            term: lam(univ(0), var(0)),
-            claimed_type: pi(univ(0), univ(0)),
-        },
-        // ---- 15. App with correct argument (when wrapped by outer λ) ------
-        // λ(x : U(0)). x   applied to itself isn't valid — but λ.x : Π.U(0)
-        // applied to a value of U(0) is.  Need a hypothesis though;
-        // closed terms can't easily make this.  We skip; covered by id-at-univ.
-        // ---- 16. Free var inside nested Pi --------------------------------
-        DifferentialCert {
-            id: "deep-var",
-            term: lam(univ(0), lam(var(0), lam(var(1), var(0)))),
-            claimed_type: pi(univ(0), pi(var(0), pi(var(1), var(2)))),
-        },
-        // ---- 17. Eta-redex: λx.(f x) ≡_η f when f closed ------------------
-        // We can't directly test eta against a free f, but we can pin
-        // the structural shape.  Identity wrapped in eta: λ(x:U(0)).((λ(y:U(0)).y) x)
-        DifferentialCert {
-            id: "eta-via-id-application",
-            term: lam(
-                univ(0),
-                app(lam(univ(0), var(0)), var(0)),
-            ),
-            claimed_type: pi(univ(0), univ(0)),
-        },
-        // ---- 18. Type-mismatch: identity claimed as Universe(0) -----------
-        DifferentialCert {
-            id: "id-claimed-as-universe",
-            term: lam(univ(0), var(0)),
-            claimed_type: univ(1),
-        },
-        // ---- 19. Nested Pi — Π(_:U(0)). Π(_:U(0)). U(0) -------------------
-        DifferentialCert {
-            id: "nested-pi",
-            term: pi(univ(0), pi(univ(0), univ(0))),
-            claimed_type: univ(1),
-        },
-        // ---- 20. Nested Lam — λ(A:U(0)). λ(x:A). Var(1) (= A's type itself) is wrong shape.
-        // The classic identity λ(A:U(0)). λ(x:A). Var(0) at type Π(A:U(0)). Π(_:A). A is correct.
-        DifferentialCert {
-            id: "nested-lam-correct",
-            term: lam(univ(0), lam(var(0), var(0))),
-            claimed_type: pi(univ(0), pi(var(0), var(1))),
-        },
-    ]
+    verum_kernel::canonical_battery::canonical_battery()
+        .into_iter()
+        .map(|c| DifferentialCert {
+            id: c.id,
+            term: c.certificate.term,
+            claimed_type: c.certificate.claimed_type,
+        })
+        .collect()
 }
 
 /// Run the Rust kernel's `Certificate::verify()` on every battery
@@ -4135,90 +3975,101 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
 
 /// Entry-point for `verum audit --differential-kernel [--format FORMAT]`.
 ///
-/// Runs the differential-kernel testing harness from
-/// [`verum_kernel::differential`] over every kernel_v0 rule + the
-/// canonical proof-term certificate library
-/// (`core/verify/proof_term_examples/*.vproof`).
+/// Runs the canonical 24-cert battery (defined in
+/// [`verum_kernel::canonical_battery`]) through every kernel
+/// implementation registered in [`verum_kernel::kernel_registry::KernelRegistry::default`]
+/// and asserts unanimous accept/reject across all of them.
 ///
-/// **Architecture (#159)**: differential testing checks that **two**
-/// kernel implementations agree on every certificate — Rust trusted
-/// base [`verum_kernel::proof_checker`] vs Verum-self-hosted kernel
-/// (`core/verify/kernel_v0/`). When the Verum side is online, the
-/// gate flips disagreements into audit failures. When the Verum
-/// side is stubbed (current state — parser blocker on
-/// `core/verify/kernel_v0/`), every report records
-/// `not_yet_self_hosting`; the gate exits 0 (observability-only)
-/// because there's no second kernel to disagree.
+/// The default registry ships three structurally-distinct kernels:
 ///
-/// **Forward-compatibility**: when
-/// `verum_kernel::differential::run_differential_test_with_verum`
-/// gains a real Verum-side adapter, this gate's output flips
-/// automatically — every existing call site still goes through
-/// `differential_test_rule(name)` which looks up the Rule then
-/// runs the test. Plug in the Verum adapter, the gate becomes
-/// load-bearing.
+/// * **Slot A** — `proof_checker` (bidirectional type-checking +
+///   explicit substitution + WHNF, the trusted base).
+/// * **Slot B** — `proof_checker_nbe` (Normalisation by Evaluation
+///   with closures + level-indexed quote — same input/output
+///   relation, structurally distinct algorithm).
+/// * **Slot C** — `kernel_v0` (manifest-driven verifier — anchors on
+///   Slot A's structural verdict, then performs orthogonal
+///   meta-soundness checks against the canonical kernel registry).
 ///
-/// **Output**: `target/audit-reports/differential-kernel.json`.
+/// Disagreements between any pair fail the audit.  This is the
+/// load-bearing complement to `--differential-lean-checker`:
+/// where that gate compares the Rust kernel to a Lean
+/// re-implementation cross-language, this one compares the three
+/// in-process Rust kernels within the language — different
+/// algorithm, same battery, must agree.
+///
+/// **Output**: `target/audit-reports/differential-kernel.json` —
+/// per-cert per-kernel verdict matrix + agreement classification.
 pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> {
-    use verum_kernel::differential::{
-        DifferentialAgreement, DifferentialOutcome, DifferentialReport, differential_test_rule,
-    };
-    use verum_kernel::soundness::kernel_v0_manifest::manifest;
+    use verum_kernel::canonical_battery::{CanonicalCert, canonical_battery};
+    use verum_kernel::kernel_registry::{AgreementVerdict, KernelRegistry};
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Differential-kernel test — Rust trusted base vs Verum self-hosted");
+        ui::step("Differential-kernel test — proof_checker ↔ proof_checker_nbe ↔ kernel_v0");
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let rules = manifest();
-    let mut reports: Vec<DifferentialReport> = Vec::with_capacity(rules.len());
+    let registry = KernelRegistry::default();
+    let kernel_names: Vec<&'static str> = registry.names();
+    let battery: Vec<CanonicalCert> = canonical_battery();
 
-    for rule in &rules {
- // `differential_test_rule` returns `None` for unknown rules,
- // but every name we pass is from `manifest()` directly, so
- // the lookup is total. We use `if let` to stay defensive —
- // a future manifest refactor that introduces aliasing should
- // fail loudly, not silently.
-        if let Some(report) = differential_test_rule(&rule.name) {
-            reports.push(report);
+    // Run each cert through every kernel and tally per-cert
+    // multi-verdicts.
+    let mut rows: Vec<serde_json::Value> = Vec::with_capacity(battery.len());
+    let mut unanimous_accept = 0usize;
+    let mut unanimous_reject = 0usize;
+    let mut disagreements: Vec<(String, Vec<&'static str>, Vec<&'static str>)> = Vec::new();
+    for cert in &battery {
+        let multi = registry.verify_all(&cert.certificate);
+        let per_kernel: Vec<serde_json::Value> = multi
+            .outcomes
+            .iter()
+            .map(|o| {
+                serde_json::json!({
+                    "kernel": o.kernel_name,
+                    "accepted": o.accepted,
+                    "error": o.error_summary,
+                })
+            })
+            .collect();
+        let agreement_tag = multi.agreement.tag();
+        match &multi.agreement {
+            AgreementVerdict::Unanimous => unanimous_accept += 1,
+            AgreementVerdict::UnanimousReject => unanimous_reject += 1,
+            AgreementVerdict::Disagreement {
+                accepting,
+                rejecting,
+            } => {
+                disagreements.push((
+                    cert.id.to_string(),
+                    accepting.clone(),
+                    rejecting.clone(),
+                ));
+            }
         }
+        rows.push(serde_json::json!({
+            "id": cert.id,
+            "agreement": agreement_tag,
+            "verdicts": per_kernel,
+        }));
     }
-    let outcome = DifferentialOutcome::from_reports(&reports);
 
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("differential-kernel.json");
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "kernel_version": env!("CARGO_PKG_VERSION"),
-        "task": "#159",
-        "discipline": "differential_kernel_cross_implementation",
-        "rule_count": rules.len(),
-        "report_count": reports.len(),
+        "discipline": "differential_kernel_n_way_agreement",
+        "kernels": kernel_names,
+        "battery_size": battery.len(),
         "outcome": {
-            "accepted": outcome.accepted,
-            "rejected": outcome.rejected,
-            "disagreement": outcome.disagreement,
-            "not_yet_self_hosting": outcome.not_yet_self_hosting,
+            "unanimous_accept": unanimous_accept,
+            "unanimous_reject": unanimous_reject,
+            "disagreements": disagreements.len(),
         },
-        "load_bearing": outcome.disagreement == 0,
-        "reports": reports
-            .iter()
-            .map(|r| {
-                let agreement_tag = match r.agreement {
-                    DifferentialAgreement::BothAccept => "both_accept",
-                    DifferentialAgreement::BothReject => "both_reject",
-                    DifferentialAgreement::Disagreement => "disagreement",
-                    DifferentialAgreement::NotYetSelfHosting => "not_yet_self_hosting",
-                };
-                serde_json::json!({
-                    "rule": r.rule_name,
-                    "rust_verdict": r.rust_verdict.tag(),
-                    "verum_verdict": r.verum_verdict.tag(),
-                    "agreement": agreement_tag,
-                })
-            })
-            .collect::<Vec<_>>(),
+        "load_bearing": disagreements.is_empty(),
+        "rows": rows,
     });
     let _ = std::fs::write(
         &report_path,
@@ -4228,73 +4079,73 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Differential-kernel test (#159 — Rust ↔ Verum self-hosted)");
-            println!("──────────────────────────────────────────────────────────");
-            println!("Total rules:           {}", rules.len());
-            println!("Reports run:           {}", reports.len());
-            println!("Both accept:           {}", outcome.accepted);
-            println!("Both reject:           {}", outcome.rejected);
+            println!("Differential-kernel test — N-way agreement on canonical battery");
+            println!("─────────────────────────────────────────────────────────────────");
+            println!("Kernels:               {}", kernel_names.join(", "));
+            println!("Battery size:          {}", battery.len());
+            println!("Unanimous accept:      {}", unanimous_accept);
+            println!("Unanimous reject:      {}", unanimous_reject);
             println!(
-                "{} Disagreement:          {}",
-                if outcome.disagreement == 0 { "✓" } else { "✗" },
-                outcome.disagreement,
+                "{} Disagreements:         {}",
+                if disagreements.is_empty() { "✓" } else { "✗" },
+                disagreements.len(),
             );
-            println!("Not yet self-hosting:  {}", outcome.not_yet_self_hosting);
             println!();
-            for r in &reports {
-                let glyph = match r.agreement {
-                    DifferentialAgreement::BothAccept => "✓",
-                    DifferentialAgreement::BothReject => "○",
-                    DifferentialAgreement::Disagreement => "✗",
-                    DifferentialAgreement::NotYetSelfHosting => "·",
+            for cert in &battery {
+                let multi = registry.verify_all(&cert.certificate);
+                let glyph = match &multi.agreement {
+                    AgreementVerdict::Unanimous => "✓".green().to_string(),
+                    AgreementVerdict::UnanimousReject => "○".to_string(),
+                    AgreementVerdict::Disagreement { .. } => "✗".red().to_string(),
                 };
-                println!(
-                    "  {} {:<14}  rust={:<10}  verum={:<22}",
-                    glyph, r.rule_name, r.rust_verdict.tag(), r.verum_verdict.tag(),
-                );
+                let columns: Vec<String> = multi
+                    .outcomes
+                    .iter()
+                    .map(|o| {
+                        format!(
+                            "{}={}",
+                            o.kernel_name,
+                            if o.accepted { "accept" } else { "reject" }
+                        )
+                    })
+                    .collect();
+                println!("  {} {:<32}  {}", glyph, cert.id, columns.join("  "));
             }
             println!();
-            if outcome.disagreement == 0 {
-                if outcome.not_yet_self_hosting > 0 {
-                    println!(
-                        "{} {} report(s) pending Verum-side self-hosting (parser blocker on \
-                         core/verify/kernel_v0/); harness load-bearing the moment it lands.",
-                        "·".yellow(),
-                        outcome.not_yet_self_hosting,
-                    );
-                } else {
-                    println!(
-                        "{} All differential reports agree — kernel implementations consistent.",
-                        "✓".green(),
-                    );
-                }
+            if disagreements.is_empty() {
+                println!(
+                    "{} all {} certs unanimous across {} kernels — implementations consistent.",
+                    "✓".green(),
+                    battery.len(),
+                    kernel_names.len(),
+                );
             } else {
                 println!(
-                    "{} {} disagreement(s) — at least one Rust↔Verum kernel divergence \
-                     detected. Failing the audit.",
+                    "{} {} disagreement(s) — at least one kernel divergence detected:",
                     "✗".red(),
-                    outcome.disagreement,
+                    disagreements.len(),
                 );
+                for (id, accepting, rejecting) in &disagreements {
+                    println!(
+                        "    {} accept={:?} reject={:?}",
+                        id, accepting, rejecting
+                    );
+                }
             }
             println!();
             println!("Report: {}", report_path.display());
         }
         AuditFormat::Json => {
-            println!("{}", serde_json::to_string(&payload).unwrap_or_default(),);
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
         }
     }
 
- // Failure semantics: ANY disagreement fails the gate.
- // `not_yet_self_hosting` reports are observability — the gate
- // remains pass-state because there's no second kernel to disagree.
- // Once the Verum-side adapter lands, the same audit code starts
- // producing real verdicts and the gate becomes load-bearing.
-    if outcome.disagreement > 0 {
+    if !disagreements.is_empty() {
         return Err(crate::error::CliError::Custom(
             format!(
-                "differential-kernel audit: {} disagreement(s) between Rust trusted \
-                 base and Verum self-hosted kernel — see {}",
-                outcome.disagreement,
+                "differential-kernel audit: {} disagreement(s) across {} kernels — see {}",
+                disagreements.len(),
+                kernel_names.len(),
                 report_path.display(),
             )
             .into(),
