@@ -20,10 +20,10 @@
 mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.database.sqlite.native.l3_btree.{
     KkRowId, KkRecord,
     SeekKey, SkRowId, SkRecord,
-    KeyOrdering, KoLess, KoEqual, KoGreater,
     CellKey, CkRowId, CkRecord,
     cmp_int64, cmp_bytes, cmp_keys,
     BinarySearchResult, binary_search_cells,
@@ -41,15 +41,15 @@ mount core.database.sqlite.native.l3_btree.{
 
 fn cmp_int64_basics() {
     match cmp_int64(1_i64, 2_i64) {
-        KoLess => {},
+        Less => {},
         _ => panic("expected 1 < 2"),
     }
     match cmp_int64(5_i64, 5_i64) {
-        KoEqual => {},
+        Equal => {},
         _ => panic("expected 5 == 5"),
     }
     match cmp_int64(9_i64, 3_i64) {
-        KoGreater => {},
+        Greater => {},
         _ => panic("expected 9 > 3"),
     }
 }
@@ -62,7 +62,7 @@ fn cmp_bytes_basics() {
     b.push(0x01 as Byte);
     b.push(0x03 as Byte);
     match cmp_bytes(&a, &b) {
-        KoLess => {},
+        Less => {},
         _ => panic("expected [01,02] < [01,03]"),
     }
     // Prefix comparison: shorter is less when prefixes match.
@@ -72,7 +72,7 @@ fn cmp_bytes_basics() {
     d.push(0x01 as Byte);
     d.push(0x00 as Byte);
     match cmp_bytes(&c, &d) {
-        KoLess => {},
+        Less => {},
         _ => panic("expected [01] < [01,00] (shorter prefix)"),
     }
 }
