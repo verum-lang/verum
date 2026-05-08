@@ -684,3 +684,132 @@ fn three_foundations_agree_on_iou_axiom_set() {
     assert_eq!(lean_set, coq_set, "Lean and Coq IOU axiom sets must agree");
     assert_eq!(coq_set, isa_set, "Coq and Isabelle IOU axiom sets must agree");
 }
+
+// =============================================================================
+// Per-foundation IOU axiom arity consistency (PR-1c)
+// =============================================================================
+//
+// PR-1b asserts the axiom *name set* matches across Lean / Coq /
+// Isabelle.  PR-1c extends this to *arity* (argument count): for
+// each named axiom, all three foundations must declare the same
+// number of arguments.  Catches the drift class where a discharge
+// removes an argument from one foundation but forgets the others
+// — the axiom name still matches but signatures don't.
+
+/// Extract the (name → arity) map from a per-foundation IOU-axiom
+/// string constant, given the foundation's argument-separator
+/// token (`→` for Lean, `->` for Coq, `\<Rightarrow>` for Isabelle).
+///
+/// Arity = number of separators in the axiom's signature line.
+/// For `A → B → C`: 2 arrows = arity 2 (A and B are args, C is
+/// the return type).
+fn extract_iou_arities_from_constant(
+    constant: &str,
+    separator: &str,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut result = std::collections::BTreeMap::new();
+    // Walk line by line — each axiom occupies one line in the
+    // emitted constant.
+    for line in constant.lines() {
+        // Find the first occurrence of `_iou` to extract the name.
+        let iou_pos = match line.find("_iou") {
+            Some(p) => p,
+            None => continue,
+        };
+        // Walk backwards over identifier chars to find the start.
+        let bytes = line.as_bytes();
+        let mut start = iou_pos;
+        while start > 0 {
+            let c = bytes[start - 1];
+            if c.is_ascii_alphanumeric() || c == b'_' {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+        let name_with_iou = &line[start..iou_pos + "_iou".len()];
+        if !name_with_iou.starts_with("K_") {
+            continue;
+        }
+        let rule_name = &name_with_iou[..name_with_iou.len() - "_iou".len()];
+        // Count the separator occurrences in this line.  For an
+        // axiom signature `A → B → C` the arrows separate A from B
+        // and B from C; A and B are args, C is the return type, so
+        // arity = arrows = 2.
+        let separator_count = line.matches(separator).count();
+        if separator_count == 0 {
+            continue; // not a signature line
+        }
+        let arity = separator_count;
+        result.insert(rule_name.to_string(), arity);
+    }
+    result
+}
+
+#[test]
+fn extractor_finds_arities_in_lean_constant() {
+    // Sanity: arity extractor returns plausible values for known
+    // axioms.  K_Path_Over_Form has signature
+    // `Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Nat → Prop`,
+    // so 7 args + Prop return = 7 arrows.
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let arities = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    assert_eq!(
+        arities.get("K_Path_Over_Form"),
+        Some(&7),
+        "K_Path_Over_Form arity should be 7 (got: {:?})",
+        arities.get("K_Path_Over_Form"),
+    );
+    // K_Smt is `Ctx → String → CoreTerm → Prop` — 3 args + Prop = 3 arrows.
+    assert_eq!(arities.get("K_Smt"), Some(&3));
+}
+
+#[test]
+fn lean_coq_arities_agree() {
+    // Pin: every IOU axiom has the same arity in Lean and Coq.
+    // Drift class: a discharge removed an arg from one foundation
+    // but forgot the other.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let lean = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    assert_eq!(
+        lean, coq,
+        "Lean and Coq IOU axiom arities must agree per axiom",
+    );
+}
+
+#[test]
+fn coq_isabelle_arities_agree() {
+    // Pin: every IOU axiom has the same arity in Coq and
+    // Isabelle.  Isabelle uses `\<Rightarrow>` for its arrow
+    // separator (HOL function-type constructor).
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    let isa = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    assert_eq!(
+        coq, isa,
+        "Coq and Isabelle IOU axiom arities must agree per axiom",
+    );
+}
+
+#[test]
+fn three_foundations_agree_on_iou_axiom_arities() {
+    // Pin: direct three-way arity agreement.  Combines the
+    // pairwise pins above into a single canonical assertion that's
+    // the natural extension of `three_foundations_agree_on_iou_axiom_set`.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let lean = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    let coq = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    let isa = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    assert_eq!(lean, coq);
+    assert_eq!(coq, isa);
+    // Sanity: the maps are non-empty.
+    assert!(
+        !lean.is_empty(),
+        "Lean arity map should have at least one IOU axiom",
+    );
+}
