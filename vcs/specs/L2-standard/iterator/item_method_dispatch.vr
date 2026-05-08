@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: iterator, for-loop, method-dispatch, type-inference, regression
+// @timeout: 15000
+// @description: For-loop item type must be fully resolved (unifier applied) before
+//               the loop body so that methods on the yielded element type work.
+//
+// Regression for: when resolve_into_iterator_protocol returns a TypeVar that
+// was already unified by prior inference (e.g., .map() closure return), the
+// unifier substitution was not applied to elem_ty before bind_pattern, leaving
+// the loop variable with an opaque TypeVar.  Methods on the concrete type
+// (e.g., Ordering.reverse()) then failed with "method not found on type variable".
+
+mount core.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// ─── Case 1: direct iteration over List<Ordering> ────────────────────────────
+fn direct_ordering_for_loop(items: List<Ordering>) -> List<Ordering> {
+    let mut out: List<Ordering> = List.new();
+    for ord in items {
+        out.push(ord.reverse());
+    }
+    out
+}
+
+// ─── Case 2: is_less / is_greater on loop variable ───────────────────────────
+fn ordering_predicates_in_loop(items: List<Ordering>) -> Int {
+    let mut count: Int = 0;
+    for ord in items {
+        if ord.is_less() { count = count + 1; }
+        if ord.is_greater() { count = count + 1; }
+    }
+    count
+}
+
+// ─── Case 3: nested method chain ─────────────────────────────────────────────
+fn chained_reverse(items: List<Ordering>) -> List<Ordering> {
+    let mut out: List<Ordering> = List.new();
+    for ord in items {
+        // double reverse should yield the original
+        out.push(ord.reverse().reverse());
+    }
+    out
+}
+
+// ─── Case 4: pattern bind picks up concrete type from Generic item ────────────
+fn match_after_reverse(items: List<Ordering>) -> Int {
+    let mut n: Int = 0;
+    for ord in items {
+        let flipped = ord.reverse();
+        match flipped {
+            Less => { n = n - 1; }
+            Equal => {}
+            Greater => { n = n + 1; }
+        }
+    }
+    n
+}
+
+fn main() {
+    let sample: List<Ordering> = List.new();
+    let _ = direct_ordering_for_loop(sample);
+    let _ = ordering_predicates_in_loop(sample);
+    let _ = chained_reverse(sample);
+    let _ = match_after_reverse(sample);
+    print("item_method_dispatch typecheck ok");
+}

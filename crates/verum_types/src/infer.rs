@@ -1555,6 +1555,28 @@ impl TypeChecker {
         checker
     }
 
+    /// Hand stdlib metadata to a TypeChecker constructed via a
+    /// non-`new_with_core` path (e.g.
+    /// [`with_shared_methods`](Self::with_shared_methods) or
+    /// [`with_minimal_context`](Self::with_minimal_context)).
+    ///
+    /// Required so the receiver-driven lazy stdlib-type loader
+    /// (`infer_method_call_inner_impl`'s `ensure_stdlib_type_loaded`
+    /// call on the receiver's type-name) actually has a metadata
+    /// table to pull from.  Without it, every method call on a
+    /// stdlib type that wasn't named explicitly by user code (e.g.
+    /// `pool.acquire().await?` returning `AsyncPgPoolGuard`
+    /// inferred indirectly through `Result.Ok` arm) fails the
+    /// inherent-method bucket lookup and surfaces as
+    /// `MethodNotFound` despite the bodies being in the
+    /// precompiled archive.
+    pub fn set_core_metadata(
+        &mut self,
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) {
+        self.core_metadata = Maybe::Some(metadata);
+    }
+
     /// Eager construction — registers every type/protocol/function
     /// from the supplied metadata upfront.  ~3.8s on release cold
     /// start.  Used by audit / corpus tooling that needs the
@@ -17715,6 +17737,13 @@ impl TypeChecker {
                             } // end else: no Iterator Item found, duck-typing fallback
                         } // end None branch
                     };
+
+                    // Apply the current substitution to resolve any type variables
+                    // that were already unified during iterable expression inference
+                    // (e.g., the closure return type in `items.map(|x| x.cmp(0))`
+                    // unifies the Item TypeVar with Ordering before we reach here,
+                    // so `ord` in the for body must be Ordering, not an opaque TypeVar).
+                    let elem_ty = self.unifier.apply(&elem_ty);
 
                     // Enter loop context for affine tracking
                     self.affine_tracker.enter_loop();
