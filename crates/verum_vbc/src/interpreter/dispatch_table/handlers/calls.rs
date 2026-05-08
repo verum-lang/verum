@@ -120,6 +120,24 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // ShellResult INHERENT methods (`stdout` / `stderr` /
+            // `success` / `exit_code` / etc.) statically dispatched
+            // via Call(func_id) when the receiver-type was known at
+            // codegen time.  Closes the
+            // `match run(...).await { Ok(r) => r.stdout() }`
+            // failure mode where the intercept-built ShellResult
+            // record had no method-table for the user-side codegen
+            // to dispatch against.
+            if let Some(result) = super::shell_runtime::try_intercept_shell_result_inherent_call(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             // `Text.*` static factories (`Text.new`,
             // `Text.with_capacity`, `Text.from_static`,
             // `Text.from_str`, `Text.from_char`, …).  Same
