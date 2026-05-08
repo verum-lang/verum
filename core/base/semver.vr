@@ -58,7 +58,7 @@
 // // Total ordering.
 // let a = semver.parse(&Text.from("1.0.0-alpha"))?;
 // let b = semver.parse(&Text.from("1.0.0"))?;
-// assert(semver.cmp(&a, &b) < 0); // prerelease < release
+// assert(semver.cmp(&a, &b) is Less); // prerelease < release
 // ```
 //
 
@@ -323,20 +323,20 @@ fn is_prerelease_ch(c: Byte) -> Bool {
 // Ordering (§11)
 // =============================================================================
 
-/// Total order: negative, zero, or positive (like `memcmp`).
-public fn cmp(a: &SemVer, b: &SemVer) -> Int {
+/// Total order: Less, Equal, or Greater per SemVer §11.
+public fn cmp(a: &SemVer, b: &SemVer) -> Ordering {
     let c = cmp_u64(a.major, b.major);
-    if c != 0 { return c; }
+    if c != Equal { return c; }
     let c = cmp_u64(a.minor, b.minor);
-    if c != 0 { return c; }
+    if c != Equal { return c; }
     let c = cmp_u64(a.patch, b.patch);
-    if c != 0 { return c; }
+    if c != Equal { return c; }
 
     // Pre-release: none > any prerelease (§11.3).
     match (a.pre_release.len() == 0, b.pre_release.len() == 0) {
-        (true,  true)  => { return 0; },
-        (true,  false) => { return 1; },
-        (false, true)  => { return -1; },
+        (true,  true)  => { return Equal; },
+        (true,  false) => { return Greater; },
+        (false, true)  => { return Less; },
         _              => {},
     }
 
@@ -346,21 +346,21 @@ public fn cmp(a: &SemVer, b: &SemVer) -> Int {
         let x = &a.pre_release[i];
         let y = &b.pre_release[i];
         let c = cmp_prerelease_id(x, y);
-        if c != 0 { return c; }
+        if c != Equal { return c; }
         i = i + 1;
     }
     // §11.4.4: longer set > shorter when common prefix equal.
     cmp_int(a.pre_release.len(), b.pre_release.len())
 }
 
-fn cmp_prerelease_id(a: &Text, b: &Text) -> Int {
+fn cmp_prerelease_id(a: &Text, b: &Text) -> Ordering {
     let ab = a.as_bytes();
     let bb = b.as_bytes();
     let a_num = is_all_numeric(ab);
     let b_num = is_all_numeric(bb);
     // Numeric < alphanumeric (§11.4.3).
-    if a_num && !b_num { return -1; }
-    if !a_num && b_num { return 1; }
+    if a_num && !b_num { return Less; }
+    if !a_num && b_num { return Greater; }
     if a_num && b_num {
         // Both numeric — compare as decimal (§11.4.1).
         let av = parse_u64_unchecked(ab);
@@ -370,8 +370,8 @@ fn cmp_prerelease_id(a: &Text, b: &Text) -> Int {
     // Both alphanumeric — ASCII lexicographic (§11.4.2).
     let mut i: Int = 0;
     while i < ab.len() && i < bb.len() {
-        if ab[i] < bb[i] { return -1; }
-        if ab[i] > bb[i] { return 1; }
+        if ab[i] < bb[i] { return Less; }
+        if ab[i] > bb[i] { return Greater; }
         i = i + 1;
     }
     cmp_int(ab.len(), bb.len())
@@ -414,12 +414,12 @@ fn parse_u64_unchecked(b: &[Byte]) -> UInt64 {
     v
 }
 
-fn cmp_u64(a: UInt64, b: UInt64) -> Int {
-    if a < b { -1 } else if a > b { 1 } else { 0 }
+fn cmp_u64(a: UInt64, b: UInt64) -> Ordering {
+    if a < b { Less } else if a > b { Greater } else { Equal }
 }
 
-fn cmp_int(a: Int, b: Int) -> Int {
-    if a < b { -1 } else if a > b { 1 } else { 0 }
+fn cmp_int(a: Int, b: Int) -> Ordering {
+    if a < b { Less } else if a > b { Greater } else { Equal }
 }
 
 // =============================================================================

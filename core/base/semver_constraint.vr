@@ -260,22 +260,22 @@ fn matches_impl(c: &SemVerConstraint, v: &SemVer, opts: &MatchOptions) -> Bool {
             // Eq with a pre-release operand always allows pre-release input
             // for that exact tuple. Otherwise: the input version must
             // structurally equal the operand (build_meta ignored per §10).
-            cmp_versions(v, target) == 0
+            cmp_versions(v, target) is Equal
         }
         SemVerConstraint.Gt(target) => {
-            cmp_versions(v, target) > 0
+            cmp_versions(v, target) is Greater
                 && allow_prerelease_check(v, opts, &Some(target.clone()))
         }
         SemVerConstraint.Gte(target) => {
-            cmp_versions(v, target) >= 0
+            !(cmp_versions(v, target) is Less)
                 && allow_prerelease_check(v, opts, &Some(target.clone()))
         }
         SemVerConstraint.Lt(target) => {
-            cmp_versions(v, target) < 0
+            cmp_versions(v, target) is Less
                 && allow_prerelease_check(v, opts, &Some(target.clone()))
         }
         SemVerConstraint.Lte(target) => {
-            cmp_versions(v, target) <= 0
+            !(cmp_versions(v, target) is Greater)
                 && allow_prerelease_check(v, opts, &Some(target.clone()))
         }
         SemVerConstraint.And(a, b) => {
