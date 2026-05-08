@@ -2066,18 +2066,23 @@ impl<'a> RecursiveParser<'a> {
         let start_pos = self.stream.position();
         let mut segments = Vec::new();
 
-        // Parse first segment
+        // Parse first segment — leading-position keywords (`cog`,
+        // `super`, `self`) carry navigation semantics here.
         segments.push(self.parse_path_segment()?);
 
         // Parse remaining segments, but stop before transforms
         // A transform looks like: . identifier (
+        // Continuation segments are plain identifiers; literal
+        // navigation-keyword spellings are accepted as names so
+        // that `mount core.cog.manifest` etc. don't have their
+        // `cog` segment silently reset the path.
         while self.stream.check(&TokenKind::Dot) {
             // Look ahead: if this is . identifier ( then it's a transform, not a path continuation
             if self.is_context_transform_lookahead() {
                 break;
             }
             self.stream.advance(); // consume the dot
-            segments.push(self.parse_path_segment()?);
+            segments.push(self.parse_path_continuation_segment()?);
         }
 
         let span = self.stream.make_span(start_pos);
@@ -5803,9 +5808,19 @@ impl<'a> RecursiveParser<'a> {
                     ));
                 }
                 _ => {
-                    // Normal path segment continues
+                    // Normal path segment continues.  Continuation
+                    // segments are pure module-name identifiers — the
+                    // navigation keywords (`cog` / `super` / `self`)
+                    // are valid only as the FIRST segment, so accept
+                    // their literal spellings as identifier names
+                    // here.  Without this, `mount core.cog.manifest`
+                    // had its middle `cog` parsed as `PathSegment::Cog`,
+                    // which `extract_path` later collapsed via
+                    // `Cog => parts.clear()` — producing the bogus
+                    // module path "manifest" and silently breaking
+                    // every `mount core.cog.<sub>.<item>` import.
                     self.stream.consume(&TokenKind::Dot);
-                    segments.push(self.parse_path_segment()?);
+                    segments.push(self.parse_path_continuation_segment()?);
                 }
             }
         }

@@ -47640,6 +47640,29 @@ impl TypeChecker {
 
             if let Some(type_name_text) = early_type_name {
                 let method_name_text = verum_common::Text::from(method.name.as_str());
+                // Receiver-driven lazy load: when the receiver type was
+                // inferred indirectly (through `Result.Ok` arm of a
+                // function return, the `?`-operator unwrap, a chained
+                // `.await` on `Result<T, _>`, …) and was never explicitly
+                // *named* by the user code, the lazy stdlib loader pass
+                // hasn't fired for `type_name_text` yet — so its
+                // `inherent_methods` bucket is empty and any
+                // `recv.method(...)` lookup falls straight through to
+                // `MethodNotFound`.  An explicit `let conn:
+                // AsyncPgPoolGuard = ...` annotation triggers the
+                // load eagerly via the type-resolution path; the
+                // receiver-only case bypasses it.  Force the same
+                // load here, idempotent — `ensure_stdlib_type_loaded`
+                // short-circuits on `ctx.lookup_type(name).is_some()`,
+                // and `register_inherent_methods_from_metadata` skips
+                // method names already populated.
+                {
+                    let mut pending_dep_load: Vec<verum_common::Text> = Vec::new();
+                    self.ensure_stdlib_type_loaded(&type_name_text, &mut pending_dep_load);
+                    while let Some(dep) = pending_dep_load.pop() {
+                        self.ensure_stdlib_type_loaded(&dep, &mut pending_dep_load);
+                    }
+                }
                 // Per-instantiation impl gating (task #35).
                 //
 
