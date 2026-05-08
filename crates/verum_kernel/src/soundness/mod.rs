@@ -760,10 +760,32 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
 /// Inductive 3 + SmtAxiom 2 + Diakrisis 11 = **38**.
 pub const EXPECTED_KERNEL_RULE_COUNT: usize = 38;
 
+/// Specification of an IOU axiom in the kernel-soundness export:
+/// rule name and argument count (arity).
+///
+/// **Arity convention**: the IOU axioms have shape `Ctx → A_1 →
+/// … → A_n → Prop` (Lean) / `Ctx -> A_1 -> … -> A_n -> Prop`
+/// (Coq) / `Ctx \<Rightarrow> A_1 \<Rightarrow> … \<Rightarrow>
+/// A_n \<Rightarrow> bool` (Isabelle).  Arity = `1 + n` (the
+/// `Ctx` parameter + `n` rule-specific arguments) — equivalently,
+/// the number of arrow separators in the signature.  Pin: the
+/// arity must match across all three foundations and against the
+/// spec returned by [`iou_axiom_specs`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IouAxiomSpec {
+    /// Rule name (without the `_iou` suffix), e.g. `"K_Smt"`.
+    pub rule_name: &'static str,
+    /// Number of arrows in the axiom's signature (= 1 + rule-
+    /// specific argument count).  E.g. `K_Smt_iou : Ctx → String
+    /// → CoreTerm → Prop` has arity 3.
+    pub arity: usize,
+}
+
 /// Source of truth for which kernel rules currently ship with an
 /// `axiom <Rule>_iou` declaration in the Lean / Coq / Isabelle
-/// kernel-soundness export.  Returned in canonical (Rust-enum)
-/// order so audit reports + drift checks see a stable ordering.
+/// kernel-soundness export, **with each axiom's arity**.
+/// Returned in canonical (Rust-enum) order so audit reports +
+/// drift checks see a stable ordering.
 ///
 /// **Discharge protocol**: removing a rule from this list also
 /// requires removing the corresponding `axiom` line from
@@ -774,26 +796,60 @@ pub const EXPECTED_KERNEL_RULE_COUNT: usize = 38;
 /// cross-validates that the per-rule [`LemmaStatus`] in `mod.rs`
 /// agrees with this list — every `Admitted` rule must appear here,
 /// every `Proved` / `DischargedByFramework` rule must not.
+/// Per-foundation arity is also cross-validated against the
+/// `arity` field via PR-1d pin tests.
 ///
 /// **Current count**: 8 axioms after the
 /// PR-5 / PR-5b / PR-5c / PR-5d / PR-5f / PR-5g / PR-5h discharge
 /// + status-fix sequence (was 17 pre-FV-9, then 17 → 16 → 14 →
 /// 12 → 11 → 8 across the structural-premises template applications).
-pub fn iou_axiom_rule_names() -> Vec<&'static str> {
+pub fn iou_axiom_specs() -> Vec<IouAxiomSpec> {
     vec![
         // Cubical (4): CCHM machinery
-        "K_Path_Over_Form",
-        "K_HComp",
-        "K_Transp",
-        "K_Glue",
+        IouAxiomSpec {
+            rule_name: "K_Path_Over_Form",
+            arity: 7, // Ctx + (motive, p, a, b, ty, motive_ret, level)
+        },
+        IouAxiomSpec {
+            rule_name: "K_HComp",
+            arity: 5, // Ctx + (phi, walls, base, T)
+        },
+        IouAxiomSpec {
+            rule_name: "K_Transp",
+            arity: 5, // Ctx + (path, regular, value, target)
+        },
+        IouAxiomSpec {
+            rule_name: "K_Glue",
+            arity: 6, // Ctx + (carrier, phi, fiber, equiv, result)
+        },
         // Refinement (1): predicate-decidability oracle
-        "K_Refine_Intro",
+        IouAxiomSpec {
+            rule_name: "K_Refine_Intro",
+            arity: 5, // Ctx + (a, base, x, predicate)
+        },
         // SMT (1): solver-specific replay
-        "K_Smt",
+        IouAxiomSpec {
+            rule_name: "K_Smt",
+            arity: 3, // Ctx + (solver_tag, T)
+        },
         // Diakrisis (2): biadjunction algebra + bridge-audit
-        "K_Eps_Mu",
-        "K_Round_Trip",
+        IouAxiomSpec {
+            rule_name: "K_Eps_Mu",
+            arity: 4, // Ctx + (articulation, enactment, ty)
+        },
+        IouAxiomSpec {
+            rule_name: "K_Round_Trip",
+            arity: 3, // Ctx + (term, recovered)
+        },
     ]
+}
+
+/// Derived helper: rule names only.  Equivalent to
+/// `iou_axiom_specs().iter().map(|s| s.rule_name).collect()`.
+/// Kept for backward compatibility with PR-1's drift_check call
+/// sites + the cross-foundation set tests.
+pub fn iou_axiom_rule_names() -> Vec<&'static str> {
+    iou_axiom_specs().into_iter().map(|s| s.rule_name).collect()
 }
 
 /// The protocol every cross-export backend implements. See module

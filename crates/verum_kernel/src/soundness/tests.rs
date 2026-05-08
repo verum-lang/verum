@@ -813,3 +813,96 @@ fn three_foundations_agree_on_iou_axiom_arities() {
         "Lean arity map should have at least one IOU axiom",
     );
 }
+
+// =============================================================================
+// Source-of-truth IOU axiom arity (PR-1d)
+// =============================================================================
+//
+// PR-1c asserts the three foundations agree on arity, but doesn't
+// anchor on a canonical specification — drift could happen
+// across all three coherently.  PR-1d adds the canonical anchor:
+// `iou_axiom_specs()` returns `Vec<IouAxiomSpec { name, arity }>`,
+// and pin tests assert each foundation's parsed arity matches the
+// spec.
+
+#[test]
+fn iou_axiom_specs_has_one_entry_per_iou_rule_name() {
+    // Pin: the spec list and the rule-names list have the same
+    // length (one spec per rule).  Catches asymmetric edits between
+    // the two source-of-truth surfaces (e.g. adding a rule name
+    // without a corresponding spec arity).
+    use crate::soundness::{iou_axiom_rule_names, iou_axiom_specs};
+    let specs = iou_axiom_specs();
+    let names = iou_axiom_rule_names();
+    assert_eq!(specs.len(), names.len());
+    // Order pin: derived rule_names() preserves spec order.
+    let spec_names: Vec<&str> = specs.iter().map(|s| s.rule_name).collect();
+    assert_eq!(spec_names, names);
+}
+
+#[test]
+fn iou_axiom_specs_arities_are_positive() {
+    // Pin: every IOU axiom has at least 1 arrow (Ctx → Prop is
+    // the minimum shape).  Arity 0 would mean a Prop literal,
+    // which doesn't fit the IOU axiom template.
+    use crate::soundness::iou_axiom_specs;
+    for spec in iou_axiom_specs() {
+        assert!(
+            spec.arity >= 1,
+            "rule {} has arity {} — must be ≥ 1",
+            spec.rule_name,
+            spec.arity,
+        );
+    }
+}
+
+#[test]
+fn lean_constant_arities_match_source_of_truth() {
+    // Pin: every IOU axiom in IOU_AXIOMS_LEAN has the arity
+    // declared by `iou_axiom_specs()`.  Drift here means the Lean
+    // signature was edited (added/removed an arg) but the spec
+    // wasn't updated to match — or vice versa.
+    use crate::soundness::iou_axiom_specs;
+    use crate::soundness::lean::IOU_AXIOMS_LEAN;
+    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_LEAN, "→");
+    for spec in iou_axiom_specs() {
+        let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
+        assert_eq!(
+            actual, spec.arity,
+            "Lean axiom {}_iou has parsed arity {} but spec declares {}",
+            spec.rule_name, actual, spec.arity,
+        );
+    }
+}
+
+#[test]
+fn coq_constant_arities_match_source_of_truth() {
+    // Pin: every IOU axiom in IOU_AXIOMS_COQ matches `iou_axiom_specs()`.
+    use crate::soundness::coq::IOU_AXIOMS_COQ;
+    use crate::soundness::iou_axiom_specs;
+    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_COQ, "->");
+    for spec in iou_axiom_specs() {
+        let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
+        assert_eq!(
+            actual, spec.arity,
+            "Coq axiom {}_iou has parsed arity {} but spec declares {}",
+            spec.rule_name, actual, spec.arity,
+        );
+    }
+}
+
+#[test]
+fn isabelle_constant_arities_match_source_of_truth() {
+    // Pin: every IOU axiom in IOU_AXIOMS_ISA matches `iou_axiom_specs()`.
+    use crate::soundness::iou_axiom_specs;
+    use crate::soundness::isabelle::IOU_AXIOMS_ISA;
+    let parsed = extract_iou_arities_from_constant(IOU_AXIOMS_ISA, "\\<Rightarrow>");
+    for spec in iou_axiom_specs() {
+        let actual = parsed.get(spec.rule_name).copied().unwrap_or(0);
+        assert_eq!(
+            actual, spec.arity,
+            "Isabelle axiom {}_iou has parsed arity {} but spec declares {}",
+            spec.rule_name, actual, spec.arity,
+        );
+    }
+}
