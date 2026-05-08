@@ -280,7 +280,14 @@ fn intercept_set_current_dir(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let path = extract_text_arg(state, args_start_reg, caller_base);
+    // Path-aware extraction: `set_current_dir(&Path)` is the
+    // canonical user-side call, and `&Path` arrives as a CBGR/
+    // ThinRef pointing at a 1-field `Path { inner: Text }` record.
+    // The plain `extract_text_arg` only unwraps refs and reads
+    // small/heap strings — it returns "" for record pointers,
+    // making chdir a silent no-op. Drill through Path/PathBuf
+    // shapes the same way file_runtime does.
+    let path = extract_path_or_text(state, args_start_reg, caller_base);
     // VBC-PERM-1 — granular target_id: hash the directory path so a
     // script frontmatter `permissions = ["run=/var/jobs"]` grants
     // chdir only into that directory.  Falls through to WILDCARD
@@ -396,4 +403,92 @@ fn alloc_text_list(state: &mut InterpreterState, items: &[Value]) -> Interpreter
         *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
     }
     Ok(Value::from_ptr(list.as_ptr() as *mut u8))
+}
+
+/// Extract a path argument that may be either:
+///   * a Text (small or heap string) — returned verbatim;
+///   * a `&Path` / `&PathBuf` reference — drill through CBGR/ThinRef
+///     wrap, then through the 1-field record's `inner` Text (Path)
+///     or 2-field PathBuf chain (`PathBuf { path: Path { inner } }`).
+///
+/// Sibling to `file_runtime::extract_path_arg`; replicated here to
+/// keep the env-runtime intercept layer self-contained without
+/// taking a cross-module dependency on file_runtime internals.
+/// Used by `set_current_dir(&Path)` so chdir actually targets the
+/// caller's intended directory.
+fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
+    use super::heap_helpers::unwrap_ref;
+    use crate::interpreter::heap;
+    use super::string_helpers::extract_string;
+    let v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(reg));
+    let unwrapped = unwrap_ref(state, v);
+    if unwrapped.is_small_string() {
+        return extract_string(&unwrapped, state);
+    }
+    if !unwrapped.is_ptr() || unwrapped.is_nil() {
+        return extract_string(&unwrapped, state);
+    }
+    let ptr = unwrapped.as_ptr::<u8>();
+    if ptr.is_null() {
+        return String::new();
+    }
+    if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+        return extract_string(&unwrapped, state);
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if (header.size as usize) < std::mem::size_of::<Value>() {
+        return extract_string(&unwrapped, state);
+    }
+    // Heap-string TEXT shape: route to extract_string directly.
+    if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
+        return extract_string(&unwrapped, state);
+    }
+    // Try Path { inner: Text } — read field 0.
+    let field0 = unsafe {
+        *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
+    };
+    if field0.is_small_string() {
+        return extract_string(&field0, state);
+    }
+    if field0.is_ptr() && !field0.is_nil() {
+        let inner_ptr = field0.as_ptr::<u8>();
+        if !inner_ptr.is_null()
+            && (inner_ptr as usize)
+                .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+        {
+            let inner_header =
+                unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+            if inner_header.type_id == TypeId::TEXT
+                || inner_header.type_id == TypeId(0x0001)
+            {
+                return extract_string(&field0, state);
+            }
+            // PathBuf { path: Path { inner: Text } } — drill once more.
+            if (inner_header.size as usize) >= std::mem::size_of::<Value>() {
+                let inner_field0 = unsafe {
+                    *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
+                };
+                if inner_field0.is_small_string() {
+                    return extract_string(&inner_field0, state);
+                }
+                if inner_field0.is_ptr() && !inner_field0.is_nil() {
+                    let deeper_ptr = inner_field0.as_ptr::<u8>();
+                    if !deeper_ptr.is_null() {
+                        let deeper_header = unsafe {
+                            &*(deeper_ptr as *const heap::ObjectHeader)
+                        };
+                        if deeper_header.type_id == TypeId::TEXT
+                            || deeper_header.type_id == TypeId(0x0001)
+                        {
+                            return extract_string(&inner_field0, state);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Last-resort: render whatever the value looks like.
+    extract_string(&unwrapped, state)
 }
