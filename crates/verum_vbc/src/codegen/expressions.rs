@@ -15632,6 +15632,26 @@ impl VbcCodegen {
         // would otherwise be recycled by the next `alloc_temp`, and the
         // deref through the resulting CBGR ref would read whatever
         // happened to land in the slot.
+        //
+        // **Literals** (`&"tar"`, `&42`, `&true`, `f"…"`) — same class
+        // of bug.  The literal-load instruction (`LoadStr`/`LoadI`/
+        // etc.) targets a temp register that the next `alloc_temp`
+        // recycles.  When two `&"literal"` arguments appear at the
+        // same call site (e.g. `run_step(&"tar", …, &"tar -czf")`),
+        // both Ref instructions captured the same recycled temp,
+        // and the intercept-side deref read the LAST literal written
+        // to that slot — so `&"tar"` decoded to `"tar -czf"` because
+        // the second LoadStr happened before the call.  Treating
+        // Literal/Path-to-known-const-value the same as Index/Call
+        // forces a fresh non-recyclable slot per literal.
+        //
+        // **Path** stabilisation handles bare-name references that
+        // resolve to a 0-arg const/static — codegen materialises
+        // those into a temp via `LoadK` / `Call(const_id)`, and the
+        // same recycling concern applies.  Local-variable Paths are
+        // already handled by `compile_path` returning the variable's
+        // permanent slot directly, so this branch only kicks in for
+        // genuine const-load patterns.
         let needs_stable = matches!(
             &inner.kind,
             ExprKind::Index { .. }
@@ -15640,6 +15660,7 @@ impl VbcCodegen {
                 | ExprKind::Binary { .. }
                 | ExprKind::Call { .. }
                 | ExprKind::MethodCall { .. }
+                | ExprKind::Literal(_)
         );
         if !needs_stable {
             return inner_reg;
