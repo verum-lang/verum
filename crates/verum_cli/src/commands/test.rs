@@ -1675,17 +1675,60 @@ fn extract_fn_name(line: &str) -> Option<Text> {
     None
 }
 
+/// Discover the list of test-source directories under `project_dir`.
+///
+/// Three well-known locations are recognised:
+///
+/// * `<project>/tests/`           — user-project tests (libtest convention).
+/// * `<project>/core-tests/`      — stdlib tests when they live alongside
+///                                  the package source.
+/// * `<project>/../core-tests/`   — stdlib tests at the workspace root,
+///                                  one level up from a package whose
+///                                  `Verum.toml` lives in a member
+///                                  directory (the canonical layout for
+///                                  this repo: `core/verum.toml` is the
+///                                  package, `core-tests/` is its test
+///                                  suite at the workspace level).
+///
+/// Each directory that exists is walked; missing directories are ignored.
+/// The discovery contract is: any stdlib module gets its tests run by
+/// `verum test` (interp + AOT) without explicit manifest configuration.
+fn test_source_dirs(project_dir: &Path) -> List<PathBuf> {
+    let mut dirs = List::new();
+    for name in &["tests", "core-tests"] {
+        let d = project_dir.join(name);
+        if d.exists() && d.is_dir() {
+            dirs.push(d);
+        }
+    }
+    // Workspace-level `core-tests/` (sibling of the package directory).
+    // Picked up only when *not* already in `dirs` and the parent
+    // directory exists. Skip when project_dir is at filesystem root.
+    if let Some(parent) = project_dir.parent() {
+        let workspace_core_tests = parent.join("core-tests");
+        if workspace_core_tests.exists()
+            && workspace_core_tests.is_dir()
+            && !dirs.iter().any(|d| d == &workspace_core_tests)
+        {
+            dirs.push(workspace_core_tests);
+        }
+    }
+    dirs
+}
+
 fn find_test_files(project_dir: &Path) -> Result<List<PathBuf>> {
-    let tests_dir = project_dir.join("tests");
-    if !tests_dir.exists() {
+    let dirs = test_source_dirs(project_dir);
+    if dirs.is_empty() {
         return Ok(List::new());
     }
     let mut files = List::new();
-    for entry in walkdir::WalkDir::new(tests_dir).follow_links(false) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("vr") {
-            files.push(path.to_path_buf());
+    for dir in dirs.iter() {
+        for entry in walkdir::WalkDir::new(dir).follow_links(false) {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("vr") {
+                files.push(path.to_path_buf());
+            }
         }
     }
     files.sort();

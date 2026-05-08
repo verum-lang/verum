@@ -261,8 +261,8 @@ pub use pretty::{PrettyConfig, PrettyPrinter};
 pub use span::{FileId, SourceFile, Span, Spanned};
 pub use stmt::{Stmt, StmtKind};
 pub use ty::{
-    GenericParam, Ident, Path, PathSegment, RefinementPredicate, Type, TypeBinding, TypeKind,
-    UniverseLevelExpr, WhereClause, WherePredicate, WherePredicateKind,
+    GenericArg, GenericParam, Ident, Path, PathSegment, RefinementPredicate, Type, TypeBinding,
+    TypeKind, UniverseLevelExpr, WhereClause, WherePredicate, WherePredicateKind,
 };
 pub use visitor::{
     Visitor, walk_context, walk_context_group, walk_expr, walk_ffi_boundary, walk_item,
