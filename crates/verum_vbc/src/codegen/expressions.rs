@@ -18301,7 +18301,7 @@ impl VbcCodegen {
                 self.emit_intrinsic_tensor_ext_extended(*sub_op, args, dest);
             }
             CodegenStrategy::GpuExtendedOpcode(sub_op) => {
-                self.emit_intrinsic_gpu_extended(*sub_op, args, dest);
+                self.emit_intrinsic_gpu_extended(*sub_op, args, dest, intrinsic.return_count as usize);
             }
             CodegenStrategy::MathExtendedOpcode(sub_op) => {
                 self.emit_intrinsic_math_extended(*sub_op, args, dest);
@@ -22708,32 +22708,39 @@ impl VbcCodegen {
         sub_op: crate::instruction::GpuSubOpcode,
         args: &[Reg],
         dest: Reg,
+        return_count: usize,
     ) {
-        // Encode operands: [dst:1-2b] [args...]
-        fn encode_gpu_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
-            let mut bytes = Vec::with_capacity(args.len() * 2 + 2);
-            // Encode destination register
-            if dest.is_short() {
-                bytes.push(dest.0 as u8);
+        // Wire format: [dest?][arg0?][arg1?]...
+        //
+        // The structured per-sub_op decoder (bytecode.rs GpuExtended arm)
+        // reads exactly the registers defined on the named Instruction
+        // variant.  Named variants follow:
+        //   - return_count > 0: first field is dst (return register), then args
+        //   - return_count == 0, args non-empty: first field is the first arg
+        //   - return_count == 0, args empty: first field is a device/status reg
+        //
+        // So: include dest as the leading byte ONLY when return_count > 0 or
+        // args is empty (zero-arg void — decoder still reads one register for
+        // device-reset / status ops).
+        fn enc(r: Reg, b: &mut Vec<u8>) {
+            if r.is_short() {
+                b.push(r.0 as u8);
             } else {
-                bytes.push(0x80 | ((dest.0 >> 8) as u8));
-                bytes.push(dest.0 as u8);
+                b.push(0x80 | ((r.0 >> 8) as u8));
+                b.push(r.0 as u8);
             }
-            // Encode argument registers
-            for arg in args {
-                if arg.is_short() {
-                    bytes.push(arg.0 as u8);
-                } else {
-                    bytes.push(0x80 | ((arg.0 >> 8) as u8));
-                    bytes.push(arg.0 as u8);
-                }
-            }
-            bytes
         }
-
+        let include_dest = return_count > 0 || args.is_empty();
+        let mut operands = Vec::with_capacity((args.len() + 1) * 2);
+        if include_dest {
+            enc(dest, &mut operands);
+        }
+        for arg in args {
+            enc(*arg, &mut operands);
+        }
         self.ctx.emit(Instruction::GpuExtended {
             sub_op: sub_op as u8,
-            operands: encode_gpu_operands(dest, args),
+            operands,
         });
     }
 
