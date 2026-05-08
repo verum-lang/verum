@@ -89,22 +89,53 @@ pub(in super::super) fn try_intercept_shell_runtime(
     // before comparing — module-relative resolution and direct
     // bare-name calls both reach this intercept identically.
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
-    match bare {
-        "sh_check" | "sh" => {}
-        _ => return Ok(None),
+    // Accept any qualified registration that ends with one of the
+    // canonical entry-points and lives under the `core.shell.*`
+    // umbrella.  The re-export at `core.shell.mod.vr` produces a
+    // second registration `core.shell.run` (in addition to the
+    // canonical `core.shell.exec.run`); both must reach the same
+    // intercept body.  Bare-name matches are accepted when the
+    // function isn't qualified at all (direct user-side
+    // registration shadowing the simple-name slot).
+    let is_canonical_entry = matches!(bare, "sh_check" | "sh" | "run");
+    if !is_canonical_entry {
+        return Ok(None);
+    }
+    let qualified_under_shell = func_name.starts_with("core.shell.")
+        && (func_name.starts_with("core.shell.exec.")
+            || func_name.starts_with("core.shell.run")
+            || func_name.starts_with("core.shell.sh")
+            || // Bare re-export forms `core.shell.run` /
+               // `core.shell.sh_check` (no `.exec.` segment).
+               matches!(
+                   func_name,
+                   "core.shell.run" | "core.shell.sh" | "core.shell.sh_check"
+               ));
+    let unqualified = !func_name.contains('.');
+    if !qualified_under_shell && !unqualified {
+        return Ok(None);
     }
 
-    // Extract command text from arg 0 (passed by &Text reference;
-    // `extract_string` handles both small-string and heap-string
-    // representations).
+    // Argv-style `run(program, args)` — bypasses the entire
+    // `Command::new(program).args(args)...output()` chain via
+    // direct `std::process::Command` dispatch.  Closes the
+    // build-paper.vr `run_step("pdflatex", args, ...)` failure
+    // mode that previously surfaced as `Err(nil)` because the
+    // Verum-side Command construction across the FFI boundary
+    // returned nil mid-chain.
+    if bare == "run" {
+        if arg_count != 2 {
+            return Ok(None);
+        }
+        return intercept_run_argv(state, args_start_reg, caller_base);
+    }
+
     if arg_count == 0 {
         return Ok(None);
     }
     let cmd_val = state
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
-    // Unwrap a CBGR-style register reference (`&cmd` lowers to a
-    // negative-int encoding pointing back into the caller's frame).
     let unwrapped_val = if super::cbgr_helpers::is_cbgr_ref(&cmd_val) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(cmd_val.as_i64());
         state.registers.get_absolute(abs_index)
@@ -181,6 +212,391 @@ pub(in super::super) fn try_intercept_shell_runtime(
         &cmd_text,
         elapsed_nanos,
     )?))
+}
+
+// ============================================================================
+// Argv-style `core.shell.exec.run(program: &Text, args: List<Text>)`
+// ============================================================================
+
+/// Intercept `core.shell.exec.run(program, args)` — the canonical
+/// argv-style spawn entry-point.  Bypasses the entire Verum-side
+/// `Command::new(program).args(&args)...output()` chain and the
+/// FFI-bound `native_spawn` / `wait_for_child` / `read_all_from_fd`
+/// stack, dispatching straight to `std::process::Command` in the
+/// host process.
+fn intercept_run_argv(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    use std::process::Command as StdCommand;
+
+    let prog_raw = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
+    let prog_unwrapped = unwrap_ref_value(state, prog_raw);
+    let program = extract_string(&prog_unwrapped, state);
+
+    let args_raw = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
+    let args_unwrapped = unwrap_ref_value(state, args_raw);
+    let argv = read_text_list(state, args_unwrapped);
+
+    let display = render_argv(&program, &argv);
+
+    {
+        use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+        let tid = target_id_for(&program);
+        if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
+            && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+                == PermissionDecision::Deny
+        {
+            return Ok(Some(build_err_spawn_failed(
+                state,
+                &display,
+                "permission denied: process spawn requires Process grant",
+            )?));
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let mut cmd = StdCommand::new(&program);
+    cmd.args(&argv);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let (status_raw, stdout_bytes, stderr_bytes) = match cmd.output() {
+        Ok(out) => {
+            let raw = match out.status.code() {
+                Some(code) => (code as i64) << 8,
+                None => 1,
+            };
+            (raw, out.stdout, out.stderr)
+        }
+        Err(e) => {
+            return Ok(Some(build_err_spawn_failed(
+                state,
+                &display,
+                &format!("spawn failed: {}", e),
+            )?));
+        }
+    };
+    let elapsed_nanos = start.elapsed().as_nanos() as i64;
+    Ok(Some(build_ok_shell_result(
+        state,
+        status_raw,
+        &stdout_bytes,
+        &stderr_bytes,
+        &display,
+        elapsed_nanos,
+    )?))
+}
+
+/// Unwrap CBGR-ref / ThinRef encodings down to the underlying Value.
+fn unwrap_ref_value(state: &InterpreterState, v: Value) -> Value {
+    if super::cbgr_helpers::is_cbgr_ref(&v) {
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        return state.registers.get_absolute(abs_index);
+    }
+    if v.is_thin_ref() {
+        let tr = v.as_thin_ref();
+        if !tr.ptr.is_null() {
+            return unsafe { *(tr.ptr as *const Value) };
+        }
+    }
+    v
+}
+
+/// Walk a `List<Text>` heap record (`[len, cap, backing_ptr]`
+/// header followed by `[Value; cap]` of Texts) into an owned
+/// `Vec<String>`.
+fn read_text_list(state: &InterpreterState, v: Value) -> Vec<String> {
+    use crate::interpreter::heap;
+    if !v.is_ptr() || v.is_nil() {
+        return Vec::new();
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return Vec::new();
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if (header.size as usize) < 3 * std::mem::size_of::<Value>() {
+        return Vec::new();
+    }
+    let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let len_v = unsafe { *base };
+    let backing_v = unsafe { *base.add(2) };
+    if !len_v.is_inline_int() || !backing_v.is_ptr() || backing_v.is_nil() {
+        return Vec::new();
+    }
+    let len = len_v.as_i64() as usize;
+    if len == 0 || len > 1_000_000 {
+        return Vec::new();
+    }
+    let backing_ptr = backing_v.as_ptr::<u8>();
+    if backing_ptr.is_null() {
+        return Vec::new();
+    }
+    let backing_data = unsafe {
+        backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+    };
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let elem = unsafe { *backing_data.add(i) };
+        out.push(extract_string(&elem, state));
+    }
+    out
+}
+
+/// Render `program + args` as a display string for the
+/// `ShellResult.command` / `ShellError.command` fields.  Quotes
+/// args containing whitespace/special chars; mirrors the stdlib
+/// `core.shell.exec::render_argv` semantics so the interpreter
+/// intercept produces a string indistinguishable from the
+/// bytecode-compiled path.
+fn render_argv(program: &str, args: &[String]) -> String {
+    let mut out = String::with_capacity(
+        program.len() + args.iter().map(|a| a.len() + 3).sum::<usize>(),
+    );
+    out.push_str(program);
+    for arg in args {
+        out.push(' ');
+        let needs_quote = arg.is_empty()
+            || arg.as_bytes().iter().any(|&b| {
+                b == b' ' || b == b'\t' || b == b'\'' || b == b'"' || b == b'$' || b == b'`'
+            });
+        if needs_quote {
+            out.push('\'');
+            for ch in arg.chars() {
+                if ch == '\'' {
+                    out.push_str("'\\''");
+                } else {
+                    out.push(ch);
+                }
+            }
+            out.push('\'');
+        } else {
+            out.push_str(arg);
+        }
+    }
+    out
+}
+
+// ============================================================================
+// ShellResult shape probe — used by method_dispatch CallM path
+// ============================================================================
+
+/// Cheap shape check: does this Value point at a heap record that
+/// matches our intercept-built `ShellResult` layout?  Fires the
+/// `try_intercept_shell_result_inherent_call` shortcut from the
+/// CallM dispatch path without paying per-method intercept cost
+/// for unrelated receivers.
+///
+/// Layout signature (5 fields, ≥ 5 × sizeof(Value)):
+///   field 0: List<Byte> (stdout_bytes)  — pointer
+///   field 1: List<Byte> (stderr_bytes)  — pointer
+///   field 2: ExitStatus (1-field record) — pointer
+///   field 3: Text (command)              — pointer / small_string
+///   field 4: Duration (1-field record)   — pointer
+pub(in super::super) fn receiver_looks_like_shell_result(v: &Value) -> bool {
+    use crate::interpreter::heap;
+    if !v.is_ptr() || v.is_nil() {
+        return false;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return false;
+    }
+    if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+        return false;
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    // Our shell_runtime intercept allocates exactly 5 fields (40 bytes).
+    // Any record of EXACTLY this size + the field-shape check is a
+    // safe signal — collisions with other 5-field heap records are
+    // possible but the inherent_call intercept's qualified-name
+    // check (`ShellResult.<method>`) screens them out at the next
+    // step.
+    let expected = 5 * std::mem::size_of::<Value>();
+    (header.size as usize) == expected
+}
+
+// ============================================================================
+// ShellResult inherent-method intercept
+// ============================================================================
+
+/// Intercept inherent-method calls on `ShellResult` that are
+/// statically dispatched as `Call(func_id)` after type resolution.
+/// Mirrors `path_ops_runtime::try_intercept_path_inherent_call` for
+/// the `core.shell.result.ShellResult` shape.
+///
+/// Receiver-shape contract (keep in sync with
+/// `build_ok_shell_result` field order):
+///   field 0: stdout_bytes (List<Byte>)
+///   field 1: stderr_bytes (List<Byte>)
+///   field 2: status       (ExitStatus { raw: Int })
+///   field 3: command      (Text)
+///   field 4: duration     (Duration { nanos: Int })
+pub(in super::super) fn try_intercept_shell_result_inherent_call(
+    state: &mut InterpreterState,
+    func_name: &str,
+    args_start_reg: u16,
+    arg_count: u8,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let bare = func_name.rsplit('.').next().unwrap_or(func_name);
+    if !matches!(
+        bare,
+        "stdout" | "stderr" | "bytes" | "stderr_bytes" | "success" | "exit_code" | "code"
+    ) {
+        return Ok(None);
+    }
+    if arg_count == 0 {
+        return Ok(None);
+    }
+    let recv_raw = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
+    let receiver = unwrap_ref_value(state, recv_raw);
+    if !receiver.is_ptr() || receiver.is_nil() {
+        return Ok(None);
+    }
+    // Receiver-shape gate: fire only when `arg[0]` actually points
+    // at a ShellResult-shaped record.  This both closes the bare-
+    // name dispatch path (`Call(func_id)` registered under
+    // unqualified `success` / `stderr` / etc.) and prevents the
+    // intercept from shadowing same-named methods on unrelated
+    // types (e.g. `Iterator.success` if such a type ever exists).
+    if !receiver_looks_like_shell_result(&receiver) {
+        // Fall back to the qualified-name gate for callers that
+        // routed a non-ShellResult receiver through here (an
+        // emergency safety net — should never fire under the
+        // shape check above passing, but let the qualified form
+        // through for forward compatibility).
+        let qualified = func_name.rsplit_terminator('.').take(2).collect::<Vec<_>>();
+        if qualified.len() != 2 || qualified[1] != "ShellResult" {
+            return Ok(None);
+        }
+    }
+    let ptr = receiver.as_ptr::<u8>();
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    use crate::interpreter::heap;
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if (header.size as usize) < 5 * std::mem::size_of::<Value>() {
+        return Ok(None);
+    }
+    let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    // Method-return-type contract per `core/shell/result.vr::ShellResult`:
+    //   stdout()        -> Text  (UTF-8 lossy of stdout_bytes)
+    //   stderr()        -> Text  (UTF-8 lossy of stderr_bytes)
+    //   bytes()         -> List<Byte>  (zero-copy alias for stdout_bytes)
+    //   stderr_bytes()  -> List<Byte>
+    //   success()       -> Bool
+    //   exit_code()/code() -> Int
+    match bare {
+        "stdout" => {
+            let stdout_v = unsafe { *base };
+            let bytes = read_byte_list(stdout_v);
+            let s = String::from_utf8_lossy(&bytes).to_string();
+            Ok(Some(alloc_string_value(state, &s)?))
+        }
+        "stderr" => {
+            let stderr_v = unsafe { *base.add(1) };
+            let bytes = read_byte_list(stderr_v);
+            let s = String::from_utf8_lossy(&bytes).to_string();
+            Ok(Some(alloc_string_value(state, &s)?))
+        }
+        "bytes" => {
+            // Zero-copy in the stdlib body; we have to re-allocate
+            // since intercepts return owned values across the
+            // dispatch boundary.  Cheap clone of the byte content.
+            let stdout_v = unsafe { *base };
+            let bytes = read_byte_list(stdout_v);
+            Ok(Some(alloc_byte_list(state, &bytes)?))
+        }
+        "stderr_bytes" => {
+            let stderr_v = unsafe { *base.add(1) };
+            let bytes = read_byte_list(stderr_v);
+            Ok(Some(alloc_byte_list(state, &bytes)?))
+        }
+        "success" => {
+            let status_v = unsafe { *base.add(2) };
+            let raw = read_exit_status_raw(status_v);
+            // success() ⇔ process exited normally with code 0.
+            // Our raw layout puts code in bits 8..15 (WIFEXITED-style);
+            // bits 0..6 are the signal byte.  Code 0 + signal 0 ⇒ success.
+            Ok(Some(Value::from_bool(raw == 0)))
+        }
+        "exit_code" | "code" => {
+            let status_v = unsafe { *base.add(2) };
+            let raw = read_exit_status_raw(status_v);
+            let code = (raw >> 8) & 0xFF;
+            Ok(Some(Value::from_i64(code)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Read the `raw: Int` field of a 1-field `ExitStatus` record.
+fn read_exit_status_raw(v: Value) -> i64 {
+    use crate::interpreter::heap;
+    if !v.is_ptr() || v.is_nil() {
+        return 0;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return 0;
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if (header.size as usize) < std::mem::size_of::<Value>() {
+        return 0;
+    }
+    let raw_v = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
+    if raw_v.is_inline_int() {
+        raw_v.as_i64()
+    } else {
+        0
+    }
+}
+
+/// Walk a `List<Byte>` heap record into a `Vec<u8>`.
+fn read_byte_list(v: Value) -> Vec<u8> {
+    use crate::interpreter::heap;
+    if !v.is_ptr() || v.is_nil() {
+        return Vec::new();
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return Vec::new();
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if (header.size as usize) < 3 * std::mem::size_of::<Value>() {
+        return Vec::new();
+    }
+    let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let len_v = unsafe { *base };
+    let backing_v = unsafe { *base.add(2) };
+    if !len_v.is_inline_int() || !backing_v.is_ptr() || backing_v.is_nil() {
+        return Vec::new();
+    }
+    let len = len_v.as_i64() as usize;
+    if len == 0 || len > 100_000_000 {
+        return Vec::new();
+    }
+    let backing_ptr = backing_v.as_ptr::<u8>();
+    if backing_ptr.is_null() {
+        return Vec::new();
+    }
+    let backing_data = unsafe {
+        backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+    };
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        out.push(unsafe { (*backing_data.add(i)).as_i64() as u8 });
+    }
+    out
 }
 
 // ============================================================================

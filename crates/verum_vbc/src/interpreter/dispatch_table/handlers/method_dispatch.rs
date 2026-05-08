@@ -492,6 +492,54 @@ pub(in super::super) fn handle_call_method(
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
         }
+        // ShellResult method dispatch.  When user code does
+        // `r.stdout()` on a ShellResult value built by the
+        // shell-runtime intercept, codegen emits CallM with
+        // `method_id = "stdout"` (or qualified
+        // `ShellResult.stdout`).  The intercept-built record has
+        // no Verum-side method table to dispatch against, so
+        // without this hook the call falls through to "method
+        // 'stdout' not found on receiver of runtime kind Object".
+        // Synthesise the qualified `ShellResult.<method>` name
+        // and forward to the inherent-call intercept (treats
+        // `dispatch_receiver` as the &self argument).
+        if super::shell_runtime::receiver_looks_like_shell_result(&dispatch_receiver) {
+            // Push receiver into a fresh argv slot so the inherent-
+            // call intercept's positional contract holds.  We use
+            // a synthesised qualified name `"ShellResult.<bare>"`
+            // — the intercept's qualifier check is `qualified[1]
+            // == "ShellResult"`, satisfied by the rsplit-first-
+            // two-segments parse.
+            let synthetic_name = format!("ShellResult.{}", bare_method_name);
+            // Emit the receiver into the slot just before the
+            // current args range so the intercept reads it as
+            // arg[0].  Direct register write is the cheapest
+            // path — temporary clobber is fine because we
+            // immediately return when the intercept fires.
+            let recv_slot = if args.start.0 > 0 {
+                args.start.0 - 1
+            } else {
+                // No room — inline a wrapper that synthesises
+                // a temporary receiver register.  Reuse args.start
+                // by spilling its current value, plant the
+                // receiver, run intercept, then restore.
+                args.start.0
+            };
+            let saved = state.registers.get(caller_base, Reg(recv_slot));
+            state.registers.set(caller_base, Reg(recv_slot), dispatch_receiver);
+            let res = super::shell_runtime::try_intercept_shell_result_inherent_call(
+                state,
+                &synthetic_name,
+                recv_slot,
+                args.count + 1,
+                caller_base,
+            )?;
+            state.registers.set(caller_base, Reg(recv_slot), saved);
+            if let Some(result) = res {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
+        }
     }
 
     // Try built-in primitive method dispatch first.
