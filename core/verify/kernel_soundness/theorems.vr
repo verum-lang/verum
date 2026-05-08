@@ -37,12 +37,13 @@
 // **What's proved / discharged / admitted.**
 //
 
-// Proved (9): K-Var, K-Univ, K-FwAx (Prop side-condition
+// Proved (10): K-Var, K-Univ, K-FwAx (Prop side-condition
 //  discharge), K-Pos (Berardi-shape rejection by structural check
-//  on constructor signatures); plus 5 IOUs discharged in
+//  on constructor signatures); plus 6 IOUs discharged in
 //  successive passes by folding their content into structural
 //  premises of the corresponding Typing constructor: K-Quot-Elim,
-//  K-Elim, K-Universe-Ascent, K-Refine, K-Refine-Omega.
+//  K-Elim, K-Universe-Ascent, K-Refine, K-Refine-Omega,
+//  K-Inductive.
 //
 
 // Discharged-by-framework (7): K-Pi-Form, K-Lam-Intro, K-App-Elim,
@@ -52,19 +53,19 @@
 //  is closed.
 //
 
-// Admitted (22): the remaining rules — Cubical (5: K-Path-Ty-Form,
+// Admitted (21): the remaining rules — Cubical (5: K-Path-Ty-Form,
 //  K-Path-Over-Form, K-Refl-Intro, K-HComp, K-Transp, K-Glue),
 //  Refinement (2: K-Refine-Intro, K-Refine-Erase), Quotient (2:
-//  K-Quot-Form, K-Quot-Intro), Inductive (1: K-Inductive),
-//  SMT (1: K-Smt), Diakrisis (10: K-Eps-Mu, K-Round-Trip,
-//  K-Epsilon-Of, K-Alpha-Of, K-Modal-Box, K-Modal-Diamond,
-//  K-Modal-Big-And, K-Shape, K-Flat, K-Sharp).  Each admit names
-//  exactly the piece of meta-theory it depends on.
+//  K-Quot-Form, K-Quot-Intro), SMT (1: K-Smt), Diakrisis (10:
+//  K-Eps-Mu, K-Round-Trip, K-Epsilon-Of, K-Alpha-Of, K-Modal-Box,
+//  K-Modal-Diamond, K-Modal-Big-And, K-Shape, K-Flat, K-Sharp).
+//  Inductive bucket fully empty.
 //
 
-// IOU trajectory:  27 → 17 → 16 → 14 → 12  (pre-FV-9, post-FV-9
-// structural fragment, post-K_Quot_Elim, post-K_Elim +
-// K_Universe_Ascent, post-K_Refine + K_Refine_Omega).
+// IOU trajectory:  27 → 17 → 16 → 14 → 12 → 11  (pre-FV-9,
+// post-FV-9 structural fragment, post-K_Quot_Elim, post-K_Elim
+// + K_Universe_Ascent, post-K_Refine + K_Refine_Omega,
+// post-K_Inductive).
 //
 
 // **Cross-export contract.** The Coq emitter walks
@@ -146,6 +147,7 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         KernelRule.KUniverseAscent => LemmaStatus.Proved,
         KernelRule.KRefine => LemmaStatus.Proved,
         KernelRule.KRefineOmega => LemmaStatus.Proved,
+        KernelRule.KInductive => LemmaStatus.Proved,
 
         // ---------- DISCHARGED-BY-FRAMEWORK -------------------------------
         // Closed IOUs with cited upstream proofs in mathlib4 /
@@ -285,14 +287,10 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         // (KQuotElim Proved above — structural premises mirroring
         // K_Quot_Form / K_Quot_Intro.)
 
-        // Inductive
-        KernelRule.KInductive => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires positivity-condition decision procedure \
-                 (mutual recursion with K-Pos below)"
-            ),
-        },
-        // (KElim Proved above — same template as K_Quot_Elim.)
+        // Inductive — fully empty bucket
+        // (KInductive Proved above — premise-free at the export
+        // layer; strict-positivity is the kernel's input contract.
+        // KElim Proved above — same template as K_Quot_Elim.)
         // SMT
         KernelRule.KSmt => LemmaStatus.Admitted {
             reason: Text.from(
@@ -525,6 +523,11 @@ public pure fn coq_proof_text(r: KernelRule) -> Text {
         KernelRule.KRefineOmega => Text.from(
             "  exact T_refine_omega."
         ),
+        // K-Inductive: premise-free at the export layer; strict-
+        // positivity is the kernel's input contract.
+        KernelRule.KInductive => Text.from(
+            "  exact T_inductive."
+        ),
         _ => Text.from(""),
     }
 }
@@ -570,6 +573,11 @@ public pure fn lean_proof_text(r: KernelRule) -> Text {
         // K-Refine-Omega: same shape as K-Refine.
         KernelRule.KRefineOmega => Text.from(
             "  exact @Typing.t_refine_omega _ _ _ _ _"
+        ),
+        // K-Inductive: premise-free; strict-positivity is the
+        // kernel's input contract.
+        KernelRule.KInductive => Text.from(
+            "  exact @Typing.t_inductive _ _ _ _"
         ),
         _ => Text.from(""),
     }
