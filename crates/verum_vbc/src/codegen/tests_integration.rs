@@ -710,7 +710,7 @@ mod collection_tests {
     #[test]
     fn test_new_list() {
         let instructions = vec![
-            Instruction::NewList { dst: Reg(0) },
+            Instruction::NewList { dst: Reg(0) , capacity_hint: 0 },
             Instruction::Ret { value: Reg(0) },
         ];
 
@@ -721,7 +721,7 @@ mod collection_tests {
     #[test]
     fn test_list_push() {
         let instructions = vec![
-            Instruction::NewList { dst: Reg(0) },
+            Instruction::NewList { dst: Reg(0) , capacity_hint: 0 },
             Instruction::LoadI {
                 dst: Reg(1),
                 value: 42,
@@ -740,7 +740,7 @@ mod collection_tests {
     #[test]
     fn test_new_map() {
         let instructions = vec![
-            Instruction::NewMap { dst: Reg(0) },
+            Instruction::NewMap { dst: Reg(0) , capacity_hint: 0 },
             Instruction::Ret { value: Reg(0) },
         ];
 
@@ -759,7 +759,7 @@ mod iterator_tests {
     #[test]
     fn test_iterator_creation() {
         let instructions = vec![
-            Instruction::NewList { dst: Reg(0) },
+            Instruction::NewList { dst: Reg(0) , capacity_hint: 0 },
             Instruction::LoadI {
                 dst: Reg(1),
                 value: 1,

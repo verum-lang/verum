@@ -578,7 +578,7 @@ mod instruction_tests {
         let mut ctx = CodegenContext::new();
         ctx.begin_function("test", &[], None);
 
-        ctx.emit(Instruction::NewList { dst: Reg(0) });
+        ctx.emit(Instruction::NewList { dst: Reg(0) , capacity_hint: 0 });
         ctx.emit(Instruction::ListPush {
             list: Reg(0),
             val: Reg(1),
@@ -587,7 +587,7 @@ mod instruction_tests {
             dst: Reg(2),
             list: Reg(0),
         });
-        ctx.emit(Instruction::NewMap { dst: Reg(3) });
+        ctx.emit(Instruction::NewMap { dst: Reg(3) , capacity_hint: 0 });
         ctx.emit(Instruction::MapGet {
             dst: Reg(4),
             map: Reg(3),
@@ -1860,7 +1860,7 @@ mod encoding_tests {
 
     #[test]
     fn test_collection_roundtrips() {
-        roundtrip(Instruction::NewList { dst: Reg(0) });
+        roundtrip(Instruction::NewList { dst: Reg(0) , capacity_hint: 0 });
         roundtrip(Instruction::ListPush {
             list: Reg(0),
             val: Reg(1),
@@ -1869,7 +1869,7 @@ mod encoding_tests {
             dst: Reg(0),
             list: Reg(1),
         });
-        roundtrip(Instruction::NewMap { dst: Reg(0) });
+        roundtrip(Instruction::NewMap { dst: Reg(0) , capacity_hint: 0 });
         roundtrip(Instruction::MapGet {
             dst: Reg(0),
             map: Reg(1),

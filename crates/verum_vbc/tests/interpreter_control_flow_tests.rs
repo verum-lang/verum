@@ -2485,7 +2485,7 @@ fn test_string_concat() {
 #[test]
 fn test_list_push_pop() {
     let result = run(&[
-        Instruction::NewList { dst: Reg(0) },
+        Instruction::NewList { dst: Reg(0) , capacity_hint: 0 },
         Instruction::LoadSmallI {
             dst: Reg(1),
             value: 10,
@@ -2524,7 +2524,7 @@ fn test_list_push_pop() {
 #[test]
 fn test_list_lifo_order() {
     let result = run(&[
-        Instruction::NewList { dst: Reg(0) },
+        Instruction::NewList { dst: Reg(0) , capacity_hint: 0 },
         Instruction::LoadSmallI {
             dst: Reg(1),
             value: 1,

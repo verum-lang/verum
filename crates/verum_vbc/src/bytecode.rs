@@ -2049,16 +2049,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Collections
         // ====================================================================
-        Instruction::NewList { dst } => {
+        Instruction::NewList { dst, capacity_hint } => {
             output.push(Opcode::NewList.to_byte());
             encode_reg(*dst, output);
-            // No capacity-hint varint — the codegen only emits
-            // `Instruction::NewList { dst }` (the empty-list form;
-            // see expressions.rs:5525, 11237, 11262, 11356, 11377,
-            // 11407, 17472, 19075).  `Instruction::MakeList { dst,
-            // len }` exists in the IR but no codegen path emits it,
-            // so the archive only contains the no-varint shape.
-            // The symmetric decoder must read no varint.
+            // Wire format: opcode + dst + varint(capacity_hint).
+            // capacity_hint == 0 → runtime default (empty list).
+            // Non-zero → pre-allocate (covers the former MakeList
+            // case used by list-literal codegen).
+            encode_varint(*capacity_hint as u64, output);
         }
         Instruction::ListPush { list, val } => {
             output.push(Opcode::ListPush.to_byte());
@@ -2070,12 +2068,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*dst, output);
             encode_reg(*list, output);
         }
-        Instruction::NewMap { dst } => {
+        Instruction::NewMap { dst, capacity_hint } => {
             output.push(Opcode::NewMap.to_byte());
             encode_reg(*dst, output);
-            // Emit capacity_hint=0 so the handler's read_varint is satisfied.
-            // MakeMap emits a real capacity; NewMap uses default.
-            encode_varint(0, output);
+            encode_varint(*capacity_hint as u64, output);
         }
         Instruction::MapGet { dst, map, key } => {
             output.push(Opcode::MapGet.to_byte());
@@ -2181,19 +2177,17 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Set Operations
         // ====================================================================
-        Instruction::NewSet { dst } => {
+        Instruction::NewSet { dst, capacity_hint } => {
             output.push(Opcode::NewSet.to_byte());
             encode_reg(*dst, output);
-            // Emit capacity_hint=0 so the handler's read_varint is satisfied.
-            // MakeSet emits a real capacity; NewSet uses default.
-            encode_varint(0, output);
+            encode_varint(*capacity_hint as u64, output);
         }
 
-        Instruction::NewDeque { dst } => {
+        Instruction::NewDeque { dst, capacity_hint } => {
             output.push(Opcode::NewDeque.to_byte());
             encode_reg(*dst, output);
             // capacity_hint=0 → handler uses DEFAULT_CAP (16).
-            encode_varint(0, output);
+            encode_varint(*capacity_hint as u64, output);
         }
 
         Instruction::SetInsert { set, elem } => {
@@ -2461,23 +2455,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*proof_hash as u64, output);
         }
 
-        Instruction::MakeList { dst, len } => {
-            output.push(Opcode::NewList.to_byte());
-            encode_reg(*dst, output);
-            encode_varint(*len as u64, output);
-        }
-
-        Instruction::MakeMap { dst, capacity } => {
-            output.push(Opcode::NewMap.to_byte());
-            encode_reg(*dst, output);
-            encode_varint(*capacity as u64, output);
-        }
-
-        Instruction::MakeSet { dst, capacity } => {
-            output.push(Opcode::NewSet.to_byte());
-            encode_reg(*dst, output);
-            encode_varint(*capacity as u64, output);
-        }
+        // The legacy MakeList/MakeMap/MakeSet arms here used to duplicate the
+        // NewList/NewMap/NewSet arms above — same Opcode, same wire format,
+        // different IR variant.  Since the variants are now unified into
+        // NewList/NewMap/NewSet { dst, capacity_hint }, the earlier arms cover
+        // both the empty-default case (capacity_hint=0) and the literal case
+        // (capacity_hint=N).  No second arm needed.
 
         Instruction::MapInsert { map, key, value } => {
             output.push(Opcode::MapSet.to_byte());
@@ -3635,16 +3618,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         Opcode::NewList => {
-            // Encoder for `Instruction::NewList { dst }` writes
-            // `opcode + dst` with NO capacity-hint varint.  The
-            // codegen never emits `Instruction::MakeList { dst, len }`
-            // (despite the IR variant existing — see expressions.rs
-            // emit sites at 5525 / 11237 / 11262 / …) so the archive
-            // only contains the no-varint shape.  Decoder mirrors the
-            // emitted shape; if a future codegen path starts emitting
-            // `MakeList`, the encoder must allocate a distinct opcode.
+            // Encoder for `Instruction::NewList { dst, .. }` writes
+            // Wire format: opcode + dst + varint(capacity_hint).
+            // capacity_hint == 0 → empty list (former NewList variant).
+            // capacity_hint  > 0 → pre-allocated (former MakeList variant).
             let dst = decode_reg(data, offset)?;
-            Ok(Instruction::NewList { dst })
+            let capacity_hint = decode_varint(data, offset)? as u16;
+            Ok(Instruction::NewList { dst, capacity_hint })
         }
 
         Opcode::ListPush => {
@@ -3663,7 +3643,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // See NewList — encoder writes capacity_hint varint after dst.
             let dst = decode_reg(data, offset)?;
             let capacity = decode_varint(data, offset)? as u16;
-            Ok(Instruction::MakeMap { dst, capacity })
+            Ok(Instruction::NewMap { dst, capacity_hint: capacity })
         }
 
         Opcode::MapGet => {
@@ -5967,12 +5947,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // (NewSet ↔ MakeSet { capacity: 0 }).
             let dst = decode_reg(data, offset)?;
             let capacity = decode_varint(data, offset)? as u16;
-            Ok(Instruction::MakeSet { dst, capacity })
+            Ok(Instruction::NewSet { dst, capacity_hint: capacity })
         }
         Opcode::NewDeque => {
             let dst = decode_reg(data, offset)?;
-            let _capacity_hint = decode_varint(data, offset)?;
-            Ok(Instruction::NewDeque { dst })
+            let capacity_hint = decode_varint(data, offset)? as u16;
+            Ok(Instruction::NewDeque { dst, capacity_hint })
         }
         Opcode::NewRange => {
             let dst = decode_reg(data, offset)?;

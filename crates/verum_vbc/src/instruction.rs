@@ -9985,10 +9985,17 @@ pub enum Instruction {
         /// register tracking (which is unreliable after function calls clear type marks).
         type_hint: u8,
     },
-    /// Create new list.
+    /// Create new list with optional capacity hint.
+    ///
+    /// `capacity_hint = 0` requests the runtime default (an empty list with
+    /// no pre-allocation). Non-zero values pre-allocate that capacity to
+    /// avoid re-grow churn for known-size literals. Wire format:
+    /// `opcode + dst + varint(capacity_hint)`.
     NewList {
         /// Destination register for new list.
         dst: Reg,
+        /// Initial capacity hint (0 = runtime default).
+        capacity_hint: u16,
     },
     /// Push value to list.
     ListPush {
@@ -10004,10 +10011,15 @@ pub enum Instruction {
         /// List register.
         list: Reg,
     },
-    /// Create new map.
+    /// Create new map with optional capacity hint.
+    ///
+    /// See `NewList` for capacity_hint semantics. Wire format:
+    /// `opcode + dst + varint(capacity_hint)`.
     NewMap {
         /// Destination register for new map.
         dst: Reg,
+        /// Initial capacity hint (0 = runtime default).
+        capacity_hint: u16,
     },
     /// Get value from map.
     MapGet {
@@ -10489,10 +10501,15 @@ pub enum Instruction {
     // ========================================================================
     // Set Operations
     // ========================================================================
-    /// Create new set.
+    /// Create new set with optional capacity hint.
+    ///
+    /// See `NewList` for capacity_hint semantics. Wire format:
+    /// `opcode + dst + varint(capacity_hint)`.
     NewSet {
         /// Destination register for new set.
         dst: Reg,
+        /// Initial capacity hint (0 = runtime default).
+        capacity_hint: u16,
     },
 
     // ========================================================================
@@ -10510,6 +10527,8 @@ pub enum Instruction {
     NewDeque {
         /// Destination register for new deque.
         dst: Reg,
+        /// Initial capacity hint (0 = runtime default).
+        capacity_hint: u16,
     },
     /// Insert element into set.
     SetInsert {
@@ -10887,27 +10906,12 @@ pub enum Instruction {
         /// predicate (widened to u64 on the wire for future growth).
         proof_hash: u32,
     },
-    /// Make list with initial capacity/length.
-    MakeList {
-        /// Destination register for new list.
-        dst: Reg,
-        /// Initial length (0 for empty list).
-        len: u16,
-    },
-    /// Make map with initial capacity.
-    MakeMap {
-        /// Destination register for new map.
-        dst: Reg,
-        /// Initial capacity hint.
-        capacity: u16,
-    },
-    /// Make set with initial capacity.
-    MakeSet {
-        /// Destination register for new set.
-        dst: Reg,
-        /// Initial capacity hint.
-        capacity: u16,
-    },
+    // MakeList / MakeMap / MakeSet were removed in favour of the unified
+    // NewList / NewMap / NewSet variants with `capacity_hint: u16`.  They
+    // shared opcodes anyway (NewList=0x68, NewMap=0x6B, NewSet=0xC7) and
+    // the duplication caused encode/decode asymmetry — encoding NewMap
+    // and decoding back produced MakeMap{capacity:0}.  See bytecode.rs
+    // and codegen/expressions.rs migration.
     /// Insert key-value pair into map.
     MapInsert {
         /// Map register.
