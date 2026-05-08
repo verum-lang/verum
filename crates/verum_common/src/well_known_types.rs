@@ -318,6 +318,50 @@ pub const ORDERING_VARIANT_LAYOUT: &[(&str, u32)] = &[
     ("Greater", 2),
 ];
 
+/// Canonical layout of the variants of `core::base::ops::ControlFlow<B, C>`.
+///
+/// **Single source of truth.** `compile_try` in VBC codegen reads this constant
+/// to interpret the result of `Try::branch()` without hardcoding tag values.
+///
+/// **Drift contract:** the slice's order MUST match `core/base/ops.vr`:
+/// ```text
+///     public type ControlFlow<B, C> is Continue(C) | Break(B);
+/// ```
+/// — `Continue = 0`, `Break = 1` in declaration order.
+pub const CONTROLFLOW_VARIANT_LAYOUT: &[(&str, u32)] = &[
+    ("Continue", 0),
+    ("Break", 1),
+];
+
+/// Returns the canonical success variant tag for `Maybe<T>` (the tag for `Some`).
+///
+/// Derived from `MAYBE_VARIANT_LAYOUT` — same source of truth used by
+/// `compile_try`, MakeVariant, and @property generators.
+///
+/// # Panics
+/// Panics if `MAYBE_VARIANT_LAYOUT` is missing the `"Some"` entry, which
+/// would indicate an inconsistency between the constant and `core/base/maybe.vr`.
+pub fn maybe_success_tag() -> u32 {
+    MAYBE_VARIANT_LAYOUT
+        .iter()
+        .find_map(|&(n, t)| if n == "Some" { Some(t) } else { None })
+        .expect("MAYBE_VARIANT_LAYOUT must contain 'Some'")
+}
+
+/// Returns the canonical success variant tag for `Result<T, E>` (the tag for `Ok`).
+///
+/// Derived from `RESULT_VARIANT_LAYOUT` — same source of truth used by
+/// `compile_try`, MakeVariant, and @property generators.
+///
+/// # Panics
+/// Panics if `RESULT_VARIANT_LAYOUT` is missing the `"Ok"` entry.
+pub fn result_success_tag() -> u32 {
+    RESULT_VARIANT_LAYOUT
+        .iter()
+        .find_map(|&(n, t)| if n == "Ok" { Some(t) } else { None })
+        .expect("RESULT_VARIANT_LAYOUT must contain 'Ok'")
+}
+
 /// Look up the canonical Verum tag for a Rust `std::cmp::Ordering` value.
 ///
 /// Translates `std::cmp::Ordering` → variant name → tag from the canonical
@@ -383,6 +427,42 @@ mod ordering_layout_tests {
         assert_eq!(RESULT_VARIANT_LAYOUT.len(), 2);
         assert_eq!(RESULT_VARIANT_LAYOUT[0], ("Ok", 0));
         assert_eq!(RESULT_VARIANT_LAYOUT[1], ("Err", 1));
+    }
+
+    /// Pins `ControlFlow<B,C>` variant order: Continue=0, Break=1.
+    #[test]
+    fn controlflow_variant_layout_pinned() {
+        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT.len(), 2);
+        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[0], ("Continue", 0));
+        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[1], ("Break", 1));
+    }
+
+    /// `maybe_success_tag()` must return the tag for `Some` (not `None`).
+    #[test]
+    fn maybe_success_tag_is_some() {
+        assert_eq!(maybe_success_tag(), 1, "Some is tag 1 per MAYBE_VARIANT_LAYOUT");
+    }
+
+    /// `result_success_tag()` must return the tag for `Ok` (not `Err`).
+    #[test]
+    fn result_success_tag_is_ok() {
+        assert_eq!(result_success_tag(), 0, "Ok is tag 0 per RESULT_VARIANT_LAYOUT");
+    }
+
+    /// Cross-check: success tags are derived from the layout constants, not hardcoded.
+    #[test]
+    fn success_tags_consistent_with_layouts() {
+        let maybe_some_tag = MAYBE_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "Some" { Some(t) } else { None })
+            .unwrap();
+        assert_eq!(maybe_success_tag(), maybe_some_tag);
+
+        let result_ok_tag = RESULT_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "Ok" { Some(t) } else { None })
+            .unwrap();
+        assert_eq!(result_success_tag(), result_ok_tag);
     }
 }
 

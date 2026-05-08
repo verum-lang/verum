@@ -1070,3 +1070,116 @@ mod edge_case_execution_tests {
         assert_int_result(module, 42);
     }
 }
+
+// ============================================================================
+// Try Operator Tag Tests
+//
+// These tests pin the runtime behavior of IsVar against the canonical variant
+// tags from MAYBE_VARIANT_LAYOUT and RESULT_VARIANT_LAYOUT.
+//
+// compile_try emits:
+//   MakeVariant { tag: X, field_count }   -- build the variant
+//   IsVar { dst, value, tag: success_tag } -- check for success variant
+//
+// For Maybe: success_tag = maybe_success_tag() = 1  (Some)
+// For Result: success_tag = result_success_tag() = 0 (Ok)
+//
+// Each test creates a minimal program that returns 1 (success) or 0 (failure)
+// depending on whether IsVar fires, verifying the interpreter honors the tag.
+// ============================================================================
+
+mod try_operator_tag_tests {
+    use super::*;
+    use verum_common::well_known_types::{maybe_success_tag, result_success_tag};
+
+    /// Helper: build a program that:
+    ///   r0 = MakeVariant { tag: variant_tag, field_count: 0 }
+    ///   r1 = IsVar(r0, check_tag)
+    ///   Ret r1   -- returns Bool (1 if tags match, 0 otherwise)
+    fn is_var_result(variant_tag: u32, check_tag: u32) -> bool {
+        let instructions = vec![
+            Instruction::MakeVariant {
+                dst: Reg(0),
+                tag: variant_tag,
+                field_count: 0,
+            },
+            Instruction::IsVar {
+                dst: Reg(1),
+                value: Reg(0),
+                tag: check_tag,
+            },
+            Instruction::Ret { value: Reg(1) },
+        ];
+        let module = create_executable_module("is_var_test", instructions, 2);
+        execute_module(module)
+            .expect("execution failed")
+            .try_as_bool()
+            .expect("expected Bool result")
+    }
+
+    /// `IsVar { tag: maybe_success_tag() }` must be true for `Some` (tag 1).
+    #[test]
+    fn maybe_success_tag_detects_some() {
+        let some_tag = 1u32; // MAYBE_VARIANT_LAYOUT: Some = 1
+        assert!(
+            is_var_result(some_tag, maybe_success_tag()),
+            "IsVar(tag={}) must be true when variant has tag {} (Some)",
+            maybe_success_tag(),
+            some_tag,
+        );
+    }
+
+    /// `IsVar { tag: maybe_success_tag() }` must be false for `None` (tag 0).
+    /// This was the critical bug: success_tag.unwrap_or(0) tested for None, not Some.
+    #[test]
+    fn maybe_success_tag_rejects_none() {
+        let none_tag = 0u32; // MAYBE_VARIANT_LAYOUT: None = 0
+        assert!(
+            !is_var_result(none_tag, maybe_success_tag()),
+            "IsVar(tag={}) must be false when variant has tag {} (None) — \
+             success tag must be Some ({}), not None ({})",
+            maybe_success_tag(),
+            none_tag,
+            maybe_success_tag(),
+            none_tag,
+        );
+    }
+
+    /// `IsVar { tag: result_success_tag() }` must be true for `Ok` (tag 0).
+    #[test]
+    fn result_success_tag_detects_ok() {
+        let ok_tag = 0u32; // RESULT_VARIANT_LAYOUT: Ok = 0
+        assert!(
+            is_var_result(ok_tag, result_success_tag()),
+            "IsVar(tag={}) must be true when variant has tag {} (Ok)",
+            result_success_tag(),
+            ok_tag,
+        );
+    }
+
+    /// `IsVar { tag: result_success_tag() }` must be false for `Err` (tag 1).
+    #[test]
+    fn result_success_tag_rejects_err() {
+        let err_tag = 1u32; // RESULT_VARIANT_LAYOUT: Err = 1
+        assert!(
+            !is_var_result(err_tag, result_success_tag()),
+            "IsVar(tag={}) must be false when variant has tag {} (Err)",
+            result_success_tag(),
+            err_tag,
+        );
+    }
+
+    /// Cross-check: maybe_success_tag != result_failure_tag.
+    /// Ensures the two canonical tags don't accidentally coincide in a way
+    /// that would mask the Maybe-tag bug.
+    #[test]
+    fn maybe_and_result_success_tags_are_correct() {
+        assert_eq!(maybe_success_tag(), 1, "Some must be tag 1");
+        assert_eq!(result_success_tag(), 0, "Ok must be tag 0");
+        assert_ne!(
+            maybe_success_tag(),
+            result_success_tag(),
+            "Maybe and Result have different success tag positions by design",
+        );
+    }
+}
