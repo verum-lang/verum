@@ -167,6 +167,7 @@ public mount .async_connection.{
 public mount .async_pool.{
     AsyncPgPool, AsyncPoolConfig, AsyncPgPoolGuard,
 };
+public mount .row.{Row};
 public mount .async_transaction.{
     AsyncPgTransaction,
     begin_tx_async, begin_tx_with_async,
