@@ -33194,7 +33194,22 @@ impl TypeChecker {
             }
             MountTreeKind::Nested { prefix, trees } => {
                 let module_name = process_path(prefix);
-                // Try inline module resolution (with and without cog. prefix)
+                // Try inline module resolution (with and without cog. prefix).
+                //
+                // **Coverage gate.** The inline-module short-circuit
+                // ONLY fires when the inline module actually exports
+                // every requested item DIRECTLY (as a top-level
+                // Function/Type/Const).  If the inline module merely
+                // re-exports the items via `public mount`, fall through
+                // to the cross-file path so the re-export chain is
+                // walked through the registry.
+                //
+                // Without this gate, `import_item_from_inline_module`
+                // returns Ok early (relying on "process_import will
+                // handle the re-export") but process_import has the
+                // same inline-modules short-circuit — neither side
+                // actually registers the type, leading to silent E101
+                // at the use site.
                 let resolved_name = if self.inline_modules.contains_key(&module_name) {
                     Some(module_name.clone())
                 } else {
@@ -33206,16 +33221,70 @@ impl TypeChecker {
                     }
                 };
                 if let Some(resolved) = resolved_name {
-                    for tree in trees {
-                        if let MountTreeKind::Path(p) = &tree.kind {
-                            let item_name = process_path(p);
-                            self.import_item_from_inline_module(
-                                resolved.as_str(),
-                                item_name.as_str(),
-                            )?;
+                    let inline_covers_all = if let Some(inline_mod) =
+                        self.inline_modules.get(&resolved).cloned()
+                    {
+                        let inline_items = inline_mod
+                            .items
+                            .as_ref()
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(|item| match &item.kind {
+                                        verum_ast::ItemKind::Function(f)
+                                            if matches!(
+                                                f.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(f.name.name.as_str().to_string())
+                                        }
+                                        verum_ast::ItemKind::Type(t)
+                                            if matches!(
+                                                t.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(t.name.name.as_str().to_string())
+                                        }
+                                        verum_ast::ItemKind::Const(c)
+                                            if matches!(
+                                                c.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(c.name.name.as_str().to_string())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect::<std::collections::HashSet<_>>()
+                            })
+                            .unwrap_or_default();
+                        trees.iter().all(|tree| {
+                            if let MountTreeKind::Path(p) = &tree.kind {
+                                let want = process_path(p);
+                                inline_items.contains(want.as_str())
+                            } else {
+                                true
+                            }
+                        })
+                    } else {
+                        false
+                    };
+                    if inline_covers_all {
+                        for tree in trees {
+                            if let MountTreeKind::Path(p) = &tree.kind {
+                                let item_name = process_path(p);
+                                self.import_item_from_inline_module(
+                                    resolved.as_str(),
+                                    item_name.as_str(),
+                                )?;
+                            }
                         }
+                        return Ok(());
                     }
-                    return Ok(());
+                    // Inline module exists but doesn't cover all items
+                    // directly — fall through to cross-file resolution.
                 }
             }
             // #5 / P1.5 — file-relative mounts are resolved by
@@ -34189,7 +34258,14 @@ impl TypeChecker {
             }
 
             MountTreeKind::Nested { prefix, trees } => {
-                // Try inline module resolution first
+                // Try inline module resolution first.
+                //
+                // **Coverage gate** (mirrors check_import). Same
+                // discipline: only short-circuit to the inline-module
+                // path when the inline module exports every requested
+                // item DIRECTLY.  If the inline module re-exports via
+                // `public mount`, fall through to the cross-file
+                // path so the registry walks the re-export chain.
                 let simple_nested_path = simple_process_path(prefix);
                 let nested_candidates = if path_starts_with_crate(prefix) {
                     vec![simple_nested_path.clone()]
@@ -34200,26 +34276,73 @@ impl TypeChecker {
                     ]
                 };
                 for candidate in &nested_candidates {
-                    if self.inline_modules.contains_key(candidate) {
-                        let mut all_ok = true;
-                        for tree in trees {
+                    if let Some(inline_mod) = self.inline_modules.get(candidate).cloned() {
+                        let inline_direct_items = inline_mod
+                            .items
+                            .as_ref()
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(|item| match &item.kind {
+                                        verum_ast::ItemKind::Function(f)
+                                            if matches!(
+                                                f.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(f.name.name.as_str().to_string())
+                                        }
+                                        verum_ast::ItemKind::Type(t)
+                                            if matches!(
+                                                t.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(t.name.name.as_str().to_string())
+                                        }
+                                        verum_ast::ItemKind::Const(c)
+                                            if matches!(
+                                                c.visibility,
+                                                verum_ast::decl::Visibility::Public
+                                            ) =>
+                                        {
+                                            Some(c.name.name.as_str().to_string())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect::<std::collections::HashSet<_>>()
+                            })
+                            .unwrap_or_default();
+                        let direct_covers_all = trees.iter().all(|tree| {
                             if let MountTreeKind::Path(p) = &tree.kind {
-                                let item_name = simple_process_path(p);
-                                if self
-                                    .import_item_from_inline_module(
-                                        candidate.as_str(),
-                                        item_name.as_str(),
-                                    )
-                                    .is_err()
-                                {
-                                    all_ok = false;
-                                    break;
+                                let want = simple_process_path(p);
+                                inline_direct_items.contains(want.as_str())
+                            } else {
+                                true
+                            }
+                        });
+                        if direct_covers_all {
+                            let mut all_ok = true;
+                            for tree in trees {
+                                if let MountTreeKind::Path(p) = &tree.kind {
+                                    let item_name = simple_process_path(p);
+                                    if self
+                                        .import_item_from_inline_module(
+                                            candidate.as_str(),
+                                            item_name.as_str(),
+                                        )
+                                        .is_err()
+                                    {
+                                        all_ok = false;
+                                        break;
+                                    }
                                 }
                             }
+                            if all_ok {
+                                return Ok(());
+                            }
                         }
-                        if all_ok {
-                            return Ok(());
-                        }
+                        // Fall through to cross-file resolution.
                     }
                 }
                 // import module.path.{item1, item2}
