@@ -245,7 +245,7 @@ implement BigInt {
 
         // |self| < |other| ⇒ quot=0, rem=self.
         let mag_cmp = compare_magnitudes(&self.digits, &other.digits);
-        if matches_lt(mag_cmp) {
+        if mag_cmp is Less {
             return Ok((
                 BigInt.zero(),
                 BigInt { sign: rem_sign, digits: clone_digits(&self.digits) },
@@ -335,11 +335,11 @@ implement BigInt {
         }
     }
 
-    public fn eq(&self, other: &BigInt) -> Bool { matches_eq(self.compare(other)) }
-    public fn lt(&self, other: &BigInt) -> Bool { matches_lt(self.compare(other)) }
-    public fn gt(&self, other: &BigInt) -> Bool { matches_gt(self.compare(other)) }
-    public fn le(&self, other: &BigInt) -> Bool { !matches_gt(self.compare(other)) }
-    public fn ge(&self, other: &BigInt) -> Bool { !matches_lt(self.compare(other)) }
+    public fn eq(&self, other: &BigInt) -> Bool { self.compare(other) is Equal }
+    public fn lt(&self, other: &BigInt) -> Bool { self.compare(other) is Less }
+    public fn gt(&self, other: &BigInt) -> Bool { self.compare(other) is Greater }
+    public fn le(&self, other: &BigInt) -> Bool { !(self.compare(other) is Greater) }
+    public fn ge(&self, other: &BigInt) -> Bool { !(self.compare(other) is Less) }
 
     // -------------------------------------------------------------------------
     // Conversion
@@ -1205,15 +1205,6 @@ fn pad_chunk_to_9(v: Int) -> Text {
     out
 }
 
-fn matches_eq(o: Ordering) -> Bool {
-    match o { Equal => true, _ => false }
-}
-fn matches_lt(o: Ordering) -> Bool {
-    match o { Less => true, _ => false }
-}
-fn matches_gt(o: Ordering) -> Bool {
-    match o { Greater => true, _ => false }
-}
 
 /// Absolute-value of an i64 with safe i64::MIN saturation.  Mirrors
 /// the helper in `decimal.vr`; duplicated here to keep this module

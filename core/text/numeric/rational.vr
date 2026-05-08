@@ -245,11 +245,11 @@ implement Rational {
         ad.compare(&bc)
     }
 
-    public fn eq(&self, other: &Rational) -> Bool { matches_eq(self.compare(other)) }
-    public fn lt(&self, other: &Rational) -> Bool { matches_lt(self.compare(other)) }
-    public fn gt(&self, other: &Rational) -> Bool { matches_gt(self.compare(other)) }
-    public fn le(&self, other: &Rational) -> Bool { !matches_gt(self.compare(other)) }
-    public fn ge(&self, other: &Rational) -> Bool { !matches_lt(self.compare(other)) }
+    public fn eq(&self, other: &Rational) -> Bool { self.compare(other) is Equal }
+    public fn lt(&self, other: &Rational) -> Bool { self.compare(other) is Less }
+    public fn gt(&self, other: &Rational) -> Bool { self.compare(other) is Greater }
+    public fn le(&self, other: &Rational) -> Bool { !(self.compare(other) is Greater) }
+    public fn ge(&self, other: &Rational) -> Bool { !(self.compare(other) is Less) }
 
     // -------------------------------------------------------------------------
     // Render
@@ -454,10 +454,6 @@ fn sub_text(s: &Text, start: Int, end: Int) -> Text {
     }
     Text.from_bytes(&out).unwrap_or("".clone())
 }
-
-fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
-fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
-fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
 
 fn map_bigint_error(e: BigIntError) -> RationalError {
     match e {

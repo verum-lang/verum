@@ -319,11 +319,11 @@ implement BigDecimal {
         a.compare(&b)
     }
 
-    public fn eq(&self, other: &BigDecimal) -> Bool { matches_eq(self.compare(other)) }
-    public fn lt(&self, other: &BigDecimal) -> Bool { matches_lt(self.compare(other)) }
-    public fn gt(&self, other: &BigDecimal) -> Bool { matches_gt(self.compare(other)) }
-    public fn le(&self, other: &BigDecimal) -> Bool { !matches_gt(self.compare(other)) }
-    public fn ge(&self, other: &BigDecimal) -> Bool { !matches_lt(self.compare(other)) }
+    public fn eq(&self, other: &BigDecimal) -> Bool { self.compare(other) is Equal }
+    public fn lt(&self, other: &BigDecimal) -> Bool { self.compare(other) is Less }
+    public fn gt(&self, other: &BigDecimal) -> Bool { self.compare(other) is Greater }
+    public fn le(&self, other: &BigDecimal) -> Bool { !(self.compare(other) is Greater) }
+    public fn ge(&self, other: &BigDecimal) -> Bool { !(self.compare(other) is Less) }
 
     // -------------------------------------------------------------------------
     // Render
@@ -551,10 +551,6 @@ fn clone_bigint(b: &BigInt) -> BigInt {
         Err(_) => BigInt.zero(),  // unreachable for well-formed BigInts
     }
 }
-
-fn matches_eq(o: Ordering) -> Bool { match o { Equal => true, _ => false } }
-fn matches_lt(o: Ordering) -> Bool { match o { Less => true, _ => false } }
-fn matches_gt(o: Ordering) -> Bool { match o { Greater => true, _ => false } }
 
 /// Borrowed sub-slice [start, end) of a List<Byte>.  Mirrors the
 /// helper in `decimal.vr`.
