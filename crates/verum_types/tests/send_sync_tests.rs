@@ -1061,3 +1061,77 @@ fn test_comprehensive_coverage() {
         );
     }
 }
+
+// ==================== Marker-protocol zero-method invariant validator (#41) ====================
+//
+// Every protocol listed in MARKER_PROTOCOL_NAMES must be:
+//   1. Registered in the ProtocolChecker
+//   2. Have zero methods (required + provided)
+//   3. Have zero associated types
+//   4. Have zero super-protocols
+//
+// Adding methods/associated-types to a marker protocol would break type-system
+// invariants (e.g., the fast-path in the object-safety checker assumes markers
+// have no method dispatch surface).
+// ===========================================================================================
+
+#[test]
+fn all_marker_protocols_are_registered() {
+    use verum_common::well_known_types::MARKER_PROTOCOL_NAMES;
+    let checker = create_checker();
+    for name in MARKER_PROTOCOL_NAMES {
+        assert!(
+            checker.get_protocol(&(*name).into()).is_some(),
+            "Marker protocol '{}' must be registered in ProtocolChecker",
+            name
+        );
+    }
+}
+
+#[test]
+fn all_marker_protocols_have_zero_methods() {
+    use verum_common::well_known_types::MARKER_PROTOCOL_NAMES;
+    let checker = create_checker();
+    for name in MARKER_PROTOCOL_NAMES {
+        if let Maybe::Some(proto) = checker.get_protocol(&(*name).into()) {
+            assert!(
+                proto.methods.is_empty(),
+                "Marker protocol '{}' must have zero methods, found: {:?}",
+                name,
+                proto.methods.keys().collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn all_marker_protocols_have_zero_associated_types() {
+    use verum_common::well_known_types::MARKER_PROTOCOL_NAMES;
+    let checker = create_checker();
+    for name in MARKER_PROTOCOL_NAMES {
+        if let Maybe::Some(proto) = checker.get_protocol(&(*name).into()) {
+            assert!(
+                proto.associated_types.is_empty(),
+                "Marker protocol '{}' must have zero associated types, found: {:?}",
+                name,
+                proto.associated_types.keys().collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn all_marker_protocols_have_zero_super_protocols() {
+    use verum_common::well_known_types::MARKER_PROTOCOL_NAMES;
+    let checker = create_checker();
+    for name in MARKER_PROTOCOL_NAMES {
+        if let Maybe::Some(proto) = checker.get_protocol(&(*name).into()) {
+            assert!(
+                proto.super_protocols.is_empty(),
+                "Marker protocol '{}' must have zero super-protocols, found: {:?}",
+                name,
+                proto.super_protocols
+            );
+        }
+    }
+}
