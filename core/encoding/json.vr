@@ -241,6 +241,46 @@ fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
 }
 
 // =============================================================================
+// Builder helpers — ergonomic constructors mirroring common JSON DSL forms
+// =============================================================================
+//
+// These are thin sugar over the JsonValue variant constructors.  They
+// keep call-sites readable when assembling object/array trees by hand
+// and avoid exposing the variant names everywhere — the variant set
+// is part of the type's contract; the builders are part of the
+// usage surface.
+
+/// Build a `JsonValue` representing the JSON null.
+public fn json_null() -> JsonValue { JsonValue.JsonNull }
+
+/// Wrap a Verum `Bool` as a JSON boolean.
+public fn json_bool(b: Bool) -> JsonValue { JsonValue.JsonBool(b) }
+
+/// Wrap a Verum `Int` as a JSON integer (64-bit lossless).
+public fn json_int(n: Int) -> JsonValue { JsonValue.JsonInt(n) }
+
+/// Wrap a Verum `Float` as a JSON number (IEEE 754 double).
+public fn json_number(f: Float) -> JsonValue { JsonValue.JsonFloat(f) }
+
+/// Wrap a Verum `Float` as a JSON number — alias of `json_number`
+/// for callers that prefer the explicit `_float` suffix.
+public fn json_float(f: Float) -> JsonValue { JsonValue.JsonFloat(f) }
+
+/// Wrap a Verum `Text` as a JSON string.  No re-escaping at this
+/// layer; serialisation handles JSON escapes.
+public fn json_string(s: Text) -> JsonValue { JsonValue.JsonString(s) }
+
+/// Wrap a `List<JsonValue>` as a JSON array (ordered).
+public fn json_array(items: List<JsonValue>) -> JsonValue {
+    JsonValue.JsonArray(items)
+}
+
+/// Wrap a `Map<Text, JsonValue>` as a JSON object (insertion-ordered).
+public fn json_object(fields: Map<Text, JsonValue>) -> JsonValue {
+    JsonValue.JsonObject(fields)
+}
+
+// =============================================================================
 // Parser — public entry points
 // =============================================================================
 
