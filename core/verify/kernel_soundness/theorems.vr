@@ -37,17 +37,18 @@
 // **What's proved / discharged / admitted.**
 //
 
-// Proved (18): K-Var, K-Univ, K-FwAx (Prop side-condition
+// Proved (23): K-Var, K-Univ, K-FwAx (Prop side-condition
 //  discharge), K-Pos (Berardi-shape rejection by structural check
 //  on constructor signatures); plus 9 IOUs discharged in
 //  successive passes by folding their content into structural
 //  premises of the corresponding Typing constructor: K-Quot-Elim,
 //  K-Elim, K-Universe-Ascent, K-Refine, K-Refine-Omega,
 //  K-Inductive, K-Epsilon-Of, K-Alpha-Of, K-Modal-Big-And; plus
-//  5 status-fixes (K-Modal-Box, K-Modal-Diamond, K-Shape, K-Flat,
-//  K-Sharp — already structural in the Lean / Coq / Isabelle
-//  export since FV-9 with no IOU axiom; .vr LemmaStatus updated to
-//  match).
+//  10 status-fixes (already structural in the Lean / Coq /
+//  Isabelle export since FV-9 with no IOU axiom; .vr LemmaStatus
+//  updated to match): K-Modal-Box, K-Modal-Diamond, K-Shape,
+//  K-Flat, K-Sharp, K-Path-Ty-Form, K-Refl-Intro, K-Refine-Erase,
+//  K-Quot-Form, K-Quot-Intro.
 //
 
 // Discharged-by-framework (7): K-Pi-Form, K-Lam-Intro, K-App-Elim,
@@ -57,12 +58,11 @@
 //  is closed.
 //
 
-// Admitted (13): the remaining rules — Cubical (5:
-//  K-Path-Ty-Form, K-Path-Over-Form, K-Refl-Intro, K-HComp,
-//  K-Transp, K-Glue), Refinement (2: K-Refine-Intro,
-//  K-Refine-Erase), Quotient (2: K-Quot-Form, K-Quot-Intro),
-//  SMT (1: K-Smt), Diakrisis (2: K-Eps-Mu, K-Round-Trip).
-//  Three buckets fully empty: Quotient, Inductive, Structural.
+// Admitted (8): the remaining rules — Cubical (4:
+//  K-Path-Over-Form, K-HComp, K-Transp, K-Glue), Refinement (1:
+//  K-Refine-Intro), SMT (1: K-Smt), Diakrisis (2: K-Eps-Mu,
+//  K-Round-Trip).  Three buckets fully empty: Quotient,
+//  Inductive, Structural.
 //
 
 // IOU trajectory:  27 → 17 → 16 → 14 → 12 → 11 → 8  (pre-FV-9,
@@ -160,6 +160,11 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         KernelRule.KShape => LemmaStatus.Proved,
         KernelRule.KFlat => LemmaStatus.Proved,
         KernelRule.KSharp => LemmaStatus.Proved,
+        KernelRule.KPathTyForm => LemmaStatus.Proved,
+        KernelRule.KReflIntro => LemmaStatus.Proved,
+        KernelRule.KRefineErase => LemmaStatus.Proved,
+        KernelRule.KQuotForm => LemmaStatus.Proved,
+        KernelRule.KQuotIntro => LemmaStatus.Proved,
 
         // ---------- DISCHARGED-BY-FRAMEWORK -------------------------------
         // Closed IOUs with cited upstream proofs in mathlib4 /
@@ -230,24 +235,16 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
             ),
         },
         // Cubical — large-step missing for hcomp/transp/glue regularity
-        KernelRule.KPathTyForm => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires interval-object semantics (CCHM De Morgan algebra) \
-                 — once formalised, the formation lemma is structural"
-            ),
-        },
+        // (KPathTyForm Proved above — structural premises in
+        // the export since FV-9.)
         KernelRule.KPathOverForm => LemmaStatus.Admitted {
             reason: Text.from(
                 "requires K-Path-Ty-Form + dependent-path semantics over \
                  a motive (HoTT Book §6.2)"
             ),
         },
-        KernelRule.KReflIntro => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires K-Path-Ty-Form + the J-rule's unit law \
-                 (refl is the identity element in the path groupoid)"
-            ),
-        },
+        // (KReflIntro Proved above — single structural premise
+        // in the export since FV-9.)
         KernelRule.KHComp => LemmaStatus.Admitted {
             reason: Text.from(
                 "requires CCHM hcomp regularity + Kan-filling lemmas \
@@ -276,26 +273,13 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                  introduced value (Bool-discharged at this layer)"
             ),
         },
-        KernelRule.KRefineErase => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires the underlying-type-recovery lemma: erasing the \
-                 predicate yields the base type"
-            ),
-        },
+        // (KRefineErase Proved above — single structural premise
+        // in the export since FV-9.)
         // Quotient
-        KernelRule.KQuotForm => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires equivalence-relation properties (refl/symm/trans) \
-                 to be witnessed at the kernel layer; currently framework- \
-                 axiomatised"
-            ),
-        },
-        KernelRule.KQuotIntro => LemmaStatus.Admitted {
-            reason: Text.from(
-                "requires K-Quot-Form + projection-onto-equivalence-class \
-                 well-typedness"
-            ),
-        },
+        // (KQuotForm + KQuotIntro Proved above — structural
+        // premises in the export since FV-9.  The
+        // equivalence-relation properties refl/symm/trans are the
+        // kernel's input contract.)
         // (KQuotElim Proved above — structural premises mirroring
         // K_Quot_Form / K_Quot_Intro.)
 
@@ -530,6 +514,13 @@ public pure fn coq_proof_text(r: KernelRule) -> Text {
         KernelRule.KShape => Text.from("  exact T_shape."),
         KernelRule.KFlat => Text.from("  exact T_flat."),
         KernelRule.KSharp => Text.from("  exact T_sharp."),
+        // K-Path-Ty-Form / K-Refl-Intro / K-Refine-Erase /
+        // K-Quot-Form / K-Quot-Intro: structural since FV-9.
+        KernelRule.KPathTyForm => Text.from("  exact T_path_ty."),
+        KernelRule.KReflIntro => Text.from("  exact T_refl."),
+        KernelRule.KRefineErase => Text.from("  exact T_refine_erase."),
+        KernelRule.KQuotForm => Text.from("  exact T_quot_form."),
+        KernelRule.KQuotIntro => Text.from("  exact T_quot_intro."),
         _ => Text.from(""),
     }
 }
@@ -609,6 +600,23 @@ public pure fn lean_proof_text(r: KernelRule) -> Text {
         ),
         KernelRule.KSharp => Text.from(
             "  exact @Typing.t_sharp _ _ _"
+        ),
+        // K-Path-Ty-Form / K-Refl-Intro / K-Refine-Erase /
+        // K-Quot-Form / K-Quot-Intro: structural since FV-9.
+        KernelRule.KPathTyForm => Text.from(
+            "  exact @Typing.t_path_ty _ _ _ _ _"
+        ),
+        KernelRule.KReflIntro => Text.from(
+            "  exact @Typing.t_refl _ _ _"
+        ),
+        KernelRule.KRefineErase => Text.from(
+            "  exact @Typing.t_refine_erase _ _ _ _ _"
+        ),
+        KernelRule.KQuotForm => Text.from(
+            "  exact @Typing.t_quot_form _ _ _ _"
+        ),
+        KernelRule.KQuotIntro => Text.from(
+            "  exact @Typing.t_quot_intro _ _ _ _"
         ),
         _ => Text.from(""),
     }
