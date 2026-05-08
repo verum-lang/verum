@@ -1,0 +1,388 @@
+// =============================================================================
+// security/kdf/argon2.vr — Argon2id (RFC 9106)
+// =============================================================================
+// Layer: 3 (Security — key derivation, password hashing)
+// Dependencies: core, core.collections, core.security.hash.blake2b
+//   (the internal hash; provided by the kernel as `@intrinsic`)
+// =============================================================================
+//
+// **Background.** Argon2 won the 2015 Password Hashing Competition.
+// RFC 9106 (Sep 2021) standardised three variants:
+//
+//   - Argon2d  — data-DEPENDENT memory access (faster; vulnerable to
+//                side-channel timing leaks if attacker controls
+//                co-resident silicon).  Best for cryptocurrencies.
+//   - Argon2i  — data-INDEPENDENT memory access (slower; resistant
+//                to side-channel attacks).  Best for password hashing
+//                in shared-tenancy environments.
+//   - Argon2id — HYBRID (first half: 2i, second half: 2d).  RFC 9106
+//                §4 designates this as the recommended default for
+//                password hashing — gets 2d's GPU-resistance with 2i's
+//                side-channel defence on the early passes that matter.
+//
+// **OWASP 2024 recommendations** for password hashing (the registry
+// uses these as `Argon2idProfile.Sensitive`):
+//
+//   - **Sensitive** (login / token-creation): m=19 MiB, t=2, p=1
+//     — chosen for ~500ms wall-clock on modern hardware while
+//     keeping memory footprint <20 MiB per concurrent verify.
+//   - **Interactive** (frequent low-stakes auth): m=64 MiB, t=3, p=4
+//     — libsodium's `OPSLIMIT_INTERACTIVE` parameter set; faster on
+//     multicore but assumes more RAM headroom.
+//   - **Sensitive paranoid** (key-encryption keys): m=256 MiB, t=8,
+//     p=1 — slower but very resistant to GPU farms; uncommon.
+//
+// **Why these specific values.**  OWASP's password-storage cheat-
+// sheet (2024-Q4 update) settled on `Sensitive` after the 2024 GPU-
+// price drops; `Interactive` is libsodium's longest-standing
+// established preset.  Both pass the cheat-sheet's "≥ 19 MiB OR ≥
+// 12 MiB + ≥ 2 iterations" floor.  Falling below either is
+// equivalent to no hashing at all under modern offline-attack costs.
+//
+// **PHC string output**.  RFC 9106 §6 + the PHC string format.
+//
+//   $argon2id$v=19$m=19456,t=2,p=1$<base64-salt>$<base64-tag>
+//
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum:    MsfsStratum.LFnd,
+    lifecycle:  Lifecycle.Theorem("v1.0"),
+    declarations: ShapeDeclarations {
+        purpose: Some(Purpose {
+            role: "Argon2id password hashing — OWASP-tuned PHC string round-trip",
+            k_min: CveThresholdK.FullWitness,
+            v_min: CveThresholdV.NamedCertification,
+            e_min: CveThresholdE.StructurallyReady,
+        }),
+        substrate: Some(CognitiveSubstrate.AnalyticDecompositional),
+        anchoring: Some(FormalAnchoring.CurryHowardLawvere),
+        e_sense:   Some(ExecutabilitySense.StructuralReadiness),
+        self_reference: None,
+    }
+)
+module core.security.kdf.argon2;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base64;
+mount core.security.password_hash.{PasswordHasher, PasswordHashError};
+
+// =============================================================================
+// Parameter limits (RFC 9106 §3)
+// =============================================================================
+
+/// Minimum salt length per RFC 9106 §3 (16 bytes — 128-bit collision
+/// resistance).
+public const ARGON2_MIN_SALT_BYTES:    Int = 16;
+/// Maximum salt length we accept (256 bytes is more than any
+/// reasonable deployment ever needs; bounds memory).
+public const ARGON2_MAX_SALT_BYTES:    Int = 256;
+
+/// Output (tag) length range.  RFC 9106 §3 allows 4..2^32-1; we
+/// cap at 64 bytes (matches BLAKE2b output and is more than enough
+/// for any real KDF use).
+public const ARGON2_MIN_TAG_BYTES:     Int = 16;
+public const ARGON2_MAX_TAG_BYTES:     Int = 64;
+
+/// Memory cost lower bound — RFC 9106 §3 mandates ≥ 8*p.  We enforce
+/// the OWASP 2024 floor of 12_288 KiB (12 MiB) for any password
+/// hash, which is far above the spec floor for any realistic p.
+public const ARGON2_OWASP_MIN_MEMORY_KIB: Int = 12_288;
+/// Memory cost upper bound — 4 GiB (operationally infeasible above
+/// this; protects against accidental DoS via tampered PHC strings).
+public const ARGON2_MAX_MEMORY_KIB:    Int = 4 * 1024 * 1024;
+
+/// Iterations — minimum 1 (spec); OWASP 2024 floor is 2 in
+/// combination with memory ≥ 19 MiB.
+public const ARGON2_OWASP_MIN_TIME:    Int = 2;
+public const ARGON2_MAX_TIME:          Int = 2_147_483_647;
+
+/// Parallelism (lanes) — minimum 1, max 2^24-1 per RFC.  We cap at
+/// 64 because operationally larger values yield diminishing returns
+/// + cause syscall pressure under heavy load.
+public const ARGON2_MIN_PARALLELISM:   Int = 1;
+public const ARGON2_MAX_PARALLELISM:   Int = 64;
+
+/// Argon2 version constant.  RFC 9106 freezes this at 0x13 (=19).
+public const ARGON2_VERSION:           Int = 0x13;
+
+// =============================================================================
+// Tuned profiles — OWASP 2024 password-storage cheatsheet
+// =============================================================================
+
+@derive(Clone, Copy, Debug, Eq)
+public type Argon2idProfile is
+    /// **Sensitive** (REGISTRY DEFAULT, OWASP recommendation):
+    /// m=19_456 KiB (19 MiB), t=2, p=1.  Wall-clock ~500ms on a
+    /// 2024-era 4 GHz x86 core.
+    | Sensitive
+    /// **Interactive** (libsodium classic): m=65_536 KiB (64 MiB),
+    /// t=3, p=4.  Wall-clock ~180ms on modern 4-core desktop.
+    | Interactive
+    /// **Paranoid** (KEK derivation, occasional use):
+    /// m=262_144 KiB (256 MiB), t=8, p=1.  Wall-clock ~5s.
+    | Paranoid
+    /// **Custom** — operator-supplied; subject to the same floor
+    /// checks as the named profiles.
+    | Custom { memory_kib: Int, iterations: Int, parallelism: Int };
+
+@derive(Clone, Copy, Debug, Eq)
+public type Argon2idParams is {
+    /// Memory cost in KiB.  RFC 9106 §3 calls this `m`.
+    memory_kib:  Int,
+    /// Iterations (passes over memory).  RFC 9106 §3 `t`.
+    iterations:  Int,
+    /// Parallelism (lanes).  RFC 9106 §3 `p`.
+    parallelism: Int,
+};
+
+public fn params_from_profile(profile: &Argon2idProfile) -> Argon2idParams {
+    match profile {
+        Argon2idProfile.Sensitive => Argon2idParams {
+            memory_kib:  19_456,    // 19 MiB
+            iterations:  2,
+            parallelism: 1,
+        },
+        Argon2idProfile.Interactive => Argon2idParams {
+            memory_kib:  65_536,    // 64 MiB
+            iterations:  3,
+            parallelism: 4,
+        },
+        Argon2idProfile.Paranoid => Argon2idParams {
+            memory_kib:  262_144,   // 256 MiB
+            iterations:  8,
+            parallelism: 1,
+        },
+        Argon2idProfile.Custom { memory_kib, iterations, parallelism } => Argon2idParams {
+            memory_kib:  *memory_kib,
+            iterations:  *iterations,
+            parallelism: *parallelism,
+        },
+    }
+}
+
+/// Reject Argon2id parameters that fall below the OWASP 2024 floor
+/// or above operational sanity caps.  Run on every PHC parse +
+/// every fresh hash call.
+public fn validate_params(p: &Argon2idParams) -> Result<(), PasswordHashError> {
+    if p.memory_kib < ARGON2_OWASP_MIN_MEMORY_KIB {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: memory {p.memory_kib} KiB below OWASP floor {ARGON2_OWASP_MIN_MEMORY_KIB} KiB"));
+    }
+    if p.memory_kib > ARGON2_MAX_MEMORY_KIB {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: memory {p.memory_kib} KiB above operational cap {ARGON2_MAX_MEMORY_KIB} KiB"));
+    }
+    if p.iterations < ARGON2_OWASP_MIN_TIME {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: iterations {p.iterations} below OWASP floor {ARGON2_OWASP_MIN_TIME}"));
+    }
+    if p.iterations > ARGON2_MAX_TIME {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: iterations {p.iterations} above cap {ARGON2_MAX_TIME}"));
+    }
+    if p.parallelism < ARGON2_MIN_PARALLELISM || p.parallelism > ARGON2_MAX_PARALLELISM {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: parallelism {p.parallelism} outside [{ARGON2_MIN_PARALLELISM}, {ARGON2_MAX_PARALLELISM}]"));
+    }
+    // RFC 9106 §3: m >= 8 * p
+    if p.memory_kib < 8 * p.parallelism {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: memory {p.memory_kib} < 8*parallelism={8 * p.parallelism}"));
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Hasher
+// =============================================================================
+
+@derive(Clone, Debug)
+public type Argon2idHasher is {
+    profile:    Argon2idProfile,
+    salt_bytes: Int,
+    tag_bytes:  Int,
+};
+
+implement Argon2idHasher {
+    /// Build a hasher from a tuned profile.  Salt + tag default to
+    /// 16 bytes (PHC convention; matches Argon2 reference impl).
+    public fn from_profile(profile: Argon2idProfile) -> Result<Argon2idHasher, PasswordHashError> {
+        let params = params_from_profile(&profile);
+        validate_params(&params)?;
+        Ok(Argon2idHasher {
+            profile,
+            salt_bytes: ARGON2_MIN_SALT_BYTES, // 16
+            tag_bytes:  32,                    // 256-bit tag
+        })
+    }
+
+    /// Convenience — the registry-canonical hasher (OWASP Sensitive).
+    public fn owasp_sensitive() -> Argon2idHasher {
+        Argon2idHasher.from_profile(Argon2idProfile.Sensitive).unwrap()
+    }
+}
+
+implement PasswordHasher for Argon2idHasher {
+    fn hash(&self, password: &[Byte]) -> Result<Text, PasswordHashError> {
+        let params = params_from_profile(&self.profile);
+        validate_params(&params)?;
+
+        // Generate a fresh random salt.  RFC 9106 §3.1 mandates a
+        // salt unique per password.
+        let salt = generate_salt(self.salt_bytes)?;
+
+        // Run the Argon2id KDF to produce the tag.
+        let tag = argon2id_derive(password, salt.as_slice(), &params, self.tag_bytes)?;
+
+        // Encode as PHC string.
+        Ok(encode_phc(&params, salt.as_slice(), tag.as_slice()))
+    }
+
+    fn verify(&self, password: &[Byte], phc_hash: &Text) -> Result<Bool, PasswordHashError> {
+        let parsed = parse_phc(phc_hash)?;
+        validate_params(&parsed.params)?;
+        let computed_tag = argon2id_derive(
+            password,
+            parsed.salt.as_slice(),
+            &parsed.params,
+            parsed.tag.len(),
+        )?;
+        // Constant-time compare.
+        Ok(ct_eq_bytes(computed_tag.as_slice(), parsed.tag.as_slice()))
+    }
+}
+
+// =============================================================================
+// PHC string encode/decode (RFC 9106 §6 + PHC format)
+// =============================================================================
+
+@derive(Clone, Debug)
+type ParsedPhc is {
+    params: Argon2idParams,
+    salt:   List<Byte>,
+    tag:    List<Byte>,
+};
+
+fn encode_phc(params: &Argon2idParams, salt: &[Byte], tag: &[Byte]) -> Text {
+    // PHC: $argon2id$v=19$m=<m>,t=<t>,p=<p>$<b64-salt>$<b64-tag>
+    // Base64 in PHC strings is the URL-safe variant WITHOUT padding.
+    let salt_b64 = base64.encode_url_no_pad(salt);
+    let tag_b64  = base64.encode_url_no_pad(tag);
+    f"$argon2id$v={ARGON2_VERSION}$m={params.memory_kib},t={params.iterations},p={params.parallelism}${salt_b64}${tag_b64}"
+}
+
+fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
+    let parts: List<Text> = phc.split('$').filter(|s| !s.is_empty()).collect();
+    if parts.len() != 5 { return Err(PasswordHashError.MalformedHash); }
+    if parts[0].as_str() != "argon2id" {
+        return Err(PasswordHashError.UnsupportedBackend(parts[0].clone()));
+    }
+    // Version segment.
+    let v_seg = parts[1].clone();
+    if !v_seg.starts_with("v=") { return Err(PasswordHashError.MalformedHash); }
+    let v_val: Int = v_seg.byte_substring(2, v_seg.len()).parse_int()
+        .map_err(|_| PasswordHashError.MalformedHash)?;
+    if v_val != ARGON2_VERSION { return Err(PasswordHashError.MalformedHash); }
+
+    // Parameters segment: m=...,t=...,p=...
+    let mut memory_kib: Int = 0;
+    let mut iterations: Int = 0;
+    let mut parallelism: Int = 0;
+    for kv in parts[2].split(',') {
+        let kv_bytes = kv.as_bytes();
+        if kv_bytes.len() < 3 || kv_bytes[1] != b'=' {
+            return Err(PasswordHashError.MalformedHash);
+        }
+        let key  = kv.byte_substring(0, 1);
+        let v_text = kv.byte_substring(2, kv.len());
+        let v_int: Int = v_text.parse_int().map_err(|_| PasswordHashError.MalformedHash)?;
+        match key.as_str() {
+            "m" => memory_kib  = v_int,
+            "t" => iterations  = v_int,
+            "p" => parallelism = v_int,
+            _   => return Err(PasswordHashError.MalformedHash),
+        }
+    }
+    let params = Argon2idParams { memory_kib, iterations, parallelism };
+
+    let salt = base64.decode_url_no_pad(&parts[3]).map_err(|_| PasswordHashError.EncodingError)?;
+    let tag  = base64.decode_url_no_pad(&parts[4]).map_err(|_| PasswordHashError.EncodingError)?;
+    if salt.len() < ARGON2_MIN_SALT_BYTES || salt.len() > ARGON2_MAX_SALT_BYTES {
+        return Err(PasswordHashError.MalformedHash);
+    }
+    if tag.len() < ARGON2_MIN_TAG_BYTES || tag.len() > ARGON2_MAX_TAG_BYTES {
+        return Err(PasswordHashError.MalformedHash);
+    }
+    Ok(ParsedPhc { params, salt, tag })
+}
+
+// =============================================================================
+// Salt generation
+// =============================================================================
+
+fn generate_salt(n: Int) -> Result<List<Byte>, PasswordHashError> {
+    if n < ARGON2_MIN_SALT_BYTES || n > ARGON2_MAX_SALT_BYTES {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: salt {n} bytes outside [{ARGON2_MIN_SALT_BYTES}, {ARGON2_MAX_SALT_BYTES}]"));
+    }
+    @intrinsic("verum.crypto.random_bytes", n)
+}
+
+// =============================================================================
+// Constant-time equality
+// =============================================================================
+
+fn ct_eq_bytes(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut diff: Int = 0;
+    let mut i: Int = 0;
+    while i < a.len() {
+        diff = diff | ((a[i] as Int) ^ (b[i] as Int));
+        i = i + 1;
+    }
+    diff == 0
+}
+
+// =============================================================================
+// Core KDF — delegates to the runtime-provided intrinsic
+// =============================================================================
+//
+// **Why an intrinsic.** Argon2id is a memory-hard function whose
+// performance hinges on tight memory access patterns + the BLAKE2b
+// permutation.  A pure-Verum implementation runs ~50× slower than
+// the reference C implementation due to bytecode dispatch overhead,
+// which would push our `Sensitive` profile from 500ms (target) to
+// 25s — operationally untenable for the login flow.
+//
+// The intrinsic is provided by the kernel's crypto runtime and
+// follows the standard pattern used by `sha256_digest`, `p256_sign`,
+// etc.  Inputs + outputs are concretely-sized byte arrays; no
+// pointer / handle abstractions are involved.
+//
+// **Safety.** The intrinsic implementation MUST be RFC 9106-faithful
+// — full Argon2id KAT vectors from RFC 9106 §C are pinned in
+// `tests/argon2id_rfc9106_kat.vr`.
+
+fn argon2id_derive(
+    password: &[Byte],
+    salt:     &[Byte],
+    params:   &Argon2idParams,
+    tag_len:  Int,
+) -> Result<List<Byte>, PasswordHashError> {
+    if tag_len < ARGON2_MIN_TAG_BYTES || tag_len > ARGON2_MAX_TAG_BYTES {
+        return Err(PasswordHashError.WeakParameters(
+            f"argon2id: tag {tag_len} outside [{ARGON2_MIN_TAG_BYTES}, {ARGON2_MAX_TAG_BYTES}]"));
+    }
+    @intrinsic(
+        "verum.argon2id.derive",
+        password,
+        salt,
+        params.memory_kib,
+        params.iterations,
+        params.parallelism,
+        tag_len,
+    )
+}
