@@ -1,0 +1,191 @@
+// =============================================================================
+// core-tests/base/error/integration_test.vr
+// =============================================================================
+//
+// Cross-module integration: error types in Result, ?-operator chains,
+// custom error hierarchies, format_error_chain through real flows.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.error.{StackFrame, Backtrace, ErrorProtocol, format_error_chain};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  Custom error hierarchy used in Result<T, MyError>.
+// -----------------------------------------------------------------------------
+
+type ParseError is {
+    msg: Text,
+    location: StackFrame,
+};
+
+implement Describable for ParseError {
+    fn description(&self) -> Text {
+        f"parse error: {self.msg} at {self.location.file}:{self.location.line}"
+    }
+}
+
+implement ErrorSource for ParseError {
+    fn source(&self) -> Maybe<&dyn Describable> { None }
+}
+
+implement ErrorProtocol for ParseError {}
+
+fn parse_int(s: &Text) -> Result<Int, ParseError> {
+    if *s == "42" { Ok(42) }
+    else if *s == "100" { Ok(100) }
+    else {
+        Err(ParseError {
+            msg: f"unexpected token: {s}",
+            location: StackFrame.new("parse_int", "test.vr", 1, 1),
+        })
+    }
+}
+
+@test
+fn integration_custom_error_in_result_happy_path() {
+    let r = parse_int(&"42");
+    assert_eq(r, Ok(42));
+}
+
+@test
+fn integration_custom_error_in_result_failure_path() {
+    let r = parse_int(&"abc");
+    assert(r.is_err());
+    let e = r.unwrap_err();
+    assert(e.msg.contains("abc"));
+    assert_eq(e.location.function, "parse_int");
+}
+
+// -----------------------------------------------------------------------------
+// §2  ?-operator with custom error types.
+// -----------------------------------------------------------------------------
+
+fn parse_pair(a: &Text, b: &Text) -> Result<Int, ParseError> {
+    let x = parse_int(a)?;
+    let y = parse_int(b)?;
+    Ok(x + y)
+}
+
+@test
+fn integration_q_operator_with_custom_error() {
+    assert_eq(parse_pair(&"42", &"100"), Ok(142));
+}
+
+@test
+fn integration_q_operator_short_circuits_on_first_err() {
+    let r = parse_pair(&"bad", &"100");
+    assert(r.is_err());
+    assert(r.unwrap_err().msg.contains("bad"));
+}
+
+@test
+fn integration_q_operator_short_circuits_on_second_err() {
+    let r = parse_pair(&"42", &"bad");
+    assert(r.is_err());
+    assert(r.unwrap_err().msg.contains("bad"));
+}
+
+// -----------------------------------------------------------------------------
+// §3  format_error_chain on a real two-level chain.
+// -----------------------------------------------------------------------------
+
+type IoError is { kind: Text };
+
+implement Describable for IoError {
+    fn description(&self) -> Text { f"io error: {self.kind}" }
+}
+
+implement ErrorSource for IoError {
+    fn source(&self) -> Maybe<&dyn Describable> { None }
+}
+
+type ConfigError is {
+    msg: Text,
+    cause: IoError,
+};
+
+implement Describable for ConfigError {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for ConfigError {
+    fn source(&self) -> Maybe<&dyn Describable> {
+        Some(&self.cause as &dyn Describable)
+    }
+}
+
+@test
+fn integration_format_error_chain_two_levels() {
+    let inner = IoError { kind: "permission denied" };
+    let outer = ConfigError {
+        msg: "failed to load config",
+        cause: inner,
+    };
+    let formatted = format_error_chain(&outer);
+    assert(formatted.contains("failed to load config"));
+    assert(formatted.contains("caused by"));
+    assert(formatted.contains("permission denied"));
+}
+
+// -----------------------------------------------------------------------------
+// §4  Backtrace wrapped in error type — round-trip through ErrorProtocol.
+// -----------------------------------------------------------------------------
+
+type WrappedError is {
+    msg: Text,
+    bt: Backtrace,
+};
+
+implement Describable for WrappedError {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for WrappedError {
+    fn source(&self) -> Maybe<&dyn Describable> { None }
+}
+
+implement ErrorProtocol for WrappedError {
+    fn backtrace(&self) -> Maybe<Backtrace> {
+        Some(self.bt.clone())
+    }
+}
+
+@test
+fn integration_error_protocol_returns_attached_backtrace() {
+    let frames: List<StackFrame> = [
+        StackFrame.new("inner", "a.vr", 10, 5),
+        StackFrame.new("outer", "b.vr", 20, 8),
+    ];
+    let e = WrappedError {
+        msg: "with backtrace",
+        bt: Backtrace.from_frames(frames),
+    };
+
+    let recovered = e.backtrace();
+    assert(recovered.is_some());
+    assert_eq(recovered.unwrap().len(), 2);
+}
+
+@test
+fn integration_error_protocol_default_backtrace_is_none() {
+    type Plain is { msg: Text };
+    implement Describable for Plain {
+        fn description(&self) -> Text { self.msg.clone() }
+    }
+    implement ErrorSource for Plain {
+        fn source(&self) -> Maybe<&dyn Describable> { None }
+    }
+    implement ErrorProtocol for Plain {}
+
+    let e = Plain { msg: "no bt" };
+    assert(e.backtrace().is_none());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

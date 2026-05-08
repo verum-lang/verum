@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/base/snowflake/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.snowflake` — Twitter-style 64-bit time-ordered
+// IDs (41-bit timestamp + 10-bit machine + 12-bit sequence).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.snowflake.{Snowflake, SnowflakeError, SnowflakeParts, parse};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Snowflake.new with valid parameters
+// =============================================================================
+
+@test
+fn test_snowflake_new_with_valid_worker() {
+    let r = Snowflake.new(0_u64, 1_u64);
+    assert(r.is_ok());
+}
+
+@test
+fn test_snowflake_using_default_epoch() {
+    let r = Snowflake.using_default_epoch(1_u64);
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// Section 2: next_id produces non-zero IDs
+// =============================================================================
+
+@test
+fn test_next_id_succeeds_first_call() {
+    let r = Snowflake.using_default_epoch(1_u64);
+    assert(r.is_ok());
+    let mut sf = r.unwrap();
+    let id_r = sf.next_id();
+    assert(id_r.is_ok());
+}
+
+// =============================================================================
+// Section 3: Sequential next_id calls produce monotonically increasing IDs
+// =============================================================================
+
+@test
+fn test_next_id_monotonic_within_same_ms() {
+    let mut sf = Snowflake.using_default_epoch(1_u64).unwrap();
+    let id1 = sf.next_id().unwrap();
+    let id2 = sf.next_id().unwrap();
+    let id3 = sf.next_id().unwrap();
+    assert(id1 < id2);
+    assert(id2 < id3);
+}
+
+// =============================================================================
+// Section 4: parse decodes ID into parts
+// =============================================================================
+
+@test
+fn test_parse_round_trip_through_parts() {
+    let mut sf = Snowflake.using_default_epoch(7_u64).unwrap();
+    let id = sf.next_id().unwrap();
+    let parts: SnowflakeParts = parse(id, sf.epoch_ms());
+    // worker_id should round-trip
+    assert_eq(parts.worker_id, 7_u64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

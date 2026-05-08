@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/base/semver/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for SemVer.
+// Laws: parse round-trip, total-order axioms, monotonicity by component.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer, parse, cmp, format_semver};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  parse ∘ format round-trip on canonical witnesses.
+// =============================================================================
+
+@test
+fn law_parse_format_round_trip() {
+    let cases: List<Text> = [
+        "0.0.0".to_text(),
+        "1.0.0".to_text(),
+        "1.2.3".to_text(),
+        "10.20.30".to_text(),
+        "1.0.0-alpha".to_text(),
+        "1.0.0-alpha.1".to_text(),
+        "1.0.0-rc.1+build.abc".to_text(),
+    ];
+    for s in cases.iter() {
+        let v = parse(s).unwrap();
+        assert_eq(format_semver(&v), *s);
+    }
+}
+
+// =============================================================================
+// §B  cmp reflexivity.
+// =============================================================================
+
+@test
+fn law_cmp_reflexive() {
+    let cases: List<Text> = [
+        "0.0.0".to_text(),
+        "1.2.3".to_text(),
+        "1.0.0-rc.1".to_text(),
+    ];
+    for s in cases.iter() {
+        let v = parse(s).unwrap();
+        assert_eq(cmp(&v, &v), 0);
+    }
+}
+
+// =============================================================================
+// §C  cmp anti-symmetry.
+// =============================================================================
+
+@test
+fn law_cmp_anti_symmetric() {
+    let pairs: List<(Text, Text)> = [
+        ("1.0.0".to_text(), "2.0.0".to_text()),
+        ("1.0.0".to_text(), "1.0.1".to_text()),
+        ("1.0.0".to_text(), "1.1.0".to_text()),
+        ("1.0.0-alpha".to_text(), "1.0.0".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a_s, b_s) = (*p);
+        let a = parse(&a_s).unwrap();
+        let b = parse(&b_s).unwrap();
+        let ab = cmp(&a, &b);
+        let ba = cmp(&b, &a);
+        // sign(ab) == -sign(ba)
+        if ab < 0 { assert(ba > 0); }
+        if ab > 0 { assert(ba < 0); }
+        if ab == 0 { assert_eq(ba, 0); }
+    }
+}
+
+// =============================================================================
+// §D  cmp transitivity.
+// =============================================================================
+
+@test
+fn law_cmp_transitive() {
+    let a = parse(&"1.0.0".to_text()).unwrap();
+    let b = parse(&"1.0.1".to_text()).unwrap();
+    let c = parse(&"1.0.2".to_text()).unwrap();
+    if cmp(&a, &b) < 0 && cmp(&b, &c) < 0 { assert(cmp(&a, &c) < 0); }
+}
+
+// =============================================================================
+// §E  Component monotonicity.
+// =============================================================================
+
+@test
+fn law_major_dominates_minor() {
+    let a = parse(&"2.0.0".to_text()).unwrap();
+    let b = parse(&"1.99.99".to_text()).unwrap();
+    assert(cmp(&a, &b) > 0);
+}
+
+@test
+fn law_minor_dominates_patch() {
+    let a = parse(&"1.2.0".to_text()).unwrap();
+    let b = parse(&"1.1.99".to_text()).unwrap();
+    assert(cmp(&a, &b) > 0);
+}
+
+// =============================================================================
+// §F  @test_case — known SemVer comparison fixtures from semver.org spec.
+// =============================================================================
+
+@test_case("1.0.0-alpha".to_text(),     "1.0.0-alpha.1".to_text(), -1)
+@test_case("1.0.0-alpha.1".to_text(),   "1.0.0-alpha.beta".to_text(), -1)
+@test_case("1.0.0-alpha.beta".to_text(), "1.0.0-beta".to_text(), -1)
+@test_case("1.0.0-beta".to_text(),      "1.0.0-beta.2".to_text(), -1)
+@test_case("1.0.0-beta.2".to_text(),    "1.0.0-beta.11".to_text(), -1)
+@test_case("1.0.0-beta.11".to_text(),   "1.0.0-rc.1".to_text(), -1)
+@test_case("1.0.0-rc.1".to_text(),      "1.0.0".to_text(), -1)
+fn parametrised_prerelease_ordering(a_s: Text, b_s: Text, expected_sign: Int) {
+    let a = parse(&a_s).unwrap();
+    let b = parse(&b_s).unwrap();
+    let n = cmp(&a, &b);
+    if expected_sign < 0 { assert(n < 0); }
+    else if expected_sign > 0 { assert(n > 0); }
+    else { assert_eq(n, 0); }
+}
+
+fn main() {}

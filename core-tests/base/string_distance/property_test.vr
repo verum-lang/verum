@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/base/string_distance/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for string-distance functions:
+// metric axioms (d(a,a)=0, d(a,b)≥0, d(a,b)=d(b,a), triangle inequality).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.string_distance.{levenshtein, jaro, jaro_winkler};
+mount core.collections.list.List;
+
+fn bytes(s: &str) -> List<Byte> {
+    let mut bs: List<Byte> = [];
+    for c in s.chars() { bs.push(c as Byte); }
+    bs
+}
+
+// =============================================================================
+// §A  Levenshtein metric axioms.
+// =============================================================================
+
+@test
+fn law_levenshtein_zero_iff_equal() {
+    let cases: List<Text> = ["".to_text(), "a".to_text(), "abc".to_text(), "kitten".to_text()];
+    for s in cases.iter() {
+        let bs = bytes(s);
+        assert_eq(levenshtein(&bs, &bs), 0);
+    }
+}
+
+@test
+fn law_levenshtein_non_negative() {
+    let pairs: List<(Text, Text)> = [
+        ("kitten".to_text(), "sitting".to_text()),
+        ("".to_text(), "abc".to_text()),
+        ("hello".to_text(), "world".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = (*p);
+        let d = levenshtein(&bytes(&a), &bytes(&b));
+        assert(d >= 0);
+    }
+}
+
+@test
+fn law_levenshtein_symmetric() {
+    let pairs: List<(Text, Text)> = [
+        ("kitten".to_text(), "sitting".to_text()),
+        ("abc".to_text(), "xyz".to_text()),
+        ("a".to_text(), "ab".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = (*p);
+        let ab = levenshtein(&bytes(&a), &bytes(&b));
+        let ba = levenshtein(&bytes(&b), &bytes(&a));
+        assert_eq(ab, ba);
+    }
+}
+
+@test
+fn law_levenshtein_triangle_inequality() {
+    let triples: List<(Text, Text, Text)> = [
+        ("kitten".to_text(), "sitting".to_text(), "fitting".to_text()),
+        ("abc".to_text(), "xyz".to_text(), "qwe".to_text()),
+    ];
+    for t in triples.iter() {
+        let (a, b, c) = (*t);
+        let ac = levenshtein(&bytes(&a), &bytes(&c));
+        let ab = levenshtein(&bytes(&a), &bytes(&b));
+        let bc = levenshtein(&bytes(&b), &bytes(&c));
+        // d(a,c) ≤ d(a,b) + d(b,c)
+        assert(ac <= ab + bc);
+    }
+}
+
+// =============================================================================
+// §B  Jaro range [0, 1].
+// =============================================================================
+
+@test
+fn law_jaro_in_unit_interval() {
+    let pairs: List<(Text, Text)> = [
+        ("MARTHA".to_text(), "MARHTA".to_text()),
+        ("DIXON".to_text(), "DICKSONX".to_text()),
+        ("JELLYFISH".to_text(), "SMELLYFISH".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = (*p);
+        let v = jaro(&bytes(&a), &bytes(&b));
+        assert(v >= 0.0);
+        assert(v <= 1.0);
+    }
+}
+
+@test
+fn law_jaro_symmetric() {
+    let pairs: List<(Text, Text)> = [
+        ("MARTHA".to_text(), "MARHTA".to_text()),
+        ("abc".to_text(), "abd".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = (*p);
+        let ab = jaro(&bytes(&a), &bytes(&b));
+        let ba = jaro(&bytes(&b), &bytes(&a));
+        let diff = if ab > ba { ab - ba } else { ba - ab };
+        assert(diff < 1e-9);
+    }
+}
+
+// =============================================================================
+// §C  Jaro-Winkler ≥ Jaro (prefix bonus is non-negative).
+// =============================================================================
+
+@test
+fn law_jaro_winkler_at_least_jaro() {
+    let pairs: List<(Text, Text)> = [
+        ("MARTHA".to_text(), "MARHTA".to_text()),
+        ("DIXON".to_text(), "DICKSONX".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = (*p);
+        let j = jaro(&bytes(&a), &bytes(&b));
+        let jw = jaro_winkler(&bytes(&a), &bytes(&b));
+        assert(jw >= j - 1e-9);   // tolerance for float precision
+    }
+}
+
+fn main() {}

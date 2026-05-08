@@ -1,16 +1,8 @@
 // =============================================================================
 // memory_cbgr_test.vr - Comprehensive CBGR Memory Safety Tests
 // =============================================================================
-// @test: typecheck-pass
-// @level: L0
-// @tier: 0
-// @tags: core, memory, cbgr, heap, shared, weak, safety, allocation
-// @description: Industrial-grade tests for CBGR memory safety system including
-//               Heap<T>, Shared<T>, Weak<T>, generation/epoch tracking,
-//               use-after-free detection, and reference counting correctness.
 // =============================================================================
 
-module specs.stdlib.core.memory_cbgr_test;
 
 // Heap, Shared, Weak, Maybe, Result, etc. are available from prelude.
 // Ordering, protocols are from core.base.

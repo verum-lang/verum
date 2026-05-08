@@ -1,12 +1,11 @@
 // =============================================================================
-// maybe_test.vr - Comprehensive tests for Maybe<T> optional type
+// core-tests/base/maybe/unit_test.vr
 // =============================================================================
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: core, maybe, optional, monad, safety
-// @description: Tests for Maybe<T> type including predicates, unwrapping,
-//               transformations, combinators, mutation, and protocol implementations.
+//
+// Per-method tests for `core.base.maybe.Maybe<T>`. Companion files:
+//   property_test.vr     — monad / functor / Eq / Ord laws + @property
+//   integration_test.vr  — Maybe in collections, ?-chains
+//   audit.md             — variant-tag drift surfaces
 //
 // Coverage:
 // - Maybe<T> type definition (None | Some(T))

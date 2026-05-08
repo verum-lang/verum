@@ -1,11 +1,6 @@
 // =============================================================================
 // data_test.vr - Comprehensive tests for core/data.vr
 // =============================================================================
-// @test: typecheck-pass
-// @tier: 1
-// @level: L1-core
-// @tags: data, dynamic, json, structured, polymorphic
-// @timeout: 30000
 // =============================================================================
 //
 // Tests for structured dynamic data type:

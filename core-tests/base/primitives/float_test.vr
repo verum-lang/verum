@@ -1,15 +1,8 @@
 // =============================================================================
 // primitives_float_test.vr - Comprehensive tests for Float type methods
 // =============================================================================
-// @test: run-interpreter
-// @level: L1
-// @tier: 0
-// @tags: core, primitives, float, ieee754, math, trigonometry
-// @description: Industrial-grade tests for Float64 (IEEE 754) covering all methods,
-//               special values (NaN, infinity), mathematical functions, and edge cases
 // =============================================================================
 
-module specs.stdlib.core.primitives_float_test;
 
 mount core.prelude.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};

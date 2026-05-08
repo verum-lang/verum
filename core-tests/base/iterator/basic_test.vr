@@ -1,11 +1,6 @@
 // =============================================================================
 // iterator_basic_test.vr - Basic iterator tests without complex dependencies
 // =============================================================================
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: core, iterator, basic, minimal
-// @description: Basic iterator functionality tests using List.iter()
 // =============================================================================
 
 mount core.maybe.{Maybe, Some, None};

@@ -1,0 +1,297 @@
+// =============================================================================
+// core-tests/base/panic/property_test.vr
+// =============================================================================
+//
+// Algebraic-law and contract verification for `core/base/panic.vr`. Most
+// of this surface is side-effecting (panics terminate the process), so
+// the laws are stated indirectly via `assert_panics` or `catch_unwind`
+// or via the non-panicking happy paths.
+//
+// Laws verified:
+//   §A  assert(true)  is a no-op             happy-path identity
+//   §B  assert(false) panics                  expected panic
+//   §C  assert_eq(a, a) is a no-op            reflexivity
+//   §D  assert_eq(a, b) where a ≠ b panics    discrimination
+//   §E  assert_ne is the dual of assert_eq    discrimination
+//   §F  assert_some/assert_none discriminate  variant axis
+//   §G  assert_ok/assert_err discriminate     variant axis
+//   §H  assert_between accepts only [lo, hi]  bounds law
+//   §I  assert_is_sorted accepts ascending    monotonicity
+//   §J  assert_contains accepts present       membership
+//   §K  catch_unwind round-trips happy-path    catch ∘ Ok = Ok
+//
+// Plus @property generators across the Int input axis to widen
+// example-based coverage.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §A / §B  assert basic discrimination
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_true_is_no_op() {
+    assert(true);                 // must not panic — no test verdict needed
+    assert(true, "with message");
+}
+
+@test
+fn law_assert_false_panics() {
+    assert_panics(|| {
+        assert(false, "intentional");
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §C / §D  assert_eq reflexive on equal, panicks on different
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_eq_reflexive_int() {
+    assert_eq(0, 0);
+    assert_eq(42, 42);
+    assert_eq(-1, -1);
+}
+
+@test
+fn law_assert_eq_panics_on_inequality() {
+    assert_panics(|| {
+        assert_eq(1, 2);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §E  assert_ne is the dual
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_ne_panics_on_equality() {
+    assert_panics(|| {
+        assert_ne(7, 7);
+    });
+}
+
+@test
+fn law_assert_ne_passes_on_inequality() {
+    assert_ne(1, 2);
+    assert_ne("a", "b");
+}
+
+// -----------------------------------------------------------------------------
+// §F  assert_some / assert_none discrimination
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_some_returns_inner_value() {
+    let v: Int = assert_some(Some(42));
+    assert_eq(v, 42);
+}
+
+@test
+fn law_assert_some_panics_on_none() {
+    assert_panics(|| {
+        let _: Int = assert_some(None);
+    });
+}
+
+@test
+fn law_assert_none_passes_on_none() {
+    let m: Maybe<Int> = None;
+    assert_none(m);                          // must not panic
+}
+
+@test
+fn law_assert_none_panics_on_some() {
+    assert_panics(|| {
+        let m: Maybe<Int> = Some(1);
+        assert_none(m);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §G  assert_ok / assert_err discrimination
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_ok_returns_inner_value() {
+    let r: Result<Int, Text> = Ok(7);
+    let v = assert_ok(r);
+    assert_eq(v, 7);
+}
+
+@test
+fn law_assert_ok_panics_on_err() {
+    assert_panics(|| {
+        let r: Result<Int, Text> = Err("x");
+        let _ = assert_ok(r);
+    });
+}
+
+@test
+fn law_assert_err_returns_inner_error() {
+    let r: Result<Int, Text> = Err("boom");
+    let e = assert_err(r);
+    assert_eq(e, "boom");
+}
+
+@test
+fn law_assert_err_panics_on_ok() {
+    assert_panics(|| {
+        let r: Result<Int, Text> = Ok(1);
+        let _ = assert_err(r);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §H  assert_between bounds law
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_between_accepts_lower_bound() {
+    assert_between(0, 0, 10);                // inclusive lower
+}
+
+@test
+fn law_assert_between_accepts_upper_bound() {
+    assert_between(10, 0, 10);               // inclusive upper
+}
+
+@test
+fn law_assert_between_accepts_interior() {
+    assert_between(5, 0, 10);
+}
+
+@test
+fn law_assert_between_panics_below_lower() {
+    assert_panics(|| { assert_between(-1, 0, 10); });
+}
+
+@test
+fn law_assert_between_panics_above_upper() {
+    assert_panics(|| { assert_between(11, 0, 10); });
+}
+
+// -----------------------------------------------------------------------------
+// §I  assert_is_sorted accepts monotone non-decreasing lists
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_sorted_empty_is_trivially_sorted() {
+    let xs: List<Int> = [];
+    assert_is_sorted(&xs);
+}
+
+@test
+fn law_assert_sorted_singleton_is_trivially_sorted() {
+    let xs: List<Int> = [42];
+    assert_is_sorted(&xs);
+}
+
+@test
+fn law_assert_sorted_strict_ascending() {
+    let xs: List<Int> = [1, 2, 3, 5, 8];
+    assert_is_sorted(&xs);
+}
+
+@test
+fn law_assert_sorted_with_duplicates() {
+    let xs: List<Int> = [1, 2, 2, 3, 3, 4];
+    assert_is_sorted(&xs);
+}
+
+@test
+fn law_assert_sorted_panics_on_inversion() {
+    assert_panics(|| {
+        let xs: List<Int> = [1, 3, 2];
+        assert_is_sorted(&xs);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §J  assert_contains membership
+// -----------------------------------------------------------------------------
+
+@test
+fn law_assert_contains_accepts_present() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    assert_contains(&xs, &3);
+}
+
+@test
+fn law_assert_contains_panics_on_absent() {
+    assert_panics(|| {
+        let xs: List<Int> = [1, 2, 3];
+        assert_contains(&xs, &99);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// §K  catch_unwind round-trip happy-path
+// -----------------------------------------------------------------------------
+
+@test
+fn law_catch_unwind_returns_ok_when_no_panic() {
+    let r = catch_unwind(|| 42);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn law_catch_unwind_returns_err_when_panic() {
+    let r: Result<Int, Text> = catch_unwind(|| {
+        panic("intentional");
+    });
+    assert(r.is_err());
+}
+
+// =============================================================================
+// §L  Auto-generated property tests via @property.
+//
+// Sample over the Int axis to widen coverage of value-discriminating
+// asserts (assert_eq, assert_ne, assert_between).
+// =============================================================================
+
+/// For any Int n, `assert_eq(n, n)` is a no-op (must not panic).
+@property
+fn prop_assert_eq_reflexive_int(n: Int) {
+    assert_eq(n, n);
+}
+
+/// For any Int n, `assert_ne(n, n + 1)` is a no-op
+/// (since n != n + 1 unless n + 1 wraps to n; we guard by clamping).
+@property
+fn prop_assert_ne_succ_int(n: Int) {
+    if n != Int.MAX {
+        assert_ne(n, n + 1);
+    }
+}
+
+/// For any Int n, assert_between(n, n, n) accepts the singleton range.
+@property
+fn prop_assert_between_singleton(n: Int) {
+    assert_between(n, n, n);
+}
+
+// =============================================================================
+// §M  Parametrised tests via @test_case — assert_between truth table.
+// =============================================================================
+
+@test_case(5,  0, 10, true)        // interior
+@test_case(0,  0, 10, true)        // lower bound
+@test_case(10, 0, 10, true)        // upper bound
+@test_case(-1, 0, 10, false)       // below
+@test_case(11, 0, 10, false)       // above
+fn parametrised_assert_between_truth_table(v: Int, lo: Int, hi: Int, ok: Bool) {
+    let r = catch_unwind(|| { assert_between(v, lo, hi); });
+    assert_eq(r.is_ok(), ok);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

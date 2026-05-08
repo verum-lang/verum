@@ -1,11 +1,4 @@
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: try, block, type-inference, result, error-handling
-// @description: Comprehensive tests for try block type inference
-//               Documents current behavior and expected improvements
 
-module specs.stdlib.core.try_block_test;
 
 mount core.primitives.*;
 mount core.maybe.{Maybe, Some, None};

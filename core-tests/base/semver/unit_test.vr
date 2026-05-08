@@ -1,0 +1,138 @@
+// =============================================================================
+// core-tests/base/semver/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.semver` — SemVer 2.0.0 parser and comparator.
+// Reference: https://semver.org/spec/v2.0.0.html
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer, SemVerError, parse, cmp, format_semver};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Canonical parsing
+// =============================================================================
+
+@test
+fn test_parse_canonical_major_minor_patch() {
+    let v = parse(&"1.2.3".to_text()).unwrap();
+    assert_eq(v.major, 1_u64);
+    assert_eq(v.minor, 2_u64);
+    assert_eq(v.patch, 3_u64);
+}
+
+@test
+fn test_parse_zero_version() {
+    let v = parse(&"0.0.0".to_text()).unwrap();
+    assert_eq(v.major, 0_u64);
+    assert_eq(v.minor, 0_u64);
+    assert_eq(v.patch, 0_u64);
+}
+
+@test
+fn test_parse_with_prerelease() {
+    let v = parse(&"1.0.0-alpha".to_text()).unwrap();
+    assert_eq(v.major, 1_u64);
+}
+
+@test
+fn test_parse_with_build_metadata() {
+    let v = parse(&"1.0.0+build.123".to_text()).unwrap();
+    assert_eq(v.major, 1_u64);
+}
+
+@test
+fn test_parse_with_prerelease_and_build() {
+    let v = parse(&"1.0.0-rc.1+commit.abc".to_text()).unwrap();
+    assert_eq(v.major, 1_u64);
+}
+
+// =============================================================================
+// Section 2: Invalid inputs
+// =============================================================================
+
+@test
+fn test_parse_empty_string_returns_err() {
+    let r = parse(&"".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_missing_components_returns_err() {
+    assert(parse(&"1".to_text()).is_err());
+    assert(parse(&"1.2".to_text()).is_err());
+}
+
+@test
+fn test_parse_non_numeric_returns_err() {
+    assert(parse(&"abc.def.ghi".to_text()).is_err());
+}
+
+@test
+fn test_parse_leading_zeros_rejected() {
+    // SemVer 2.0.0 §2: numeric identifiers MUST NOT have leading zeros.
+    assert(parse(&"01.2.3".to_text()).is_err());
+}
+
+// =============================================================================
+// Section 3: cmp ordering
+// =============================================================================
+
+@test
+fn test_cmp_major_difference() {
+    let a = parse(&"1.0.0".to_text()).unwrap();
+    let b = parse(&"2.0.0".to_text()).unwrap();
+    assert(cmp(&a, &b) < 0);
+    assert(cmp(&b, &a) > 0);
+}
+
+@test
+fn test_cmp_minor_difference() {
+    let a = parse(&"1.0.0".to_text()).unwrap();
+    let b = parse(&"1.1.0".to_text()).unwrap();
+    assert(cmp(&a, &b) < 0);
+}
+
+@test
+fn test_cmp_patch_difference() {
+    let a = parse(&"1.0.0".to_text()).unwrap();
+    let b = parse(&"1.0.1".to_text()).unwrap();
+    assert(cmp(&a, &b) < 0);
+}
+
+@test
+fn test_cmp_equal_versions() {
+    let a = parse(&"1.2.3".to_text()).unwrap();
+    let b = parse(&"1.2.3".to_text()).unwrap();
+    assert_eq(cmp(&a, &b), 0);
+}
+
+@test
+fn test_cmp_prerelease_lower_than_release() {
+    // 1.0.0-alpha < 1.0.0
+    let a = parse(&"1.0.0-alpha".to_text()).unwrap();
+    let b = parse(&"1.0.0".to_text()).unwrap();
+    assert(cmp(&a, &b) < 0);
+}
+
+// =============================================================================
+// Section 4: format_semver round-trip
+// =============================================================================
+
+@test
+fn test_format_semver_round_trip_canonical() {
+    let cases: List<Text> = [
+        "0.0.0".to_text(),
+        "1.2.3".to_text(),
+        "1.0.0-alpha".to_text(),
+        "1.0.0-rc.1".to_text(),
+    ];
+    for s in cases.iter() {
+        let v = parse(s).unwrap();
+        let formatted = format_semver(&v);
+        assert_eq(formatted, *s);
+    }
+}
+
+fn main() {}

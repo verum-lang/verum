@@ -1,0 +1,271 @@
+// =============================================================================
+// core-tests/base/ops/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/base/ops.vr`. The carriers (`Try`,
+// `FromResidual`, `ControlFlow`, `Never`, `Residual`) underpin Verum's
+// `?`-operator and control-flow desugaring — getting their laws right is
+// load-bearing for every fallible API in the standard library.
+//
+// Laws verified:
+//   §A  ControlFlow predicate disjointness  is_continue ⊕ is_break
+//   §B  Map laws on ControlFlow             identity, composition
+//   §C  Continue / Break round-trip          continue_value ∘ Continue = id
+//   §D  Try-protocol coherence on Maybe<T>   branch ∘ from_output ⊆ Continue
+//   §E  Try-protocol coherence on Result<T,E> branch ∘ from_output ⊆ Continue
+//   §F  FromResidual round-trip              ?-propagation preserves payload
+//   §G  Never type inhabitation              `!` is uninhabited (compile-time)
+//
+// Plus auto-generated @property samples on Int and Bool inputs to widen
+// the witness set beyond hand-picked examples.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §A  ControlFlow predicate disjointness — exactly-one of is_continue / is_break.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_controlflow_predicate_disjoint_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    assert(cf.is_continue());
+    assert(!cf.is_break());
+    assert(cf.is_continue() ^ cf.is_break());   // XOR — exactly one
+}
+
+@test
+fn law_controlflow_predicate_disjoint_break() {
+    let cf: ControlFlow<Text, Int> = Break("err");
+    assert(!cf.is_continue());
+    assert(cf.is_break());
+    assert(cf.is_continue() ^ cf.is_break());
+}
+
+// -----------------------------------------------------------------------------
+// §B  Functor laws on map_continue / map_break.
+//
+// Identity: c.map_continue(|x| x) == c
+// Composition: c.map_continue(f).map_continue(g) == c.map_continue(|x| g(f(x)))
+// -----------------------------------------------------------------------------
+
+@test
+fn law_map_continue_identity_on_continue() {
+    let cf: ControlFlow<Text, Int> = Continue(7);
+    let mapped = cf.map_continue(|x| x);
+    assert(mapped.is_continue());
+    assert_eq(mapped.continue_value(), 7);
+}
+
+@test
+fn law_map_continue_identity_on_break_unchanged() {
+    let cf: ControlFlow<Text, Int> = Break("err");
+    let mapped = cf.map_continue(|x| x * 2);
+    assert(mapped.is_break());                  // map_continue does not touch Break
+    assert_eq(mapped.break_value(), "err");
+}
+
+@test
+fn law_map_break_identity_on_break() {
+    let cf: ControlFlow<Text, Int> = Break("err");
+    let mapped = cf.map_break(|s| s);
+    assert(mapped.is_break());
+    assert_eq(mapped.break_value(), "err");
+}
+
+@test
+fn law_map_continue_composition() {
+    // (f . g)(x) = f(g(x)) on Continue payloads
+    let cf: ControlFlow<Text, Int> = Continue(5);
+    let lhs = cf.map_continue(|x| x + 1).map_continue(|x| x * 2);
+    let rhs = Continue(5).map_continue(|x| (x + 1) * 2);
+    assert_eq(lhs.continue_value(), rhs.continue_value());
+    assert_eq(lhs.continue_value(), 12);
+}
+
+@test
+fn law_map_break_composition() {
+    let cf: ControlFlow<Int, Text> = Break(10);
+    let lhs = cf.map_break(|n| n + 5).map_break(|n| n * 3);
+    let rhs: ControlFlow<Int, Text> = Break((10 + 5) * 3);
+    assert_eq(lhs.break_value(), rhs.break_value());
+    assert_eq(lhs.break_value(), 45);
+}
+
+// -----------------------------------------------------------------------------
+// §C  Continue / Break round-trip — destructors invert constructors.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_continue_value_round_trip() {
+    let original = 42;
+    let cf: ControlFlow<Text, Int> = Continue(original);
+    assert_eq(cf.continue_value(), original);
+}
+
+@test
+fn law_break_value_round_trip() {
+    let original: Text = "boom";
+    let cf: ControlFlow<Text, Int> = Break(original);
+    assert_eq(cf.break_value(), original);
+}
+
+// -----------------------------------------------------------------------------
+// §D  Try-protocol coherence on Maybe<T>: from_output ∘ branch is identity-on-Continue.
+//
+// from_output wraps a value into the carrier; branch unwraps. For success
+// values, branch should report Continue with the original payload.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_maybe_try_from_output_branch_continue() {
+    let m: Maybe<Int> = Maybe.from_output(7);
+    match m.branch() {
+        Continue(v) => assert_eq(v, 7),
+        Break(_) => panic("Maybe.from_output(_).branch() must be Continue"),
+    }
+}
+
+@test
+fn law_maybe_try_branch_none_is_break() {
+    let m: Maybe<Int> = None;
+    assert(m.branch().is_break());
+}
+
+// -----------------------------------------------------------------------------
+// §E  Try-protocol coherence on Result<T, E>.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_result_try_from_output_branch_continue() {
+    let r: Result<Int, Text> = Result.from_output(7);
+    match r.branch() {
+        Continue(v) => assert_eq(v, 7),
+        Break(_) => panic("Result.from_output(_).branch() must be Continue"),
+    }
+}
+
+@test
+fn law_result_try_branch_err_is_break() {
+    let r: Result<Int, Text> = Err("boom");
+    assert(r.branch().is_break());
+}
+
+// -----------------------------------------------------------------------------
+// §F  FromResidual round-trip — the bridge that ?-propagation uses.
+//
+// When a function returns `Result<T, OuterE>` and ?-propagates a
+// `Result<U, InnerE>` where `OuterE: From<InnerE>`, the residual is
+// converted in-place. We test the simplest mono case: `Result<Never, E>
+// -> Result<T, E>`.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_result_from_residual_preserves_err_payload() {
+    fn produce_residual() -> Result<Never, Text> { Err("payload") }
+    let r: Result<Int, Text> = Result.from_residual(produce_residual());
+    assert(r.is_err());
+    assert_eq(r.unwrap_err(), "payload");
+}
+
+@test
+fn law_maybe_from_residual_collapses_to_none() {
+    fn produce_residual() -> Maybe<Never> { None }
+    let m: Maybe<Int> = Maybe.from_residual(produce_residual());
+    assert(m.is_none());
+}
+
+// -----------------------------------------------------------------------------
+// §G  Never type — uninhabited at the type-system level.
+//
+// We can't `produce` a Never value, but we can take it as a parameter
+// in a function whose body proves it's unreachable. The function below
+// must typecheck; calling it at runtime would require constructing a
+// Never, which is impossible by definition.
+// -----------------------------------------------------------------------------
+
+fn absurd<T>(_: Never) -> T {
+    // Body unreachable: no value of `Never` ever exists. Verum's
+    // exhaustiveness checker accepts an empty body for `!`-typed input.
+    unreachable()
+}
+
+@test
+fn law_never_function_typechecks_but_unreachable() {
+    // Just exercising the type signature — no value of Never is ever
+    // constructed, so absurd is never called. The presence of this
+    // test verifies that absurd<T> compiles, which is the contract.
+    let _: fn(Never) -> Int = |n| absurd(n);
+}
+
+// =============================================================================
+// §H  Auto-generated property tests via @property.
+//
+// Generators today only handle primitive types (see CAPABILITY_GAPS.md §1.1).
+// We sample Int / Bool inputs to feed properties that quantify over
+// payloads, and pin compound-type generators as a deferred capability.
+// =============================================================================
+
+/// For any Int payload, Continue.continue_value() returns the payload.
+@property
+fn prop_continue_value_round_trip_int(n: Int) {
+    let cf: ControlFlow<Text, Int> = Continue(n);
+    assert_eq(cf.continue_value(), n);
+}
+
+/// For any Bool payload, Break.break_value() returns the payload.
+@property
+fn prop_break_value_round_trip_bool(b: Bool) {
+    let cf: ControlFlow<Bool, Int> = Break(b);
+    assert_eq(cf.break_value(), b);
+}
+
+/// map_continue applied to (n + 1) then (·*2) equals (n + 1) * 2 for any Int.
+@property
+fn prop_map_continue_composition_int(n: Int) {
+    let cf: ControlFlow<Text, Int> = Continue(n);
+    let composed = cf.map_continue(|x| x + 1).map_continue(|x| x * 2);
+    let direct: ControlFlow<Text, Int> = Continue((n + 1) * 2);
+    assert_eq(composed.continue_value(), direct.continue_value());
+}
+
+// =============================================================================
+// §I  Parametrised tests via @test_case — table-driven Try-protocol coverage.
+// =============================================================================
+
+/// Maybe<Int>'s branch result by variant.
+@test_case(Some(1),  true,  false)
+@test_case(Some(0),  true,  false)
+@test_case(None,     false, true)
+fn parametrised_maybe_branch_classification(
+    m: Maybe<Int>,
+    expected_continue: Bool,
+    expected_break: Bool,
+) {
+    let cf = m.branch();
+    assert_eq(cf.is_continue(), expected_continue);
+    assert_eq(cf.is_break(), expected_break);
+}
+
+/// Result<Int, Text>'s branch result by variant.
+@test_case(Ok(1),         true,  false)
+@test_case(Ok(0),         true,  false)
+@test_case(Err("x"),      false, true)
+fn parametrised_result_branch_classification(
+    r: Result<Int, Text>,
+    expected_continue: Bool,
+    expected_break: Bool,
+) {
+    let cf = r.branch();
+    assert_eq(cf.is_continue(), expected_continue);
+    assert_eq(cf.is_break(), expected_break);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

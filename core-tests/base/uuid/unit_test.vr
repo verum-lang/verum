@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/base/uuid/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.uuid` — RFC 4122/9562 UUIDs (v4 random, v7 time-ordered).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.uuid.{Uuid, UuidError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: nil UUID is all zeros, version 0
+// =============================================================================
+
+@test
+fn test_nil_uuid_text_format() {
+    let u = Uuid.nil();
+    assert_eq(u.to_text(), "00000000-0000-0000-0000-000000000000");
+}
+
+// =============================================================================
+// Section 2: v4 generates valid UUIDs
+// =============================================================================
+
+@test
+fn test_v4_has_version_4() {
+    let u = Uuid.new_v4();
+    assert_eq(u.version(), 4);
+}
+
+@test
+fn test_v4_text_format_is_canonical() {
+    let u = Uuid.new_v4();
+    let s = u.to_text();
+    // Canonical form: 8-4-4-4-12 with hyphens, total 36 chars.
+    assert_eq(s.len(), 36);
+}
+
+// =============================================================================
+// Section 3: v7 generates time-ordered UUIDs
+// =============================================================================
+
+@test
+fn test_v7_has_version_7() {
+    let u = Uuid.new_v7();
+    assert_eq(u.version(), 7);
+}
+
+@test
+fn test_v7_sequential_calls_monotonic() {
+    let a = Uuid.new_v7();
+    let b = Uuid.new_v7();
+    let c = Uuid.new_v7();
+    // v7 IDs sort lexicographically by time. Three sequential calls
+    // should produce strictly-increasing text representations
+    // (modulo ms-tick resolution).
+    assert(a.to_text() <= b.to_text());
+    assert(b.to_text() <= c.to_text());
+}
+
+// =============================================================================
+// Section 4: parse / to_text round-trip
+// =============================================================================
+
+@test
+fn test_parse_canonical_round_trip() {
+    let original = Uuid.new_v4();
+    let s = original.to_text();
+    let parsed = Uuid.parse(&s);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), original);
+}
+
+@test
+fn test_parse_invalid_returns_err() {
+    let s: Text = "not-a-uuid";
+    let r = Uuid.parse(&s);
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 5: from_bytes / to_bytes round-trip
+// =============================================================================
+
+@test
+fn test_from_bytes_to_bytes_round_trip() {
+    let original = Uuid.new_v4();
+    let bytes = original.to_bytes();
+    let recovered = Uuid.from_bytes(&bytes);
+    assert_eq(recovered, original);
+}
+
+fn main() {}

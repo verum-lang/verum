@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/base/coinductive/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for coinductive primitives.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coinductive.{
+    CorecursiveCall, corec_call, is_guarded,
+    Observation, observation,
+    ObservationTrace, trace, trace_prefix,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  is_guarded characterised by guard_depth.
+// =============================================================================
+
+@property
+fn prop_is_guarded_iff_depth_positive(depth: Int) {
+    if depth >= 0 {
+        let c = corec_call("f".to_text(), depth);
+        assert_eq(is_guarded(c), depth > 0);
+    }
+}
+
+// =============================================================================
+// §B  trace_prefix length law.
+// =============================================================================
+
+@test
+fn law_trace_prefix_length_is_min() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let full = trace(steps);
+
+    let cases: List<Int> = [0, 1, 2, 3, 5, 100];
+    for n in cases.iter() {
+        let pref = trace_prefix(full.clone(), *n);
+        let expected = if *n < full.steps.len() { *n } else { full.steps.len() };
+        assert_eq(pref.steps.len(), expected);
+    }
+}
+
+// =============================================================================
+// §C  trace_prefix idempotent for n ≥ length.
+// =============================================================================
+
+@test
+fn law_trace_prefix_idempotent_when_n_exceeds_length() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ];
+    let full = trace(steps);
+
+    let pref100 = trace_prefix(full.clone(), 100);
+    let pref100_again = trace_prefix(pref100.clone(), 100);
+    assert_eq(pref100.steps.len(), pref100_again.steps.len());
+}
+
+// =============================================================================
+// §D  Observation round-trip.
+// =============================================================================
+
+@property
+fn prop_observation_round_trip_text(label: Text, payload: Text) {
+    let o = observation(label.clone(), payload.clone());
+    assert_eq(o.label, label);
+    assert_eq(o.payload, payload);
+}
+
+fn main() {}

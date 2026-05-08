@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/base/glob/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for glob pattern matching.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.glob.{matches, compile};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Literal pattern matches itself.
+// =============================================================================
+
+@test
+fn law_literal_self_match() {
+    let cases: List<Text> = [
+        "foo.txt".to_text(),
+        "src/lib.rs".to_text(),
+        "README.md".to_text(),
+        "".to_text(),
+    ];
+    for s in cases.iter() {
+        assert(matches(s, s));
+    }
+}
+
+// =============================================================================
+// §B  Star matches strict superset of prefix-suffix literals.
+// =============================================================================
+
+@test
+fn law_star_includes_prefix_suffix_literal() {
+    // "*.txt" matches "anything.txt" — including "literal.txt".
+    let pairs: List<(Text, Text)> = [
+        ("*.txt".to_text(), "literal.txt".to_text()),
+        ("*.txt".to_text(), "another.txt".to_text()),
+        ("foo*".to_text(),  "foo".to_text()),
+        ("foo*".to_text(),  "foobar".to_text()),
+    ];
+    for p in pairs.iter() {
+        let (pattern, path) = (*p);
+        assert(matches(&pattern, &path));
+    }
+}
+
+// =============================================================================
+// §C  Globstar ⊇ Star: anything * matches, ** also matches.
+// =============================================================================
+
+@test
+fn law_globstar_superset_of_star() {
+    let cases: List<Text> = [
+        "foo.txt".to_text(),
+        "any.rs".to_text(),
+        "thing".to_text(),
+    ];
+    for path in cases.iter() {
+        if matches("*", path) { assert(matches("**", path)); }
+    }
+}
+
+// =============================================================================
+// §D  Bracket-class commutative under reorder.
+// =============================================================================
+
+@test
+fn law_char_class_reorder_invariant() {
+    let cases: List<Text> = ["a".to_text(), "b".to_text(), "c".to_text()];
+    for c in cases.iter() {
+        // [abc] vs [cba] should match the same set.
+        assert_eq(matches("[abc]", c), matches("[cba]", c));
+    }
+}
+
+// =============================================================================
+// §E  @test_case — common-pattern truth table.
+// =============================================================================
+
+@test_case("*.txt".to_text(),     "foo.txt".to_text(),    true)
+@test_case("*.txt".to_text(),     "foo.md".to_text(),     false)
+@test_case("*.txt".to_text(),     "dir/foo.txt".to_text(), false)
+@test_case("**/*.txt".to_text(),  "foo.txt".to_text(),    true)
+@test_case("**/*.txt".to_text(),  "dir/foo.txt".to_text(), true)
+@test_case("file?.txt".to_text(), "file1.txt".to_text(),  true)
+@test_case("file?.txt".to_text(), "file12.txt".to_text(), false)
+fn parametrised_glob_match_truth_table(pattern: Text, path: Text, expected: Bool) {
+    assert_eq(matches(&pattern, &path), expected);
+}
+
+fn main() {}

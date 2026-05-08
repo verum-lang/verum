@@ -1,16 +1,8 @@
 // =============================================================================
 // primitives_bool_byte_char_test.vr - Tests for Bool, Byte, Char, Unit types
 // =============================================================================
-// @test: run-interpreter
-// @level: L1
-// @tier: 0
-// @tags: core, primitives, bool, byte, char, unit, ascii, unicode
-// @timeout: 30000
-// @description: Industrial-grade tests for Bool, Byte, Char, and Unit types
-//               covering all methods, edge cases, and protocol implementations
 // =============================================================================
 
-module specs.stdlib.core.primitives_bool_byte_char_test;
 
 mount core.prelude.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};

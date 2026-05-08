@@ -1,0 +1,107 @@
+// =============================================================================
+// core-tests/base/retry/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for retry: max-attempts cap, delay
+// monotonicity for backoff strategies.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.retry.{RetryBackoff, retry, retry_immediate};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  max_attempts cap is honoured: retry never calls more than N times.
+// =============================================================================
+
+@test
+fn law_retry_max_attempts_cap() {
+    let cases: List<Int> = [1, 2, 5, 10];
+    for max in cases.iter() {
+        let mut counter = 0;
+        let _r: Result<Int, Text> = retry(*max, || {
+            counter = counter + 1;
+            Err("always fails".to_text())
+        });
+        assert_eq(counter, *max);
+    }
+}
+
+// =============================================================================
+// §B  Backoff delay is monotonic non-decreasing across attempts.
+// =============================================================================
+
+@test
+fn law_exponential_backoff_monotonic() {
+    let backoff: RetryBackoff = RetryBackoff.Exponential {
+        base_ms: 10,
+        factor: 2,
+    };
+    let mut prev = -1;
+    let mut i = 1;
+    while i <= 5 {
+        let d = backoff.delay_for_attempt(i);
+        assert(d >= prev);
+        prev = d;
+        i = i + 1;
+    }
+}
+
+@test
+fn law_linear_backoff_monotonic() {
+    let backoff: RetryBackoff = RetryBackoff.Linear {
+        base_ms: 100,
+    };
+    let mut prev = -1;
+    let mut i = 1;
+    while i <= 5 {
+        let d = backoff.delay_for_attempt(i);
+        assert(d >= prev);
+        prev = d;
+        i = i + 1;
+    }
+}
+
+@test
+fn law_immediate_backoff_returns_zero() {
+    let backoff: RetryBackoff = RetryBackoff.Immediate;
+    let mut i = 1;
+    while i <= 5 {
+        assert_eq(backoff.delay_for_attempt(i), 0);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §C  retry succeeds first attempt → exactly one call.
+// =============================================================================
+
+@property
+fn prop_retry_one_call_on_immediate_success(max: Int) {
+    if max >= 1 && max <= 100 {
+        let mut counter = 0;
+        let _: Result<Int, Text> = retry(max, || {
+            counter = counter + 1;
+            Ok(42)
+        });
+        assert_eq(counter, 1);
+    }
+}
+
+// =============================================================================
+// §D  retry exhausts attempts → exactly max calls.
+// =============================================================================
+
+@property
+fn prop_retry_exhausts_to_max(max: Int) {
+    if max >= 1 && max <= 100 {
+        let mut counter = 0;
+        let _: Result<Int, Text> = retry(max, || {
+            counter = counter + 1;
+            Err("never works".to_text())
+        });
+        assert_eq(counter, max);
+    }
+}
+
+fn main() {}

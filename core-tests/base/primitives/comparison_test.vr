@@ -1,11 +1,4 @@
-// @test: typecheck-pass
-// @level: L1
-// @tier: 0
-// @tags: comparison, operators, bool, ordering, protocol
-// @description: Comprehensive tests for comparison operator type inference
-//               Verifies that <, >, <=, >= return Bool (not Ordering)
 
-module specs.stdlib.core.comparison_operator_test;
 
 mount core.primitives.*;
 mount core.maybe.{Maybe, Some, None};

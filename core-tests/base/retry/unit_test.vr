@@ -1,0 +1,95 @@
+// =============================================================================
+// core-tests/base/retry/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.base.retry` — retry policies (RetryBackoff, RetryOptions)
+// and retry-loop helpers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.retry.{
+    RetryBackoff, RetryOptions,
+    retry, retry_linear, retry_immediate, retry_jittered,
+    retry_with_strategy,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: RetryOptions construction
+// =============================================================================
+
+@test
+fn test_retry_options_simple_max_attempts() {
+    let opts: RetryOptions<Text> = RetryOptions.simple(5);
+    assert_eq(opts.max_attempts, 5);
+}
+
+@test
+fn test_retry_options_with_should_retry_predicate() {
+    let opts: RetryOptions<Text> = RetryOptions.simple(3)
+        .with_should_retry(|e: &Text| { *e == "transient" });
+    // Just verify construction; predicate is hot-tested in retry().
+    assert_eq(opts.max_attempts, 3);
+}
+
+// =============================================================================
+// Section 2: retry — succeeds first attempt
+// =============================================================================
+
+@test
+fn test_retry_succeeds_first_attempt() {
+    let mut counter = 0;
+    let r: Result<Int, Text> = retry(3, || {
+        counter = counter + 1;
+        Ok(42)
+    });
+    assert_eq(r, Ok(42));
+    assert_eq(counter, 1);
+}
+
+// =============================================================================
+// Section 3: retry — eventually succeeds
+// =============================================================================
+
+@test
+fn test_retry_succeeds_after_failures() {
+    let mut counter = 0;
+    let r: Result<Int, Text> = retry(5, || {
+        counter = counter + 1;
+        if counter < 3 { Err("transient".to_text()) } else { Ok(99) }
+    });
+    assert_eq(r, Ok(99));
+    assert_eq(counter, 3);
+}
+
+// =============================================================================
+// Section 4: retry — exhausts attempts
+// =============================================================================
+
+@test
+fn test_retry_exhausts_returns_last_err() {
+    let mut counter = 0;
+    let r: Result<Int, Text> = retry(3, || {
+        counter = counter + 1;
+        Err(f"attempt {counter}".to_text())
+    });
+    assert(r.is_err());
+    assert_eq(counter, 3);   // exactly max_attempts calls
+}
+
+// =============================================================================
+// Section 5: retry_immediate — no delays
+// =============================================================================
+
+@test
+fn test_retry_immediate_succeeds() {
+    let mut counter = 0;
+    let r: Result<Int, Text> = retry_immediate(2, || {
+        counter = counter + 1;
+        if counter == 1 { Err("once".to_text()) } else { Ok(7) }
+    });
+    assert_eq(r, Ok(7));
+    assert_eq(counter, 2);
+}
+
+fn main() {}

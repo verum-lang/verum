@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/base/error/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/base/error.vr`.
+//
+// Laws verified:
+//   §A  StackFrame.new round-trip preserves all 4 fields  (line/col/file/fn)
+//   §B  StackFrame Eq: reflexive, symmetric, transitive
+//   §C  Backtrace.from_frames(xs).len() = xs.len()
+//   §D  Backtrace.empty().is_empty() = true
+//   §E  Backtrace.is_empty() ⇔ len() = 0
+//   §F  Backtrace.clone preserves length
+//   §G  format_error_chain output contains every error description
+//
+// Plus @property samples on Int (line/column) and Text (function/file) axes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.error.{StackFrame, Backtrace, ErrorProtocol, format_error_chain};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §A  StackFrame.new round-trip
+// -----------------------------------------------------------------------------
+
+@test
+fn law_stackframe_round_trip_pinned_witnesses() {
+    let cases: List<(Text, Text, Int, Int)> = [
+        ("main",  "x.vr",  1,    1),
+        ("alpha", "a.vr",  100,  50),
+        ("",      "",      0,    0),
+        ("nested::deep", "long/path.vr", 99999, 1),
+    ];
+    for c in cases.iter() {
+        let (f, file, line, col) = (*c);
+        let sf = StackFrame.new(f.clone(), file.clone(), line, col);
+        assert_eq(sf.function, f);
+        assert_eq(sf.file, file);
+        assert_eq(sf.line, line);
+        assert_eq(sf.column, col);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §B  StackFrame Eq is an equivalence relation.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_stackframe_eq_reflexive() {
+    let sf = StackFrame.new("f", "x.vr", 1, 1);
+    assert(sf == sf);
+}
+
+@test
+fn law_stackframe_eq_symmetric() {
+    let a = StackFrame.new("f", "x.vr", 1, 1);
+    let b = StackFrame.new("f", "x.vr", 1, 1);
+    assert_eq(a == b, b == a);
+}
+
+@test
+fn law_stackframe_eq_transitive() {
+    let a = StackFrame.new("f", "x.vr", 1, 1);
+    let b = StackFrame.new("f", "x.vr", 1, 1);
+    let c = StackFrame.new("f", "x.vr", 1, 1);
+    if (a == b) && (b == c) { assert(a == c); }
+}
+
+@test
+fn law_stackframe_eq_witnesses_field_sensitivity() {
+    let base = StackFrame.new("f", "x.vr", 1, 1);
+
+    // Each field difference must produce inequality.
+    assert(base != StackFrame.new("g", "x.vr", 1, 1));   // function differs
+    assert(base != StackFrame.new("f", "y.vr", 1, 1));   // file differs
+    assert(base != StackFrame.new("f", "x.vr", 2, 1));   // line differs
+    assert(base != StackFrame.new("f", "x.vr", 1, 2));   // column differs
+}
+
+// -----------------------------------------------------------------------------
+// §C  Backtrace.from_frames count law.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_backtrace_from_frames_preserves_count_zero() {
+    let bt = Backtrace.from_frames(List.new());
+    assert_eq(bt.len(), 0);
+}
+
+@test
+fn law_backtrace_from_frames_preserves_count_one() {
+    let frames: List<StackFrame> = [StackFrame.new("a", "x.vr", 1, 1)];
+    let bt = Backtrace.from_frames(frames);
+    assert_eq(bt.len(), 1);
+}
+
+@test
+fn law_backtrace_from_frames_preserves_count_many() {
+    let frames: List<StackFrame> = [
+        StackFrame.new("a", "x.vr", 1, 1),
+        StackFrame.new("b", "y.vr", 2, 2),
+        StackFrame.new("c", "z.vr", 3, 3),
+        StackFrame.new("d", "w.vr", 4, 4),
+        StackFrame.new("e", "v.vr", 5, 5),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    assert_eq(bt.len(), 5);
+}
+
+// -----------------------------------------------------------------------------
+// §D / §E  Backtrace empty / is_empty laws.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_backtrace_empty_is_empty() {
+    let bt = Backtrace.empty();
+    assert(bt.is_empty());
+    assert_eq(bt.len(), 0);
+}
+
+@test
+fn law_backtrace_is_empty_iff_len_zero() {
+    let cases: List<List<StackFrame>> = [
+        [],
+        [StackFrame.new("a", "x.vr", 1, 1)],
+        [StackFrame.new("a", "x.vr", 1, 1), StackFrame.new("b", "y.vr", 2, 2)],
+    ];
+    for frames in cases.iter() {
+        let bt = Backtrace.from_frames((*frames).clone());
+        assert_eq(bt.is_empty(), bt.len() == 0);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §F  Clone preserves Backtrace length.
+// -----------------------------------------------------------------------------
+
+@test
+fn law_backtrace_clone_preserves_length() {
+    let frames: List<StackFrame> = [
+        StackFrame.new("a", "x.vr", 1, 1),
+        StackFrame.new("b", "y.vr", 2, 2),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    let bt2 = bt.clone();
+    assert_eq(bt.len(), bt2.len());
+}
+
+// -----------------------------------------------------------------------------
+// §G  format_error_chain output contains every error description.
+// -----------------------------------------------------------------------------
+
+type LeafErr is { msg: Text };
+
+implement Describable for LeafErr {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+implement ErrorSource for LeafErr {
+    fn source(&self) -> Maybe<&dyn Describable> { None }
+}
+
+@test
+fn law_format_error_chain_contains_self_description() {
+    let cases: List<Text> = ["leaf", "another", "with spaces", ""];
+    for msg in cases.iter() {
+        let e = LeafErr { msg: (*msg).clone() };
+        let formatted = format_error_chain(&e);
+        assert(formatted.contains(*msg) || (*msg).len() == 0);
+    }
+}
+
+// =============================================================================
+// §H  Auto-generated property tests via @property.
+// =============================================================================
+
+/// For any (line, col), StackFrame round-trips line and column.
+@property
+fn prop_stackframe_int_fields_round_trip(line: Int, column: Int) {
+    let sf = StackFrame.new("f", "x.vr", line, column);
+    assert_eq(sf.line, line);
+    assert_eq(sf.column, column);
+}
+
+/// For any function name (Text), StackFrame round-trips it.
+@property
+fn prop_stackframe_function_round_trip(name: Text) {
+    let sf = StackFrame.new(name.clone(), "x.vr", 1, 1);
+    assert_eq(sf.function, name);
+}
+
+/// For any file path (Text), StackFrame round-trips it.
+@property
+fn prop_stackframe_file_round_trip(file: Text) {
+    let sf = StackFrame.new("f", file.clone(), 1, 1);
+    assert_eq(sf.file, file);
+}
+
+// =============================================================================
+// §I  Parametrised tests via @test_case — frame-eq truth table.
+// =============================================================================
+
+@test_case("a", "x.vr", 1, 1, "a", "x.vr", 1, 1, true)
+@test_case("a", "x.vr", 1, 1, "b", "x.vr", 1, 1, false)
+@test_case("a", "x.vr", 1, 1, "a", "y.vr", 1, 1, false)
+@test_case("a", "x.vr", 1, 1, "a", "x.vr", 2, 1, false)
+@test_case("a", "x.vr", 1, 1, "a", "x.vr", 1, 2, false)
+fn parametrised_stackframe_eq_truth_table(
+    f1: Text, file1: Text, line1: Int, col1: Int,
+    f2: Text, file2: Text, line2: Int, col2: Int,
+    expected_eq: Bool,
+) {
+    let a = StackFrame.new(f1, file1, line1, col1);
+    let b = StackFrame.new(f2, file2, line2, col2);
+    assert_eq(a == b, expected_eq);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

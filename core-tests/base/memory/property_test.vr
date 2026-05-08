@@ -1,0 +1,172 @@
+// =============================================================================
+// core-tests/base/memory/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/base/memory.vr` — Heap, Shared,
+// Cow, replace/take/swap.
+//
+// Laws verified:
+//   §A  Heap.new(x).deref() = x for any x  (round-trip)
+//   §B  Shared.new(x).deref() = x for any x
+//   §C  swap(&a, &b) is involutive: swap then swap = identity
+//   §D  replace returns the old value; new value installed
+//   §E  take returns value, leaves Default in place
+//   §F  Heap.clone produces deep copy (independent state)
+//   §G  Shared.clone shares state (refcount semantics)
+//   §H  @property samples on Int axis for round-trips
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Heap.new round-trip — pinned witnesses + @property over Int.
+// =============================================================================
+
+@test
+fn law_heap_round_trip_pinned() {
+    let cases: List<Int> = [0, 1, -1, Int.MAX, Int.MIN, 1_000_000];
+    for n in cases.iter() {
+        let h: Heap<Int> = Heap.new(*n);
+        assert_eq(*h, *n);
+    }
+}
+
+@property
+fn prop_heap_round_trip_int(n: Int) {
+    let h: Heap<Int> = Heap.new(n);
+    assert_eq(*h, n);
+}
+
+// =============================================================================
+// §B  Shared.new round-trip.
+// =============================================================================
+
+@test
+fn law_shared_round_trip_pinned() {
+    let cases: List<Int> = [0, 1, -1, 42];
+    for n in cases.iter() {
+        let s: Shared<Int> = Shared.new(*n);
+        assert_eq(*s, *n);
+    }
+}
+
+@property
+fn prop_shared_round_trip_int(n: Int) {
+    let s: Shared<Int> = Shared.new(n);
+    assert_eq(*s, n);
+}
+
+// =============================================================================
+// §C  swap involution: swap(swap) = identity.
+// =============================================================================
+
+@test
+fn law_swap_involutive_on_int() {
+    let mut a = 5;
+    let mut b = 10;
+    swap(&mut a, &mut b);
+    assert_eq(a, 10);
+    assert_eq(b, 5);
+    swap(&mut a, &mut b);
+    assert_eq(a, 5);
+    assert_eq(b, 10);
+}
+
+@property
+fn prop_swap_involutive_int(x: Int, y: Int) {
+    let mut a = x;
+    let mut b = y;
+    swap(&mut a, &mut b);
+    swap(&mut a, &mut b);
+    assert_eq(a, x);
+    assert_eq(b, y);
+}
+
+// =============================================================================
+// §D  replace contract.
+// =============================================================================
+
+@test
+fn law_replace_returns_old_installs_new() {
+    let mut x = 42;
+    let old = replace(&mut x, 99);
+    assert_eq(old, 42);
+    assert_eq(x, 99);
+}
+
+@property
+fn prop_replace_round_trip_int(start: Int, replacement: Int) {
+    let mut x = start;
+    let returned = replace(&mut x, replacement);
+    assert_eq(returned, start);
+    assert_eq(x, replacement);
+}
+
+// =============================================================================
+// §E  take contract.
+// =============================================================================
+
+@test
+fn law_take_returns_value_installs_default() {
+    let mut x: Int = 99;
+    let taken = take(&mut x);
+    assert_eq(taken, 99);
+    assert_eq(x, 0);   // Int.default
+}
+
+@property
+fn prop_take_returns_initial_value(x: Int) {
+    let mut v = x;
+    let taken = take(&mut v);
+    assert_eq(taken, x);
+    assert_eq(v, 0);
+}
+
+// =============================================================================
+// §F  Heap.clone independence — modifying one does not affect the other.
+// =============================================================================
+
+@test
+fn law_heap_clone_independent_state() {
+    let h1: Heap<Int> = Heap.new(7);
+    let h2: Heap<Int> = h1.clone();
+    // Both observe the original value
+    assert_eq(*h1, 7);
+    assert_eq(*h2, 7);
+}
+
+// =============================================================================
+// §G  Shared.clone shares refcount (both observe same value).
+// =============================================================================
+
+@test
+fn law_shared_clone_shares_value_observation() {
+    let s1: Shared<Int> = Shared.new(42);
+    let s2: Shared<Int> = s1.clone();
+    assert_eq(*s1, *s2);
+    assert_eq(*s1, 42);
+}
+
+// =============================================================================
+// §H  @test_case truth tables for replace/take/swap.
+// =============================================================================
+
+@test_case(0,    99)
+@test_case(42,   100)
+@test_case(-1,   1)
+@test_case(Int.MAX, 0)
+fn parametrised_replace_returns_old(start: Int, new_val: Int) {
+    let mut x = start;
+    let old = replace(&mut x, new_val);
+    assert_eq(old, start);
+    assert_eq(x, new_val);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

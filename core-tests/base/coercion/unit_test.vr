@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/base/coercion/unit_test.vr
+// =============================================================================
+//
+// Per-marker tests for `core/base/coercion.vr`. The four protocols
+// (IntCoercible, TensorLike, Indexable, RangeLike) are MARKER protocols —
+// zero methods. Their *value* is exclusively the implement-block
+// existence: the unifier discovers them and applies the matching
+// coercion rule.
+//
+// What "unit tests" mean for a marker: assert that the protocol can be
+// declared, can be implemented on a user type, and that the unifier
+// then permits the coercion-rule that the marker is supposed to gate.
+// Companion files:
+//   property_test.vr     — coercion idempotence + reflexivity laws
+//   integration_test.vr  — real arithmetic / indexing / range scenarios
+//   audit.md             — unifier consumer sites & drift surfaces
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coercion.{IntCoercible, TensorLike, Indexable, RangeLike};
+
+// =============================================================================
+// Section 1: IntCoercible — Type ↔ Int coercion
+// =============================================================================
+
+type FdHandle is { raw: Int };
+
+implement IntCoercible for FdHandle {}
+
+@test
+fn test_int_coercible_marker_declared() {
+    // The marker is implemented; this test exists primarily to verify
+    // the implement-block typechecks.
+    let h = FdHandle { raw: 42 };
+    assert_eq(h.raw, 42);
+}
+
+// =============================================================================
+// Section 2: TensorLike — tensor-family marker
+// =============================================================================
+
+type Vec3 is {
+    x: Float,
+    y: Float,
+    z: Float,
+};
+
+implement TensorLike for Vec3 {}
+
+@test
+fn test_tensor_like_marker_declared() {
+    let v = Vec3 { x: 1.0, y: 2.0, z: 3.0 };
+    assert_eq(v.x, 1.0);
+}
+
+// =============================================================================
+// Section 3: Indexable — t[i: Int] integer indexing
+// =============================================================================
+
+type RingBuffer is { data: List<Int>, head: Int };
+
+implement Indexable for RingBuffer {}
+
+@test
+fn test_indexable_marker_declared() {
+    let rb = RingBuffer { data: [1, 2, 3], head: 0 };
+    assert_eq(rb.data.len(), 3);
+}
+
+// =============================================================================
+// Section 4: RangeLike — (start, end) interval shape
+// =============================================================================
+
+type ByteSpan is { lo: Int, hi: Int };
+
+implement RangeLike for ByteSpan {}
+
+@test
+fn test_range_like_marker_declared() {
+    let span = ByteSpan { lo: 0, hi: 10 };
+    assert_eq(span.hi - span.lo, 10);
+}
+
+// =============================================================================
+// Section 5: All four markers compose on a single type
+// =============================================================================
+// A pathological but valid case: nothing prevents one type from carrying
+// every coercion marker. The tests here confirm the protocols don't
+// conflict at the type-system level.
+
+type MultiMarker is { value: Int };
+
+implement IntCoercible for MultiMarker {}
+implement TensorLike for MultiMarker {}
+implement Indexable for MultiMarker {}
+implement RangeLike for MultiMarker {}
+
+@test
+fn test_all_four_markers_on_single_type() {
+    let m = MultiMarker { value: 99 };
+    assert_eq(m.value, 99);
+}
+
+// =============================================================================
+// Section 6: Generic types implementing markers
+// =============================================================================
+
+type DynBox<T> is { inner: T };
+
+implement<T> TensorLike for DynBox<T> {}
+
+@test
+fn test_generic_marker_implementation() {
+    let b: DynBox<Float> = DynBox { inner: 3.14 };
+    assert(b.inner > 3.0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

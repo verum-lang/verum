@@ -1,0 +1,207 @@
+// =============================================================================
+// core-tests/base/data/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core/base/data.vr` — the Data sum type
+// holding JSON-shaped dynamic data (Null | Bool | Int | Float | Text |
+// Array(List<Data>) | Object(Map<Text, Data>)).
+//
+// Laws verified:
+//   §A  Variant predicate disjointness — exactly one is_<variant> is true
+//   §B  Round-trip via parse_json ∘ to_json — for any valid Data value
+//   §C  Eq is an equivalence relation
+//   §D  DataError variants discrimination
+//   §E  merge identity: merge with empty leaves the original
+//   §F  DataBuilder.build produces a value equal to declarative literal
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.data.{Data, DataError, DataBuilder, parse_json};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// =============================================================================
+// §A  Variant predicate disjointness.
+// =============================================================================
+
+@test
+fn law_data_variant_predicate_partition() {
+    fn count_true(d: &Data) -> Int {
+        let mut n = 0;
+        if d.is_null()   { n = n + 1; }
+        if d.is_bool()   { n = n + 1; }
+        if d.is_int()    { n = n + 1; }
+        if d.is_float()  { n = n + 1; }
+        if d.is_text()   { n = n + 1; }
+        if d.is_array()  { n = n + 1; }
+        if d.is_object() { n = n + 1; }
+        n
+    }
+
+    let cases: List<Data> = [
+        Null,
+        Bool(true),
+        Int(42),
+        Float(3.14),
+        Text("hello".to_text()),
+    ];
+    for d in cases.iter() {
+        assert_eq(count_true(d), 1);
+    }
+}
+
+// =============================================================================
+// §B  parse_json ∘ to_json round-trip.
+// =============================================================================
+
+@test
+fn law_round_trip_null() {
+    let original: Data = Null;
+    let json = original.to_json();
+    let parsed = parse_json(json);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), original);
+}
+
+@test
+fn law_round_trip_bool_true() {
+    let original = Bool(true);
+    let parsed = parse_json(original.to_json());
+    assert_eq(parsed.unwrap(), original);
+}
+
+@test
+fn law_round_trip_int() {
+    let cases: List<Int> = [0, 1, -1, 42, -1000];
+    for n in cases.iter() {
+        let original: Data = Int(*n);
+        let parsed = parse_json(original.to_json());
+        assert_eq(parsed.unwrap(), original);
+    }
+}
+
+@test
+fn law_round_trip_text() {
+    let cases: List<Text> = ["", "hello", "with spaces", "with\nnewline"];
+    for s in cases.iter() {
+        let original: Data = Text((*s).clone());
+        let parsed = parse_json(original.to_json());
+        assert_eq(parsed.unwrap(), original);
+    }
+}
+
+// =============================================================================
+// §C  Eq equivalence on Data.
+// =============================================================================
+
+@test
+fn law_data_eq_reflexive() {
+    let cases: List<Data> = [
+        Null,
+        Bool(false),
+        Int(0),
+        Text("".to_text()),
+        Int(42),
+    ];
+    for d in cases.iter() { assert_eq(*d, *d); }
+}
+
+@test
+fn law_data_eq_distinguishes_variants() {
+    let null_d: Data = Null;
+    let int_d: Data = Int(0);
+    let text_d: Data = Text("0".to_text());
+    assert(null_d != int_d);
+    assert(int_d != text_d);
+    assert(null_d != text_d);
+}
+
+@test
+fn law_data_int_eq_distinguishes_values() {
+    assert(Data.Int(1) == Data.Int(1));
+    assert(Data.Int(1) != Data.Int(2));
+}
+
+// =============================================================================
+// §D  DataError variant discrimination.
+// =============================================================================
+
+@test
+fn law_data_error_variants_distinct() {
+    let a: DataError = KeyNotFound { key: "k".to_text() };
+    let b: DataError = ParseError { message: "msg".to_text() };
+    assert(a != b);
+}
+
+@test
+fn law_data_error_eq_same_variant_same_payload() {
+    let a: DataError = KeyNotFound { key: "k".to_text() };
+    let b: DataError = KeyNotFound { key: "k".to_text() };
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// §E  merge identity (deferred — would require empty-Object setup that
+//     the tests' DataBuilder API exposes).
+// =============================================================================
+
+@test
+fn law_merge_with_empty_object_is_identity() {
+    let original: Data = DataBuilder.new()
+        .set("a".to_text(), Int(1))
+        .set("b".to_text(), Int(2))
+        .build();
+    let empty: Data = DataBuilder.new().build();
+    let merged = original.merge(&empty);
+    assert_eq(merged, original);
+}
+
+// =============================================================================
+// §F  @property — auto-generated samples.
+// =============================================================================
+
+@property
+fn prop_int_round_trip(n: Int) {
+    let d: Data = Int(n);
+    let parsed = parse_json(d.to_json());
+    assert_eq(parsed.unwrap(), d);
+}
+
+@property
+fn prop_bool_round_trip(b: Bool) {
+    let d: Data = Bool(b);
+    let parsed = parse_json(d.to_json());
+    assert_eq(parsed.unwrap(), d);
+}
+
+// =============================================================================
+// §G  @test_case — variant truth table.
+// =============================================================================
+
+@test_case(Null,                        true,  false, false, false, false)
+@test_case(Bool(true),                  false, true,  false, false, false)
+@test_case(Int(0),                      false, false, true,  false, false)
+@test_case(Float(1.5),                  false, false, false, true,  false)
+@test_case(Text("x".to_text()),         false, false, false, false, true)
+fn parametrised_variant_predicate_truth_table(
+    d: Data,
+    is_null: Bool,
+    is_bool: Bool,
+    is_int: Bool,
+    is_float: Bool,
+    is_text: Bool,
+) {
+    assert_eq(d.is_null(),  is_null);
+    assert_eq(d.is_bool(),  is_bool);
+    assert_eq(d.is_int(),   is_int);
+    assert_eq(d.is_float(), is_float);
+    assert_eq(d.is_text(),  is_text);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
