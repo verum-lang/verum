@@ -873,17 +873,17 @@ public type Describable is protocol {
 ///
 
 /// ```verum
-/// type IoError is { message: Text, cause: Maybe<Heap<dyn Describable>> };
+/// type IoError is { message: Text, cause: Maybe<Heap<dyn ErrorSource>> };
 ///
 
 /// implement ErrorSource for IoError {
 ///  fn description(&self) -> Text { self.message.clone() }
-///  fn source(&self) -> Maybe<&dyn Describable> { None }
+///  fn source(&self) -> Maybe<&dyn ErrorSource> { None }
 /// }
 /// ```
 public type ErrorSource is protocol extends Describable {
     /// Get the underlying cause of this error, if any.
-    fn source(&self) -> Maybe<&dyn Describable> {
+    fn source(&self) -> Maybe<&dyn ErrorSource> {
         None
     }
 };

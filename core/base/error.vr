@@ -262,7 +262,7 @@ implement Default for Backtrace {
 ///  }
 ///
 
-///  fn source(&self) -> Maybe<&dyn Describable> {
+///  fn source(&self) -> Maybe<&dyn ErrorSource> {
 ///  match &self.cause {
 ///  Some(e) => Some(e.as_ref()),
 ///  None => None,
@@ -307,14 +307,29 @@ public type ErrorProtocol is protocol extends ErrorSource {
 /// }
 /// ```
 public type ErrorChain is {
-    current: Maybe<&dyn Describable>,
+    current: Maybe<&dyn ErrorSource>,
 };
 
 implement ErrorChain {
     /// Create a new error chain iterator starting from the given error.
     public fn new(error: &dyn ErrorSource) -> ErrorChain {
         ErrorChain {
-            current: Some(error as &dyn Describable),
+            current: Some(error),
+        }
+    }
+}
+
+implement Iterator for ErrorChain {
+    type Item = Text;
+
+    fn next(&mut self) -> Maybe<Text> {
+        match self.current {
+            None => None,
+            Some(s) => {
+                let desc = s.description();
+                self.current = s.source();
+                Some(desc)
+            }
         }
     }
 }
@@ -323,27 +338,25 @@ implement ErrorChain {
 // Utility Functions
 // =============================================================================
 
-/// Format an error and its immediate source for display.
+/// Format an error and its full source chain for display.
 ///
 
 /// Produces output like:
 /// ```
 /// error: file not found
 /// caused by: permission denied
+/// caused by: no such file or directory
 /// ```
 ///
 
-/// Note: Only one level of source chaining is supported because
-/// `ErrorSource.source()` returns `&dyn Describable` (which lacks
-/// a `source()` method). For deeper chains, use `ErrorProtocol`
-/// and traverse the chain manually.
+/// Traverses the complete chain via `ErrorSource.source()` until
+/// a link returns `None`.
 public fn format_error_chain(error: &dyn ErrorSource) -> Text {
     let mut result = error.description();
-    let mut source = error.source();
-    while source is Some(s) {
+    let mut current: Maybe<&dyn ErrorSource> = error.source();
+    while current is Some(s) {
         result = result + "\ncaused by: " + s.description();
-        // Cannot continue chain: s is &dyn Describable, not &dyn ErrorSource
-        source = None;
+        current = s.source();
     }
     result
 }
