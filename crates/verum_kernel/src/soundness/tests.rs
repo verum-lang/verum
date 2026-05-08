@@ -31,7 +31,10 @@ fn canonical_rules_has_expected_count() {
 }
 
 #[test]
-fn proved_lemma_set_is_exactly_four() {
+fn proved_lemma_set_includes_quot_elim_and_placeholder_four() {
+    // Pin: 4 placeholder structurally-proved lemmas (K_Var / K_Univ
+    // / K_FwAx / K_Pos) + the K_Quot_Elim discharge from the
+    // Quotient-elimination pass = 5 proved.
     let rules = canonical_rules();
     let proved: Vec<&str> = rules
         .iter()
@@ -41,8 +44,8 @@ fn proved_lemma_set_is_exactly_four() {
 
     assert_eq!(
         proved.len(),
-        4,
-        "expected 4 structurally-proved lemmas, got {}: {:?}",
+        5,
+        "expected 5 structurally-proved lemmas, got {}: {:?}",
         proved.len(),
         proved,
     );
@@ -51,6 +54,10 @@ fn proved_lemma_set_is_exactly_four() {
     assert!(proved.contains(&"K_Univ"), "K_Univ must be proved");
     assert!(proved.contains(&"K_FwAx"), "K_FwAx must be proved");
     assert!(proved.contains(&"K_Pos"), "K_Pos must be proved");
+    assert!(
+        proved.contains(&"K_Quot_Elim"),
+        "K_Quot_Elim must be proved (discharged in Quotient-elimination pass)",
+    );
 }
 
 #[test]
@@ -295,7 +302,9 @@ fn proved_count_plus_admitted_count_matches_total() {
         EXPECTED_KERNEL_RULE_COUNT,
         "every rule must be either proved, admitted, or discharged-by-framework",
     );
-    assert_eq!(proved, 4, "expected 4 proved lemmas");
+    // 4 placeholder structural rules (K_Var / K_Univ / K_FwAx /
+    // K_Pos) + 1 discharged-via-Quotient-pass (K_Quot_Elim) = 5 proved.
+    assert_eq!(proved, 5, "expected 5 proved lemmas");
     assert!(
         discharged >= 7,
         "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",

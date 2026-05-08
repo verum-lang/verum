@@ -192,11 +192,16 @@ impl SoundnessBackend for CoqBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (17 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (16 axioms — one per with-IOU rule).
+//
+// K_Quot_Elim was discharged in the Quotient-elimination pass: its
+// constructor now takes structural premises directly, mirroring the
+// shape of T_quot_form / T_quot_intro.  The respect-of-equivalence
+// side condition is the kernel's input contract.
 // ============================================================================
 
 const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (17 total) ====== *)\n\
+(* ====== Per-rule IOU axioms (16 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
 Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
@@ -219,8 +224,9 @@ Axiom K_Refine_Omega_iou : Ctx -> CoreTerm -> string -> CoreTerm -> Prop.\n\
 (* K_Refine_Intro: predicate decidability at the introduced value. *)\n\
 Axiom K_Refine_Intro_iou : Ctx -> CoreTerm -> CoreTerm -> string -> CoreTerm -> Prop.\n\
 \n\
-(* K_Quot_Elim: respect-of-equivalence side-condition. *)\n\
-Axiom K_Quot_Elim_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
+(* (K_Quot_Elim: discharged — see T_quot_elim below for the structural\n\
+   form; the respect-of-equivalence side condition remains the kernel's\n\
+   input contract.) *)\n\
 \n\
 (* K_Inductive: positivity decision procedure. *)\n\
 Axiom K_Inductive_iou : Ctx -> string -> list CoreTerm -> CoreTerm -> Prop.\n\
@@ -354,9 +360,11 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma value base ->\n        \
         Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)\n  \
   | T_quot_elim :\n      \
-      forall (Gamma : Ctx) (scrutinee motive case_fn result : CoreTerm),\n        \
-        K_Quot_Elim_iou Gamma scrutinee motive case_fn result ->\n        \
-        Typing Gamma (QuotElim scrutinee motive case_fn) result\n  \
+      forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),\n        \
+        Typing Gamma scrutinee (Quotient base equiv) ->\n        \
+        Typing Gamma motive (Pi \"x\" base (Universe i)) ->\n        \
+        Typing Gamma case_fn (Pi \"x\" base (App motive (Var \"x\"))) ->\n        \
+        Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee)\n  \
   (* ===== Inductive (3) ===== *)\n  \
   | T_inductive :\n      \
       forall (Gamma : Ctx) (path : string) (args : list CoreTerm) (result : CoreTerm),\n        \
@@ -581,10 +589,12 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         ),
         "K_Quot_Elim" => Some(
             "Lemma K_Quot_Elim_sound :\n  \
-              forall (Gamma : Ctx) (scrutinee motive case_fn result : CoreTerm),\n    \
-                K_Quot_Elim_iou Gamma scrutinee motive case_fn result ->\n    \
-                Typing Gamma (QuotElim scrutinee motive case_fn) result.\n\
-              Proof. exact T_quot_elim. Qed.",
+              forall (Gamma : Ctx) (scrutinee motive case_fn base equiv : CoreTerm) (i : nat),\n    \
+                Typing Gamma scrutinee (Quotient base equiv) ->\n    \
+                Typing Gamma motive (Pi \"x\"%string base (Universe i)) ->\n    \
+                Typing Gamma case_fn (Pi \"x\"%string base (App motive (Var \"x\"%string))) ->\n    \
+                Typing Gamma (QuotElim scrutinee motive case_fn) (App motive scrutinee).\n\
+              Proof. intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption. Qed.",
         ),
         // ===== Inductive (3) =====
         "K_Inductive" => Some(

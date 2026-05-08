@@ -225,7 +225,7 @@ axiomatization\n  \
   K_Refine_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Refine_Omega_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Refine_Intro_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
-  K_Quot_Elim_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
+  (* (K_Quot_Elim: discharged — see T_quot_elim below for the structural form.) *) \n  \
   K_Inductive_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Elim_iou :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm list \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
   K_Smt_iou :: \"Ctx \\<Rightarrow> string \\<Rightarrow> CoreTerm \\<Rightarrow> bool\" and\n  \
@@ -266,7 +266,7 @@ where\n\
 | T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; K_Refine_Intro_iou \\<Gamma> a base x predicate\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
 | T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
 | T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
-| T_quot_elim:    \"K_Quot_Elim_iou \\<Gamma> scrutinee motive case_fn result \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : result\"\n\
+| T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
 | T_inductive:    \"K_Inductive_iou \\<Gamma> path args result \\<Longrightarrow> \\<Gamma> \\<turnstile> InductiveT path args : result\"\n\
 | T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
 | T_elim:         \"K_Elim_iou \\<Gamma> scrutinee motive cases result \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : result\"\n\
@@ -418,8 +418,10 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
         ),
         "K_Quot_Elim" => Some(
             "lemma K_Quot_Elim_sound:\n  \
-              assumes \"K_Quot_Elim_iou \\<Gamma> scrutinee motive case_fn result\"\n  \
-              shows \"\\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : result\"\n  \
+              assumes \"\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP\"\n  \
+              and \"\\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i)\"\n  \
+              and \"\\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\"\n  \
+              shows \"\\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n  \
               using assms by (rule T_quot_elim)",
         ),
         // Inductive (3)

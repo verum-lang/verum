@@ -473,9 +473,17 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Quotient,
             3,
             true,
-            admitted(
-                "requires the respect-of-equivalence side-condition to be discharged \
-             structurally; currently audited via verum audit --proof-honesty",
+            // Discharged: the rule's IOU axiom was eliminated; the
+            // soundness lemma now follows from the structural premises
+            // (scrutinee at the quotient, motive well-typed, case_fn at
+            // the dependent product) by the corresponding Typing
+            // constructor.  The respect-of-equivalence side condition
+            // remains the kernel's input contract — audited at the
+            // Verum side via `verum audit --proof-honesty`, never
+            // assumed here.
+            proved(
+                "intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption.",
+                "  intros; exact (Typing.t_quot_elim ‹_› ‹_› ‹_›)",
             ),
         ),
         // ---- Inductive (3) --------------------------------------------------
