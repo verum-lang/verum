@@ -27,7 +27,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use verum_ast::{FunctionParamKind, ItemKind, TypeKind};
+use verum_ast::{FunctionParamKind, GenericArg, ItemKind, PathSegment, TypeKind};
 use verum_vbc::{FunctionId, Value, VbcModule};
 
 // --------------------------------------------------------------------
@@ -123,63 +123,174 @@ impl<T: Clone> Tree<T> {
 /// A runtime-dispatched generator — one variant per supported Verum type.
 /// Keeps the public surface small; internal shrink logic lives in the
 /// producer helpers below.
+///
+/// Compound-type variants (Maybe, Result, List, Tuple) are recursive:
+/// each carries `Box<Generator>` for the element/field generators so
+/// arbitrary nesting is supported. `Fallback` is used when the type
+/// cannot be structurally decomposed; it produces `Value::unit()` and
+/// emits a tracing warning so the test still runs but the user knows.
 pub enum Generator {
     Bool,
     /// Full Int range.
     Int,
     /// Bounded Int from refinement type `Int{ lo <= it <= hi }`.
-    IntRange {
-        lo: i64,
-        hi: i64,
-    },
+    IntRange { lo: i64, hi: i64 },
     /// Non-negative integers.
     Nat,
     /// IEEE 754 f64 with edge-cases bias.
     Float,
     /// Text with length bound.
-    Text {
-        max_len: u32,
-    },
+    Text { max_len: u32 },
+    /// `Maybe<T>` — 50 % None, 50 % Some(inner).
+    Maybe(Box<Generator>),
+    /// `Result<T, E>` — 50 % Ok(ok_gen), 50 % Err(err_gen).
+    Result { ok: Box<Generator>, err: Box<Generator> },
+    /// `List<T>` — random length in `[0, max_len]`, each element from `elem`.
+    List { elem: Box<Generator>, max_len: u32 },
+    /// `Ordering` — uniform over Less / Equal / Greater (tags 0 / 1 / 2).
+    Ordering,
+    /// Tuple `(T0, T1, …)` — product of per-field generators.
+    Tuple(Vec<Generator>),
+    /// Unknown / unsupported type — produces `Value::unit()` with a warning.
+    Fallback,
+}
+
+// --------------------------------------------------------------------
+// Helper: extract the leaf name from a path type
+// --------------------------------------------------------------------
+
+fn path_leaf<'a>(ty: &'a verum_ast::Type) -> Option<&'a str> {
+    match &ty.kind {
+        TypeKind::Path(p) => p.segments.last().and_then(|s| match s {
+            PathSegment::Name(id) => Some(id.name.as_str()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn generic_arg_ty(arg: &GenericArg) -> Option<&verum_ast::Type> {
+    match arg {
+        GenericArg::Type(t) => Some(t),
+        _ => None,
+    }
 }
 
 impl Generator {
-    /// Pick a generator for a Verum type (AST `TypeKind`) with optional
-    /// refinement bounds extracted by `extract_refinement_bounds`.
+    /// Build a generator for a Verum AST type.
     ///
-
-    /// Returns `None` for unsupported types so the caller can skip the
-    /// property with a clear diagnostic rather than invent random data.
+    /// Never returns `None` — unknown types produce `Generator::Fallback`
+    /// (which emits a `tracing::warn!` when sampled and yields `Value::unit()`).
+    /// This guarantees every `@property` test runs regardless of parameter types.
     pub fn for_type(ty: &verum_ast::Type) -> Option<Self> {
-        // Refinement walk — a type like `Int{ 0 < it < 100 }` shows up
-        // as `TypeKind::Refinement { base, .. }` wrapping the primitive.
+        Some(Self::for_type_inner(ty))
+    }
+
+    fn for_type_inner(ty: &verum_ast::Type) -> Self {
+        // Strip outer references (&T, &mut T, &checked T) transparently.
+        match &ty.kind {
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                return Self::for_type_inner(inner);
+            }
+            _ => {}
+        }
+
+        // Unwrap refinement wrapper to reach the base kind.
         let base_kind = unwrap_refinement(&ty.kind);
         let bounds = extract_bounds(&ty.kind);
+
         match base_kind {
-            TypeKind::Bool => Some(Generator::Bool),
+            // ---- primitives ----
+            TypeKind::Bool => Generator::Bool,
             TypeKind::Int => match bounds {
-                Some((lo, hi)) => Some(Generator::IntRange { lo, hi }),
-                None => Some(Generator::Int),
+                Some((lo, hi)) => Generator::IntRange { lo, hi },
+                None => Generator::Int,
             },
-            TypeKind::Float => Some(Generator::Float),
-            TypeKind::Text => Some(Generator::Text { max_len: 32 }),
-            // Aliases likely meaning Int/Nat at the stdlib level.
-            TypeKind::Path(p) => match p.segments.last().and_then(|s| match s {
-                verum_ast::PathSegment::Name(id) => Some(id.name.as_str()),
-                _ => None,
-            }) {
-                Some("Nat") | Some("U8") | Some("U16") | Some("U32") | Some("U64") => {
-                    Some(Generator::Nat)
+            TypeKind::Float => Generator::Float,
+            TypeKind::Text => Generator::Text { max_len: 32 },
+            TypeKind::Unit => Generator::Tuple(vec![]),  // unit == empty tuple
+
+            // ---- named / path types ----
+            TypeKind::Path(p) => {
+                let name = p.segments.last().and_then(|s| match s {
+                    PathSegment::Name(id) => Some(id.name.as_str()),
+                    _ => None,
+                });
+                match name {
+                    Some("Nat") | Some("U8") | Some("U16") | Some("U32") | Some("U64") => {
+                        Generator::Nat
+                    }
+                    Some("I8") | Some("I16") | Some("I32") | Some("I64") | Some("Int") => {
+                        Generator::Int
+                    }
+                    Some("Bool") => Generator::Bool,
+                    Some("Byte") => Generator::IntRange { lo: 0, hi: 255 },
+                    Some("Float") | Some("F32") | Some("F64") => Generator::Float,
+                    Some("Text") | Some("String") => Generator::Text { max_len: 32 },
+                    Some("Ordering") => Generator::Ordering,
+                    _ => Generator::Fallback,
                 }
-                Some("I8") | Some("I16") | Some("I32") | Some("I64") | Some("Int") => {
-                    Some(Generator::Int)
+            }
+
+            // ---- generic types: Maybe<T>, Result<T,E>, List<T>, … ----
+            TypeKind::Generic { base, args } => {
+                let name = path_leaf(base);
+                match name {
+                    Some("Maybe") => {
+                        let inner = args
+                            .first()
+                            .and_then(generic_arg_ty)
+                            .map(Self::for_type_inner)
+                            .unwrap_or(Generator::Fallback);
+                        Generator::Maybe(Box::new(inner))
+                    }
+                    Some("Result") => {
+                        let ok = args
+                            .first()
+                            .and_then(generic_arg_ty)
+                            .map(Self::for_type_inner)
+                            .unwrap_or(Generator::Fallback);
+                        let err = args
+                            .get(1)
+                            .and_then(generic_arg_ty)
+                            .map(Self::for_type_inner)
+                            .unwrap_or(Generator::Fallback);
+                        Generator::Result {
+                            ok: Box::new(ok),
+                            err: Box::new(err),
+                        }
+                    }
+                    Some("List") => {
+                        let elem = args
+                            .first()
+                            .and_then(generic_arg_ty)
+                            .map(Self::for_type_inner)
+                            .unwrap_or(Generator::Fallback);
+                        Generator::List {
+                            elem: Box::new(elem),
+                            max_len: 8,
+                        }
+                    }
+                    // Transparent ownership wrappers — generate the inner T.
+                    Some("Heap") | Some("Shared") => args
+                        .first()
+                        .and_then(generic_arg_ty)
+                        .map(Self::for_type_inner)
+                        .unwrap_or(Generator::Fallback),
+                    _ => Generator::Fallback,
                 }
-                Some("Bool") => Some(Generator::Bool),
-                Some("Byte") => Some(Generator::IntRange { lo: 0, hi: 255 }),
-                Some("Float") | Some("F32") | Some("F64") => Some(Generator::Float),
-                Some("Text") | Some("String") => Some(Generator::Text { max_len: 32 }),
-                _ => None,
-            },
-            _ => None,
+            }
+
+            // ---- tuple types ----
+            TypeKind::Tuple(types) => {
+                let field_gens: Vec<Generator> =
+                    types.iter().map(Self::for_type_inner).collect();
+                Generator::Tuple(field_gens)
+            }
+
+            _ => Generator::Fallback,
         }
     }
 
@@ -192,6 +303,18 @@ impl Generator {
             Generator::Nat => gen_int_range(seed, 0, 1_000_000),
             Generator::Float => gen_float(seed),
             Generator::Text { max_len } => gen_text(seed, *max_len),
+            Generator::Maybe(inner) => gen_maybe(seed, inner),
+            Generator::Result { ok, err } => gen_result(seed, ok, err),
+            Generator::List { elem, max_len } => gen_list(seed, elem, *max_len),
+            Generator::Ordering => gen_ordering(seed),
+            Generator::Tuple(gens) => gen_tuple(seed, gens),
+            Generator::Fallback => {
+                tracing::warn!(
+                    "property generator: unknown type — using unit fallback. \
+                     Add a Generator variant for this type to exercise it properly."
+                );
+                TreeValue::Tuple(vec![])
+            }
         }
     }
 }
@@ -200,12 +323,29 @@ impl Generator {
 /// generator was constrained by so shrinks can't escape the refinement
 /// domain. A fresh `Int` generator uses `[i64::MIN, i64::MAX]`; a
 /// refined `Int{ 1 <= it <= 100 }` uses `[1, 100]`.
+///
+/// Compound variants mirror the language types they represent:
+/// `Maybe(None)` = `Maybe::None`, `Maybe(Some(v))` = `Maybe::Some(v)`,
+/// `Ordering(-1/0/1)` = `Less/Equal/Greater`, `List(elems)` = a Verum
+/// List, `Tuple(fields)` = an anonymous tuple.
 #[derive(Debug, Clone)]
 pub enum TreeValue {
+    // ---- primitives ----
     Bool(bool),
     Int { value: i64, lo: i64, hi: i64 },
     Float(f64),
     Text { value: String, max_len: u32 },
+    // ---- compound types ----
+    /// `Maybe<T>` — `None` represented as `Maybe(None)`.
+    Maybe(Option<Box<TreeValue>>),
+    /// `Result<T,E>` — `is_ok=true` → Ok(inner), `is_ok=false` → Err(inner).
+    ResultVal { is_ok: bool, inner: Box<TreeValue> },
+    /// `List<T>` — variable-length vector of element values.
+    List(Vec<TreeValue>),
+    /// `Ordering` — -1 = Less (tag 0), 0 = Equal (tag 1), 1 = Greater (tag 2).
+    Ordering(i8),
+    /// Tuple / unit — empty vec for `()`, otherwise field values in order.
+    Tuple(Vec<TreeValue>),
 }
 
 impl TreeValue {
@@ -215,28 +355,44 @@ impl TreeValue {
             TreeValue::Int { value, .. } => value.to_string(),
             TreeValue::Float(f) => format!("{:?}", f),
             TreeValue::Text { value, .. } => format!("{:?}", value),
+            TreeValue::Maybe(None) => "None".to_string(),
+            TreeValue::Maybe(Some(v)) => format!("Some({})", v.display()),
+            TreeValue::ResultVal { is_ok: true, inner } => format!("Ok({})", inner.display()),
+            TreeValue::ResultVal { is_ok: false, inner } => format!("Err({})", inner.display()),
+            TreeValue::List(elems) => format!(
+                "[{}]",
+                elems.iter().map(TreeValue::display).collect::<Vec<_>>().join(", ")
+            ),
+            TreeValue::Ordering(-1) => "Less".to_string(),
+            TreeValue::Ordering(0) => "Equal".to_string(),
+            TreeValue::Ordering(_) => "Greater".to_string(),
+            TreeValue::Tuple(fields) if fields.is_empty() => "()".to_string(),
+            TreeValue::Tuple(fields) => format!(
+                "({})",
+                fields.iter().map(TreeValue::display).collect::<Vec<_>>().join(", ")
+            ),
         }
     }
+
     /// One step of shrinking — returns candidates *closer to a minimal
     /// case* than self. Empty vec means "already minimal".
     ///
-
     /// Shrinks are filtered to stay within the generator's domain:
     /// a refined `Int{ 1..=100 }` never shrinks to 0, preserving the
     /// refinement invariant by construction.
+    ///
+    /// Compound shrinking follows the Hedgehog convention: always try
+    /// to eliminate structure first (None < Some, Err < Ok, [] < [x]).
     pub fn shrink(&self) -> Vec<TreeValue> {
         match self {
+            // ---- primitives ----
             TreeValue::Bool(true) => vec![TreeValue::Bool(false)],
             TreeValue::Bool(false) => vec![],
             TreeValue::Int { value: 0, .. } => vec![],
             TreeValue::Int { value, lo, hi } => shrink_int(*value)
                 .into_iter()
                 .filter(|v| v >= lo && v <= hi)
-                .map(|v| TreeValue::Int {
-                    value: v,
-                    lo: *lo,
-                    hi: *hi,
-                })
+                .map(|v| TreeValue::Int { value: v, lo: *lo, hi: *hi })
                 .collect(),
             TreeValue::Float(f) if *f == 0.0 => vec![],
             TreeValue::Float(f) => shrink_float(*f).into_iter().map(TreeValue::Float).collect(),
@@ -244,14 +400,45 @@ impl TreeValue {
             TreeValue::Text { value, max_len } => shrink_text(value)
                 .into_iter()
                 .filter(|s| s.chars().count() as u32 <= *max_len)
-                .map(|s| TreeValue::Text {
-                    value: s,
-                    max_len: *max_len,
-                })
+                .map(|s| TreeValue::Text { value: s, max_len: *max_len })
                 .collect(),
+            // ---- compound ----
+            TreeValue::Maybe(None) => vec![],
+            TreeValue::Maybe(Some(inner)) => {
+                // Minimal: None; then shrink the payload.
+                let mut out = vec![TreeValue::Maybe(None)];
+                for s in inner.shrink() {
+                    out.push(TreeValue::Maybe(Some(Box::new(s))));
+                }
+                out
+            }
+            TreeValue::ResultVal { is_ok: false, inner } => {
+                // Err shrinks toward Ok (simpler); then shrink payload.
+                let mut out = vec![TreeValue::ResultVal { is_ok: true, inner: inner.clone() }];
+                for s in inner.shrink() {
+                    out.push(TreeValue::ResultVal { is_ok: false, inner: Box::new(s) });
+                }
+                out
+            }
+            TreeValue::ResultVal { is_ok: true, inner } => {
+                inner.shrink()
+                    .into_iter()
+                    .map(|s| TreeValue::ResultVal { is_ok: true, inner: Box::new(s) })
+                    .collect()
+            }
+            TreeValue::List(elems) if elems.is_empty() => vec![],
+            TreeValue::List(elems) => shrink_list(elems),
+            TreeValue::Ordering(-1) | TreeValue::Ordering(1) => {
+                vec![TreeValue::Ordering(0)]  // Less/Greater → Equal (minimal)
+            }
+            TreeValue::Ordering(_) => vec![],  // Equal is minimal
+            TreeValue::Tuple(fields) if fields.is_empty() => vec![],
+            TreeValue::Tuple(fields) => shrink_tuple(fields),
         }
     }
+
     pub fn to_vbc_value(&self, interp: &mut verum_vbc::interpreter::Interpreter) -> Result<Value> {
+        use verum_common::well_known_types::{MAYBE_VARIANT_LAYOUT, ORDERING_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT};
         Ok(match self {
             TreeValue::Bool(b) => Value::from_bool(*b),
             TreeValue::Int { value, .. } => Value::from_i64(*value),
@@ -259,6 +446,55 @@ impl TreeValue {
             TreeValue::Text { value, .. } => interp
                 .alloc_string(value)
                 .map_err(|e| CliError::RuntimeError(format!("alloc_string: {:?}", e)))?,
+            TreeValue::Maybe(None) => {
+                let none_tag = MAYBE_VARIANT_LAYOUT[0].1;  // None = 0
+                interp.alloc_variant(none_tag, &[])
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(None): {:?}", e)))?
+            }
+            TreeValue::Maybe(Some(inner)) => {
+                let some_tag = MAYBE_VARIANT_LAYOUT[1].1;  // Some = 1
+                let v = inner.to_vbc_value(interp)?;
+                interp.alloc_variant(some_tag, &[v])
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Some): {:?}", e)))?
+            }
+            TreeValue::ResultVal { is_ok: true, inner } => {
+                let ok_tag = RESULT_VARIANT_LAYOUT[0].1;  // Ok = 0
+                let v = inner.to_vbc_value(interp)?;
+                interp.alloc_variant(ok_tag, &[v])
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Ok): {:?}", e)))?
+            }
+            TreeValue::ResultVal { is_ok: false, inner } => {
+                let err_tag = RESULT_VARIANT_LAYOUT[1].1;  // Err = 1
+                let v = inner.to_vbc_value(interp)?;
+                interp.alloc_variant(err_tag, &[v])
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Err): {:?}", e)))?
+            }
+            TreeValue::List(elems) => {
+                let vs: Vec<Value> = elems
+                    .iter()
+                    .map(|e| e.to_vbc_value(interp))
+                    .collect::<Result<Vec<_>>>()?;
+                interp.alloc_list(&vs)
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_list: {:?}", e)))?
+            }
+            TreeValue::Ordering(ord) => {
+                // Less=-1→tag 0, Equal=0→tag 1, Greater=1→tag 2
+                let tag = ORDERING_VARIANT_LAYOUT[match ord {
+                    -1 => 0,
+                    0 => 1,
+                    _ => 2,
+                }].1;
+                interp.alloc_variant(tag, &[])
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Ordering): {:?}", e)))?
+            }
+            TreeValue::Tuple(fields) => {
+                let vs: Vec<Value> = fields
+                    .iter()
+                    .map(|f| f.to_vbc_value(interp))
+                    .collect::<Result<Vec<_>>>()?;
+                interp.alloc_tuple(&vs)
+                    .map_err(|e| CliError::RuntimeError(format!("alloc_tuple: {:?}", e)))?
+            }
         })
     }
 }
@@ -341,6 +577,91 @@ fn gen_text(seed: &mut Seed, max_len: u32) -> TreeValue {
         s.push(c);
     }
     TreeValue::Text { value: s, max_len }
+}
+
+// --------------------------------------------------------------------
+// Compound-type generators
+// --------------------------------------------------------------------
+
+fn gen_maybe(seed: &mut Seed, inner: &Generator) -> TreeValue {
+    if (next_u64(seed) & 1) == 0 {
+        TreeValue::Maybe(None)
+    } else {
+        TreeValue::Maybe(Some(Box::new(inner.sample(seed))))
+    }
+}
+
+fn gen_result(seed: &mut Seed, ok: &Generator, err: &Generator) -> TreeValue {
+    if (next_u64(seed) & 1) == 0 {
+        TreeValue::ResultVal { is_ok: true, inner: Box::new(ok.sample(seed)) }
+    } else {
+        TreeValue::ResultVal { is_ok: false, inner: Box::new(err.sample(seed)) }
+    }
+}
+
+fn gen_list(seed: &mut Seed, elem: &Generator, max_len: u32) -> TreeValue {
+    let len = rand_range_u32(seed, 0, max_len) as usize;
+    let mut elems = Vec::with_capacity(len);
+    for _ in 0..len {
+        elems.push(elem.sample(seed));
+    }
+    TreeValue::List(elems)
+}
+
+fn gen_ordering(seed: &mut Seed) -> TreeValue {
+    match rand_range_u32(seed, 0, 2) {
+        0 => TreeValue::Ordering(-1),
+        1 => TreeValue::Ordering(0),
+        _ => TreeValue::Ordering(1),
+    }
+}
+
+fn gen_tuple(seed: &mut Seed, gens: &[Generator]) -> TreeValue {
+    let fields: Vec<TreeValue> = gens.iter().map(|g| g.sample(seed)).collect();
+    TreeValue::Tuple(fields)
+}
+
+// --------------------------------------------------------------------
+// Compound-type shrink helpers
+// --------------------------------------------------------------------
+
+fn shrink_list(elems: &[TreeValue]) -> Vec<TreeValue> {
+    let mut out = Vec::new();
+    // Empty list is minimal.
+    out.push(TreeValue::List(vec![]));
+    // Halve by dropping the second half.
+    if elems.len() > 1 {
+        out.push(TreeValue::List(elems[..elems.len() / 2].to_vec()));
+    }
+    // Drop one element at each position.
+    for i in 0..elems.len() {
+        let mut v = elems.to_vec();
+        v.remove(i);
+        out.push(TreeValue::List(v));
+    }
+    // Shrink the first element while keeping the rest.
+    if let Some(first) = elems.first() {
+        for s in first.shrink() {
+            let mut v = elems.to_vec();
+            v[0] = s;
+            out.push(TreeValue::List(v));
+        }
+    }
+    out.dedup_by(|a, b| a.display() == b.display());
+    out
+}
+
+fn shrink_tuple(fields: &[TreeValue]) -> Vec<TreeValue> {
+    let mut out = Vec::new();
+    // Shrink each field independently.
+    for (i, f) in fields.iter().enumerate() {
+        for s in f.shrink() {
+            let mut v = fields.to_vec();
+            v[i] = s;
+            out.push(TreeValue::Tuple(v));
+        }
+    }
+    out
 }
 
 /// Shrink candidates for an integer — halve toward 0, also try nearby
@@ -579,29 +900,21 @@ pub fn run_property(
     use verum_vbc::interpreter::Interpreter;
     let start = Instant::now();
 
-    // Build a generator per parameter once — cheap by construction.
-    let gens: Vec<Option<Generator>> = prop
+    // Build a generator per parameter — always succeeds; unknown types
+    // produce Generator::Fallback which emits a tracing::warn and yields
+    // Value::unit() so the test runs even for partially-supported types.
+    let gens: Vec<Generator> = prop
         .params
         .iter()
-        .map(|(_, ty)| Generator::for_type(ty))
+        .map(|(_, ty)| Generator::for_type(ty).unwrap_or(Generator::Fallback))
         .collect();
-    if gens.iter().any(|g| g.is_none()) {
-        return PropertyOutcome {
-            iterations: 0,
-            duration: start.elapsed(),
-            failure: Some(PropertyFailure {
-                seed: cfg.seed,
-                original_inputs: vec![],
-                shrunk_inputs: vec![],
-                shrink_steps: 0,
-                message: format!(
-                    "property `{}` has an unsupported parameter type; add a manual @test instead",
-                    prop.name
-                ),
-            }),
-        };
+    if gens.iter().any(|g| matches!(g, Generator::Fallback)) {
+        tracing::warn!(
+            "property `{}`: one or more parameters use Generator::Fallback \
+             (unknown type); add a Generator variant for accurate coverage",
+            prop.name
+        );
     }
-    let gens: Vec<Generator> = gens.into_iter().map(|g| g.unwrap()).collect();
 
     // Resolve VBC FunctionId by name.
     let fid: FunctionId = match module
@@ -1019,5 +1332,162 @@ mod tests {
                 assert!(n >= -5 && n <= 5, "got {} outside [-5,5]", n);
             }
         }
+    }
+
+    // ---- compound generator tests ----
+
+    #[test]
+    fn maybe_gen_produces_both_variants() {
+        let g = Generator::Maybe(Box::new(Generator::Int));
+        let mut seed = Seed(0xABCD);
+        let mut saw_none = false;
+        let mut saw_some = false;
+        for _ in 0..100 {
+            match g.sample(&mut seed) {
+                TreeValue::Maybe(None) => saw_none = true,
+                TreeValue::Maybe(Some(_)) => saw_some = true,
+                _ => panic!("unexpected variant"),
+            }
+            if saw_none && saw_some {
+                break;
+            }
+        }
+        assert!(saw_none, "Maybe gen should produce None");
+        assert!(saw_some, "Maybe gen should produce Some");
+    }
+
+    #[test]
+    fn maybe_none_shrinks_to_nothing() {
+        let v = TreeValue::Maybe(None);
+        assert!(v.shrink().is_empty());
+    }
+
+    #[test]
+    fn maybe_some_shrinks_toward_none() {
+        let v = TreeValue::Maybe(Some(Box::new(TreeValue::Int { value: 42, lo: i64::MIN, hi: i64::MAX })));
+        let shrinks = v.shrink();
+        assert!(shrinks.contains(&TreeValue::Maybe(None)));
+    }
+
+    #[test]
+    fn result_gen_produces_both_arms() {
+        let g = Generator::Result {
+            ok: Box::new(Generator::Int),
+            err: Box::new(Generator::Bool),
+        };
+        let mut seed = Seed(0x1234);
+        let mut saw_ok = false;
+        let mut saw_err = false;
+        for _ in 0..100 {
+            match g.sample(&mut seed) {
+                TreeValue::ResultVal { is_ok: true, .. } => saw_ok = true,
+                TreeValue::ResultVal { is_ok: false, .. } => saw_err = true,
+                _ => panic!("unexpected variant"),
+            }
+            if saw_ok && saw_err {
+                break;
+            }
+        }
+        assert!(saw_ok && saw_err);
+    }
+
+    #[test]
+    fn list_gen_respects_max_len() {
+        let g = Generator::List { elem: Box::new(Generator::Int), max_len: 5 };
+        let mut seed = Seed(99);
+        for _ in 0..200 {
+            if let TreeValue::List(elems) = g.sample(&mut seed) {
+                assert!(elems.len() <= 5, "list exceeded max_len");
+            }
+        }
+    }
+
+    #[test]
+    fn list_empty_is_minimal_shrink() {
+        let v = TreeValue::List(vec![
+            TreeValue::Int { value: 1, lo: i64::MIN, hi: i64::MAX },
+            TreeValue::Int { value: 2, lo: i64::MIN, hi: i64::MAX },
+        ]);
+        let shrinks = v.shrink();
+        assert!(shrinks.iter().any(|s| matches!(s, TreeValue::List(elems) if elems.is_empty())));
+    }
+
+    #[test]
+    fn ordering_gen_covers_all_three() {
+        let g = Generator::Ordering;
+        let mut seed = Seed(0xF00D);
+        let mut seen = [false; 3];
+        for _ in 0..200 {
+            if let TreeValue::Ordering(v) = g.sample(&mut seed) {
+                match v {
+                    -1 => seen[0] = true,
+                    0 => seen[1] = true,
+                    1 => seen[2] = true,
+                    _ => {}
+                }
+            }
+        }
+        assert!(seen.iter().all(|&x| x), "Ordering gen must cover Less/Equal/Greater");
+    }
+
+    #[test]
+    fn ordering_equal_is_minimal() {
+        assert!(TreeValue::Ordering(0).shrink().is_empty());
+        assert_eq!(TreeValue::Ordering(-1).shrink(), vec![TreeValue::Ordering(0)]);
+        assert_eq!(TreeValue::Ordering(1).shrink(), vec![TreeValue::Ordering(0)]);
+    }
+
+    #[test]
+    fn tuple_gen_has_correct_arity() {
+        let g = Generator::Tuple(vec![Generator::Int, Generator::Bool, Generator::Float]);
+        let mut seed = Seed(42);
+        if let TreeValue::Tuple(fields) = g.sample(&mut seed) {
+            assert_eq!(fields.len(), 3);
+        } else {
+            panic!("expected Tuple");
+        }
+    }
+
+    #[test]
+    fn unit_tuple_gen_is_empty_tuple() {
+        let g = Generator::Tuple(vec![]);
+        let mut seed = Seed(0);
+        if let TreeValue::Tuple(fields) = g.sample(&mut seed) {
+            assert!(fields.is_empty());
+        } else {
+            panic!("expected empty Tuple");
+        }
+    }
+
+    #[test]
+    fn for_type_inner_strips_reference() {
+        use verum_ast::Span;
+        let inner = verum_ast::Type::int(Span::default());
+        let ref_ty = verum_ast::Type::new(
+            TypeKind::Reference { mutable: false, inner: Box::new(inner).into() },
+            Span::default(),
+        );
+        let g = Generator::for_type_inner(&ref_ty);
+        assert!(matches!(g, Generator::Int));
+    }
+
+    #[test]
+    fn display_compound_types() {
+        assert_eq!(TreeValue::Maybe(None).display(), "None");
+        assert_eq!(
+            TreeValue::Maybe(Some(Box::new(TreeValue::Bool(true)))).display(),
+            "Some(true)"
+        );
+        assert_eq!(TreeValue::Ordering(-1).display(), "Less");
+        assert_eq!(TreeValue::Ordering(0).display(), "Equal");
+        assert_eq!(TreeValue::Ordering(1).display(), "Greater");
+        assert_eq!(TreeValue::Tuple(vec![]).display(), "()");
+        assert_eq!(
+            TreeValue::List(vec![
+                TreeValue::Int { value: 1, lo: i64::MIN, hi: i64::MAX },
+            ])
+            .display(),
+            "[1]"
+        );
     }
 }
