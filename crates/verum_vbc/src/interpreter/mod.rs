@@ -526,6 +526,92 @@ impl Interpreter {
     }
 
     // =========================================================================
+    // Host-side aggregate construction (used by property.rs and test harness)
+    // =========================================================================
+
+    /// Allocate a sum-type variant on the heap.
+    ///
+    /// `tag` = variant discriminant (0 = first constructor, 1 = second, …).
+    /// `payload` = ordered field values; pass an empty slice for unit variants
+    /// (e.g. `None`, `Less`, `Equal`, `Greater`).
+    ///
+    /// The legacy `0x8000 + tag` TypeId sentinel matches the `MakeVariant`
+    /// opcode path — downstream consumers recognise it as "tag is meaningful
+    /// but the parent sum-type id is not available".
+    pub fn alloc_variant(&mut self, tag: u32, payload: &[Value]) -> InterpreterResult<Value> {
+        let field_count = payload.len() as u32;
+        let data_size = 8 + payload.len() * std::mem::size_of::<Value>();
+        let type_id = crate::types::TypeId(0x8000 + tag);
+        let obj = self.state.heap.alloc_with_init(type_id, data_size, |data| {
+            let tag_ptr = data.as_mut_ptr() as *mut u32;
+            unsafe {
+                *tag_ptr = tag;
+                *tag_ptr.add(1) = field_count;
+            }
+        })?;
+        self.state.record_allocation();
+        // Payload starts at data_ptr() + 8 (after 4-byte tag + 4-byte field_count).
+        let payload_base = unsafe { obj.data_ptr().add(8) as *mut Value };
+        for (i, v) in payload.iter().enumerate() {
+            unsafe { *payload_base.add(i) = *v; }
+        }
+        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    }
+
+    /// Allocate a `List<T>` from a slice of already-resolved VBC Values.
+    ///
+    /// Mirrors the layout of `alloc_string_list` and the `MakeList` opcode:
+    /// `[len: i64, cap: i64, backing_ptr: *Value]` in the data area.
+    pub fn alloc_list(&mut self, elements: &[Value]) -> InterpreterResult<Value> {
+        let count = elements.len();
+        let header_size = 3 * std::mem::size_of::<i64>();
+        let obj = self
+            .state
+            .heap
+            .alloc(crate::types::TypeId::LIST, header_size)?;
+        self.state.record_allocation();
+        let backing_layout =
+            std::alloc::Layout::from_size_align(count.max(1) * std::mem::size_of::<Value>(), 8)
+                .map_err(|_| InterpreterError::Panic {
+                    message: "list layout overflow".into(),
+                })?;
+        let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
+        if backing_ptr.is_null() && count > 0 {
+            return Err(InterpreterError::Panic {
+                message: "list allocation failed".into(),
+            });
+        }
+        let value_ptr = backing_ptr as *mut Value;
+        for (i, v) in elements.iter().enumerate() {
+            unsafe { *value_ptr.add(i) = *v; }
+        }
+        let data_ptr = unsafe { obj.data_ptr() as *mut i64 };
+        unsafe {
+            *data_ptr = count as i64;
+            *data_ptr.add(1) = count as i64;
+            *data_ptr.add(2) = backing_ptr as i64;
+        }
+        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    }
+
+    /// Allocate a Tuple from an ordered slice of VBC Values.
+    ///
+    /// Layout: `[field_0: Value, field_1: Value, …]` at `data_ptr()`.
+    pub fn alloc_tuple(&mut self, fields: &[Value]) -> InterpreterResult<Value> {
+        let data_size = (fields.len() * std::mem::size_of::<Value>()).max(8);
+        let obj = self
+            .state
+            .heap
+            .alloc(crate::types::TypeId::TUPLE, data_size)?;
+        self.state.record_allocation();
+        let data_ptr = unsafe { obj.data_ptr() as *mut Value };
+        for (i, v) in fields.iter().enumerate() {
+            unsafe { *data_ptr.add(i) = *v; }
+        }
+        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    }
+
+    // =========================================================================
     // Generator API
     // =========================================================================
     //
