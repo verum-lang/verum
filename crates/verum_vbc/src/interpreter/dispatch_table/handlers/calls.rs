@@ -239,6 +239,19 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // catch_unwind(f) intercept (#50): run f, catch Panic, build
+            // Result<T, PanicInfo>.  Must come LAST so other intercepts
+            // that match "catch_unwind" are not reachable (none currently).
+            if let Some(result) = super::panic_runtime::try_intercept_catch_unwind(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 
