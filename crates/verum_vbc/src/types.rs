@@ -240,6 +240,25 @@ impl TypeId {
         matches!(self.0, 512 | 527)
     }
 
+    /// Canonical smart-pointer name → TypeId table.
+    ///
+    /// Single source of truth for Heap/Shared TypeIds shared by codegen
+    /// (well_known_types map), disassembler (type_id_name), and runtime
+    /// dispatch (method_dispatch / memory_collections).  Any change to
+    /// the raw TypeId(N) values MUST be reflected here — `smart_pointer_type_ids_pinned`
+    /// in the test suite will catch drift.
+    pub const SMART_POINTER_TYPE_IDS: &'static [(&'static str, TypeId)] =
+        &[("Heap", TypeId::HEAP), ("Shared", TypeId::SHARED)];
+
+    /// Returns `true` if this TypeId identifies a smart-pointer container
+    /// (Heap or Shared).  Derived from `SMART_POINTER_TYPE_IDS` — never
+    /// independently hardcoded.
+    pub fn is_smart_pointer(self) -> bool {
+        Self::SMART_POINTER_TYPE_IDS
+            .iter()
+            .any(|&(_, id)| id == self)
+    }
+
     /// Checks if this is a built-in type.
     pub fn is_builtin(self) -> bool {
         self.0 < Self::FIRST_USER
@@ -2381,5 +2400,60 @@ mod tests {
         td.clone_fn = Some(101);
         assert_eq!(td.drop_fn, Some(100));
         assert_eq!(td.clone_fn, Some(101));
+    }
+
+    // ========================================================================
+    // Smart-pointer TypeId drift-guard (#39)
+    // ========================================================================
+
+    #[test]
+    fn smart_pointer_type_ids_pinned() {
+        // Pin raw TypeId values.  Changing these breaks interpreter
+        // dispatch (method_dispatch.rs, memory_collections.rs) and the
+        // disassembler simultaneously — this test is the first line of
+        // defence against accidental drift.
+        assert_eq!(TypeId::HEAP, TypeId(519), "Heap TypeId drifted");
+        assert_eq!(TypeId::SHARED, TypeId(520), "Shared TypeId drifted");
+    }
+
+    #[test]
+    fn smart_pointer_type_ids_table_matches_constants() {
+        // Verify SMART_POINTER_TYPE_IDS entries agree with the named constants.
+        let table = TypeId::SMART_POINTER_TYPE_IDS;
+        assert_eq!(table.len(), 2, "expected exactly Heap and Shared");
+
+        let heap_entry = table.iter().find(|&&(name, _)| name == "Heap");
+        let shared_entry = table.iter().find(|&&(name, _)| name == "Shared");
+
+        assert_eq!(heap_entry.map(|&(_, id)| id), Some(TypeId::HEAP));
+        assert_eq!(shared_entry.map(|&(_, id)| id), Some(TypeId::SHARED));
+    }
+
+    #[test]
+    fn smart_pointer_is_smart_pointer_method() {
+        assert!(TypeId::HEAP.is_smart_pointer(), "HEAP must be a smart pointer");
+        assert!(TypeId::SHARED.is_smart_pointer(), "SHARED must be a smart pointer");
+
+        // Spot-check non-smart-pointer types.
+        assert!(!TypeId::LIST.is_smart_pointer());
+        assert!(!TypeId::MAYBE.is_smart_pointer());
+        assert!(!TypeId::TUPLE.is_smart_pointer());
+    }
+
+    #[test]
+    fn smart_pointer_type_ids_are_distinct() {
+        assert_ne!(TypeId::HEAP, TypeId::SHARED);
+        // Ensure no duplicate raw IDs in the table.
+        let table = TypeId::SMART_POINTER_TYPE_IDS;
+        let ids: Vec<u32> = table.iter().map(|&(_, id)| id.0).collect();
+        let mut sorted = ids.clone();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len(), "duplicate TypeId in SMART_POINTER_TYPE_IDS");
+        // Ensure no duplicate names.
+        let names: Vec<&str> = table.iter().map(|&(name, _)| name).collect();
+        let mut sorted_names = names.clone();
+        sorted_names.sort_unstable();
+        sorted_names.dedup();
+        assert_eq!(names.len(), sorted_names.len(), "duplicate name in SMART_POINTER_TYPE_IDS");
     }
 }
