@@ -14374,6 +14374,20 @@ impl VbcCodegen {
                 let inner_type = self.extract_expr_type_name(inner)?;
                 Self::extract_element_type(&inner_type)
             }
+            // Await: at Tier-0 async fns are not state-machine-lowered
+            // (see compile_await comment), so `expr.await` returns the
+            // SAME value `expr` produces.  Type-wise: if the awaited
+            // expression is a Future<T>, we'd extract T; but Verum's
+            // current async-as-sync semantics means the return type
+            // of an async fn is its declared `-> T` directly (no
+            // Future<T> wrapper at the value level), so propagating
+            // `inner` type unchanged is correct.  Without this arm,
+            // `let result = run(...).await` left `result`'s type
+            // unset, and pattern matching `Ok(r) => r.stdout()` saw
+            // `r: <unknown>` which fell through method dispatch into
+            // free-fn shadowing for stdlib names like
+            // `core.io.stdio.stdout`.
+            ExprKind::Await(inner) => self.extract_expr_type_name(inner),
             // If/else expression: infer type from then branch
             ExprKind::If { then_branch, .. } => self.extract_type_from_block(then_branch),
             // Match expression: infer type from first arm body with a known
