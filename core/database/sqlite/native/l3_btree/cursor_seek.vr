@@ -52,7 +52,6 @@ mount core.database.sqlite.native.l3_btree.page_layout.{
 mount core.database.sqlite.native.l3_btree.comparator.{
     KeyKind, SeekKey, CellKey, CkRowId, CkRecord,
     SkRowId, SkRecord,
-    KeyOrdering, KoLess, KoEqual, KoGreater,
     cmp_keys, binary_search_cells, BinarySearchResult,
 };
 mount core.database.sqlite.native.btree_seek_op_codes.op.{
@@ -189,7 +188,7 @@ public fn cursor_seek(
 
         if page_kind_is_interior(hdr.kind) {
             // Decide which child to descend into.  If the search
-            // returned `KoEqual` at index `i`, descend via cell i's
+            // returned `Equal` at index `i`, descend via cell i's
             // left_child for index trees; for table interior cells
             // (which only carry rowids) descend via cell i's left_child
             // when the rowid is <= target, else cell i+1's left_child.
@@ -320,20 +319,20 @@ fn finalise_leaf_position(
     op: SeekOp,
 ) {
     let target_idx = match (op, &bsr.ordering) {
-        (SoEq, KoEqual)    => bsr.index,
-        (SoEq, _)          => -1,                              // miss
-        (SoGe, KoEqual)    => bsr.index,
-        (SoGe, KoGreater)  => bsr.index,
-        (SoGe, KoLess)     => hdr.cell_count,                  // past end
-        (SoGt, KoEqual)    => bsr.index + 1,
-        (SoGt, KoGreater)  => bsr.index,
-        (SoGt, KoLess)     => hdr.cell_count,
-        (SoLe, KoEqual)    => bsr.index,
-        (SoLe, KoGreater)  => bsr.index - 1,
-        (SoLe, KoLess)     => hdr.cell_count - 1,
-        (SoLt, KoEqual)    => bsr.index - 1,
-        (SoLt, KoGreater)  => bsr.index - 1,
-        (SoLt, KoLess)     => hdr.cell_count - 1,
+        (SoEq, Equal)    => bsr.index,
+        (SoEq, _)        => -1,                              // miss
+        (SoGe, Equal)    => bsr.index,
+        (SoGe, Greater)  => bsr.index,
+        (SoGe, Less)     => hdr.cell_count,                  // past end
+        (SoGt, Equal)    => bsr.index + 1,
+        (SoGt, Greater)  => bsr.index,
+        (SoGt, Less)     => hdr.cell_count,
+        (SoLe, Equal)    => bsr.index,
+        (SoLe, Greater)  => bsr.index - 1,
+        (SoLe, Less)     => hdr.cell_count - 1,
+        (SoLt, Equal)    => bsr.index - 1,
+        (SoLt, Greater)  => bsr.index - 1,
+        (SoLt, Less)     => hdr.cell_count - 1,
     };
     if target_idx < 0 || target_idx >= hdr.cell_count {
         c.mark_at_end();
@@ -344,17 +343,17 @@ fn finalise_leaf_position(
 
 fn seek_outcome_from_bsr(bsr: &BinarySearchResult, op: SeekOp) -> SeekOutcome {
     match (op, &bsr.ordering) {
-        (SoEq, KoEqual) => SoExactMatch,
-        (SoEq, _)       => SoEmpty,                            // miss
-        (_, KoEqual)    => SoExactMatch,
-        (SoGe, KoLess)  => SoPastEnd,
-        (SoGt, KoLess)  => SoPastEnd,
-        (SoLe, KoLess)  => SoFoundSmaller,
-        (SoLt, KoLess)  => SoFoundSmaller,
-        (SoGe, _)       => SoFoundLarger,
-        (SoGt, _)       => SoFoundLarger,
-        (SoLe, _)       => SoFoundSmaller,
-        (SoLt, _)       => SoFoundSmaller,
+        (SoEq, Equal) => SoExactMatch,
+        (SoEq, _)     => SoEmpty,                            // miss
+        (_, Equal)    => SoExactMatch,
+        (SoGe, Less)  => SoPastEnd,
+        (SoGt, Less)  => SoPastEnd,
+        (SoLe, Less)  => SoFoundSmaller,
+        (SoLt, Less)  => SoFoundSmaller,
+        (SoGe, _)     => SoFoundLarger,
+        (SoGt, _)     => SoFoundLarger,
+        (SoLe, _)     => SoFoundSmaller,
+        (SoLt, _)     => SoFoundSmaller,
     }
 }
 
