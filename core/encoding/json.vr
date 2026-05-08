@@ -61,13 +61,6 @@ public type JsonValue is
 // `core.net.weft.json_extractor.Json<T>` per net-framework spec §5.3.
 // Encoding-layer code uses the canonical `JsonValue`.
 
-// `JsonObject` exists inside `JsonValue` as the `JsonObject(Map<…>)`
-// variant, but consumer code routinely reaches for it as a stand-alone
-// type ("a JSON object literal").  This top-level alias makes
-// `mount core.encoding.json.{JsonObject}` resolve cleanly without
-// forcing every caller to write `Map<Text, JsonValue>` longhand.
-public type JsonObject is Map<Text, JsonValue>;
-
 // Error position and cause.
 public type JsonError is {
     kind: JsonErrorKind,
