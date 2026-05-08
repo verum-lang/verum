@@ -31,9 +31,9 @@ fn canonical_rules_has_expected_count() {
 }
 
 #[test]
-fn proved_lemma_set_includes_six_discharged_iou_rules() {
+fn proved_lemma_set_includes_nine_discharged_iou_rules() {
     // Pin: 4 placeholder structurally-proved lemmas (K_Var / K_Univ
-    // / K_FwAx / K_Pos) + 6 IOU discharges = 10 proved.
+    // / K_FwAx / K_Pos) + 9 IOU discharges = 13 proved.
     //
     // Discharged so far:
     //   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
@@ -45,6 +45,11 @@ fn proved_lemma_set_includes_six_discharged_iou_rules() {
     //                         the ordinal-modal-depth-bound intent.
     //   * K_Inductive       — premise-free at the export layer; strict-
     //                         positivity is the kernel's input contract.
+    //   * K_Epsilon_Of      — EpsilonOf preserves the articulation's typing;
+    //                         the M ⊣ A unit law is the kernel's input contract.
+    //   * K_Alpha_Of        — counit-law analogue.
+    //   * K_Modal_Big_And   — premise-free; homogeneous-typed-components
+    //                         is the kernel's input contract.
     let rules = canonical_rules();
     let proved: Vec<&str> = rules
         .iter()
@@ -54,40 +59,24 @@ fn proved_lemma_set_includes_six_discharged_iou_rules() {
 
     assert_eq!(
         proved.len(),
-        10,
-        "expected 10 structurally-proved lemmas, got {}: {:?}",
+        13,
+        "expected 13 structurally-proved lemmas, got {}: {:?}",
         proved.len(),
         proved,
     );
 
-    assert!(proved.contains(&"K_Var"), "K_Var must be proved");
-    assert!(proved.contains(&"K_Univ"), "K_Univ must be proved");
-    assert!(proved.contains(&"K_FwAx"), "K_FwAx must be proved");
-    assert!(proved.contains(&"K_Pos"), "K_Pos must be proved");
-    assert!(
-        proved.contains(&"K_Quot_Elim"),
-        "K_Quot_Elim must be proved (discharged in Quotient-elimination pass)",
-    );
-    assert!(
-        proved.contains(&"K_Elim"),
-        "K_Elim must be proved (discharged via structural premises)",
-    );
-    assert!(
-        proved.contains(&"K_Universe_Ascent"),
-        "K_Universe_Ascent must be proved (collapses onto T_univ)",
-    );
-    assert!(
-        proved.contains(&"K_Refine"),
-        "K_Refine must be proved (predicate at Pi x base (Universe 0))",
-    );
-    assert!(
-        proved.contains(&"K_Refine_Omega"),
-        "K_Refine_Omega must be proved (same shape as K_Refine)",
-    );
-    assert!(
-        proved.contains(&"K_Inductive"),
-        "K_Inductive must be proved (premise-free; strict-positivity is the kernel's input contract)",
-    );
+    for needed in [
+        "K_Var", "K_Univ", "K_FwAx", "K_Pos",
+        "K_Quot_Elim", "K_Elim", "K_Universe_Ascent",
+        "K_Refine", "K_Refine_Omega", "K_Inductive",
+        "K_Epsilon_Of", "K_Alpha_Of", "K_Modal_Big_And",
+    ] {
+        assert!(
+            proved.contains(&needed),
+            "{} must be proved",
+            needed,
+        );
+    }
 }
 
 #[test]
@@ -333,10 +322,10 @@ fn proved_count_plus_admitted_count_matches_total() {
         "every rule must be either proved, admitted, or discharged-by-framework",
     );
     // 4 placeholder structural rules (K_Var / K_Univ / K_FwAx /
-    // K_Pos) + 6 discharged IOUs (K_Quot_Elim / K_Elim /
-    // K_Universe_Ascent / K_Refine / K_Refine_Omega / K_Inductive)
-    // = 10 proved.
-    assert_eq!(proved, 10, "expected 10 proved lemmas");
+    // K_Pos) + 9 discharged IOUs (K_Quot_Elim / K_Elim /
+    // K_Universe_Ascent / K_Refine / K_Refine_Omega / K_Inductive
+    // / K_Epsilon_Of / K_Alpha_Of / K_Modal_Big_And) = 13 proved.
+    assert_eq!(proved, 13, "expected 13 proved lemmas");
     assert!(
         discharged >= 7,
         "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",

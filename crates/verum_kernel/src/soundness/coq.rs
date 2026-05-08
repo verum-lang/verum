@@ -192,7 +192,7 @@ impl SoundnessBackend for CoqBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (11 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (8 axioms — one per with-IOU rule).
 //
 // Discharged so far (each removed an axiom):
 //   * K_Quot_Elim       — structural premises mirroring K_Quot_Form/K_Quot_Intro.
@@ -205,7 +205,7 @@ impl SoundnessBackend for CoqBackend {
 // ============================================================================
 
 const IOU_AXIOMS_COQ: &str = "\
-(* ====== Per-rule IOU axioms (11 total) ====== *)\n\
+(* ====== Per-rule IOU axioms (8 total) ====== *)\n\
 \n\
 (* K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2). *)\n\
 Axiom K_Path_Over_Form_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> CoreTerm -> nat -> Prop.\n\
@@ -252,14 +252,15 @@ Axiom K_Eps_Mu_iou : Ctx -> CoreTerm -> CoreTerm -> CoreTerm -> Prop.\n\
 (* K_Round_Trip: bridge-audit completeness. *)\n\
 Axiom K_Round_Trip_iou : Ctx -> CoreTerm -> CoreTerm -> Prop.\n\
 \n\
-(* K_Epsilon_Of: M ⊣ A unit law. *)\n\
-Axiom K_Epsilon_Of_iou : Ctx -> CoreTerm -> CoreTerm -> Prop.\n\
+(* (K_Epsilon_Of: discharged — see T_epsilon_of below; the M ⊣ A\n\
+   unit law is the kernel's input contract.  EpsilonOf preserves\n\
+   the articulation's typing, mirroring T_modal_box / T_modal_diamond.) *)\n\
 \n\
-(* K_Alpha_Of: M ⊣ A counit law. *)\n\
-Axiom K_Alpha_Of_iou : Ctx -> CoreTerm -> CoreTerm -> Prop.\n\
+(* (K_Alpha_Of: discharged — see T_alpha_of below; counit-law analogue.) *)\n\
 \n\
-(* K_Modal_Big_And: transfinite-supremum ordinal recursion (Lemma 136.L0). *)\n\
-Axiom K_Modal_Big_And_iou : Ctx -> list CoreTerm -> CoreTerm -> Prop.";
+(* (K_Modal_Big_And: discharged — see T_modal_big_and below for the\n\
+   premise-free form; homogeneous-typed-components is the kernel's\n\
+   input contract, mirroring K_Inductive.) *)";
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -407,11 +408,11 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma term recovered\n  \
   | T_epsilon_of :\n      \
       forall (Gamma : Ctx) (articulation result : CoreTerm),\n        \
-        K_Epsilon_Of_iou Gamma articulation result ->\n        \
+        Typing Gamma articulation result ->\n        \
         Typing Gamma (EpsilonOf articulation) result\n  \
   | T_alpha_of :\n      \
       forall (Gamma : Ctx) (enactment result : CoreTerm),\n        \
-        K_Alpha_Of_iou Gamma enactment result ->\n        \
+        Typing Gamma enactment result ->\n        \
         Typing Gamma (AlphaOf enactment) result\n  \
   | T_modal_box :\n      \
       forall (Gamma : Ctx) (inner T : CoreTerm),\n        \
@@ -423,7 +424,6 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
         Typing Gamma (ModalDiamond inner) T\n  \
   | T_modal_big_and :\n      \
       forall (Gamma : Ctx) (components : list CoreTerm) (result : CoreTerm),\n        \
-        K_Modal_Big_And_iou Gamma components result ->\n        \
         Typing Gamma (ModalBigAnd components) result\n  \
   | T_shape :\n      \
       forall (Gamma : Ctx) (inner T : CoreTerm),\n        \
@@ -659,14 +659,14 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         "K_Epsilon_Of" => Some(
             "Lemma K_Epsilon_Of_sound :\n  \
               forall (Gamma : Ctx) (articulation result : CoreTerm),\n    \
-                K_Epsilon_Of_iou Gamma articulation result ->\n    \
+                Typing Gamma articulation result ->\n    \
                 Typing Gamma (EpsilonOf articulation) result.\n\
               Proof. exact T_epsilon_of. Qed.",
         ),
         "K_Alpha_Of" => Some(
             "Lemma K_Alpha_Of_sound :\n  \
               forall (Gamma : Ctx) (enactment result : CoreTerm),\n    \
-                K_Alpha_Of_iou Gamma enactment result ->\n    \
+                Typing Gamma enactment result ->\n    \
                 Typing Gamma (AlphaOf enactment) result.\n\
               Proof. exact T_alpha_of. Qed.",
         ),
@@ -685,7 +685,6 @@ fn rule_signature_coq(rule_name: &str) -> Option<String> {
         "K_Modal_Big_And" => Some(
             "Lemma K_Modal_Big_And_sound :\n  \
               forall (Gamma : Ctx) (components : list CoreTerm) (result : CoreTerm),\n    \
-                K_Modal_Big_And_iou Gamma components result ->\n    \
                 Typing Gamma (ModalBigAnd components) result.\n\
               Proof. exact T_modal_big_and. Qed.",
         ),

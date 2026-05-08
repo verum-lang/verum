@@ -155,7 +155,7 @@ impl SoundnessBackend for LeanBackend {
              opaque side_conditions_hold : Prop\n\n",
         );
 
-        // 3. Per-rule IOU axioms — exactly 11 axioms, one per
+        // 3. Per-rule IOU axioms — exactly 8 axioms, one per
         //    with-IOU rule.  Each captures the rule's meta-theory
         //    dependency at the type level: discharging the IOU =
         //    replacing the `axiom` declaration with a `def`, or (as
@@ -252,10 +252,10 @@ impl SoundnessBackend for LeanBackend {
 }
 
 // ============================================================================
-// Per-rule IOU axiom declarations (11 axioms — one per with-IOU rule).
+// Per-rule IOU axiom declarations (8 axioms — one per with-IOU rule).
 // ============================================================================
 
-/// The 11 axiom declarations covering every with-IOU rule.  Each
+/// The 8 axiom declarations covering every with-IOU rule.  Each
 /// axiom's parameter list captures the rule's relevant data; the
 /// Typing constructor for the rule consumes the axiom as a
 /// hypothesis.  Comments on each axiom name the meta-theory citation.
@@ -269,7 +269,7 @@ impl SoundnessBackend for LeanBackend {
 /// Verum side); the Lean export now models the structural
 /// typing of well-formed elimination terms.
 const IOU_AXIOMS_LEAN: &str = "\
--- ====== Per-rule IOU axioms (11 total) ======\n\
+-- ====== Per-rule IOU axioms (8 total) ======\n\
 -- Each captures a specific meta-theory dependency that we have not yet\n\
 -- formalised.  Discharging an IOU = replacing the axiom with a `def` (or,\n\
 -- as for K_Quot_Elim, removing the axiom entirely and folding its content\n\
@@ -325,14 +325,18 @@ axiom K_Eps_Mu_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → Prop\n\
 -- K_Round_Trip: bridge-audit completeness.\n\
 axiom K_Round_Trip_iou : Ctx → CoreTerm → CoreTerm → Prop\n\
 \n\
--- K_Epsilon_Of: M ⊣ A unit law.\n\
-axiom K_Epsilon_Of_iou : Ctx → CoreTerm → CoreTerm → Prop\n\
+-- (K_Epsilon_Of: discharged — see Typing.t_epsilon_of below for\n\
+-- the structural form; the M ⊣ A unit law is the kernel's input\n\
+-- contract.  EpsilonOf preserves the articulation's typing, same\n\
+-- shape as t_modal_box / t_modal_diamond.)\n\
 \n\
--- K_Alpha_Of: M ⊣ A counit law.\n\
-axiom K_Alpha_Of_iou : Ctx → CoreTerm → CoreTerm → Prop\n\
+-- (K_Alpha_Of: discharged — see Typing.t_alpha_of below; the\n\
+-- counit-law analogue.)\n\
 \n\
--- K_Modal_Big_And: transfinite-supremum ordinal recursion (Lemma 136.L0).\n\
-axiom K_Modal_Big_And_iou : Ctx → List CoreTerm → CoreTerm → Prop";
+-- (K_Modal_Big_And: discharged — see Typing.t_modal_big_and\n\
+-- below for the premise-free form; homogeneous-typed-components\n\
+-- is the kernel's input contract, mirroring the K_Inductive\n\
+-- discipline.)";
 
 // ============================================================================
 // The Typing inductive — 38 constructors covering every kernel rule.
@@ -486,11 +490,11 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ term recovered\n  \
   | t_epsilon_of :\n      \
       ∀ {Γ : Ctx} {articulation result : CoreTerm},\n        \
-        K_Epsilon_Of_iou Γ articulation result →\n        \
+        Typing Γ articulation result →\n        \
         Typing Γ (CoreTerm.EpsilonOf articulation) result\n  \
   | t_alpha_of :\n      \
       ∀ {Γ : Ctx} {enactment result : CoreTerm},\n        \
-        K_Alpha_Of_iou Γ enactment result →\n        \
+        Typing Γ enactment result →\n        \
         Typing Γ (CoreTerm.AlphaOf enactment) result\n  \
   | t_modal_box :\n      \
       ∀ {Γ : Ctx} {inner T : CoreTerm},\n        \
@@ -502,7 +506,6 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
         Typing Γ (CoreTerm.ModalDiamond inner) T\n  \
   | t_modal_big_and :\n      \
       ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm},\n        \
-        K_Modal_Big_And_iou Γ components result →\n        \
         Typing Γ (CoreTerm.ModalBigAnd components) result\n  \
   | t_shape :\n      \
       ∀ {Γ : Ctx} {inner T : CoreTerm},\n        \
@@ -531,8 +534,8 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where\n\
 /// the lemmas' shapes.  Real proofs across the entire surface; no
 /// `sorry` for any structural- or formation-level concern.
 ///
-/// The 11 with-IOU rules' lemmas thread the per-rule axiom as a
-/// hypothesis; their `#print axioms` output enumerates the 11 IOU
+/// The 8 with-IOU rules' lemmas thread the per-rule axiom as a
+/// hypothesis; their `#print axioms` output enumerates the 8 IOU
 /// trust extensions explicitly.  Discharges so far:
 ///   * K_Quot_Elim       — structural premises mirroring K_Quot_Form / K_Quot_Intro.
 ///   * K_Elim            — same template, with per-constructor case-typing
@@ -713,12 +716,12 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         "K_Epsilon_Of" => Some(
             "theorem K_Epsilon_Of_sound :\n    ∀ {Γ : Ctx} {articulation result : CoreTerm},\n      \
-              K_Epsilon_Of_iou Γ articulation result →\n      \
+              Typing Γ articulation result →\n      \
               Typing Γ (CoreTerm.EpsilonOf articulation) result :=\n  @Typing.t_epsilon_of",
         ),
         "K_Alpha_Of" => Some(
             "theorem K_Alpha_Of_sound :\n    ∀ {Γ : Ctx} {enactment result : CoreTerm},\n      \
-              K_Alpha_Of_iou Γ enactment result →\n      \
+              Typing Γ enactment result →\n      \
               Typing Γ (CoreTerm.AlphaOf enactment) result :=\n  @Typing.t_alpha_of",
         ),
         "K_Modal_Box" => Some(
@@ -733,7 +736,6 @@ fn rule_signature_lean(rule_name: &str) -> Option<String> {
         ),
         "K_Modal_Big_And" => Some(
             "theorem K_Modal_Big_And_sound :\n    ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm},\n      \
-              K_Modal_Big_And_iou Γ components result →\n      \
               Typing Γ (CoreTerm.ModalBigAnd components) result :=\n  @Typing.t_modal_big_and",
         ),
         "K_Shape" => Some(

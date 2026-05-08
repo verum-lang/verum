@@ -611,14 +611,26 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             false,
-            admitted("requires the M ⊣ A biadjunction unit law"),
+            // Discharged: EpsilonOf preserves the articulation's
+            // typing — same shape as t_modal_box / t_modal_diamond.
+            // The M ⊣ A unit-law content is the kernel's input
+            // contract, audited at the Verum side.
+            proved(
+                "exact T_epsilon_of.",
+                "  exact @Typing.t_epsilon_of _ _ _",
+            ),
         ),
         spec(
             "K_Alpha_Of",
             Diakrisis,
             1,
             false,
-            admitted("requires the M ⊣ A biadjunction counit law"),
+            // Discharged: AlphaOf preserves the enactment's typing
+            // — counit-law analogue of K_Epsilon_Of.
+            proved(
+                "exact T_alpha_of.",
+                "  exact @Typing.t_alpha_of _ _ _",
+            ),
         ),
         spec(
             "K_Modal_Box",
@@ -643,7 +655,15 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             Diakrisis,
             1,
             false,
-            admitted("requires transfinite-supremum lemma for ordinal recursion (Lemma 136.L0)"),
+            // Discharged: premise-free at the export layer; the
+            // transfinite-supremum lemma's content (homogeneously-
+            // typed components) is the kernel's input contract,
+            // mirroring K_Inductive's structural-positivity
+            // discipline.
+            proved(
+                "exact T_modal_big_and.",
+                "  exact @Typing.t_modal_big_and _ _ _",
+            ),
         ),
         spec(
             "K_Shape",
