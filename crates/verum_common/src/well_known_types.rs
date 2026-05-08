@@ -464,6 +464,88 @@ mod ordering_layout_tests {
             .unwrap();
         assert_eq!(result_success_tag(), result_ok_tag);
     }
+
+    // =========================================================================
+    // Task #37 — Operator fast-path drift validator
+    //
+    // The `?`-operator fast path in `compile_try` (verum_vbc/codegen/expressions.rs)
+    // emits `IsVar { tag: success_tag }` directly on the Maybe/Result value instead
+    // of calling `Try::branch()` and then checking ControlFlow::Continue.
+    //
+    // This shortcut is correct ONLY when the success tag in MAYBE/RESULT_VARIANT_LAYOUT
+    // corresponds to the variant that `branch()` maps to Continue.
+    //
+    // The invariants (documented as constants in core/base/maybe.vr + result.vr):
+    //   Maybe::branch(): Some(v) → Continue(v), None → Break(None)
+    //   Result::branch(): Ok(v) → Continue(v), Err(e) → Break(Err(e))
+    //
+    // The assertions below pin the contracts that make the fast path safe.
+    // =========================================================================
+
+    /// The ControlFlow::Continue tag must be distinct from ControlFlow::Break tag.
+    /// The fast path exploits this to substitute a direct variant check for branch().
+    #[test]
+    fn operator_fastpath_drift_controlflow_tags_distinct() {
+        let continue_tag = CONTROLFLOW_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "Continue" { Some(t) } else { None })
+            .expect("CONTROLFLOW_VARIANT_LAYOUT must contain 'Continue'");
+        let break_tag = CONTROLFLOW_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "Break" { Some(t) } else { None })
+            .expect("CONTROLFLOW_VARIANT_LAYOUT must contain 'Break'");
+        assert_ne!(
+            continue_tag, break_tag,
+            "Continue and Break must have different tags for the fast-path substitution to be valid",
+        );
+    }
+
+    /// The Maybe success-tag (Some=1) and failure-tag (None=0) must be different.
+    /// The fast path does `IsVar { tag: maybe_success_tag() }` — it is only correct
+    /// if the success tag uniquely identifies the success variant.
+    #[test]
+    fn operator_fastpath_drift_maybe_tags_distinct() {
+        let none_tag = MAYBE_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "None" { Some(t) } else { None })
+            .expect("MAYBE_VARIANT_LAYOUT must contain 'None'");
+        assert_ne!(
+            maybe_success_tag(),
+            none_tag,
+            "maybe_success_tag (Some) must differ from None tag; fast path would always Ret on None",
+        );
+    }
+
+    /// The Result success-tag (Ok=0) and failure-tag (Err=1) must be different.
+    #[test]
+    fn operator_fastpath_drift_result_tags_distinct() {
+        let err_tag = RESULT_VARIANT_LAYOUT
+            .iter()
+            .find_map(|&(n, t)| if n == "Err" { Some(t) } else { None })
+            .expect("RESULT_VARIANT_LAYOUT must contain 'Err'");
+        assert_ne!(
+            result_success_tag(),
+            err_tag,
+            "result_success_tag (Ok) must differ from Err tag; fast path would always Ret on Err",
+        );
+    }
+
+    /// All three layout constants together: each has exactly 2 entries,
+    /// each entry has a unique tag within the type, and no duplicate names.
+    #[test]
+    fn operator_fastpath_drift_all_layouts_well_formed() {
+        for &(layout, name) in &[
+            (MAYBE_VARIANT_LAYOUT, "MAYBE"),
+            (RESULT_VARIANT_LAYOUT, "RESULT"),
+            (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW"),
+        ] {
+            assert_eq!(layout.len(), 2, "{} layout must have exactly 2 variants", name);
+            let tags: std::collections::HashSet<u32> = layout.iter().map(|&(_, t)| t).collect();
+            assert_eq!(tags.len(), 2, "{} layout must have unique tags", name);
+            let names: std::collections::HashSet<&str> = layout.iter().map(|&(n, _)| n).collect();
+            assert_eq!(names.len(), 2, "{} layout must have unique variant names", name);
+        }
+    }
 }
 
 /// Convenience constants for the most commonly referenced type names.
