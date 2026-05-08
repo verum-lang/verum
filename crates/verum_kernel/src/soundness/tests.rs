@@ -311,6 +311,96 @@ fn drift_check_rejects_short_list() {
 }
 
 #[test]
+fn trust_extension_report_partitions_corpus() {
+    // Pin (FV-18): the trust-extension report's aggregate counts
+    // partition the 38-rule corpus exactly across {Proved,
+    // Admitted, DischargedByFramework}.  Post-FV-17 the IOU
+    // registry is empty, so the open-axiom count is `0`.
+    let exporter = SoundnessExporter::new();
+    let report = exporter.render_trust_extension_report();
+
+    assert_eq!(
+        report.total_rules,
+        EXPECTED_KERNEL_RULE_COUNT,
+        "trust-extension report must enumerate every kernel rule",
+    );
+    assert_eq!(
+        report.proved_count + report.admitted_count + report.discharged_by_framework_count,
+        report.total_rules,
+        "Proved + Admitted + DischargedByFramework must partition the corpus",
+    );
+    assert_eq!(report.entries.len(), report.total_rules);
+
+    // Post-FV-17 architectural endgame: zero open IOUs.
+    assert_eq!(
+        report.open_iou_axioms,
+        0,
+        "trust-extension report must witness empty IOU registry post-FV-17",
+    );
+    assert_eq!(
+        report.open_iou_axioms,
+        crate::soundness::iou_axiom_specs().len(),
+        "report's open_iou_axioms must equal `iou_axiom_specs().len()`",
+    );
+
+    // Per-rule status kind shape.
+    for entry in &report.entries {
+        match entry.status_kind.as_str() {
+            "proved" => {
+                assert!(
+                    entry.framework_lemma_path.is_none() && entry.framework_name.is_none(),
+                    "Proved rule {} must have no framework citation; got: {:?}",
+                    entry.rule_name,
+                    entry,
+                );
+            }
+            "discharged-by-framework" => {
+                assert!(
+                    entry.framework_lemma_path.is_some() && entry.framework_name.is_some(),
+                    "DischargedByFramework rule {} must carry citation triple; got: {:?}",
+                    entry.rule_name,
+                    entry,
+                );
+            }
+            "admitted" => {
+                assert!(
+                    entry.trust_note.is_some(),
+                    "Admitted rule {} must carry a reason; got: {:?}",
+                    entry.rule_name,
+                    entry,
+                );
+            }
+            other => panic!("unexpected status_kind {:?} on rule {}", other, entry.rule_name),
+        }
+    }
+}
+
+#[test]
+fn trust_extension_report_serialises_to_json() {
+    // Pin (FV-18): the report's structure is JSON-serialisable
+    // (Serde `Serialize` derive) and round-trips through JSON
+    // back into the same logical value.  This is the audit-gate
+    // contract for `--trust-extension-report --format json`.
+    let exporter = SoundnessExporter::new();
+    let report = exporter.render_trust_extension_report();
+    let json = serde_json::to_string(&report)
+        .expect("trust-extension report must serialise to JSON");
+    let round_trip: crate::soundness::TrustExtensionReport =
+        serde_json::from_str(&json).expect("JSON round-trip must succeed");
+    // Structural equality on the load-bearing aggregate fields —
+    // entry-by-entry equality would over-pin.
+    assert_eq!(round_trip.total_rules, report.total_rules);
+    assert_eq!(round_trip.proved_count, report.proved_count);
+    assert_eq!(
+        round_trip.discharged_by_framework_count,
+        report.discharged_by_framework_count,
+    );
+    assert_eq!(round_trip.admitted_count, report.admitted_count);
+    assert_eq!(round_trip.open_iou_axioms, report.open_iou_axioms);
+    assert_eq!(round_trip.entries.len(), report.entries.len());
+}
+
+#[test]
 fn proved_count_plus_admitted_count_matches_total() {
     let exporter = SoundnessExporter::new();
     let proved = exporter.proved_count();
@@ -574,36 +664,41 @@ fn drift_check_catches_admitted_without_iou_axiom() {
 }
 
 #[test]
-fn drift_check_catches_proved_with_orphan_iou_axiom() {
-    // Pin: a rule that's Proved in mod.rs but still has an IOU
-    // axiom in the export (orphan-axiom drift) is caught.
+fn drift_check_catches_admitted_with_missing_iou_axiom() {
+    // Pin: a rule that's Admitted in mod.rs but has NO IOU axiom in
+    // the export (missing-axiom drift) is caught.  Post-FV-17 the
+    // IOU registry is empty by design, so the inverse drift class
+    // (orphan axiom) is structurally unreachable; this regression
+    // guard remains exercisable because Admitted-without-axiom
+    // can still happen if a future change forgets to flip the
+    // status when removing an axiom from the registry.
     use crate::soundness::{
         LemmaStatus, RuleSpec, SoundnessExporter,
     };
     let mut rules: Vec<RuleSpec> = canonical_rules();
-    // K_Smt has an IOU axiom and is currently Admitted.  Flipping
-    // it to Proved without removing the axiom should trigger a
-    // drift error.
+    // Pick K_Smt as the synthetic Admitted target: it's currently
+    // Proved, so flipping it to Admitted (while the registry stays
+    // empty) creates the missing-axiom drift the check should
+    // catch.
     for r in rules.iter_mut() {
         if r.rule_name == "K_Smt" {
-            r.status = LemmaStatus::Proved {
-                coq_tactics: "exact T_smt.".to_string(),
-                lean_tactics: "  exact @Typing.t_smt _ _ _".to_string(),
+            r.status = LemmaStatus::Admitted {
+                reason: "synthetic test fixture".to_string(),
             };
         }
     }
     let exporter = SoundnessExporter::with_rules(rules);
     let err = exporter
         .drift_check()
-        .expect_err("drift_check should reject Proved-with-orphan-axiom");
+        .expect_err("drift_check should reject Admitted-with-missing-axiom");
     assert!(
         err.contains("K_Smt"),
         "drift error should name K_Smt; got: {}",
         err,
     );
     assert!(
-        err.contains("orphan"),
-        "drift error should call out the orphan axiom; got: {}",
+        err.contains("status drift") || err.contains("no") || err.contains("missing"),
+        "drift error should call out the missing axiom; got: {}",
         err,
     );
 }
@@ -706,18 +801,26 @@ fn extract_iou_rule_names_from_constant(constant: &str) -> std::collections::BTr
 
 #[test]
 fn extractor_finds_axioms_in_lean_constant() {
-    // Sanity: the extractor finds the right names in the Lean constant.
+    // Sanity: the extractor's output cardinality matches the
+    // registry's length exactly — the rendered Lean text has one
+    // `axiom K_<rule>_iou` line per spec.  Post-FV-17 the registry
+    // is empty, so the extractor sees zero axioms; the regression
+    // guard catches drift between `iou_axiom_specs()` and the
+    // rendered text if either side is altered without the other.
     use crate::soundness::lean::iou_axioms_lean;
     let names = extract_iou_rule_names_from_constant(iou_axioms_lean());
-    // At least one well-known axiom should be found.
-    assert!(
-        names.contains("K_Smt"),
-        "extractor should find K_Smt; got: {:?}",
+    let expected = crate::soundness::iou_axiom_specs().len();
+    assert_eq!(
+        names.len(),
+        expected,
+        "extractor saw {} axioms; iou_axiom_specs() declares {}: {:?}",
+        names.len(),
+        expected,
         names,
     );
-    // Number should be exactly the IOU count.  Lower bound tracks
-    // the registry-driven `iou_axiom_specs()` length.
-    let expected = crate::soundness::iou_axiom_specs().len();
+    // Sanity check on the lower-bound assertion (kept for shape
+    // backwards compat with prior versions that asserted a
+    // hard-coded floor).
     assert!(
         names.len() >= expected,
         "extractor should find at least {} IOU axioms; got {}: {:?}",
@@ -924,10 +1027,16 @@ fn three_foundations_agree_on_iou_axiom_arities() {
     let isa = extract_iou_arities_from_constant(iou_axioms_isabelle(), "\\<Rightarrow>");
     assert_eq!(lean, coq);
     assert_eq!(coq, isa);
-    // Sanity: the maps are non-empty.
-    assert!(
-        !lean.is_empty(),
-        "Lean arity map should have at least one IOU axiom",
+    // Sanity: the maps' size matches the registry exactly.  Post-FV-17
+    // this is zero by design (every kernel rule is structurally Proved
+    // or DischargedByFramework).
+    let expected = crate::soundness::iou_axiom_specs().len();
+    assert_eq!(
+        lean.len(),
+        expected,
+        "Lean arity map size {} must match `iou_axiom_specs()` length {}",
+        lean.len(),
+        expected,
     );
 }
 

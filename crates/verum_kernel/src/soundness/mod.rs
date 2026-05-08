@@ -653,7 +653,7 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // The structural-fragment soundness claim is preserved;
             // the trust extension is the cited theorem.
             discharged(
-                "kernel_v0/lemmas/biadjunction_triangle_identities.lean",
+                "kernel_v0.lemmas.biadjunction_triangle_identities",
                 "category-theory",
                 "Mac Lane (Categories for the Working Mathematician, 2nd ed., \
                  Theorem IV.7.3) — every biadjunction satisfies the triangle \
@@ -691,10 +691,10 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             // soundness claim is preserved; the trust extension is
             // the cited internal specification.
             discharged(
-                "kernel_v0/lemmas/bridge_audit_round_trip.lean",
+                "kernel_v0.lemmas.bridge_audit_round_trip",
                 "verum-internal",
                 "Bridge-audit completeness specification \
-                 (`docs/architecture/verum-kernel-audit.md` \
+                 (docs/architecture/verum-kernel-audit.md \
                  §bridge-encode-decode-roundtrip): every well-typed \
                  BridgeAudit trail recovers the original term up to \
                  normalisation, witnessed by the kernel's internal \
@@ -1246,5 +1246,173 @@ impl SoundnessExporter {
 impl Default for SoundnessExporter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// =============================================================================
+// Trust-extension report (FV-18)
+// =============================================================================
+//
+// Auditor-facing canonical snapshot of the kernel-soundness corpus's
+// trust extension surface.  Walks `canonical_rules()` and produces a
+// per-rule entry describing the rule's status, structural premises,
+// framework citation (when DischargedByFramework), and the per-
+// foundation lemma's signature shape.  The aggregate counts at the
+// top level state the partition: structurally-proved rules vs framework-
+// discharged rules vs (post-FV-17) zero open IOUs.
+
+/// One entry in the per-rule trust-extension report.  Everything an
+/// auditor needs to follow a single rule's trust extension surface
+/// is bundled here: status, premises, citation, per-foundation
+/// lemma signature shape (so the auditor can spot-check that the
+/// emitted Lean / Coq / Isabelle file's rendered lemma matches the
+/// claimed shape).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustExtensionEntry {
+    /// Stable rule name in `K_<Name>` form.
+    pub rule_name: String,
+    /// Stable lemma name in `K_<Name>_sound` form.
+    pub lemma_name: String,
+    /// Coarse category for grouping (Structural / Cubical / Refinement
+    /// / Quotient / Inductive / SmtAxiom / Diakrisis).
+    pub category: String,
+    /// Number of premise sub-derivations the rule's Typing constructor
+    /// expects.
+    pub premise_arity: usize,
+    /// Whether the rule has a non-judgmental side-condition obligation.
+    pub has_side_condition: bool,
+    /// Status kind as a stable string: `"proved"` / `"admitted"` /
+    /// `"discharged-by-framework"`.  Stable across runs; consumed by
+    /// machine readers.
+    pub status_kind: String,
+    /// For `Admitted`: the stated reason.  For
+    /// `DischargedByFramework`: the citation text.  `None` for
+    /// `Proved`.
+    pub trust_note: Option<String>,
+    /// For `DischargedByFramework`: the cited upstream lemma path.
+    /// `None` otherwise.
+    pub framework_lemma_path: Option<String>,
+    /// For `DischargedByFramework`: the framework name (`mathlib4` /
+    /// `category-theory` / `verum-internal` / `zfc` / …).  `None`
+    /// otherwise.
+    pub framework_name: Option<String>,
+}
+
+/// Aggregate trust-extension report.  Top-level partition of the
+/// corpus + the per-rule entries.  Serialised as JSON via the audit
+/// gate; the human-readable rendering is built from the same
+/// instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustExtensionReport {
+    /// Total number of kernel rules in the corpus.  Should always
+    /// equal [`EXPECTED_KERNEL_RULE_COUNT`] (currently 38); pin-tested.
+    pub total_rules: usize,
+    /// Count of rules in `Proved` status — structurally typed in
+    /// the inductive without any framework citation.
+    pub proved_count: usize,
+    /// Count of rules in `Admitted` status — open IOUs.  After
+    /// FV-17 this is `0`; non-zero means an open IOU has been
+    /// re-introduced.
+    pub admitted_count: usize,
+    /// Count of rules in `DischargedByFramework` status — closed
+    /// IOUs with cited upstream proofs.
+    pub discharged_by_framework_count: usize,
+    /// Length of [`iou_axiom_specs`] — the count of `axiom
+    /// K_<rule>_iou` declarations emitted into the per-foundation
+    /// files.  Post-FV-17 this is `0`.
+    pub open_iou_axioms: usize,
+    /// Per-rule entries in canonical KernelRule order.
+    pub entries: Vec<TrustExtensionEntry>,
+    /// Top-level prose summary for human consumption.  Stable
+    /// across runs barring corpus changes; not consumed by machine
+    /// readers (use the structured fields above).
+    pub summary: String,
+}
+
+impl SoundnessExporter {
+    /// Render the trust-extension report — auditor-facing canonical
+    /// snapshot of the kernel-soundness corpus's trust extension
+    /// surface.  Walks [`canonical_rules`] and produces one
+    /// [`TrustExtensionEntry`] per rule plus aggregate counts.
+    ///
+    /// **Invariants** (pin-tested):
+    /// * `total_rules == EXPECTED_KERNEL_RULE_COUNT`.
+    /// * `proved + admitted + discharged == total`.
+    /// * `open_iou_axioms == iou_axiom_specs().len()` (post-FV-17 this
+    ///   is `0`).
+    pub fn render_trust_extension_report(&self) -> TrustExtensionReport {
+        let mut entries = Vec::with_capacity(self.rules.len());
+        for rule in &self.rules {
+            let category = match rule.category {
+                RuleCategory::Structural => "Structural",
+                RuleCategory::Cubical => "Cubical",
+                RuleCategory::Refinement => "Refinement",
+                RuleCategory::Quotient => "Quotient",
+                RuleCategory::Inductive => "Inductive",
+                RuleCategory::SmtAxiom => "SmtAxiom",
+                RuleCategory::Diakrisis => "Diakrisis",
+            };
+            let (status_kind, trust_note, framework_lemma_path, framework_name) =
+                match &rule.status {
+                    LemmaStatus::Proved { .. } => ("proved", None, None, None),
+                    LemmaStatus::Admitted { reason } => {
+                        ("admitted", Some(reason.clone()), None, None)
+                    }
+                    LemmaStatus::DischargedByFramework {
+                        lemma_path,
+                        framework,
+                        citation,
+                    } => (
+                        "discharged-by-framework",
+                        Some(citation.clone()),
+                        Some(lemma_path.clone()),
+                        Some(framework.clone()),
+                    ),
+                };
+            entries.push(TrustExtensionEntry {
+                rule_name: rule.rule_name.clone(),
+                lemma_name: rule.lemma_name.clone(),
+                category: category.to_string(),
+                premise_arity: rule.premise_arity,
+                has_side_condition: rule.has_side_condition,
+                status_kind: status_kind.to_string(),
+                trust_note,
+                framework_lemma_path,
+                framework_name,
+            });
+        }
+
+        let proved = self.proved_count();
+        let admitted = self.admitted_count();
+        let discharged = self.discharged_by_framework_count();
+        let open_iou_axioms = iou_axiom_specs().len();
+
+        let summary = format!(
+            "Kernel-soundness corpus: {total} rules — {proved} structurally \
+             proved, {discharged} discharged-by-framework (closed IOUs with \
+             cited upstream proofs), {admitted} admitted (open IOUs).  \
+             `iou_axiom_specs()` registry length: {open_iou_axioms}.  \
+             Trust extension surface = {{structural premises}} ∪ \
+             {{framework citations}}.  Auditor follows each \
+             `discharged-by-framework` entry's `framework_lemma_path` to \
+             verify the upstream proof; `proved` entries are typed by the \
+             Typing inductive's structural premises (no external citation \
+             needed).",
+            total = self.rules.len(),
+            proved = proved,
+            discharged = discharged,
+            admitted = admitted,
+            open_iou_axioms = open_iou_axioms,
+        );
+
+        TrustExtensionReport {
+            total_rules: self.rules.len(),
+            proved_count: proved,
+            admitted_count: admitted,
+            discharged_by_framework_count: discharged,
+            open_iou_axioms,
+            entries,
+            summary,
+        }
     }
 }

@@ -1221,6 +1221,18 @@ enum Commands {
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
+ /// Render the trust-extension report (FV-18). Walks the
+ /// kernel-soundness corpus and emits a per-rule snapshot
+ /// classifying every rule as `proved`, `discharged-by-framework`
+ /// or `admitted`.  Post-FV-17 the `admitted` bucket is empty;
+ /// non-zero count signals a regression that re-introduced an
+ /// open meta-theory dependency.  Output: console summary +
+ /// `target/audit-reports/trust-extension/report.json` (always
+ /// JSON, regardless of `--format`; the JSON file is the canonical
+ /// CI artefact).
+        #[clap(long = "trust-extension-report")]
+        trust_extension_report: bool,
+
  /// Run the external-prover replay gate. Drives the kernel-
  /// soundness corpus through Lake (Lean 4) and `coqc` (Rocq /
  /// Coq), capturing per-backend pass / sorry-only / hard-error
@@ -4099,6 +4111,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             kernel_recheck,
             kernel_soundness,
+            trust_extension_report,
             external_prover_replay,
             external_prover_backend,
             external_prover_strict,
@@ -4166,6 +4179,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_recheck_with_format(output_format)
             } else if kernel_soundness {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
+            } else if trust_extension_report {
+                commands::audit::audit_trust_extension_report_with_format(output_format)
             } else if external_prover_replay {
                 commands::audit::audit_external_prover_replay_with_format(
                     output_format,

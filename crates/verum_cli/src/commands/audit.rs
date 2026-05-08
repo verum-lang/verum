@@ -2404,6 +2404,175 @@ fn print_kernel_soundness_report_json(
 }
 
 // =============================================================================
+// audit --trust-extension-report — auditor-facing snapshot (FV-18)
+// =============================================================================
+
+/// Entry-point for `verum audit --trust-extension-report [--format FORMAT]`.
+///
+/// Produces a canonical machine-readable snapshot of the kernel-
+/// soundness corpus's trust extension surface.  Every rule is
+/// classified into one of three buckets:
+///
+/// * **proved** — structurally typed in the [`Typing`] inductive
+///   without any framework citation.  No external trust required.
+/// * **discharged-by-framework** — closed IOU with a cited upstream
+///   proof in mathlib4 / category-theory / verum-internal / zfc.
+///   Auditor follows the citation to verify the upstream lemma.
+/// * **admitted** — open IOU.  Post-FV-17 architectural endgame
+///   this bucket is empty; non-zero count signals a regression
+///   re-introducing an open meta-theory dependency.
+///
+/// Output: `target/audit-reports/trust-extension/report.json` (JSON
+/// always, regardless of `--format`) plus per-format console
+/// rendering.
+pub fn audit_trust_extension_report_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::SoundnessExporter;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Rendering kernel-soundness trust-extension report");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let exporter = SoundnessExporter::new();
+    let report = exporter.render_trust_extension_report();
+
+    // Always emit the JSON sidecar regardless of console format —
+    // the file is the canonical CI artefact.
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("trust-extension");
+    let report_path = report_dir.join("report.json");
+    let mut emit_errors: Vec<String> = Vec::new();
+    if let Err(e) = std::fs::create_dir_all(&report_dir) {
+        emit_errors.push(format!("mkdir {}: {}", report_dir.display(), e));
+    } else if let Ok(json) = serde_json::to_string_pretty(&report) {
+        if let Err(e) = std::fs::write(&report_path, &json) {
+            emit_errors.push(format!("write {}: {}", report_path.display(), e));
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => print_trust_extension_report(&report, &report_path, &emit_errors),
+        AuditFormat::Json => {
+            // Console JSON form mirrors the file content + emit-error list.
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "command": "audit-trust-extension-report",
+                "report": report,
+                "report_path": report_path.display().to_string(),
+                "emit_errors": emit_errors,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    Ok(())
+}
+
+fn print_trust_extension_report(
+    report: &verum_kernel::soundness::TrustExtensionReport,
+    report_path: &std::path::Path,
+    emit_errors: &[String],
+) {
+    println!();
+    println!("{}", "Trust-extension report".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Corpus: {} rules — {} proved, {} discharged-by-framework, {} admitted.",
+        report.total_rules,
+        report.proved_count,
+        report.discharged_by_framework_count,
+        report.admitted_count,
+    );
+    println!(
+        "  Open IOU axioms (`iou_axiom_specs()` length): {}.",
+        report.open_iou_axioms,
+    );
+    if report.open_iou_axioms == 0 {
+        println!(
+            "  {}: kernel-soundness corpus carries no open IOUs.  Trust extension surface =",
+            "FV-17 endgame".green().bold(),
+        );
+        println!(
+            "  {{structural premises}} ∪ {{framework citations}}.",
+        );
+    }
+    println!();
+
+    // Per-rule entries grouped by status_kind + category.
+    let proved: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
+        .entries
+        .iter()
+        .filter(|e| e.status_kind == "proved")
+        .collect();
+    let discharged: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
+        .entries
+        .iter()
+        .filter(|e| e.status_kind == "discharged-by-framework")
+        .collect();
+    let admitted: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
+        .entries
+        .iter()
+        .filter(|e| e.status_kind == "admitted")
+        .collect();
+
+    if !discharged.is_empty() {
+        println!("{}", "Framework-discharged rules:".bold());
+        for e in &discharged {
+            println!(
+                "  • {} ({}, arity {}) — {} via {}",
+                e.rule_name.cyan(),
+                e.category,
+                e.premise_arity,
+                e.framework_name.as_deref().unwrap_or("?"),
+                e.framework_lemma_path.as_deref().unwrap_or("?"),
+            );
+        }
+        println!();
+    }
+
+    if !admitted.is_empty() {
+        println!("{}", "Admitted (open IOU) rules:".bold().yellow());
+        for e in &admitted {
+            println!(
+                "  • {} ({}, arity {}) — {}",
+                e.rule_name.yellow(),
+                e.category,
+                e.premise_arity,
+                e.trust_note.as_deref().unwrap_or("(no reason)"),
+            );
+        }
+        println!();
+    }
+
+    if !proved.is_empty() {
+        println!("{}", "Structurally-proved rules:".dimmed());
+        let mut chunk = String::new();
+        for (i, e) in proved.iter().enumerate() {
+            if i > 0 && i % 4 == 0 {
+                println!("  {}", chunk.dimmed());
+                chunk.clear();
+            } else if i > 0 {
+                chunk.push_str(", ");
+            }
+            chunk.push_str(&e.rule_name);
+        }
+        if !chunk.is_empty() {
+            println!("  {}", chunk.dimmed());
+        }
+        println!();
+    }
+
+    println!("  Report written to: {}", report_path.display().to_string().dimmed());
+    if !emit_errors.is_empty() {
+        println!("  {}: {}", "Emit errors".yellow(), emit_errors.join("; "));
+    }
+    println!();
+    println!("  {}", report.summary.dimmed());
+}
+
+// =============================================================================
 // audit --differential-lean-checker — cert-by-cert Rust↔Lean agreement (FV-3)
 // =============================================================================
 
@@ -11237,7 +11406,7 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 pub fn arch_check(file: &str, format: AuditFormat, strict: bool) -> Result<()> {
     use verum_ast::FileId;
     use verum_fast_parser::FastParser;
-    use verum_kernel::arch_phase::{run_arch_phase, ArchPhaseReport};
+    use verum_kernel::arch_phase::run_arch_phase;
 
     if matches!(format, AuditFormat::Plain) {
         ui::step(&format!("ATS-V arch:check {}", file));
@@ -12965,7 +13134,7 @@ pub fn audit_arch_coverage_with_format(format: AuditFormat) -> Result<()> {
 ///
 /// Output: `target/audit-reports/arch-corpus.json` (schema_version=1).
 pub fn audit_arch_corpus_with_format(format: AuditFormat) -> Result<()> {
-    use verum_kernel::arch::{Foundation, Shape};
+    use verum_kernel::arch::Shape;
     use verum_kernel::arch_anti_pattern::{check_all_anti_patterns, DiagnosticContext};
     use verum_kernel::arch_parse::parse_arch_module;
 
