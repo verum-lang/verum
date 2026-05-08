@@ -91,7 +91,6 @@ public mount .integrity.{
 public mount .comparator.{
     KeyKind, KkRowId, KkRecord,
     SeekKey, SkRowId, SkRecord,
-    KeyOrdering, KoLess, KoEqual, KoGreater,
     CellKey, CkRowId, CkRecord,
     seek_key_kind, ordering_name, reverse_ordering,
     cmp_int64, cmp_bytes, cmp_keys,

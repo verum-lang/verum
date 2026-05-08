@@ -10,16 +10,15 @@
 // Spec: internal/specs/sqlite-native.md §10.4 (key ordering) + §9.5 (collation)
 //
 // Note: this test uses the `cmp_byte_records` back-compat shim that
-// returns `KeyOrdering` directly (no Result wrapper) — the upstream
-// stdlib parser has a regression on `Result` destructuring that's
-// unrelated to #157.  The shim covers the same dispatch path.
+// returns `Ordering` directly (no Result wrapper) — callers that need
+// structured errors use `cmp_records_with_schema` directly.  The shim
+// covers the same dispatch path.
 
 mount core.*;
 mount collections.{List, Map};
 mount base.{Text, Maybe};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.database.sqlite.native.l3_btree.{
-    KeyOrdering, KoLess, KoEqual, KoGreater,
     ColumnSchema, RecordSchema,
     record_schema_binary, record_schema_from_choices,
     cmp_byte_records,
@@ -79,14 +78,6 @@ fn user_schema_one(name: Text) -> RecordSchema {
     record_schema_from_choices(&colls, &descs, 1)
 }
 
-fn key_ordering_eq(a: &KeyOrdering, b: &KeyOrdering) -> Bool {
-    match a {
-        KoLess => match b { KoLess => true, _ => false },
-        KoEqual => match b { KoEqual => true, _ => false },
-        KoGreater => match b { KoGreater => true, _ => false },
-    }
-}
-
 // -----------------------------------------------------------------------------
 // 1. record_schema_binary builds N BINARY-asc columns
 // -----------------------------------------------------------------------------
@@ -114,7 +105,7 @@ fn binary_text_compare() {
     let b = text_record("hello".clone());
     let s = binary_schema_n(1);
     let ord = cmp_byte_records(&a, &b, &s, None);
-    assert(key_ordering_eq(&ord, &KoLess));
+    match ord { Less => {}, _ => panic("expected Hello < hello (BINARY)") }
 }
 
 // -----------------------------------------------------------------------------
@@ -126,7 +117,7 @@ fn nocase_text_compare() {
     let b = text_record("hello".clone());
     let s = nocase_schema_one();
     let ord = cmp_byte_records(&a, &b, &s, None);
-    assert(key_ordering_eq(&ord, &KoEqual));
+    match ord { Equal => {}, _ => panic("expected Hello == hello (NOCASE)") }
 }
 
 // -----------------------------------------------------------------------------
@@ -138,7 +129,7 @@ fn rtrim_text_compare() {
     let b = text_record("abc".clone());
     let s = rtrim_schema_one();
     let ord = cmp_byte_records(&a, &b, &s, None);
-    assert(key_ordering_eq(&ord, &KoEqual));
+    match ord { Equal => {}, _ => panic("expected abc<sp> == abc (RTRIM)") }
 }
 
 // -----------------------------------------------------------------------------
@@ -189,7 +180,7 @@ fn user_collation_dispatches() {
     let s = user_schema_one("REVERSE".clone());
     // Under REVERSE, Apple > Banana (BINARY < flips to >).
     let ord = cmp_byte_records(&a, &b, &s, Some(&r));
-    assert(key_ordering_eq(&ord, &KoGreater));
+    match ord { Greater => {}, _ => panic("expected Apple > Banana under REVERSE") }
 }
 
 // -----------------------------------------------------------------------------
@@ -201,7 +192,7 @@ fn back_compat_shim_byte_compare() {
     let b = text_record("aab".clone());
     let s = record_schema_binary(0);  // empty schema → defaults to BINARY-asc
     let result = cmp_byte_records(&a, &b, &s, None);
-    assert(key_ordering_eq(&result, &KoLess));
+    match result { Less => {}, _ => panic("expected aaa < aab (back-compat shim)") }
 }
 
 // -----------------------------------------------------------------------------
@@ -213,7 +204,7 @@ fn extra_schema_columns_ignored() {
     let b = text_record("x".clone());
     let s = record_schema_binary(5);  // 5-col schema; records have 1 col
     let ord = cmp_byte_records(&a, &b, &s, None);
-    assert(key_ordering_eq(&ord, &KoEqual));
+    match ord { Equal => {}, _ => panic("expected x == x with extra schema cols") }
 }
 
 fn main() {
