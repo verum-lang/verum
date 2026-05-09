@@ -1,0 +1,156 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: iterator, try_fold, try_collect, try_for_each, Result, error-propagation
+// @timeout: 10000
+// @description: Pins the Result-aware iterator combinator API (#55).
+//
+// `Iterator` provides three combinators that thread `Result` through iteration:
+//
+//   try_fold<B, E, F>(self, init: B, f: fn(B, T) -> Result<B, E>) -> Result<B, E>
+//     — folds with early exit on the first `Err`.
+//
+//   try_collect<T, E, C>(self) -> Result<C, E>
+//     where Self.Item = Result<T, E>
+//     — collects a `Result<T,E>` iterator into `Result<C, E>`, short-
+//       circuiting on the first `Err`.
+//
+//   try_for_each<E, F>(&mut self, f: fn(T) -> Result<(), E>) -> Result<(), E>
+//     — calls f on each element; stops and returns the first `Err`.
+//
+// This spec verifies:
+//   1. try_fold folds successfully over an all-Ok sequence.
+//   2. try_fold short-circuits and returns the first Err.
+//   3. try_collect collects a clean sequence into List<T>.
+//   4. try_collect short-circuits on the first Err<E> item.
+//   5. try_for_each completes when all calls succeed.
+//   6. try_for_each returns first Err without visiting remaining elements.
+//   7. Type inference: return type is Result<_, E> (not just Bool or Int).
+
+mount core.base.iterator.{Iterator};
+mount core.collections.list.{List};
+
+// ── 1 & 2. try_fold ───────────────────────────────────────────────────────────
+
+fn try_fold_all_ok() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let result: Result<Int, Text> = xs.into_iter().try_fold(0, |acc, x| {
+        Ok(acc + x)
+    });
+    match result {
+        Ok(sum) => assert_eq(sum, 15),
+        Err(_)  => panic("expected Ok"),
+    }
+}
+
+fn try_fold_short_circuits_on_err() {
+    let xs: List<Int> = [1, 2, -1, 4, 5];
+    let mut visited: Int = 0;
+    let result: Result<Int, Text> = xs.into_iter().try_fold(0, |acc, x| {
+        visited = visited + 1;
+        if x < 0 {
+            Err(Text.from("negative value"))
+        } else {
+            Ok(acc + x)
+        }
+    });
+    match result {
+        Err(msg) => {
+            assert(msg.len() > 0);
+            // visited must be ≤ 3 (stopped at index 2, the negative value)
+            assert(visited <= 3);
+        }
+        Ok(_) => panic("expected Err for negative value"),
+    }
+}
+
+// ── 3 & 4. try_collect ────────────────────────────────────────────────────────
+
+fn try_collect_all_ok() {
+    let results: List<Result<Int, Text>> = [Ok(10), Ok(20), Ok(30)];
+    let collected: Result<List<Int>, Text> = results.into_iter().try_collect();
+    match collected {
+        Ok(xs) => {
+            assert_eq(xs.len(), 3);
+            assert_eq(xs[0], 10);
+            assert_eq(xs[2], 30);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn try_collect_short_circuits_on_err() {
+    let results: List<Result<Int, Text>> = [Ok(1), Err(Text.from("oops")), Ok(3)];
+    let collected: Result<List<Int>, Text> = results.into_iter().try_collect();
+    match collected {
+        Err(msg) => assert(msg.len() > 0),
+        Ok(_)    => panic("expected Err"),
+    }
+}
+
+fn try_collect_empty_list_is_ok() {
+    let empty: List<Result<Int, Text>> = [];
+    let collected: Result<List<Int>, Text> = empty.into_iter().try_collect();
+    match collected {
+        Ok(xs) => assert_eq(xs.len(), 0),
+        Err(_) => panic("expected Ok for empty iterator"),
+    }
+}
+
+// ── 5 & 6. try_for_each ───────────────────────────────────────────────────────
+
+fn try_for_each_all_ok() {
+    let xs: List<Int> = [2, 4, 6];
+    let mut sum: Int = 0;
+    let result: Result<(), Text> = xs.iter().try_for_each(|x| {
+        sum = sum + *x;
+        Ok(())
+    });
+    assert(result.is_ok());
+    assert_eq(sum, 12);
+}
+
+fn try_for_each_stops_on_first_err() {
+    let xs: List<Int> = [1, 0, 3];
+    let mut count: Int = 0;
+    let result: Result<(), Text> = xs.iter().try_for_each(|x| {
+        count = count + 1;
+        if *x == 0 {
+            Err(Text.from("zero not allowed"))
+        } else {
+            Ok(())
+        }
+    });
+    match result {
+        Err(msg) => {
+            assert(msg.len() > 0);
+            // count must be exactly 2 (stopped at the zero element)
+            assert_eq(count, 2);
+        }
+        Ok(()) => panic("expected Err for zero element"),
+    }
+}
+
+// ── 7. Type-inference: Result return type ─────────────────────────────────────
+
+fn try_fold_return_type_is_result() {
+    // The explicit annotation `Result<Int, Bool>` must typecheck —
+    // confirming the combinator binds to the user's error type correctly.
+    let xs: List<Int> = [1, 2, 3];
+    let r: Result<Int, Bool> = xs.into_iter().try_fold(0, |acc, x| {
+        if x > 10 { Err(false) } else { Ok(acc + x) }
+    });
+    assert(r.is_ok());
+}
+
+fn main() {
+    try_fold_all_ok();
+    try_fold_short_circuits_on_err();
+    try_collect_all_ok();
+    try_collect_short_circuits_on_err();
+    try_collect_empty_list_is_ok();
+    try_for_each_all_ok();
+    try_for_each_stops_on_first_err();
+    try_fold_return_type_is_result();
+    print("try_fold / try_collect / try_for_each typecheck ok");
+}
