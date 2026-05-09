@@ -1977,24 +1977,35 @@ impl VbcCodegen {
             ("SO_ERROR", 4),
         ];
 
-        // Variant constructors that need tags for pattern matching and ? operator
-        // Declaration-order variant tags for built-in sum types; must
-        // agree with register_type_constructors and the register_builtin
-        // table near compile_program.
-        let variant_tags: &[(&str, u32)] = &[
-            ("Ok", 0),
-            ("Err", 1),
-            ("None", 0),
-            ("Some", 1),
-            ("Less", 0),
-            ("Equal", 1),
-            ("Greater", 2),
-            ("Continue", 0),
-            ("Break", 1),
-            ("True", 1),
-            ("False", 0),
+        // Variant tags for built-in sum-type constructors are sourced from
+        // the canonical layout constants in `verum_common::well_known_types`
+        // — the single source of truth used by VBC codegen, the runtime
+        // dispatcher, and the registry. Editing a layout constant
+        // automatically retunes this map. Bool's True/False are extras
+        // not modelled by a layout constant (they're not a sum type) so
+        // they're appended explicitly.
+        let layout_sources: &[&[(&str, u32)]] = &[
+            // Cast each layout to a slice of `(name, u32)` — unifies
+            // signed-vs-unsigned tag types under the lookup map. All
+            // canonical tags are non-negative; the `i32`-typed Ordering
+            // layout is widened safely into u32.
+            verum_common::well_known_types::RESULT_VARIANT_LAYOUT,
+            verum_common::well_known_types::MAYBE_VARIANT_LAYOUT,
+            verum_common::well_known_types::ORDERING_VARIANT_LAYOUT,
+            verum_common::well_known_types::CONTROLFLOW_VARIANT_LAYOUT,
         ];
-        let tag_map: std::collections::HashMap<&str, u32> = variant_tags.iter().copied().collect();
+        let mut tag_map: std::collections::HashMap<&str, u32> =
+            std::collections::HashMap::new();
+        for layout in layout_sources {
+            for &(name, tag) in layout.iter() {
+                tag_map.insert(name, tag);
+            }
+        }
+        // Bool literals — not a sum type but the codegen treats them
+        // identically to nullary variant constructors for pattern-matching
+        // dispatch.
+        tag_map.insert("True", 1);
+        tag_map.insert("False", 0);
 
         for &(name, _value) in constants {
             let id = FunctionId(self.next_func_id);
@@ -4943,11 +4954,17 @@ impl VbcCodegen {
         // only carry name+tag; arity is encoded here once).
         let mut builtins: Vec<(&str, &str, u32, usize, Vec<String>)> = Vec::new();
         for (name, tag) in verum_common::well_known_types::MAYBE_VARIANT_LAYOUT.iter() {
-            let (arity, params): (usize, Vec<String>) = if *name == "Some" {
-                (1, vec!["_0".into()])
-            } else {
-                (0, vec![])
-            };
+            // The canonical Maybe layout is `None | Some(T)`: the SOME
+            // constructor carries a single payload, NONE is unit. Compare
+            // through the centralized `variant_tags::SOME` constant so
+            // a future rename in the canonical layout flows through here
+            // automatically.
+            let (arity, params): (usize, Vec<String>) =
+                if *name == verum_common::well_known_types::variant_tags::SOME {
+                    (1, vec!["_0".into()])
+                } else {
+                    (0, vec![])
+                };
             builtins.push(("Maybe", *name, *tag, arity, params));
         }
         for (name, tag) in verum_common::well_known_types::RESULT_VARIANT_LAYOUT.iter() {
