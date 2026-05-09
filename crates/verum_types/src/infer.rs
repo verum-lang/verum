@@ -48423,457 +48423,10 @@ impl TypeChecker {
     ) -> Result<InferResult> {
         let method_name_str = method.name.as_str();
         let method_name: verum_common::Text = method.name.as_str().into();
-        // CRITICAL FIX: Handle type variables with protocol bounds
-        // When receiver is a type variable (e.g., `T` in `fn display<T: Showable>(item: T)`),
-        // we need to look up methods from the protocol bounds, not from implementations.
-        // Type variables don't have concrete implementations registered, but their bounds
-        // define which methods they support.
-        // Also handle references to type variables (e.g., `&T` in `fn display<T: Display>(item: &T)`)
-        let inner_type_var = match &recv_ty {
-            Type::Var(_) => Some(&recv_ty),
-            Type::Reference { inner, .. }
-            | Type::CheckedReference { inner, .. }
-            | Type::UnsafeReference { inner, .. } => {
-                if matches!(&**inner, Type::Var(_)) {
-                    Some(&**inner)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        if inner_type_var.is_some() {
-            // Look up all type parameters with their bounds from the environment
-            let all_type_params = self.ctx.env.all_type_params();
-
-            // Find the type parameter for this type variable
-            // We match by checking if the receiver variable is used as a type param
-            // For now, we search all bounds from all type params since we don't track
-            // the exact correspondence between Type::Var and TypeParam
-            for type_param in all_type_params {
-                // Check each protocol bound on this type parameter
-                for bound in &type_param.bounds {
-                    // Get the protocol name from the bound
-                    if let Some(protocol_ident) = bound.protocol.as_ident() {
-                        let protocol_name: Text = protocol_ident.name.clone();
-
-                        // Look up the protocol definition
-                        let protocol_opt = self
-                            .protocol_checker
-                            .read()
-                            .get_protocol(&protocol_name)
-                            .cloned();
-                        if let Maybe::Some(protocol) = protocol_opt {
-                            // Check if this protocol has the method we're looking for
-                            for (_, method) in &protocol.methods {
-                                if method.name == method_name {
-                                    // Found the method in a bounded protocol
-                                    // CRITICAL FIX: Substitute Self with the receiver type
-                                    // Protocol methods use Self as a placeholder for the implementing type.
-                                    // For bounded type params like T: Default, calling T.default()
-                                    // should return T, not Self.
-                                    let method_ty = self
-                                        .instantiate_method_for_receiver(&method.ty, &recv_ty);
-                                    // Instantiate method's own type parameters with explicit type args
-                                    let method_ty = self.instantiate_method_type_params(
-                                        method_ty, type_args, span,
-                                    )?;
-
-                                    // Type check arguments against method signature
-                                    if let Type::Function {
-                                        params,
-                                        return_type,
-                                        ..
-                                    } = &method_ty
-                                    {
-                                        // Protocol method signatures now EXCLUDE self parameter
-                                        // (self is handled implicitly as the receiver)
-                                        // Check argument count directly
-                                        if params.len().abs_diff(args.len()) > 1 {
-                                            return Err(TypeError::WrongArgCount {
-                                                method: method_name.clone(),
-                                                expected: params.len(),
-                                                actual: args.len(),
-                                                span,
-                                            });
-                                        }
-
-                                        // Type check each argument with substitution
-                                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                            let resolved_param = self.unifier.apply(param_ty);
-                                            self.check_expr(arg, &resolved_param)?;
-                                        }
-
-                                        // Apply substitution to return type
-                                        let resolved_return = self.unifier.apply(return_type);
-                                        return Ok(InferResult::new(resolved_return));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if let Some(r) = self.try_type_var_bound_dispatch(&recv_ty, method, type_args, args, span)? {
+            return Ok(r);
         }
 
-        // CRITICAL FIX: Handle higher-kinded type applications
-        // When receiver is a TypeApp (e.g., F<A> in `fn map<F<_>: Functor, A, B>(fa: F<A>, ...)`),
-        // we need to look up methods from the HKT parameter's protocol bounds.
-        // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
-        if let Type::TypeApp {
-            constructor,
-            args: type_args,
-        } = &recv_ty
-        {
-            // Extract the constructor name - it could be a TypeConstructor, Named type, or Var (HKT param)
-            let constructor_name: Option<Text> = match constructor.as_ref() {
-                Type::TypeConstructor { name, .. } => Some(name.clone()),
-                Type::Named { path, .. } => path.segments.last().and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                    _ => None,
-                }),
-                Type::Var(tv) => {
-                    let all_params = self.ctx.env.all_type_params();
-                    let mut found: Option<Text> = None;
-                    for tp in &all_params {
-                        if let Maybe::Some(type_val) = self.ctx.lookup_type(tp.name.as_str()) {
-                            if let Type::Var(ptv) = type_val {
-                                if ptv.id() == tv.id() {
-                                    found = Some(tp.name.clone());
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if found.is_none() {
-                        let resolved = self.unifier.apply(&Type::Var(*tv));
-                        match &resolved {
-                            Type::TypeConstructor { name, .. } => {
-                                found = Some(name.clone());
-                            }
-                            Type::Named { path, .. } => {
-                                found = path.segments.last().and_then(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(ident) => {
-                                        Some(ident.name.clone())
-                                    }
-                                    _ => None,
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                    found
-                }
-                _ => None,
-            };
-
-            if let Some(ctor_name) = constructor_name {
-                // Look up bounds for this HKT type constructor
-                let bounds_opt = self.ctx.env.get_param_bounds(ctor_name.as_str());
-                // Fallback: check type_var_bounds for Var-based HKT params
-                let bounds_from_var: Option<List<crate::protocol::ProtocolBound>> =
-                    if bounds_opt.is_none() {
-                        if let Type::Var(tv) = constructor.as_ref() {
-                            let b = self.get_type_var_bounds(tv);
-                            if !b.is_empty() { Some(b) } else { None }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                let effective_bounds: Option<&[crate::protocol::ProtocolBound]> = bounds_opt
-                    .as_ref()
-                    .map(|b| b.as_slice())
-                    .or_else(|| bounds_from_var.as_ref().map(|b| b.as_slice()));
-
-                if let Some(bounds) = effective_bounds {
-                    // Check each protocol bound for the method
-                    for bound in bounds.iter() {
-                        if let Some(protocol_ident) = bound.protocol.as_ident() {
-                            let protocol_name: Text = protocol_ident.name.clone();
-
-                            // Look up the protocol definition
-                            let protocol_exists = self
-                                .protocol_checker
-                                .read()
-                                .get_protocol(&protocol_name)
-                                .is_some();
-
-                            if protocol_exists {
-                                // Check if this protocol or its super_protocols have the method
-                                // This enables protocol inheritance: Monad extends Applicative extends Functor
-                                let found_method = self.find_method_in_protocol_hierarchy(
-                                    &protocol_name,
-                                    &method_name,
-                                );
-
-                                if let Some(protocol_method) = found_method {
-                                    // Found the method in a bounded protocol!
-                                    // CRITICAL: Instantiate fresh type variables for each call
-                                    // Without this, multiple calls like fa.map(f).map(g) would
-                                    // share the same type variables and fail unification
-                                    let method_ty = {
-                                        use crate::ty::Substitution;
-                                        let free_vars = protocol_method.ty.free_vars();
-                                        if free_vars.is_empty() {
-                                            protocol_method.ty.clone()
-                                        } else {
-                                            let mut subst = Substitution::new();
-                                            for var in free_vars {
-                                                let fresh = TypeVar::fresh();
-                                                subst.insert(var, Type::Var(fresh));
-                                            }
-                                            protocol_method.ty.apply_subst(&subst)
-                                        }
-                                    };
-
-                                    // Type check arguments against method signature
-                                    if let Type::Function {
-                                        params,
-                                        return_type,
-                                        ..
-                                    } = &method_ty
-                                    {
-                                        // Skip the first param (self) for method calls
-                                        let method_params: List<Type> = if !params.is_empty() {
-                                            params.iter().skip(1).cloned().collect()
-                                        } else {
-                                            List::new()
-                                        };
-
-                                        // Check argument count
-                                        if args.len() != method_params.len() {
-                                            return Err(TypeError::WrongArgCount {
-                                                method: method_name.clone(),
-                                                expected: method_params.len(),
-                                                actual: args.len(),
-                                                span,
-                                            });
-                                        }
-
-                                        // CRITICAL: Unify receiver type with method's self parameter
-                                        // This binds the HKT type variables (e.g., A in F<A>) to the actual receiver type args
-                                        if !params.is_empty() {
-                                            let self_param_ty = &params[0];
-                                            // Substitute ::F with the actual constructor before unifying
-                                            let self_param_substituted = self
-                                                .substitute_self_hkt_in_type(
-                                                    self_param_ty,
-                                                    &ctor_name,
-                                                    constructor.as_ref(),
-                                                );
-                                            // Unify receiver type with self parameter type
-                                            self.unifier.unify(
-                                                &recv_ty,
-                                                &self_param_substituted,
-                                                span,
-                                            )?;
-                                        }
-
-                                        // Type check each argument
-                                        // CRITICAL: Substitute ::F in param types as well for closures
-                                        // Without this, closure args like |b| g(a, b) expect ::F<B> but get M<B>
-                                        for (arg, param_ty) in
-                                            args.iter().zip(method_params.iter())
-                                        {
-                                            let resolved_param = self.unifier.apply(param_ty);
-                                            let substituted_param = self
-                                                .substitute_self_hkt_in_type(
-                                                    &resolved_param,
-                                                    &ctor_name,
-                                                    constructor.as_ref(),
-                                                );
-                                            self.check_expr(arg, &substituted_param)?;
-                                        }
-
-                                        // The return type should be instantiated with the HKT constructor
-                                        // For Functor.map: Self.F<B> -> F<B>
-                                        let resolved_return = self.unifier.apply(return_type);
-
-                                        // If return type is also a TypeApp with Self.F, substitute
-                                        let final_return = self.substitute_self_hkt_in_type(
-                                            &resolved_return,
-                                            &ctor_name,
-                                            constructor.as_ref(),
-                                        );
-
-                                        return Ok(InferResult::new(final_return));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check if this is a record field access that's a function.
-        // Also handles Named/Generic types by expanding them to their record definitions.
-        {
-            let record_fields: Option<indexmap::IndexMap<verum_common::Text, Type>> =
-                match &recv_ty {
-                    Type::Record(fields) => Some(fields.clone()),
-                    // For Named/Generic types, try to expand to their underlying record definition
-                    Type::Named { .. } | Type::Generic { .. } => self
-                        .expand_type_alias(&recv_ty)
-                        .and_then(|expanded| match expanded {
-                            Type::Record(fields) => Some(fields),
-                            _ => None,
-                        }),
-                    _ => None,
-                };
-
-            if let Some(fields) = record_fields {
-                if let Some(field_ty) =
-                    fields.get(&verum_common::Text::from(method.name.as_str()))
-                {
-                    // Field access to function: treat as method call
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = field_ty
-                    {
-                        // Check argument count — must match exactly.
-                        // Record-field functions have NO implicit self
-                        // parameter (unlike inherent methods), so the
-                        // arity check here must be strict.
-                        if params.len() != args.len() {
-                            return Err(TypeError::WrongArgCount {
-                                method: method.name.as_str().to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        // Check each argument with substitution
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    }
-                    // Field exists but is not a function - return its type directly
-                    // for zero-arg "method" calls (field access sugar)
-                    if args.is_empty() {
-                        return Ok(InferResult::new(field_ty.clone()));
-                    }
-                }
-            }
-        }
-
-        // Protocol-based HKT method resolution for Variant types.
-        // Instead of hardcoding witness names (MaybeFunctor, ResultMonad, etc.),
-        // resolve the variant to its named type and look up protocol implementations
-        // registered via explicit `implement` declarations.
-        if let Type::Variant(variants) = &recv_ty {
-            // Look up the named type for this variant signature via the registry
-            let variant_sig = {
-                let mut parts: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
-                parts.sort();
-                parts.join("|")
-            };
-            let named_type_name: Option<verum_common::Text> = {
-                let protocol_checker_guard = self.protocol_checker.read();
-                protocol_checker_guard
-                    .get_variant_type_name(&verum_common::Text::from(variant_sig.as_str()))
-                    .cloned()
-                    .or_else(|| {
-                        // Try relaxed signature (without payload types)
-                        let relaxed = variants
-                            .keys()
-                            .map(|k| k.as_str())
-                            .collect::<Vec<_>>()
-                            .join("|");
-                        protocol_checker_guard
-                            .get_variant_type_name(&verum_common::Text::from(relaxed.as_str()))
-                            .cloned()
-                    })
-            };
-
-            // If we found a named type, look up its protocol implementations for the method
-            if let Some(type_name) = named_type_name {
-                let named_ty = Type::Named {
-                    path: verum_ast::ty::Path::from_ident(verum_ast::Ident::new(
-                        type_name.as_str(),
-                        span,
-                    )),
-                    args: List::new(),
-                };
-
-                // Search all protocol implementations for this type for the method
-                let method_types: List<Type> = {
-                    let protocol_checker_guard = self.protocol_checker.read();
-                    let impls = protocol_checker_guard.get_implementations(&named_ty);
-                    impls
-                        .iter()
-                        .filter_map(|impl_| impl_.methods.get(&method_name).cloned())
-                        .collect()
-                };
-
-                for method_ty in method_types {
-                    // Instantiate with fresh type variables
-                    let method_ty = {
-                        use crate::ty::Substitution;
-                        let free_vars = method_ty.free_vars();
-                        if free_vars.is_empty() {
-                            method_ty.clone()
-                        } else {
-                            let mut subst = Substitution::new();
-                            for var in free_vars {
-                                let fresh = TypeVar::fresh();
-                                subst.insert(var, Type::Var(fresh));
-                            }
-                            method_ty.apply_subst(&subst)
-                        }
-                    };
-
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = &method_ty
-                    {
-                        // Method params include self, so skip it
-                        let method_params: List<Type> = if !params.is_empty() {
-                            params.iter().skip(1).cloned().collect()
-                        } else {
-                            List::new()
-                        };
-
-                        // Check argument count
-                        if args.len() != method_params.len() {
-                            continue; // Try next method type
-                        }
-
-                        // Extract type argument from variant: use first variant with non-Unit payload
-                        let _type_arg = variants
-                            .values()
-                            .find(|ty| !matches!(ty, Type::Unit))
-                            .cloned()
-                            .unwrap_or(Type::Unit);
-
-                        // Unify the receiver type with the method's self parameter
-                        if !params.is_empty() {
-                            let _ = self.unifier.unify(&recv_ty, &params[0], span);
-                        }
-
-                        // Type check each argument with substitution
-                        for (arg, param_ty) in args.iter().zip(method_params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    }
-                }
-            }
-        }
 
         // =========================================================================
         // Protocol-based method resolution (NEW - replaces hardcoded methods)
@@ -48920,929 +48473,29 @@ impl TypeChecker {
         // which provides data-driven method signatures via MethodRegistry.
         // Protocol-driven method resolution: methods resolved by searching implemented protocols for matching signatures
 
-        // CRITICAL FIX: Check inherent instance methods from implement blocks
-        // This enables obj.method() where method has self parameter
-        //
-
-        // ENHANCEMENT: First try exact type name (for Reference/Slice/Array methods),
-        // then fall back to unwrapped type name (for methods on inner types),
-        // and finally try fallback type names (e.g., Array -> Slice).
-        // This enables methods like as_checked(), as_unsafe() on reference types.
-        let exact_type_name = self.get_exact_type_name(&recv_ty);
-        let unwrapped_type_name = self.get_type_name(&recv_ty);
-        let fallback_type_names = self.get_fallback_type_names(&recv_ty);
-
-        // Build list of type names to try: exact, unwrapped, then fallbacks
-        let mut type_names_to_try: List<verum_common::Text> = List::new();
-        if let Some(name) = exact_type_name.clone() {
-            type_names_to_try.push(name);
-        }
-        if let Some(name) = unwrapped_type_name.clone() {
-            type_names_to_try.push(name);
-        }
-        type_names_to_try.extend(fallback_type_names);
-
-        // NOTE: resolve_primitive_method was previously called FIRST here, overriding stdlib.
-        // Now stdlib definitions take priority. The fallback at the end of method resolution
-        // still calls resolve_primitive_method for methods not yet covered by stdlib.
-
-        // Track whether a method was found but rejected by specialization (for error reporting)
-        let mut specialization_rejected = false;
-        // if method.name.as_str() == "next" {
-        //  eprintln!("[DEBUG method_call] Looking for 'next' method");
-        //  eprintln!(" recv_ty={:?}", recv_ty);
-        //  eprintln!(" type_names_to_try={:?}", type_names_to_try);
-        // }
-        let method_info_opt = {
-            let methods_guard = self.inherent_methods.read();
-            let method_name_text = verum_common::Text::from(method.name.as_str());
-
-            // Extract receiver type args for specialization checking
-            let recv_type_args_for_check: List<Type> = match &recv_ty {
-                Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                _ => List::new(),
-            };
-
-            // Read method_impl_patterns for specialization filtering
-            let patterns_guard = self.method_impl_patterns.read();
-
-            // Try each type name in order
-            type_names_to_try.iter().find_map(|type_name_text| {
-                methods_guard.get(type_name_text).and_then(|methods| {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG method_lookup] Found type '{}' with methods: {:?}",
-                    // type_name_text, methods.keys().map(|k| k.as_str()).collect::<Vec<_>>());
-                    methods.get(&method_name_text).cloned().and_then(|scheme| {
-                        // SPECIALIZATION CHECK: If patterns exist for this method,
-                        // verify that the receiver type args match at least one pattern.
-                        if let Some(type_patterns) = patterns_guard.get(type_name_text) {
-                            if let Some(method_patterns) = type_patterns.get(&method_name_text)
-                            {
-                                if !method_patterns.is_empty()
-                                    && !recv_type_args_for_check.is_empty()
-                                {
-                                    let matches_any =
-                                        method_patterns.iter().any(|pattern_args| {
-                                            if pattern_args.len()
-                                                != recv_type_args_for_check.len()
-                                            {
-                                                return false;
-                                            }
-                                            pattern_args
-                                                .iter()
-                                                .zip(recv_type_args_for_check.iter())
-                                                .all(|(pat, recv)| {
-                                                    // Type variables in patterns are wildcards (match anything)
-                                                    matches!(pat, Type::Var(_))
-                                                        || pat.to_text() == recv.to_text()
-                                                })
-                                        });
-                                    if !matches_any {
-                                        specialization_rejected = true;
-                                        return None; // Method not available for this receiver specialization
-                                    }
-                                }
-                            }
-                        }
-
-                        // Use instantiate_with_type_bounds to preserve function type bounds
-                        // This enables proper closure type inference for methods like
-                        // `map<U, F: fn(T) -> U>` where F needs its fn type bound
-                        let impl_vc = scheme.impl_var_count;
-                        let (ty, fresh_vars, type_bounds) =
-                            scheme.instantiate_with_type_bounds();
-                        Some(((ty, fresh_vars, impl_vc), type_bounds))
-                    })
-                })
-            })
-        };
-
-        if let Some(type_name_text) = exact_type_name.or(unwrapped_type_name) {
-            // Clone the method type to avoid borrow issues with check_expr
-            // Uses shared RwLock for order-independent resolution
-            // CRITICAL FIX: Use instantiate_with_type_bounds to get ordered type variables AND bounds
-            // This ensures that receiver type args are bound to the correct type params
-            // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
-            let _ = type_name_text; // Used in original code but now method_info_opt is computed above
-
-            if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
-                method_info_opt
-            {
-                // CRITICAL: Register type bounds for fresh type variables
-                // This enables closure type inference for generic methods like map<U, F: fn(T) -> U>
-                // #[cfg(debug_assertions)]
-                // if method.name.as_str() == "min" || method.name.as_str() == "max" {
-                //  eprintln!("[DEBUG inherent_methods path] Method '{}' found in inherent_methods:", method.name.as_str());
-                //  eprintln!(" method_ty={:?}", method_ty);
-                //  if let Type::Function { params, .. } = &method_ty {
-                //  eprintln!(" params.len()={}", params.len());
-                //  }
-                //  eprintln!(" args.len()={}", args.len());
-                // }
-                // #[cfg(debug_assertions)]
-                // if method.name.as_str() == "eq" {
-                //  eprintln!("[DEBUG inherent_methods path] Method 'eq' found in inherent_methods: method_ty={:?}", method_ty);
-                // }
-                // if method.name.as_str() == "map" {
-                //  eprintln!("[DEBUG method_call] map: type_bounds has {} entries", type_bounds.len());
-                //  for (fresh_var, bounds) in &type_bounds {
-                //  eprintln!(" fresh_var={:?}, bounds={:?}", fresh_var, bounds);
-                //  }
-                // }
-
-                for (fresh_var, bounds) in &type_bounds {
-                    // if method.name.as_str() == "map" {
-                    //  eprintln!("[DEBUG method_call] Registering {} bounds for var {:?}", bounds.len(), fresh_var);
-                    // }
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
-                    }
-                }
-                // Found the method - type check the call
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    let method_name_text = verum_common::Text::from(method.name.as_str());
-                    // Check argument count (method params don't include self)
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_text,
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
-                    }
-
-                    // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
-                    // e.g., for Wrapper<Int>.get() where return type is &τ_fresh,
-                    // we bind τ_fresh = Int, making return type &τ_fresh become &Int.
-                    //
-
-                    // The ordered_fresh_vars from instantiate_with_fresh_vars preserves the
-                    // order of type params from the implement block, so zip correctly matches
-                    // receiver type args to their corresponding type variables.
-                    let receiver_type_args = match &recv_ty {
-                        Type::Named { args, .. } => args.clone(),
-                        Type::Generic { args, .. } => args.clone(),
-                        // CRITICAL FIX: Handle Variant types with type parameters
-                        // Variant types like Result<T, E> need to extract type args from their variants
-                        // For Result<T, E>: Variant { "Ok" -> T, "Err" -> E }
-                        // We need to extract [T, E] in the order the implement block expects
-                        Type::Variant(variants) => {
-                            // Extract type args based on semantic variant meaning
-                            // This must match how `implement<T, E> Result<T, E>` is declared
-                            // Result<T, E> = Ok(T) | Err(E), so: T from "Ok", E from "Err"
-                            // Maybe<T> = None | Some(T), so: T from "Some"
-                            let mut args = List::new();
-
-                            // Generic variant type handling (stdlib-agnostic).
-                            //
-
-                            // For ANY variant type (Result, Maybe, Validated, user-defined, etc.),
-                            // extract type arguments using the registered type metadata:
-                            // 1. Look up type name from variant_type_names registry
-                            // 2. Look up __type_var_order_{name} to get TypeVars in declaration order
-                            // 3. Look up original (unsubstituted) variant type from type context
-                            // 4. Unify original with substituted type to get TypeVar -> concrete type mapping
-                            // 5. Return type args in the correct declaration order
-                            let variant_ty = Type::Variant(variants.clone());
-                            let extracted = self.extract_type_args_from_variant(&variant_ty);
-                            if !extracted.is_empty() {
-                                for arg in extracted {
-                                    args.push(arg);
-                                }
-                            } else {
-                                // Final fallback: extract non-Unit payloads (may be wrong for complex types)
-                                let mut variant_names: Vec<_> = variants.keys().collect();
-                                variant_names.sort();
-                                for name in variant_names {
-                                    if let Some(ty) = variants.get(name) {
-                                        if !matches!(ty, Type::Unit) {
-                                            args.push(ty.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG method_call] Variant receiver extracted type_args: {:?}",
-                            // args.iter().map(|t| format!("{}", t)).collect::<Vec<_>>());
-                            args
-                        }
-                        _ => {
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG method_call] recv_ty={:?} has no extractable type args", recv_ty);
-                            List::new()
-                        }
-                    };
-                    // Collect substitution from unification using the ORDERED fresh vars.
-                    // This ensures L maps to receiver_type_args[0], R to [1], etc.
-                    //
-
-                    // CRITICAL: When impl_var_count > 0, only bind the first impl_var_count
-                    // type vars from receiver type args. Method-level vars (like F in
-                    // modify<F: Fn(T) -> T>) must NOT be bound from receiver type args —
-                    // they are inferred from the method's arguments instead.
-                    let bind_limit = Self::resolve_bind_limit(
-                        impl_var_count,
-                        ordered_fresh_vars.len(),
-                        receiver_type_args.len(),
-                    );
-                    let mut combined_subst = crate::ty::Substitution::new();
-                    for (type_var, type_arg) in ordered_fresh_vars
-                        .iter()
-                        .take(bind_limit)
-                        .zip(receiver_type_args.iter())
-                    {
-                        // Unify the type variable with the receiver's type argument
-                        if let Ok(subst) =
-                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
-                        {
-                            combined_subst.extend(subst);
-                        }
-                    }
-
-                    // Clone params for iteration to avoid borrow issues
-                    let params_cloned = params.clone();
-
-                    // OVERLOAD GUARD: If any argument is a closure but the corresponding
-                    // parameter type (after substitution) is a concrete non-function type,
-                    // this inherent method signature doesn't match the call. Skip to protocol
-                    // fallback which may have a predicate-accepting overload.
-                    // Example: List.position(value: &T) vs Iterator.position(pred: fn(&T)->Bool)
-                    {
-                        let mut signature_mismatch = false;
-                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                            if matches!(&arg.kind, ExprKind::Closure { .. }) {
-                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                let resolved_param = self.unifier.apply(&subst_param_ty);
-                                // If the param type is concrete and not a function type / type var,
-                                // a closure argument cannot possibly match.
-                                if !matches!(
-                                    &resolved_param,
-                                    Type::Function { .. }
-                                        | Type::Var(_)
-                                        | Type::Placeholder { .. }
-                                ) {
-                                    signature_mismatch = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if signature_mismatch {
-                            // Don't return error — fall through to protocol/blanket/fallback paths
-                            // which may have a matching overload accepting a closure.
-                        } else {
-                            // Type check each argument (with substituted param types)
-                            for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                self.check_expr(arg, &subst_param_ty)?;
-                            }
-
-                            // Apply substitution to get the concrete return type
-                            let subst_return_type = return_type.apply_subst(&combined_subst);
-
-                            // CRITICAL FIX: Also apply unifier to resolve type variables from argument checking
-                            // For generic methods like `map_left<L2>(self, f: fn(L) -> L2) -> Either<L2, R>`,
-                            // L2 is inferred from the closure argument, not from receiver type args.
-                            // The closure checking at line 17776 unifies L2 with the closure return type,
-                            // but this unification is in the unifier, not in combined_subst.
-                            // Without this, return type still has unresolved L2 type variable.
-                            let final_return_type = self.unifier.apply(&subst_return_type);
-
-                            return Ok(InferResult::new(final_return_type));
-                        }
-                    }
-                }
-            }
+        let (inherent_result, specialization_rejected) = self.try_inherent_method_dispatch(
+            &recv_ty, method, args, span,
+        )?;
+        if let Some(r) = inherent_result {
+            return Ok(r);
         }
 
-        // Check inherent blanket impls (e.g., `implement<I: Iterator> I { fn reduce_with... }`)
-        // These provide extension methods for all types satisfying protocol bounds.
-        // Registered under "__blanket:Protocol" keys in inherent_methods.
-        let blanket_result =
-            self.lookup_inherent_blanket_method(&recv_ty, method.name.as_str());
-        if let Some((blanket_method_ty, _remaining_vars, blanket_bounds)) = blanket_result {
-            // Register type bounds for closure inference
-            for (fresh_var, bounds) in &blanket_bounds {
-                for bound in bounds {
-                    self.register_type_var_type_bound(*fresh_var, bound.clone());
-                }
-            }
 
-            if let Type::Function {
-                params,
-                return_type,
-                ..
-            } = &blanket_method_ty
-            {
-                if args.len() == params.len() {
-                    let params_cloned = params.clone();
-                    for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                        let resolved_param = self.unifier.apply(param_ty);
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    let subst_return = self.unifier.apply(return_type);
-                    let normalized = self.normalize_type(&subst_return);
-                    return Ok(InferResult::new(normalized));
-                }
-            }
+        if let Some(r) = self.try_blanket_and_ufcs_dispatch(&recv_ty, method, args, span)? {
+            return Ok(r);
         }
 
-        // UFCS (Uniform Function Call Syntax) fallback
-        // Try to find a free function with this name and call it with receiver as first argument
-        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — UFCS allows x.foo(args) to resolve as foo(x, args)
-        let method_name_str = method.name.as_str();
 
-        // First try local environment, then module-level functions
-        let func_scheme = self
-            .ctx
-            .env
-            .lookup(method_name_str)
-            .cloned()
-            .or_else(|| self.lookup_function_in_module(method_name_str));
-
-        if let Some(scheme) = func_scheme {
-            let func_ty = scheme.instantiate();
-
-            // Check if it's a function that accepts receiver as first arg
-            if let Type::Function {
-                params,
-                return_type,
-                ..
-            } = &func_ty
-                && !params.is_empty()
-            {
-                // Check if receiver is compatible with first parameter
-                if self.subtyping.is_subtype(&recv_ty, &params[0]) {
-                    // Check remaining arguments
-                    let remaining_params: List<Type> = params.iter().skip(1).cloned().collect();
-
-                    if args.len() != remaining_params.len() {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_str.to_text(),
-                            expected: remaining_params.len(),
-                            actual: args.len(),
-                            span,
-                        });
-                    }
-
-                    // Type check each argument against remaining params with substitution
-                    for (arg, param_ty) in args.iter().zip(remaining_params.iter()) {
-                        let resolved_param = self.unifier.apply(param_ty);
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-
-                    let resolved_return = self.unifier.apply(return_type);
-                    return Ok(InferResult::new(resolved_return));
-                }
-            }
+        if let Some(r) = self.try_synthetic_iterator_adapter_dispatch(&recv_ty, method, args, span)? {
+            return Ok(r);
         }
 
-        // SYNTHETIC ITERATOR ADAPTER METHOD RESOLUTION
-        // For synthetic types like MapIterator<Iter, F>, FilterIter<Iter, P>, etc.,
-        // resolve common iterator methods BEFORE protocol lookup. Protocol lookup
-        // would resolve Self.Item incorrectly for these synthetic types since they
-        // have no explicit `implement Iterator for MapIterator` registration.
-        {
-            let adapter_method_name = method.name.as_str();
-            let adapter_type_name = match &recv_ty {
-                Type::Generic { name, .. } => Some(name.as_str()),
-                Type::Named { path, .. } => path.as_ident().map(|id| id.name.as_str()),
-                _ => None,
-            };
-            let adapter_type_args = match &recv_ty {
-                Type::Generic { args: targs, .. } | Type::Named { args: targs, .. } => {
-                    targs.clone()
-                }
-                _ => List::new(),
-            };
-            // Only match SYNTHETIC adapter types created by the type checker itself.
-            // These are types like MapIterator, FilterIter, etc. that exist
-            // only as type-checker constructs without protocol implementations.
-            // Do NOT match real stdlib types like ListIter, SliceIter, etc.
-            let is_iterator_adapter = adapter_type_name.is_some_and(|n| {
-                n == "MapIterator" || n == "FilterIter" || n == "FilterMapIter"
-                || n == "ScanIter" || n == "EnumerateIter" || n == "FlatMapIter"
-                || n == "Iter" // generic Iter<T> from .iter() calls
-                || n == "Range" || n == "RangeInclusive"
-                || n == "MappedIter" || n == "ChainIter" || n == "ZipIter"
-                || n == "TakeIter" || n == "SkipIter" || n == "TakeWhileIter"
-                || n == "SkipWhileIter" || n == "PeekableIter" || n == "FuseIter"
-                || n == "RevIter" || n == "InspectIter" || n == "StepByIter"
-                || n == "CopiedIter" || n == "ClonedIter" || n == "FlattenIter"
-                || n == "DedupIter" || n == "UniqueIter" || n == "SortedIter"
-                || n == "ChunksIter"
-            });
-            if is_iterator_adapter {
-                // Helper: extract element type from an iterator adapter type
-                let extract_adapter_elem_ty = |recv: &Type, targs: &List<Type>| -> Type {
-                    let tname = match recv {
-                        Type::Generic { name, .. } => name.as_str(),
-                        Type::Named { path, .. } => {
-                            path.as_ident().map(|id| id.name.as_str()).unwrap_or("")
-                        }
-                        _ => "",
-                    };
-                    if (tname.contains("Map") || tname.contains("Mapped")) && targs.len() >= 2 {
-                        // MapIterator<Iter, F> - element type is F's return type
-                        match &targs[1] {
-                            Type::Function { return_type, .. } => (**return_type).clone(),
-                            _ => Type::Var(TypeVar::fresh()),
-                        }
-                    } else if tname.contains("Enumerate") && !targs.is_empty() {
-                        // EnumerateIter<Iter> - element type is (Int, inner_elem)
-                        let inner_elem = match &targs[0] {
-                            Type::Generic {
-                                args: inner_args, ..
-                            }
-                            | Type::Named {
-                                args: inner_args, ..
-                            } if !inner_args.is_empty() => inner_args[0].clone(),
-                            _ => Type::Var(TypeVar::fresh()),
-                        };
-                        Type::Tuple(vec![Type::Int, inner_elem].into())
-                    } else if !targs.is_empty() {
-                        // FilterIter, TakeIter, SkipIter, Rev, etc. - preserve inner element type
-                        match &targs[0] {
-                            Type::Generic {
-                                args: inner_args, ..
-                            }
-                            | Type::Named {
-                                args: inner_args, ..
-                            } if !inner_args.is_empty() => {
-                                // If inner is also a Map adapter, recurse
-                                let inner_name = match &targs[0] {
-                                    Type::Generic { name, .. } => name.as_str(),
-                                    Type::Named { path, .. } => {
-                                        path.as_ident().map(|id| id.name.as_str()).unwrap_or("")
-                                    }
-                                    _ => "",
-                                };
-                                if (inner_name.contains("Map") || inner_name.contains("Mapped"))
-                                    && inner_args.len() >= 2
-                                {
-                                    match &inner_args[1] {
-                                        Type::Function { return_type, .. } => {
-                                            (**return_type).clone()
-                                        }
-                                        _ => inner_args[0].clone(),
-                                    }
-                                } else {
-                                    inner_args[0].clone()
-                                }
-                            }
-                            _ => targs[0].clone(),
-                        }
-                    } else {
-                        Type::Var(TypeVar::fresh())
-                    }
-                };
 
-                match adapter_method_name {
-                    "next" | "next_back" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
-                        return Ok(InferResult::new(Type::maybe(elem_ty)));
-                    }
-                    "map" => {
-                        if args.len() == 1 {
-                            let closure_result = self.synth_expr(&args[0])?;
-                            let iter_ty = Type::Generic {
-                                name: verum_common::Text::from("MapIterator"),
-                                args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
-                            };
-                            return Ok(InferResult::new(iter_ty));
-                        }
-                    }
-                    "filter" | "take" | "skip" | "take_while" | "skip_while" | "inspect"
-                    | "peekable" | "fuse" | "rev" | "dedup" | "unique" | "sorted"
-                    | "cloned" | "copied" | "step_by" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    "filter_map" => {
-                        if args.len() == 1 {
-                            let closure_result = self.synth_expr(&args[0])?;
-                            let mapped_elem_ty = match &closure_result.ty {
-                                Type::Function { return_type, .. } => {
-                                    // filter_map returns Maybe<U>, extract U
-                                    match return_type.as_ref() {
-                                        Type::Generic {
-                                            args: inner_args, ..
-                                        } if !inner_args.is_empty() => inner_args[0].clone(),
-                                        _ => (**return_type).clone(),
-                                    }
-                                }
-                                _ => Type::Var(TypeVar::fresh()),
-                            };
-                            let iter_ty = Type::Generic {
-                                name: verum_common::Text::from("FilterMapIter"),
-                                args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
-                            };
-                            let _ = mapped_elem_ty; // The actual resolution happens on next()
-                            return Ok(InferResult::new(iter_ty));
-                        }
-                    }
-                    "flat_map" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    "fold" | "rfold" => {
-                        if !args.is_empty() {
-                            let init_result = self.synth_expr(&args[0])?;
-                            for arg in args.iter().skip(1) {
-                                let _ = self.synth_expr(arg)?;
-                            }
-                            return Ok(InferResult::new(init_result.ty));
-                        }
-                    }
-                    "try_fold" => {
-                        if args.len() >= 2 {
-                            let init_result = self.synth_expr(&args[0])?;
-                            let closure_result = self.synth_expr(&args[1])?;
-                            // try_fold returns Result<Acc, E> or the closure's return type
-                            let result_ty = match &closure_result.ty {
-                                Type::Function { return_type, .. } => (**return_type).clone(),
-                                _ => {
-                                    // Default: wrap init type in Result
-                                    Type::Generic {
-                                        name: verum_common::Text::from("Result"),
-                                        args: vec![init_result.ty, Type::Var(TypeVar::fresh())]
-                                            .into(),
-                                    }
-                                }
-                            };
-                            return Ok(InferResult::new(result_ty));
-                        }
-                    }
-                    "scan" => {
-                        if args.len() >= 2 {
-                            let _state_result = self.synth_expr(&args[0])?;
-                            let closure_result = self.synth_expr(&args[1])?;
-                            let iter_ty = Type::Generic {
-                                name: verum_common::Text::from("ScanIter"),
-                                args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
-                            };
-                            return Ok(InferResult::new(iter_ty));
-                        }
-                    }
-                    "enumerate" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let iter_ty = Type::Generic {
-                            name: verum_common::Text::from("EnumerateIter"),
-                            args: vec![recv_ty.clone()].into(),
-                        };
-                        return Ok(InferResult::new(iter_ty));
-                    }
-                    "zip" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    "collect" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::Var(TypeVar::fresh())));
-                    }
-                    "sum" | "product" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
-                        return Ok(InferResult::new(elem_ty));
-                    }
-                    "count" | "len" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::Int));
-                    }
-                    "any" | "all" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::Bool));
-                    }
-                    "find" | "find_map" | "position" | "min" | "max" | "min_by" | "max_by"
-                    | "min_by_key" | "max_by_key" | "first" | "last" | "nth" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
-                        return Ok(InferResult::new(Type::maybe(elem_ty)));
-                    }
-                    "for_each" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::unit()));
-                    }
-                    "join" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::text()));
-                    }
-                    "partition" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
-                        let list_ty = Type::Generic {
-                            name: verum_common::Text::from("List"),
-                            args: vec![elem_ty].into(),
-                        };
-                        return Ok(InferResult::new(Type::Tuple(
-                            vec![list_ty.clone(), list_ty].into(),
-                        )));
-                    }
-                    "unzip" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        let fresh1 = Type::Var(TypeVar::fresh());
-                        let fresh2 = Type::Var(TypeVar::fresh());
-                        let list1 = Type::Generic {
-                            name: verum_common::Text::from("List"),
-                            args: vec![fresh1].into(),
-                        };
-                        let list2 = Type::Generic {
-                            name: verum_common::Text::from("List"),
-                            args: vec![fresh2].into(),
-                        };
-                        return Ok(InferResult::new(Type::Tuple(vec![list1, list2].into())));
-                    }
-                    "size_hint" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::Tuple(
-                            vec![Type::Int, Type::maybe(Type::Int)].into(),
-                        )));
-                    }
-                    "chunks" => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // CRITICAL FIX: Fallback to protocol method lookup for default methods
-        // This enables methods like `file.read_to_string()` where `read_to_string` is a
-        // default method in the `Read` protocol that `File` implements.
-        // Spec: Protocol default methods should be callable on implementing types.
         let method_name_text = verum_common::Text::from(method.name.as_str());
-        #[cfg(debug_assertions)]
-        if method.name.as_str() == "next" {
-            // #[cfg(debug_assertions)]
-            // eprintln!("[DEBUG fallback_protocol_method] Looking for method '{}' on recv_ty={:?}", method.name.as_str(), recv_ty);
-        }
-        let protocol_method_result = self
-            .protocol_checker
-            .read()
-            .lookup_protocol_method_with_type_param_names(&recv_ty, &method_name_text);
-        #[cfg(debug_assertions)]
-        if method.name.as_str() == "next" {
-            // #[cfg(debug_assertions)]
-            // eprintln!("[DEBUG fallback_protocol_method] lookup_protocol_method returned: {:?}", protocol_method_result);
-        }
-        if let Ok(Maybe::Some((raw_method_ty, method_type_param_names))) =
-            protocol_method_result
-        {
-            // Freshen method-level type parameters to avoid sharing TypeVars across call sites.
-            // For `fn collect<C: FromIterator<Self.Item>>() -> C`, this creates a fresh TypeVar
-            // for C at each call site, enabling backward type inference from let-binding annotations.
-            let method_ty = self.freshen_method_type_params(
-                raw_method_ty,
-                &method_type_param_names,
-                type_args,
-                span,
-            )?;
-
-            // Found protocol method - type check the call
-            if let Type::Function {
-                params,
-                return_type,
-                ..
-            } = &method_ty
-            {
-                // Protocol methods don't include self in params (we already excluded it during registration)
-                if params.len().abs_diff(args.len()) > 1 {
-                    return Err(TypeError::WrongArgCount {
-                        method: method_name_text,
-                        expected: params.len(),
-                        actual: args.len(),
-                        span,
-                    });
-                }
-
-                // Type check each argument
-                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                    let resolved_param = self.unifier.apply(param_ty);
-                    self.check_expr(arg, &resolved_param)?;
-                }
-
-                let resolved_return = self.unifier.apply(return_type);
-                return Ok(InferResult::new(resolved_return));
-            }
+        if let Some(r) = self.try_protocol_object_dispatch(&recv_ty, method, type_args, args, span)? {
+            return Ok(r);
         }
 
-        // CRITICAL FIX: When receiver type IS a protocol (trait object), look up methods
-        // from the protocol definition itself.
-        // This enables: `fn foo(hasher: &mut Hasher) { hasher.write_int(42); }`
-        // where `Hasher` is the protocol type and `write_int` is a method/default method.
-        // Spec: Protocol types used as trait objects should resolve methods from the protocol.
-        // Also handles &Drawable, &&Drawable, etc. by peeling references.
-        let protocol_lookup_ty = {
-            let mut ty = &recv_ty;
-            loop {
-                match ty {
-                    Type::Reference { inner, .. }
-                    | Type::CheckedReference { inner, .. }
-                    | Type::UnsafeReference { inner, .. } => ty = inner.as_ref(),
-                    _ => break ty.clone(),
-                }
-            }
-        };
-        if let Type::Named { path, .. } = &protocol_lookup_ty {
-            if let Some(protocol_name) = path.as_ident().map(|id| id.name.clone()) {
-                // Check if this is a registered protocol
-                let protocol_opt = self
-                    .protocol_checker
-                    .read()
-                    .get_protocol(&protocol_name)
-                    .cloned();
-                if let Maybe::Some(protocol) = protocol_opt {
-                    // Look up the method in the protocol definition
-                    if let Some(proto_method) = protocol.methods.get(&method_name_text) {
-                        // Found the method in the protocol definition!
-                        // Substitute Self with the protocol type for method resolution
-                        let method_ty = self.instantiate_method_for_receiver(
-                            &proto_method.ty,
-                            &protocol_lookup_ty,
-                        );
-                        // Instantiate method's own type parameters with explicit type args
-                        let method_ty =
-                            self.instantiate_method_type_params(method_ty, type_args, span)?;
-
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = &method_ty
-                        {
-                            // Check argument count
-                            if params.len().abs_diff(args.len()) > 1 {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method_name_text,
-                                    expected: params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
-                            }
-
-                            // Type check each argument
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-
-                            let resolved_return = self.unifier.apply(return_type);
-                            return Ok(InferResult::new(resolved_return));
-                        }
-                    }
-                }
-            }
-        }
-
-        // PROTOCOL OBJECT DISPATCH THROUGH WRAPPER TYPES
-        // Enables shape.draw() on Heap<Drawable>, Shared<Printable>, etc.
-        // When recv_ty is Generic { name, args: [T] } and T is a protocol,
-        // look up T's protocol definition methods and dispatch through them.
-        if let Type::Generic {
-            args: wrapper_args, ..
-        } = &recv_ty
-        {
-            if wrapper_args.len() == 1 {
-                let inner = &wrapper_args[0];
-                let protocol_name_opt: Option<verum_common::Text> = match inner {
-                    Type::Named { path, .. } => path.as_ident().map(|id| id.name.clone()),
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    _ => None,
-                };
-                if let Some(pname) = protocol_name_opt {
-                    let protocol_opt =
-                        self.protocol_checker.read().get_protocol(&pname).cloned();
-                    if let Maybe::Some(protocol) = protocol_opt {
-                        if let Some(proto_method) = protocol.methods.get(&method_name_text) {
-                            let method_ty =
-                                self.instantiate_method_for_receiver(&proto_method.ty, inner);
-                            let method_ty = self
-                                .instantiate_method_type_params(method_ty, type_args, span)?;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = &method_ty
-                            {
-                                if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::WrongArgCount {
-                                        method: method_name_text,
-                                        expected: params.len(),
-                                        actual: args.len(),
-                                        span,
-                                    });
-                                }
-                                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    self.check_expr(arg, &resolved_param)?;
-                                }
-                                let resolved_return = self.unifier.apply(return_type);
-                                return Ok(InferResult::new(resolved_return));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // PROTOCOL OBJECT DISPATCH THROUGH WRAPPER TYPES
-        // Enables shape.draw() on Heap<Drawable>, Shared<Printable>, etc.
-        // When recv_ty is Wrapper<Protocol>, look up Protocol's methods.
-        {
-            let wrapper_inner = match &recv_ty {
-                Type::Named { path, args } if args.len() == 1 => Some(&args[0]),
-                Type::Generic { args, .. } if args.len() == 1 => Some(&args[0]),
-                _ => None,
-            };
-            if let Some(inner) = wrapper_inner {
-                let protocol_name_opt = match inner {
-                    Type::Named { path, .. } => path.as_ident().map(|id| id.name.clone()),
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    _ => None,
-                };
-                if let Some(pname) = protocol_name_opt {
-                    let method_opt = {
-                        let checker = self.protocol_checker.read();
-                        if checker.get_protocol_definition(pname.as_str()).is_some() {
-                            checker
-                                .get_protocol_definition(pname.as_str())
-                                .and_then(|def| def.methods.get(&method_name_text).cloned())
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some(proto_method) = method_opt {
-                        let method_ty =
-                            self.instantiate_method_for_receiver(&proto_method.ty, inner);
-                        let method_ty =
-                            self.instantiate_method_type_params(method_ty, type_args, span)?;
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = &method_ty
-                        {
-                            let method_params: List<Type> = if !params.is_empty() {
-                                params.iter().skip(1).cloned().collect()
-                            } else {
-                                params.clone()
-                            };
-                            if args.len() != method_params.len() {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method_name_text.clone(),
-                                    expected: method_params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
-                            }
-                            for (arg, param_ty) in args.iter().zip(method_params.iter()) {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-                            return Ok(InferResult::new(self.unifier.apply(return_type)));
-                        }
-                    }
-                }
-            }
-        }
 
         // HARDCODED FALLBACK: Primitive method return types for Int/Float/Bool/Char/Byte.
         // This is reached when inherent_methods (from stdlib .vr implement blocks) did
@@ -49875,271 +48528,10 @@ impl TypeChecker {
             }
         }
 
-        // TYPE ALIAS METHOD RESOLUTION FALLBACK
-        // When a method is not found on the receiver type directly, search for
-        // implement blocks on type aliases whose target type is compatible with recv_ty.
-        // This enables transparent type alias semantics where:
-        //  type EpochCaps = u32;
-        //  implement EpochCaps { fn epoch(self) -> u32 { ... } }
-        //  let x: Int = ref.epoch_caps(); // epoch_caps() returns Int
-        //  x.epoch() // finds EpochCaps::epoch because u32 == Int
-        {
-            let alias_method_info = {
-                let methods_guard = self.inherent_methods.read();
-                let method_name_text = verum_common::Text::from(method.name.as_str());
-
-                // First check: only look at aliases that have the method registered.
-                // This avoids iterating through all aliases and calling the Numeric protocol checker.
-                let mut found = None;
-                for (alias_name, alias_target) in &self.ctx.type_aliases {
-                    // Quick check: does this alias even have the method?
-                    let has_method = methods_guard
-                        .get(alias_name)
-                        .and_then(|methods| methods.get(&method_name_text))
-                        .is_some();
-                    if !has_method {
-                        continue;
-                    }
-
-                    // Check if alias target is compatible with the receiver type.
-                    // Direct equality check (since u32/i32/etc all resolve to Type::Int).
-                    let compatible =
-                        *alias_target == recv_ty || alias_target.to_text() == recv_ty.to_text();
-
-                    if compatible {
-                        if let Some(methods) = methods_guard.get(alias_name) {
-                            if let Some(scheme) = methods.get(&method_name_text) {
-                                let impl_vc = scheme.impl_var_count;
-                                let (ty, fresh_vars, type_bounds) =
-                                    scheme.instantiate_with_type_bounds();
-                                found = Some(((ty, fresh_vars, impl_vc), type_bounds));
-                                break;
-                            }
-                        }
-                    }
-                }
-                found
-            };
-
-            if let Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)) =
-                alias_method_info
-            {
-                // Register type bounds for fresh type variables
-                for (fresh_var, bounds) in &type_bounds {
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
-                    }
-                }
-                // Type check the call
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: verum_common::Text::from(method.name.as_str()),
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
-                    }
-                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                        let resolved_param = self.unifier.apply(param_ty);
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    let resolved_return = self.unifier.apply(return_type);
-                    return Ok(InferResult::new(resolved_return));
-                }
-            }
+        if let Some(r) = self.try_fallback_name_dispatch(&recv_ty, recv_ty_raw, method, args, span)? {
+            return Ok(r);
         }
 
-        // GENERIC BASE-NAME FALLBACK: When all other lookup paths fail, try
-        // extracting the base type name by stripping type arguments and re-trying
-        // inherent_methods. This handles cases where:
-        //  - The receiver type is a generic stdlib type (Weak<T>, JoinHandle<T>,
-        //  MutexGuard<T>, etc.) whose methods were registered under the bare name
-        //  - The standard get_type_name/get_exact_type_name didn't match due to
-        //  type representation differences (Named vs Generic, resolved aliases, etc.)
-        //  - The receiver type went through auto-deref or alias resolution that
-        //  changed its representation
-        //
-
-        // This is stdlib-agnostic: it works for ANY generic type, not just hardcoded ones.
-        {
-            // Try multiple type representations: recv_ty (derefed/resolved),
-            // recv_ty_raw (original), and type_to_name (string-based extraction)
-            let mut base_name_candidates: List<verum_common::Text> = List::new();
-
-            // Strategy 1: Extract from recv_ty_raw (pre-deref, pre-alias-resolution)
-            match &recv_ty_raw {
-                Type::Generic { name, .. } => {
-                    base_name_candidates.push(name.clone());
-                }
-                Type::Named { path, args, .. } => {
-                    if let Some(ident) = path.as_ident() {
-                        base_name_candidates
-                            .push(verum_common::Text::from(ident.name.as_str()));
-                    }
-                    // Also try with no args — sometimes the method is registered under
-                    // the path's last segment regardless of args
-                    if !args.is_empty() {
-                        if let Some(seg) = path.segments.last() {
-                            if let verum_ast::ty::PathSegment::Name(id) = seg {
-                                let name = verum_common::Text::from(id.name.as_str());
-                                if !base_name_candidates.contains(&name) {
-                                    base_name_candidates.push(name);
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            // Strategy 2: Extract from recv_ty (post-deref, post-alias-resolution)
-            match &recv_ty {
-                Type::Generic { name, .. } => {
-                    if !base_name_candidates.contains(name) {
-                        base_name_candidates.push(name.clone());
-                    }
-                }
-                Type::Named { path, .. } => {
-                    if let Some(ident) = path.as_ident() {
-                        let name = verum_common::Text::from(ident.name.as_str());
-                        if !base_name_candidates.contains(&name) {
-                            base_name_candidates.push(name);
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            // Strategy 3: Use type_to_name which handles Display formatting
-            let display_name = self.type_to_name(&recv_ty);
-            // Strip type arguments from display name: "Weak<Int>" → "Weak"
-            let base_from_display = if let Some(idx) = display_name.as_str().find('<') {
-                verum_common::Text::from(&display_name.as_str()[..idx])
-            } else {
-                display_name.clone()
-            };
-            if !base_from_display.is_empty()
-                && !base_name_candidates.contains(&base_from_display)
-            {
-                base_name_candidates.push(base_from_display);
-            }
-
-            let method_name_text = verum_common::Text::from(method.name.as_str());
-            let fallback_method_info = {
-                let methods_guard = self.inherent_methods.read();
-                base_name_candidates.iter().find_map(|candidate_name| {
-                    methods_guard.get(candidate_name).and_then(|methods| {
-                        methods.get(&method_name_text).cloned().map(|scheme| {
-                            let impl_vc = scheme.impl_var_count;
-                            let (ty, fresh_vars, type_bounds) =
-                                scheme.instantiate_with_type_bounds();
-                            (
-                                candidate_name.clone(),
-                                (ty, fresh_vars, impl_vc),
-                                type_bounds,
-                            )
-                        })
-                    })
-                })
-            };
-
-            if let Some((
-                _matched_name,
-                (method_ty, ordered_fresh_vars, impl_var_count),
-                type_bounds,
-            )) = fallback_method_info
-            {
-                // Register type bounds
-                for (fresh_var, bounds) in &type_bounds {
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
-                    }
-                }
-
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    if params.len().abs_diff(args.len()) > 1 {
-                        return Err(TypeError::WrongArgCount {
-                            method: method_name_text,
-                            expected: params.len(),
-                            actual: args.len(),
-                            span,
-                        });
-                    }
-
-                    // Bind type variables from receiver type args
-                    let receiver_type_args: List<Type> = match &recv_ty {
-                        Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                        _ => {
-                            // Also try recv_ty_raw
-                            match &recv_ty_raw {
-                                Type::Named { args, .. } | Type::Generic { args, .. } => {
-                                    args.clone()
-                                }
-                                _ => List::new(),
-                            }
-                        }
-                    };
-
-                    let bind_limit = Self::resolve_bind_limit(
-                        impl_var_count,
-                        ordered_fresh_vars.len(),
-                        receiver_type_args.len(),
-                    );
-                    let mut combined_subst = crate::ty::Substitution::new();
-                    for (type_var, type_arg) in ordered_fresh_vars
-                        .iter()
-                        .take(bind_limit)
-                        .zip(receiver_type_args.iter())
-                    {
-                        if let Ok(subst) =
-                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
-                        {
-                            combined_subst.extend(subst);
-                        }
-                    }
-
-                    // OVERLOAD GUARD: same as early/primary paths
-                    let params_cloned = params.clone();
-                    let mut signature_mismatch = false;
-                    for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                        if matches!(&arg.kind, ExprKind::Closure { .. }) {
-                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                            let resolved_param = self.unifier.apply(&subst_param_ty);
-                            if !matches!(
-                                &resolved_param,
-                                Type::Function { .. } | Type::Var(_) | Type::Placeholder { .. }
-                            ) {
-                                signature_mismatch = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !signature_mismatch {
-                        // Type check arguments
-                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                            self.check_expr(arg, &subst_param_ty)?;
-                        }
-
-                        let subst_return_type = return_type.apply_subst(&combined_subst);
-                        let final_return_type = self.unifier.apply(&subst_return_type);
-                        return Ok(InferResult::new(final_return_type));
-                    }
-                    // signature_mismatch: fall through to generic method fallbacks
-                }
-            }
-        }
 
         // SLICE/ARRAY BUILT-IN METHOD FALLBACK
         // Methods like as_mut_ptr, as_ptr, offset, len on array/slice types
@@ -50477,6 +48869,1717 @@ impl TypeChecker {
             span,
             did_you_mean,
         });
+    }
+
+    /// Resolve method calls on synthetic iterator adapter types
+    /// (MapIterator, FilterIter, EnumerateIter, etc.) that exist only as
+    /// type-checker constructs without registered protocol implementations.
+    fn try_synthetic_iterator_adapter_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        let adapter_method_name = method.name.as_str();
+        let adapter_type_name = match &recv_ty {
+            Type::Generic { name, .. } => Some(name.as_str()),
+            Type::Named { path, .. } => path.as_ident().map(|id| id.name.as_str()),
+            _ => None,
+        };
+        let adapter_type_args = match &recv_ty {
+            Type::Generic { args: targs, .. } | Type::Named { args: targs, .. } => {
+                targs.clone()
+            }
+            _ => List::new(),
+        };
+        // Only match SYNTHETIC adapter types created by the type checker itself.
+        // These are types like MapIterator, FilterIter, etc. that exist
+        // only as type-checker constructs without protocol implementations.
+        // Do NOT match real stdlib types like ListIter, SliceIter, etc.
+        let is_iterator_adapter = adapter_type_name.is_some_and(|n| {
+            n == "MapIterator" || n == "FilterIter" || n == "FilterMapIter"
+            || n == "ScanIter" || n == "EnumerateIter" || n == "FlatMapIter"
+            || n == "Iter" // generic Iter<T> from .iter() calls
+            || n == "Range" || n == "RangeInclusive"
+            || n == "MappedIter" || n == "ChainIter" || n == "ZipIter"
+            || n == "TakeIter" || n == "SkipIter" || n == "TakeWhileIter"
+            || n == "SkipWhileIter" || n == "PeekableIter" || n == "FuseIter"
+            || n == "RevIter" || n == "InspectIter" || n == "StepByIter"
+            || n == "CopiedIter" || n == "ClonedIter" || n == "FlattenIter"
+            || n == "DedupIter" || n == "UniqueIter" || n == "SortedIter"
+            || n == "ChunksIter"
+        });
+        if is_iterator_adapter {
+            // Helper: extract element type from an iterator adapter type
+            let extract_adapter_elem_ty = |recv: &Type, targs: &List<Type>| -> Type {
+                let tname = match recv {
+                    Type::Generic { name, .. } => name.as_str(),
+                    Type::Named { path, .. } => {
+                        path.as_ident().map(|id| id.name.as_str()).unwrap_or("")
+                    }
+                    _ => "",
+                };
+                if (tname.contains("Map") || tname.contains("Mapped")) && targs.len() >= 2 {
+                    // MapIterator<Iter, F> - element type is F's return type
+                    match &targs[1] {
+                        Type::Function { return_type, .. } => (**return_type).clone(),
+                        _ => Type::Var(TypeVar::fresh()),
+                    }
+                } else if tname.contains("Enumerate") && !targs.is_empty() {
+                    // EnumerateIter<Iter> - element type is (Int, inner_elem)
+                    let inner_elem = match &targs[0] {
+                        Type::Generic {
+                            args: inner_args, ..
+                        }
+                        | Type::Named {
+                            args: inner_args, ..
+                        } if !inner_args.is_empty() => inner_args[0].clone(),
+                        _ => Type::Var(TypeVar::fresh()),
+                    };
+                    Type::Tuple(vec![Type::Int, inner_elem].into())
+                } else if !targs.is_empty() {
+                    // FilterIter, TakeIter, SkipIter, Rev, etc. - preserve inner element type
+                    match &targs[0] {
+                        Type::Generic {
+                            args: inner_args, ..
+                        }
+                        | Type::Named {
+                            args: inner_args, ..
+                        } if !inner_args.is_empty() => {
+                            // If inner is also a Map adapter, recurse
+                            let inner_name = match &targs[0] {
+                                Type::Generic { name, .. } => name.as_str(),
+                                Type::Named { path, .. } => {
+                                    path.as_ident().map(|id| id.name.as_str()).unwrap_or("")
+                                }
+                                _ => "",
+                            };
+                            if (inner_name.contains("Map") || inner_name.contains("Mapped"))
+                                && inner_args.len() >= 2
+                            {
+                                match &inner_args[1] {
+                                    Type::Function { return_type, .. } => {
+                                        (**return_type).clone()
+                                    }
+                                    _ => inner_args[0].clone(),
+                                }
+                            } else {
+                                inner_args[0].clone()
+                            }
+                        }
+                        _ => targs[0].clone(),
+                    }
+                } else {
+                    Type::Var(TypeVar::fresh())
+                }
+            };
+
+            match adapter_method_name {
+                "next" | "next_back" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
+                    return Ok(Some(InferResult::new(Type::maybe(elem_ty))));
+                }
+                "map" => {
+                    if args.len() == 1 {
+                        let closure_result = self.synth_expr(&args[0])?;
+                        let iter_ty = Type::Generic {
+                            name: verum_common::Text::from("MapIterator"),
+                            args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
+                        };
+                        return Ok(Some(InferResult::new(iter_ty)));
+                    }
+                }
+                "filter" | "take" | "skip" | "take_while" | "skip_while" | "inspect"
+                | "peekable" | "fuse" | "rev" | "dedup" | "unique" | "sorted"
+                | "cloned" | "copied" | "step_by" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(recv_ty.clone())));
+                }
+                "filter_map" => {
+                    if args.len() == 1 {
+                        let closure_result = self.synth_expr(&args[0])?;
+                        let mapped_elem_ty = match &closure_result.ty {
+                            Type::Function { return_type, .. } => {
+                                // filter_map returns Maybe<U>, extract U
+                                match return_type.as_ref() {
+                                    Type::Generic {
+                                        args: inner_args, ..
+                                    } if !inner_args.is_empty() => inner_args[0].clone(),
+                                    _ => (**return_type).clone(),
+                                }
+                            }
+                            _ => Type::Var(TypeVar::fresh()),
+                        };
+                        let iter_ty = Type::Generic {
+                            name: verum_common::Text::from("FilterMapIter"),
+                            args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
+                        };
+                        let _ = mapped_elem_ty; // The actual resolution happens on next()
+                        return Ok(Some(InferResult::new(iter_ty)));
+                    }
+                }
+                "flat_map" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(recv_ty.clone())));
+                }
+                "fold" | "rfold" => {
+                    if !args.is_empty() {
+                        let init_result = self.synth_expr(&args[0])?;
+                        for arg in args.iter().skip(1) {
+                            let _ = self.synth_expr(arg)?;
+                        }
+                        return Ok(Some(InferResult::new(init_result.ty)));
+                    }
+                }
+                "try_fold" => {
+                    if args.len() >= 2 {
+                        let init_result = self.synth_expr(&args[0])?;
+                        let closure_result = self.synth_expr(&args[1])?;
+                        // try_fold returns Result<Acc, E> or the closure's return type
+                        let result_ty = match &closure_result.ty {
+                            Type::Function { return_type, .. } => (**return_type).clone(),
+                            _ => {
+                                // Default: wrap init type in Result
+                                Type::Generic {
+                                    name: verum_common::Text::from("Result"),
+                                    args: vec![init_result.ty, Type::Var(TypeVar::fresh())]
+                                        .into(),
+                                }
+                            }
+                        };
+                        return Ok(Some(InferResult::new(result_ty)));
+                    }
+                }
+                "scan" => {
+                    if args.len() >= 2 {
+                        let _state_result = self.synth_expr(&args[0])?;
+                        let closure_result = self.synth_expr(&args[1])?;
+                        let iter_ty = Type::Generic {
+                            name: verum_common::Text::from("ScanIter"),
+                            args: vec![recv_ty.clone(), closure_result.ty.clone()].into(),
+                        };
+                        return Ok(Some(InferResult::new(iter_ty)));
+                    }
+                }
+                "enumerate" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let iter_ty = Type::Generic {
+                        name: verum_common::Text::from("EnumerateIter"),
+                        args: vec![recv_ty.clone()].into(),
+                    };
+                    return Ok(Some(InferResult::new(iter_ty)));
+                }
+                "zip" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(recv_ty.clone())));
+                }
+                "collect" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::Var(TypeVar::fresh()))));
+                }
+                "sum" | "product" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
+                    return Ok(Some(InferResult::new(elem_ty)));
+                }
+                "count" | "len" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "any" | "all" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "find" | "find_map" | "position" | "min" | "max" | "min_by" | "max_by"
+                | "min_by_key" | "max_by_key" | "first" | "last" | "nth" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
+                    return Ok(Some(InferResult::new(Type::maybe(elem_ty))));
+                }
+                "for_each" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::unit())));
+                }
+                "join" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::text())));
+                }
+                "partition" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let elem_ty = extract_adapter_elem_ty(&recv_ty, &adapter_type_args);
+                    let list_ty = Type::Generic {
+                        name: verum_common::Text::from("List"),
+                        args: vec![elem_ty].into(),
+                    };
+                    return Ok(Some(InferResult::new(Type::Tuple(
+                        vec![list_ty.clone(), list_ty].into(),
+                    ))));
+                }
+                "unzip" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    let fresh1 = Type::Var(TypeVar::fresh());
+                    let fresh2 = Type::Var(TypeVar::fresh());
+                    let list1 = Type::Generic {
+                        name: verum_common::Text::from("List"),
+                        args: vec![fresh1].into(),
+                    };
+                    let list2 = Type::Generic {
+                        name: verum_common::Text::from("List"),
+                        args: vec![fresh2].into(),
+                    };
+                    return Ok(Some(InferResult::new(Type::Tuple(vec![list1, list2].into()))));
+                }
+                "size_hint" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(Type::Tuple(
+                        vec![Type::Int, Type::maybe(Type::Int)].into(),
+                    ))));
+                }
+                "chunks" => {
+                    for arg in args.iter() {
+                        let _ = self.synth_expr(arg)?;
+                    }
+                    return Ok(Some(InferResult::new(recv_ty.clone())));
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
+    /// Handle method dispatch when the receiver is a type variable with protocol bounds,
+    /// a HKT type application (F<A>), a record type with function fields, or a
+    /// Variant type. Called early before protocol search in handle_empty_candidates.
+    fn try_type_var_bound_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        let method_name: verum_common::Text = method.name.as_str().into();
+        // CRITICAL FIX: Handle type variables with protocol bounds
+        // When receiver is a type variable (e.g., `T` in `fn display<T: Showable>(item: T)`),
+        // we need to look up methods from the protocol bounds, not from implementations.
+        // Type variables don't have concrete implementations registered, but their bounds
+        // define which methods they support.
+        // Also handle references to type variables (e.g., `&T` in `fn display<T: Display>(item: &T)`)
+        let inner_type_var = match recv_ty {
+            Type::Var(_) => Some(recv_ty),
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
+                if matches!(&**inner, Type::Var(_)) {
+                    Some(&**inner)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if inner_type_var.is_some() {
+            // Look up all type parameters with their bounds from the environment
+            let all_type_params = self.ctx.env.all_type_params();
+
+            // Find the type parameter for this type variable
+            // We match by checking if the receiver variable is used as a type param
+            // For now, we search all bounds from all type params since we don't track
+            // the exact correspondence between Type::Var and TypeParam
+            for type_param in all_type_params {
+                // Check each protocol bound on this type parameter
+                for bound in &type_param.bounds {
+                    // Get the protocol name from the bound
+                    if let Some(protocol_ident) = bound.protocol.as_ident() {
+                        let protocol_name: Text = protocol_ident.name.clone();
+
+                        // Look up the protocol definition
+                        let protocol_opt = self
+                            .protocol_checker
+                            .read()
+                            .get_protocol(&protocol_name)
+                            .cloned();
+                        if let Maybe::Some(protocol) = protocol_opt {
+                            // Check if this protocol has the method we're looking for
+                            for (_, method) in &protocol.methods {
+                                if method.name == method_name {
+                                    // Found the method in a bounded protocol
+                                    // CRITICAL FIX: Substitute Self with the receiver type
+                                    // Protocol methods use Self as a placeholder for the implementing type.
+                                    // For bounded type params like T: Default, calling T.default()
+                                    // should return T, not Self.
+                                    let method_ty = self
+                                        .instantiate_method_for_receiver(&method.ty, &recv_ty);
+                                    // Instantiate method's own type parameters with explicit type args
+                                    let method_ty = self.instantiate_method_type_params(
+                                        method_ty, type_args, span,
+                                    )?;
+
+                                    // Type check arguments against method signature
+                                    if let Type::Function {
+                                        params,
+                                        return_type,
+                                        ..
+                                    } = &method_ty
+                                    {
+                                        // Protocol method signatures now EXCLUDE self parameter
+                                        // (self is handled implicitly as the receiver)
+                                        // Check argument count directly
+                                        if params.len().abs_diff(args.len()) > 1 {
+                                            return Err(TypeError::WrongArgCount {
+                                                method: method_name.clone(),
+                                                expected: params.len(),
+                                                actual: args.len(),
+                                                span,
+                                            });
+                                        }
+
+                                        // Type check each argument with substitution
+                                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                            let resolved_param = self.unifier.apply(param_ty);
+                                            self.check_expr(arg, &resolved_param)?;
+                                        }
+
+                                        // Apply substitution to return type
+                                        let resolved_return = self.unifier.apply(return_type);
+                                        return Ok(Some(InferResult::new(resolved_return)));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // CRITICAL FIX: Handle higher-kinded type applications
+        // When receiver is a TypeApp (e.g., F<A> in `fn map<F<_>: Functor, A, B>(fa: F<A>, ...)`),
+        // we need to look up methods from the HKT parameter's protocol bounds.
+        // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
+        if let Type::TypeApp {
+            constructor,
+            args: type_args,
+        } = &recv_ty
+        {
+            // Extract the constructor name - it could be a TypeConstructor, Named type, or Var (HKT param)
+            let constructor_name: Option<Text> = match constructor.as_ref() {
+                Type::TypeConstructor { name, .. } => Some(name.clone()),
+                Type::Named { path, .. } => path.segments.last().and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                    _ => None,
+                }),
+                Type::Var(tv) => {
+                    let all_params = self.ctx.env.all_type_params();
+                    let mut found: Option<Text> = None;
+                    for tp in &all_params {
+                        if let Maybe::Some(type_val) = self.ctx.lookup_type(tp.name.as_str()) {
+                            if let Type::Var(ptv) = type_val {
+                                if ptv.id() == tv.id() {
+                                    found = Some(tp.name.clone());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if found.is_none() {
+                        let resolved = self.unifier.apply(&Type::Var(*tv));
+                        match &resolved {
+                            Type::TypeConstructor { name, .. } => {
+                                found = Some(name.clone());
+                            }
+                            Type::Named { path, .. } => {
+                                found = path.segments.last().and_then(|seg| match seg {
+                                    verum_ast::ty::PathSegment::Name(ident) => {
+                                        Some(ident.name.clone())
+                                    }
+                                    _ => None,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                    found
+                }
+                _ => None,
+            };
+
+            if let Some(ctor_name) = constructor_name {
+                // Look up bounds for this HKT type constructor
+                let bounds_opt = self.ctx.env.get_param_bounds(ctor_name.as_str());
+                // Fallback: check type_var_bounds for Var-based HKT params
+                let bounds_from_var: Option<List<crate::protocol::ProtocolBound>> =
+                    if bounds_opt.is_none() {
+                        if let Type::Var(tv) = constructor.as_ref() {
+                            let b = self.get_type_var_bounds(tv);
+                            if !b.is_empty() { Some(b) } else { None }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                let effective_bounds: Option<&[crate::protocol::ProtocolBound]> = bounds_opt
+                    .as_ref()
+                    .map(|b| b.as_slice())
+                    .or_else(|| bounds_from_var.as_ref().map(|b| b.as_slice()));
+
+                if let Some(bounds) = effective_bounds {
+                    // Check each protocol bound for the method
+                    for bound in bounds.iter() {
+                        if let Some(protocol_ident) = bound.protocol.as_ident() {
+                            let protocol_name: Text = protocol_ident.name.clone();
+
+                            // Look up the protocol definition
+                            let protocol_exists = self
+                                .protocol_checker
+                                .read()
+                                .get_protocol(&protocol_name)
+                                .is_some();
+
+                            if protocol_exists {
+                                // Check if this protocol or its super_protocols have the method
+                                // This enables protocol inheritance: Monad extends Applicative extends Functor
+                                let found_method = self.find_method_in_protocol_hierarchy(
+                                    &protocol_name,
+                                    &method_name,
+                                );
+
+                                if let Some(protocol_method) = found_method {
+                                    // Found the method in a bounded protocol!
+                                    // CRITICAL: Instantiate fresh type variables for each call
+                                    // Without this, multiple calls like fa.map(f).map(g) would
+                                    // share the same type variables and fail unification
+                                    let method_ty = {
+                                        use crate::ty::Substitution;
+                                        let free_vars = protocol_method.ty.free_vars();
+                                        if free_vars.is_empty() {
+                                            protocol_method.ty.clone()
+                                        } else {
+                                            let mut subst = Substitution::new();
+                                            for var in free_vars {
+                                                let fresh = TypeVar::fresh();
+                                                subst.insert(var, Type::Var(fresh));
+                                            }
+                                            protocol_method.ty.apply_subst(&subst)
+                                        }
+                                    };
+
+                                    // Type check arguments against method signature
+                                    if let Type::Function {
+                                        params,
+                                        return_type,
+                                        ..
+                                    } = &method_ty
+                                    {
+                                        // Skip the first param (self) for method calls
+                                        let method_params: List<Type> = if !params.is_empty() {
+                                            params.iter().skip(1).cloned().collect()
+                                        } else {
+                                            List::new()
+                                        };
+
+                                        // Check argument count
+                                        if args.len() != method_params.len() {
+                                            return Err(TypeError::WrongArgCount {
+                                                method: method_name.clone(),
+                                                expected: method_params.len(),
+                                                actual: args.len(),
+                                                span,
+                                            });
+                                        }
+
+                                        // CRITICAL: Unify receiver type with method's self parameter
+                                        // This binds the HKT type variables (e.g., A in F<A>) to the actual receiver type args
+                                        if !params.is_empty() {
+                                            let self_param_ty = &params[0];
+                                            // Substitute ::F with the actual constructor before unifying
+                                            let self_param_substituted = self
+                                                .substitute_self_hkt_in_type(
+                                                    self_param_ty,
+                                                    &ctor_name,
+                                                    constructor.as_ref(),
+                                                );
+                                            // Unify receiver type with self parameter type
+                                            self.unifier.unify(
+                                                &recv_ty,
+                                                &self_param_substituted,
+                                                span,
+                                            )?;
+                                        }
+
+                                        // Type check each argument
+                                        // CRITICAL: Substitute ::F in param types as well for closures
+                                        // Without this, closure args like |b| g(a, b) expect ::F<B> but get M<B>
+                                        for (arg, param_ty) in
+                                            args.iter().zip(method_params.iter())
+                                        {
+                                            let resolved_param = self.unifier.apply(param_ty);
+                                            let substituted_param = self
+                                                .substitute_self_hkt_in_type(
+                                                    &resolved_param,
+                                                    &ctor_name,
+                                                    constructor.as_ref(),
+                                                );
+                                            self.check_expr(arg, &substituted_param)?;
+                                        }
+
+                                        // The return type should be instantiated with the HKT constructor
+                                        // For Functor.map: Self.F<B> -> F<B>
+                                        let resolved_return = self.unifier.apply(return_type);
+
+                                        // If return type is also a TypeApp with Self.F, substitute
+                                        let final_return = self.substitute_self_hkt_in_type(
+                                            &resolved_return,
+                                            &ctor_name,
+                                            constructor.as_ref(),
+                                        );
+
+                                        return Ok(Some(InferResult::new(final_return)));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if this is a record field access that's a function.
+        // Also handles Named/Generic types by expanding them to their record definitions.
+        {
+            let record_fields: Option<indexmap::IndexMap<verum_common::Text, Type>> =
+                match &recv_ty {
+                    Type::Record(fields) => Some(fields.clone()),
+                    // For Named/Generic types, try to expand to their underlying record definition
+                    Type::Named { .. } | Type::Generic { .. } => self
+                        .expand_type_alias(&recv_ty)
+                        .and_then(|expanded| match expanded {
+                            Type::Record(fields) => Some(fields),
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+
+            if let Some(fields) = record_fields {
+                if let Some(field_ty) =
+                    fields.get(&verum_common::Text::from(method.name.as_str()))
+                {
+                    // Field access to function: treat as method call
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = field_ty
+                    {
+                        // Check argument count — must match exactly.
+                        // Record-field functions have NO implicit self
+                        // parameter (unlike inherent methods), so the
+                        // arity check here must be strict.
+                        if params.len() != args.len() {
+                            return Err(TypeError::WrongArgCount {
+                                method: method.name.as_str().to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        // Check each argument with substitution
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                    // Field exists but is not a function - return its type directly
+                    // for zero-arg "method" calls (field access sugar)
+                    if args.is_empty() {
+                        return Ok(Some(InferResult::new(field_ty.clone())));
+                    }
+                }
+            }
+        }
+
+        // Protocol-based HKT method resolution for Variant types.
+        // Instead of hardcoding witness names (MaybeFunctor, ResultMonad, etc.),
+        // resolve the variant to its named type and look up protocol implementations
+        // registered via explicit `implement` declarations.
+        if let Type::Variant(variants) = &recv_ty {
+            // Look up the named type for this variant signature via the registry
+            let variant_sig = {
+                let mut parts: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
+                parts.sort();
+                parts.join("|")
+            };
+            let named_type_name: Option<verum_common::Text> = {
+                let protocol_checker_guard = self.protocol_checker.read();
+                protocol_checker_guard
+                    .get_variant_type_name(&verum_common::Text::from(variant_sig.as_str()))
+                    .cloned()
+                    .or_else(|| {
+                        // Try relaxed signature (without payload types)
+                        let relaxed = variants
+                            .keys()
+                            .map(|k| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join("|");
+                        protocol_checker_guard
+                            .get_variant_type_name(&verum_common::Text::from(relaxed.as_str()))
+                            .cloned()
+                    })
+            };
+
+            // If we found a named type, look up its protocol implementations for the method
+            if let Some(type_name) = named_type_name {
+                let named_ty = Type::Named {
+                    path: verum_ast::ty::Path::from_ident(verum_ast::Ident::new(
+                        type_name.as_str(),
+                        span,
+                    )),
+                    args: List::new(),
+                };
+
+                // Search all protocol implementations for this type for the method
+                let method_types: List<Type> = {
+                    let protocol_checker_guard = self.protocol_checker.read();
+                    let impls = protocol_checker_guard.get_implementations(&named_ty);
+                    impls
+                        .iter()
+                        .filter_map(|impl_| impl_.methods.get(&method_name).cloned())
+                        .collect()
+                };
+
+                for method_ty in method_types {
+                    // Instantiate with fresh type variables
+                    let method_ty = {
+                        use crate::ty::Substitution;
+                        let free_vars = method_ty.free_vars();
+                        if free_vars.is_empty() {
+                            method_ty.clone()
+                        } else {
+                            let mut subst = Substitution::new();
+                            for var in free_vars {
+                                let fresh = TypeVar::fresh();
+                                subst.insert(var, Type::Var(fresh));
+                            }
+                            method_ty.apply_subst(&subst)
+                        }
+                    };
+
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = &method_ty
+                    {
+                        // Method params include self, so skip it
+                        let method_params: List<Type> = if !params.is_empty() {
+                            params.iter().skip(1).cloned().collect()
+                        } else {
+                            List::new()
+                        };
+
+                        // Check argument count
+                        if args.len() != method_params.len() {
+                            continue; // Try next method type
+                        }
+
+                        // Extract type argument from variant: use first variant with non-Unit payload
+                        let _type_arg = variants
+                            .values()
+                            .find(|ty| !matches!(ty, Type::Unit))
+                            .cloned()
+                            .unwrap_or(Type::Unit);
+
+                        // Unify the receiver type with the method's self parameter
+                        if !params.is_empty() {
+                            let _ = self.unifier.unify(&recv_ty, &params[0], span);
+                        }
+
+                        // Type check each argument with substitution
+                        for (arg, param_ty) in args.iter().zip(method_params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Search for a method by stripping type arguments and trying type aliases
+    /// and base type names. Handles transparent type alias semantics and generic
+    /// wrapper types like Weak<T>, JoinHandle<T> registered under bare names.
+    fn try_fallback_name_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        recv_ty_raw: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // TYPE ALIAS METHOD RESOLUTION FALLBACK
+        // When a method is not found on the receiver type directly, search for
+        // implement blocks on type aliases whose target type is compatible with recv_ty.
+        // This enables transparent type alias semantics where:
+        //  type EpochCaps = u32;
+        //  implement EpochCaps { fn epoch(self) -> u32 { ... } }
+        //  let x: Int = ref.epoch_caps(); // epoch_caps() returns Int
+        //  x.epoch() // finds EpochCaps::epoch because u32 == Int
+        {
+            let alias_method_info = {
+                let methods_guard = self.inherent_methods.read();
+                let method_name_text = verum_common::Text::from(method.name.as_str());
+
+                // First check: only look at aliases that have the method registered.
+                // This avoids iterating through all aliases and calling the Numeric protocol checker.
+                let mut found = None;
+                for (alias_name, alias_target) in &self.ctx.type_aliases {
+                    // Quick check: does this alias even have the method?
+                    let has_method = methods_guard
+                        .get(alias_name)
+                        .and_then(|methods| methods.get(&method_name_text))
+                        .is_some();
+                    if !has_method {
+                        continue;
+                    }
+
+                    // Check if alias target is compatible with the receiver type.
+                    // Direct equality check (since u32/i32/etc all resolve to Type::Int).
+                    let compatible =
+                        *alias_target == *recv_ty || alias_target.to_text() == recv_ty.to_text();
+
+                    if compatible {
+                        if let Some(methods) = methods_guard.get(alias_name) {
+                            if let Some(scheme) = methods.get(&method_name_text) {
+                                let impl_vc = scheme.impl_var_count;
+                                let (ty, fresh_vars, type_bounds) =
+                                    scheme.instantiate_with_type_bounds();
+                                found = Some(((ty, fresh_vars, impl_vc), type_bounds));
+                                break;
+                            }
+                        }
+                    }
+                }
+                found
+            };
+
+            if let Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)) =
+                alias_method_info
+            {
+                // Register type bounds for fresh type variables
+                for (fresh_var, bounds) in &type_bounds {
+                    for bound in bounds {
+                        self.register_type_var_type_bound(*fresh_var, bound.clone());
+                    }
+                }
+                // Type check the call
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &method_ty
+                {
+                    if params.len().abs_diff(args.len()) > 1 {
+                        return Err(TypeError::WrongArgCount {
+                            method: verum_common::Text::from(method.name.as_str()),
+                            expected: params.len(),
+                            actual: args.len(),
+                            span,
+                        });
+                    }
+                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                        let resolved_param = self.unifier.apply(param_ty);
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    let resolved_return = self.unifier.apply(return_type);
+                    return Ok(Some(InferResult::new(resolved_return)));
+                }
+            }
+        }
+
+        // GENERIC BASE-NAME FALLBACK: When all other lookup paths fail, try
+        // extracting the base type name by stripping type arguments and re-trying
+        // inherent_methods. This handles cases where:
+        //  - The receiver type is a generic stdlib type (Weak<T>, JoinHandle<T>,
+        //  MutexGuard<T>, etc.) whose methods were registered under the bare name
+        //  - The standard get_type_name/get_exact_type_name didn't match due to
+        //  type representation differences (Named vs Generic, resolved aliases, etc.)
+        //  - The receiver type went through auto-deref or alias resolution that
+        //  changed its representation
+        //
+
+        // This is stdlib-agnostic: it works for ANY generic type, not just hardcoded ones.
+        {
+            // Try multiple type representations: recv_ty (derefed/resolved),
+            // recv_ty_raw (original), and type_to_name (string-based extraction)
+            let mut base_name_candidates: List<verum_common::Text> = List::new();
+
+            // Strategy 1: Extract from recv_ty_raw (pre-deref, pre-alias-resolution)
+            match &recv_ty_raw {
+                Type::Generic { name, .. } => {
+                    base_name_candidates.push(name.clone());
+                }
+                Type::Named { path, args, .. } => {
+                    if let Some(ident) = path.as_ident() {
+                        base_name_candidates
+                            .push(verum_common::Text::from(ident.name.as_str()));
+                    }
+                    // Also try with no args — sometimes the method is registered under
+                    // the path's last segment regardless of args
+                    if !args.is_empty() {
+                        if let Some(seg) = path.segments.last() {
+                            if let verum_ast::ty::PathSegment::Name(id) = seg {
+                                let name = verum_common::Text::from(id.name.as_str());
+                                if !base_name_candidates.contains(&name) {
+                                    base_name_candidates.push(name);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            // Strategy 2: Extract from recv_ty (post-deref, post-alias-resolution)
+            match &recv_ty {
+                Type::Generic { name, .. } => {
+                    if !base_name_candidates.contains(name) {
+                        base_name_candidates.push(name.clone());
+                    }
+                }
+                Type::Named { path, .. } => {
+                    if let Some(ident) = path.as_ident() {
+                        let name = verum_common::Text::from(ident.name.as_str());
+                        if !base_name_candidates.contains(&name) {
+                            base_name_candidates.push(name);
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            // Strategy 3: Use type_to_name which handles Display formatting
+            let display_name = self.type_to_name(&recv_ty);
+            // Strip type arguments from display name: "Weak<Int>" → "Weak"
+            let base_from_display = if let Some(idx) = display_name.as_str().find('<') {
+                verum_common::Text::from(&display_name.as_str()[..idx])
+            } else {
+                display_name.clone()
+            };
+            if !base_from_display.is_empty()
+                && !base_name_candidates.contains(&base_from_display)
+            {
+                base_name_candidates.push(base_from_display);
+            }
+
+            let method_name_text = verum_common::Text::from(method.name.as_str());
+            let fallback_method_info = {
+                let methods_guard = self.inherent_methods.read();
+                base_name_candidates.iter().find_map(|candidate_name| {
+                    methods_guard.get(candidate_name).and_then(|methods| {
+                        methods.get(&method_name_text).cloned().map(|scheme| {
+                            let impl_vc = scheme.impl_var_count;
+                            let (ty, fresh_vars, type_bounds) =
+                                scheme.instantiate_with_type_bounds();
+                            (
+                                candidate_name.clone(),
+                                (ty, fresh_vars, impl_vc),
+                                type_bounds,
+                            )
+                        })
+                    })
+                })
+            };
+
+            if let Some((
+                _matched_name,
+                (method_ty, ordered_fresh_vars, impl_var_count),
+                type_bounds,
+            )) = fallback_method_info
+            {
+                // Register type bounds
+                for (fresh_var, bounds) in &type_bounds {
+                    for bound in bounds {
+                        self.register_type_var_type_bound(*fresh_var, bound.clone());
+                    }
+                }
+
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &method_ty
+                {
+                    if params.len().abs_diff(args.len()) > 1 {
+                        return Err(TypeError::WrongArgCount {
+                            method: method_name_text,
+                            expected: params.len(),
+                            actual: args.len(),
+                            span,
+                        });
+                    }
+
+                    // Bind type variables from receiver type args
+                    let receiver_type_args: List<Type> = match &recv_ty {
+                        Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        _ => {
+                            // Also try recv_ty_raw
+                            match &recv_ty_raw {
+                                Type::Named { args, .. } | Type::Generic { args, .. } => {
+                                    args.clone()
+                                }
+                                _ => List::new(),
+                            }
+                        }
+                    };
+
+                    let bind_limit = Self::resolve_bind_limit(
+                        impl_var_count,
+                        ordered_fresh_vars.len(),
+                        receiver_type_args.len(),
+                    );
+                    let mut combined_subst = crate::ty::Substitution::new();
+                    for (type_var, type_arg) in ordered_fresh_vars
+                        .iter()
+                        .take(bind_limit)
+                        .zip(receiver_type_args.iter())
+                    {
+                        if let Ok(subst) =
+                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
+                        {
+                            combined_subst.extend(subst);
+                        }
+                    }
+
+                    // OVERLOAD GUARD: same as early/primary paths
+                    let params_cloned = params.clone();
+                    let mut signature_mismatch = false;
+                    for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                        if matches!(&arg.kind, ExprKind::Closure { .. }) {
+                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                            let resolved_param = self.unifier.apply(&subst_param_ty);
+                            if !matches!(
+                                &resolved_param,
+                                Type::Function { .. } | Type::Var(_) | Type::Placeholder { .. }
+                            ) {
+                                signature_mismatch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !signature_mismatch {
+                        // Type check arguments
+                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                            self.check_expr(arg, &subst_param_ty)?;
+                        }
+
+                        let subst_return_type = return_type.apply_subst(&combined_subst);
+                        let final_return_type = self.unifier.apply(&subst_return_type);
+                        return Ok(Some(InferResult::new(final_return_type)));
+                    }
+                    // signature_mismatch: fall through to generic method fallbacks
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Protocol method fallback, protocol-typed receiver dispatch, and wrapper
+    /// type protocol dispatch. Tries lookup_protocol_method (default methods),
+    /// then checks if the receiver IS a protocol type, then checks wrappers.
+    fn try_protocol_object_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // CRITICAL FIX: Fallback to protocol method lookup for default methods
+        // This enables methods like `file.read_to_string()` where `read_to_string` is a
+        // default method in the `Read` protocol that `File` implements.
+        // Spec: Protocol default methods should be callable on implementing types.
+        let method_name_text = verum_common::Text::from(method.name.as_str());
+        #[cfg(debug_assertions)]
+        if method.name.as_str() == "next" {
+            // #[cfg(debug_assertions)]
+            // eprintln!("[DEBUG fallback_protocol_method] Looking for method '{}' on recv_ty={:?}", method.name.as_str(), recv_ty);
+        }
+        let protocol_method_result = self
+            .protocol_checker
+            .read()
+            .lookup_protocol_method_with_type_param_names(&recv_ty, &method_name_text);
+        #[cfg(debug_assertions)]
+        if method.name.as_str() == "next" {
+            // #[cfg(debug_assertions)]
+            // eprintln!("[DEBUG fallback_protocol_method] lookup_protocol_method returned: {:?}", protocol_method_result);
+        }
+        if let Ok(Maybe::Some((raw_method_ty, method_type_param_names))) =
+            protocol_method_result
+        {
+            // Freshen method-level type parameters to avoid sharing TypeVars across call sites.
+            // For `fn collect<C: FromIterator<Self.Item>>() -> C`, this creates a fresh TypeVar
+            // for C at each call site, enabling backward type inference from let-binding annotations.
+            let method_ty = self.freshen_method_type_params(
+                raw_method_ty,
+                &method_type_param_names,
+                type_args,
+                span,
+            )?;
+
+            // Found protocol method - type check the call
+            if let Type::Function {
+                params,
+                return_type,
+                ..
+            } = &method_ty
+            {
+                // Protocol methods don't include self in params (we already excluded it during registration)
+                if params.len().abs_diff(args.len()) > 1 {
+                    return Err(TypeError::WrongArgCount {
+                        method: method_name_text,
+                        expected: params.len(),
+                        actual: args.len(),
+                        span,
+                    });
+                }
+
+                // Type check each argument
+                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                    let resolved_param = self.unifier.apply(param_ty);
+                    self.check_expr(arg, &resolved_param)?;
+                }
+
+                let resolved_return = self.unifier.apply(return_type);
+                return Ok(Some(InferResult::new(resolved_return)));
+            }
+        }
+
+        // CRITICAL FIX: When receiver type IS a protocol (trait object), look up methods
+        // from the protocol definition itself.
+        // This enables: `fn foo(hasher: &mut Hasher) { hasher.write_int(42); }`
+        // where `Hasher` is the protocol type and `write_int` is a method/default method.
+        // Spec: Protocol types used as trait objects should resolve methods from the protocol.
+        // Also handles &Drawable, &&Drawable, etc. by peeling references.
+        let protocol_lookup_ty = {
+            let mut ty: &Type = recv_ty;
+            loop {
+                match ty {
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. } => ty = inner.as_ref(),
+                    _ => break ty.clone(),
+                }
+            }
+        };
+        if let Type::Named { path, .. } = &protocol_lookup_ty {
+            if let Some(protocol_name) = path.as_ident().map(|id| id.name.clone()) {
+                // Check if this is a registered protocol
+                let protocol_opt = self
+                    .protocol_checker
+                    .read()
+                    .get_protocol(&protocol_name)
+                    .cloned();
+                if let Maybe::Some(protocol) = protocol_opt {
+                    // Look up the method in the protocol definition
+                    if let Some(proto_method) = protocol.methods.get(&method_name_text) {
+                        // Found the method in the protocol definition!
+                        // Substitute Self with the protocol type for method resolution
+                        let method_ty = self.instantiate_method_for_receiver(
+                            &proto_method.ty,
+                            &protocol_lookup_ty,
+                        );
+                        // Instantiate method's own type parameters with explicit type args
+                        let method_ty =
+                            self.instantiate_method_type_params(method_ty, type_args, span)?;
+
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &method_ty
+                        {
+                            // Check argument count
+                            if params.len().abs_diff(args.len()) > 1 {
+                                return Err(TypeError::WrongArgCount {
+                                    method: method_name_text,
+                                    expected: params.len(),
+                                    actual: args.len(),
+                                    span,
+                                });
+                            }
+
+                            // Type check each argument
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = self.unifier.apply(param_ty);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+
+                            let resolved_return = self.unifier.apply(return_type);
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
+                    }
+                }
+            }
+        }
+
+        // PROTOCOL OBJECT DISPATCH THROUGH WRAPPER TYPES
+        // Enables shape.draw() on Heap<Drawable>, Shared<Printable>, etc.
+        // When recv_ty is Generic { name, args: [T] } and T is a protocol,
+        // look up T's protocol definition methods and dispatch through them.
+        if let Type::Generic {
+            args: wrapper_args, ..
+        } = &recv_ty
+        {
+            if wrapper_args.len() == 1 {
+                let inner = &wrapper_args[0];
+                let protocol_name_opt: Option<verum_common::Text> = match inner {
+                    Type::Named { path, .. } => path.as_ident().map(|id| id.name.clone()),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
+                if let Some(pname) = protocol_name_opt {
+                    let protocol_opt =
+                        self.protocol_checker.read().get_protocol(&pname).cloned();
+                    if let Maybe::Some(protocol) = protocol_opt {
+                        if let Some(proto_method) = protocol.methods.get(&method_name_text) {
+                            let method_ty =
+                                self.instantiate_method_for_receiver(&proto_method.ty, inner);
+                            let method_ty = self
+                                .instantiate_method_type_params(method_ty, type_args, span)?;
+                            if let Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } = &method_ty
+                            {
+                                if params.len().abs_diff(args.len()) > 1 {
+                                    return Err(TypeError::WrongArgCount {
+                                        method: method_name_text,
+                                        expected: params.len(),
+                                        actual: args.len(),
+                                        span,
+                                    });
+                                }
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+                                let resolved_return = self.unifier.apply(return_type);
+                                return Ok(Some(InferResult::new(resolved_return)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // PROTOCOL OBJECT DISPATCH THROUGH WRAPPER TYPES
+        // Enables shape.draw() on Heap<Drawable>, Shared<Printable>, etc.
+        // When recv_ty is Wrapper<Protocol>, look up Protocol's methods.
+        {
+            let wrapper_inner = match &recv_ty {
+                Type::Named { path, args } if args.len() == 1 => Some(&args[0]),
+                Type::Generic { args, .. } if args.len() == 1 => Some(&args[0]),
+                _ => None,
+            };
+            if let Some(inner) = wrapper_inner {
+                let protocol_name_opt = match inner {
+                    Type::Named { path, .. } => path.as_ident().map(|id| id.name.clone()),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
+                if let Some(pname) = protocol_name_opt {
+                    let method_opt = {
+                        let checker = self.protocol_checker.read();
+                        if checker.get_protocol_definition(pname.as_str()).is_some() {
+                            checker
+                                .get_protocol_definition(pname.as_str())
+                                .and_then(|def| def.methods.get(&method_name_text).cloned())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(proto_method) = method_opt {
+                        let method_ty =
+                            self.instantiate_method_for_receiver(&proto_method.ty, inner);
+                        let method_ty =
+                            self.instantiate_method_type_params(method_ty, type_args, span)?;
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &method_ty
+                        {
+                            let method_params: List<Type> = if !params.is_empty() {
+                                params.iter().skip(1).cloned().collect()
+                            } else {
+                                params.clone()
+                            };
+                            if args.len() != method_params.len() {
+                                return Err(TypeError::WrongArgCount {
+                                    method: method_name_text.clone(),
+                                    expected: method_params.len(),
+                                    actual: args.len(),
+                                    span,
+                                });
+                            }
+                            for (arg, param_ty) in args.iter().zip(method_params.iter()) {
+                                let resolved_param = self.unifier.apply(param_ty);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+                            return Ok(Some(InferResult::new(self.unifier.apply(return_type))));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Check inherent blanket impls (`implement<I: Iterator> I { fn ... }`) and
+    /// UFCS (Uniform Function Call Syntax) free-function fallback.
+    fn try_blanket_and_ufcs_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // Check inherent blanket impls (e.g., `implement<I: Iterator> I { fn reduce_with... }`)
+        // These provide extension methods for all types satisfying protocol bounds.
+        // Registered under "__blanket:Protocol" keys in inherent_methods.
+        let blanket_result =
+            self.lookup_inherent_blanket_method(&recv_ty, method.name.as_str());
+        if let Some((blanket_method_ty, _remaining_vars, blanket_bounds)) = blanket_result {
+            // Register type bounds for closure inference
+            for (fresh_var, bounds) in &blanket_bounds {
+                for bound in bounds {
+                    self.register_type_var_type_bound(*fresh_var, bound.clone());
+                }
+            }
+
+            if let Type::Function {
+                params,
+                return_type,
+                ..
+            } = &blanket_method_ty
+            {
+                if args.len() == params.len() {
+                    let params_cloned = params.clone();
+                    for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                        let resolved_param = self.unifier.apply(param_ty);
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    let subst_return = self.unifier.apply(return_type);
+                    let normalized = self.normalize_type(&subst_return);
+                    return Ok(Some(InferResult::new(normalized)));
+                }
+            }
+        }
+
+        // UFCS (Uniform Function Call Syntax) fallback
+        // Try to find a free function with this name and call it with receiver as first argument
+        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — UFCS allows x.foo(args) to resolve as foo(x, args)
+        let method_name_str = method.name.as_str();
+
+        // First try local environment, then module-level functions
+        let func_scheme = self
+            .ctx
+            .env
+            .lookup(method_name_str)
+            .cloned()
+            .or_else(|| self.lookup_function_in_module(method_name_str));
+
+        if let Some(scheme) = func_scheme {
+            let func_ty = scheme.instantiate();
+
+            // Check if it's a function that accepts receiver as first arg
+            if let Type::Function {
+                params,
+                return_type,
+                ..
+            } = &func_ty
+                && !params.is_empty()
+            {
+                // Check if receiver is compatible with first parameter
+                if self.subtyping.is_subtype(&recv_ty, &params[0]) {
+                    // Check remaining arguments
+                    let remaining_params: List<Type> = params.iter().skip(1).cloned().collect();
+
+                    if args.len() != remaining_params.len() {
+                        return Err(TypeError::WrongArgCount {
+                            method: method_name_str.to_text(),
+                            expected: remaining_params.len(),
+                            actual: args.len(),
+                            span,
+                        });
+                    }
+
+                    // Type check each argument against remaining params with substitution
+                    for (arg, param_ty) in args.iter().zip(remaining_params.iter()) {
+                        let resolved_param = self.unifier.apply(param_ty);
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+
+                    let resolved_return = self.unifier.apply(return_type);
+                    return Ok(Some(InferResult::new(resolved_return)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Look up methods in the inherent methods table (from parsed .vr implement blocks).
+    /// Handles specialization filtering, type variable binding, and the overload guard
+    /// for closures. Returns (Some(result), false) on success, (None, true) when a
+    /// method was found but rejected by specialization, (None, false) when not found.
+    fn try_inherent_method_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<(Option<InferResult>, bool)> {
+        // CRITICAL FIX: Check inherent instance methods from implement blocks
+        // This enables obj.method() where method has self parameter
+        //
+
+        // ENHANCEMENT: First try exact type name (for Reference/Slice/Array methods),
+        // then fall back to unwrapped type name (for methods on inner types),
+        // and finally try fallback type names (e.g., Array -> Slice).
+        // This enables methods like as_checked(), as_unsafe() on reference types.
+        let exact_type_name = self.get_exact_type_name(&recv_ty);
+        let unwrapped_type_name = self.get_type_name(&recv_ty);
+        let fallback_type_names = self.get_fallback_type_names(&recv_ty);
+
+        // Build list of type names to try: exact, unwrapped, then fallbacks
+        let mut type_names_to_try: List<verum_common::Text> = List::new();
+        if let Some(name) = exact_type_name.clone() {
+            type_names_to_try.push(name);
+        }
+        if let Some(name) = unwrapped_type_name.clone() {
+            type_names_to_try.push(name);
+        }
+        type_names_to_try.extend(fallback_type_names);
+
+        // NOTE: resolve_primitive_method was previously called FIRST here, overriding stdlib.
+        // Now stdlib definitions take priority. The fallback at the end of method resolution
+        // still calls resolve_primitive_method for methods not yet covered by stdlib.
+
+        // Track whether a method was found but rejected by specialization (for error reporting)
+        let mut specialization_rejected = false;
+        // if method.name.as_str() == "next" {
+        //  eprintln!("[DEBUG method_call] Looking for 'next' method");
+        //  eprintln!(" recv_ty={:?}", recv_ty);
+        //  eprintln!(" type_names_to_try={:?}", type_names_to_try);
+        // }
+        let method_info_opt = {
+            let methods_guard = self.inherent_methods.read();
+            let method_name_text = verum_common::Text::from(method.name.as_str());
+
+            // Extract receiver type args for specialization checking
+            let recv_type_args_for_check: List<Type> = match &recv_ty {
+                Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                _ => List::new(),
+            };
+
+            // Read method_impl_patterns for specialization filtering
+            let patterns_guard = self.method_impl_patterns.read();
+
+            // Try each type name in order
+            type_names_to_try.iter().find_map(|type_name_text| {
+                methods_guard.get(type_name_text).and_then(|methods| {
+                    // #[cfg(debug_assertions)]
+                    // eprintln!("[DEBUG method_lookup] Found type '{}' with methods: {:?}",
+                    // type_name_text, methods.keys().map(|k| k.as_str()).collect::<Vec<_>>());
+                    methods.get(&method_name_text).cloned().and_then(|scheme| {
+                        // SPECIALIZATION CHECK: If patterns exist for this method,
+                        // verify that the receiver type args match at least one pattern.
+                        if let Some(type_patterns) = patterns_guard.get(type_name_text) {
+                            if let Some(method_patterns) = type_patterns.get(&method_name_text)
+                            {
+                                if !method_patterns.is_empty()
+                                    && !recv_type_args_for_check.is_empty()
+                                {
+                                    let matches_any =
+                                        method_patterns.iter().any(|pattern_args| {
+                                            if pattern_args.len()
+                                                != recv_type_args_for_check.len()
+                                            {
+                                                return false;
+                                            }
+                                            pattern_args
+                                                .iter()
+                                                .zip(recv_type_args_for_check.iter())
+                                                .all(|(pat, recv)| {
+                                                    // Type variables in patterns are wildcards (match anything)
+                                                    matches!(pat, Type::Var(_))
+                                                        || pat.to_text() == recv.to_text()
+                                                })
+                                        });
+                                    if !matches_any {
+                                        specialization_rejected = true;
+                                        return None; // Method not available for this receiver specialization
+                                    }
+                                }
+                            }
+                        }
+
+                        // Use instantiate_with_type_bounds to preserve function type bounds
+                        // This enables proper closure type inference for methods like
+                        // `map<U, F: fn(T) -> U>` where F needs its fn type bound
+                        let impl_vc = scheme.impl_var_count;
+                        let (ty, fresh_vars, type_bounds) =
+                            scheme.instantiate_with_type_bounds();
+                        Some(((ty, fresh_vars, impl_vc), type_bounds))
+                    })
+                })
+            })
+        };
+
+        if let Some(type_name_text) = exact_type_name.or(unwrapped_type_name) {
+            // Clone the method type to avoid borrow issues with check_expr
+            // Uses shared RwLock for order-independent resolution
+            // CRITICAL FIX: Use instantiate_with_type_bounds to get ordered type variables AND bounds
+            // This ensures that receiver type args are bound to the correct type params
+            // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
+            let _ = type_name_text; // Used in original code but now method_info_opt is computed above
+
+            if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
+                method_info_opt
+            {
+                // CRITICAL: Register type bounds for fresh type variables
+                // This enables closure type inference for generic methods like map<U, F: fn(T) -> U>
+                // #[cfg(debug_assertions)]
+                // if method.name.as_str() == "min" || method.name.as_str() == "max" {
+                //  eprintln!("[DEBUG inherent_methods path] Method '{}' found in inherent_methods:", method.name.as_str());
+                //  eprintln!(" method_ty={:?}", method_ty);
+                //  if let Type::Function { params, .. } = &method_ty {
+                //  eprintln!(" params.len()={}", params.len());
+                //  }
+                //  eprintln!(" args.len()={}", args.len());
+                // }
+                // #[cfg(debug_assertions)]
+                // if method.name.as_str() == "eq" {
+                //  eprintln!("[DEBUG inherent_methods path] Method 'eq' found in inherent_methods: method_ty={:?}", method_ty);
+                // }
+                // if method.name.as_str() == "map" {
+                //  eprintln!("[DEBUG method_call] map: type_bounds has {} entries", type_bounds.len());
+                //  for (fresh_var, bounds) in &type_bounds {
+                //  eprintln!(" fresh_var={:?}, bounds={:?}", fresh_var, bounds);
+                //  }
+                // }
+
+                for (fresh_var, bounds) in &type_bounds {
+                    // if method.name.as_str() == "map" {
+                    //  eprintln!("[DEBUG method_call] Registering {} bounds for var {:?}", bounds.len(), fresh_var);
+                    // }
+                    for bound in bounds {
+                        self.register_type_var_type_bound(*fresh_var, bound.clone());
+                    }
+                }
+                // Found the method - type check the call
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &method_ty
+                {
+                    let method_name_text = verum_common::Text::from(method.name.as_str());
+                    // Check argument count (method params don't include self)
+                    if params.len().abs_diff(args.len()) > 1 {
+                        return Err(TypeError::WrongArgCount {
+                            method: method_name_text,
+                            expected: params.len(),
+                            actual: args.len(),
+                            span,
+                        });
+                    }
+
+                    // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
+                    // e.g., for Wrapper<Int>.get() where return type is &τ_fresh,
+                    // we bind τ_fresh = Int, making return type &τ_fresh become &Int.
+                    //
+
+                    // The ordered_fresh_vars from instantiate_with_fresh_vars preserves the
+                    // order of type params from the implement block, so zip correctly matches
+                    // receiver type args to their corresponding type variables.
+                    let receiver_type_args = match &recv_ty {
+                        Type::Named { args, .. } => args.clone(),
+                        Type::Generic { args, .. } => args.clone(),
+                        // CRITICAL FIX: Handle Variant types with type parameters
+                        // Variant types like Result<T, E> need to extract type args from their variants
+                        // For Result<T, E>: Variant { "Ok" -> T, "Err" -> E }
+                        // We need to extract [T, E] in the order the implement block expects
+                        Type::Variant(variants) => {
+                            // Extract type args based on semantic variant meaning
+                            // This must match how `implement<T, E> Result<T, E>` is declared
+                            // Result<T, E> = Ok(T) | Err(E), so: T from "Ok", E from "Err"
+                            // Maybe<T> = None | Some(T), so: T from "Some"
+                            let mut args = List::new();
+
+                            // Generic variant type handling (stdlib-agnostic).
+                            //
+
+                            // For ANY variant type (Result, Maybe, Validated, user-defined, etc.),
+                            // extract type arguments using the registered type metadata:
+                            // 1. Look up type name from variant_type_names registry
+                            // 2. Look up __type_var_order_{name} to get TypeVars in declaration order
+                            // 3. Look up original (unsubstituted) variant type from type context
+                            // 4. Unify original with substituted type to get TypeVar -> concrete type mapping
+                            // 5. Return type args in the correct declaration order
+                            let variant_ty = Type::Variant(variants.clone());
+                            let extracted = self.extract_type_args_from_variant(&variant_ty);
+                            if !extracted.is_empty() {
+                                for arg in extracted {
+                                    args.push(arg);
+                                }
+                            } else {
+                                // Final fallback: extract non-Unit payloads (may be wrong for complex types)
+                                let mut variant_names: Vec<_> = variants.keys().collect();
+                                variant_names.sort();
+                                for name in variant_names {
+                                    if let Some(ty) = variants.get(name) {
+                                        if !matches!(ty, Type::Unit) {
+                                            args.push(ty.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            // #[cfg(debug_assertions)]
+                            // eprintln!("[DEBUG method_call] Variant receiver extracted type_args: {:?}",
+                            // args.iter().map(|t| format!("{}", t)).collect::<Vec<_>>());
+                            args
+                        }
+                        _ => {
+                            // #[cfg(debug_assertions)]
+                            // eprintln!("[DEBUG method_call] recv_ty={:?} has no extractable type args", recv_ty);
+                            List::new()
+                        }
+                    };
+                    // Collect substitution from unification using the ORDERED fresh vars.
+                    // This ensures L maps to receiver_type_args[0], R to [1], etc.
+                    //
+
+                    // CRITICAL: When impl_var_count > 0, only bind the first impl_var_count
+                    // type vars from receiver type args. Method-level vars (like F in
+                    // modify<F: Fn(T) -> T>) must NOT be bound from receiver type args —
+                    // they are inferred from the method's arguments instead.
+                    let bind_limit = Self::resolve_bind_limit(
+                        impl_var_count,
+                        ordered_fresh_vars.len(),
+                        receiver_type_args.len(),
+                    );
+                    let mut combined_subst = crate::ty::Substitution::new();
+                    for (type_var, type_arg) in ordered_fresh_vars
+                        .iter()
+                        .take(bind_limit)
+                        .zip(receiver_type_args.iter())
+                    {
+                        // Unify the type variable with the receiver's type argument
+                        if let Ok(subst) =
+                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
+                        {
+                            combined_subst.extend(subst);
+                        }
+                    }
+
+                    // Clone params for iteration to avoid borrow issues
+                    let params_cloned = params.clone();
+
+                    // OVERLOAD GUARD: If any argument is a closure but the corresponding
+                    // parameter type (after substitution) is a concrete non-function type,
+                    // this inherent method signature doesn't match the call. Skip to protocol
+                    // fallback which may have a predicate-accepting overload.
+                    // Example: List.position(value: &T) vs Iterator.position(pred: fn(&T)->Bool)
+                    {
+                        let mut signature_mismatch = false;
+                        for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                            if matches!(&arg.kind, ExprKind::Closure { .. }) {
+                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                                let resolved_param = self.unifier.apply(&subst_param_ty);
+                                // If the param type is concrete and not a function type / type var,
+                                // a closure argument cannot possibly match.
+                                if !matches!(
+                                    &resolved_param,
+                                    Type::Function { .. }
+                                        | Type::Var(_)
+                                        | Type::Placeholder { .. }
+                                ) {
+                                    signature_mismatch = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if signature_mismatch {
+                            // Don't return error — fall through to protocol/blanket/fallback paths
+                            // which may have a matching overload accepting a closure.
+                        } else {
+                            // Type check each argument (with substituted param types)
+                            for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                                self.check_expr(arg, &subst_param_ty)?;
+                            }
+
+                            // Apply substitution to get the concrete return type
+                            let subst_return_type = return_type.apply_subst(&combined_subst);
+
+                            // CRITICAL FIX: Also apply unifier to resolve type variables from argument checking
+                            // For generic methods like `map_left<L2>(self, f: fn(L) -> L2) -> Either<L2, R>`,
+                            // L2 is inferred from the closure argument, not from receiver type args.
+                            // The closure checking at line 17776 unifies L2 with the closure return type,
+                            // but this unification is in the unifier, not in combined_subst.
+                            // Without this, return type still has unresolved L2 type variable.
+                            let final_return_type = self.unifier.apply(&subst_return_type);
+
+                            return Ok((Some(InferResult::new(final_return_type)), false));
+                        }
+                    }
+                }
+            }
+        }
+        Ok((None, specialization_rejected))
     }
 
     fn try_resolve_pre_receiver_method(
