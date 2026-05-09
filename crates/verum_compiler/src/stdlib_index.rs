@@ -85,6 +85,29 @@ impl StdlibModuleIndex {
         }
     }
 
+    /// #102 — Build the index from the precompiled VBC archive's
+    /// module index instead of the source archive.  Each
+    /// `archive.index[i].name` is already the canonical dotted
+    /// module path (`core.text`, `core.io.fs`).  No file-path side
+    /// of the bidirectional map is populated — `module_to_file` and
+    /// `file_to_module` return `None` after this build path.
+    /// Source-walking dev tools (classifier / audit) MUST consume
+    /// source via `SdkLookup` rather than this index.
+    fn build_from_vbc(archive: &verum_vbc::archive::VbcArchive) -> Self {
+        let n = archive.index.len();
+        let mut sorted_modules = Vec::with_capacity(n);
+        for entry in &archive.index {
+            sorted_modules.push(entry.name.clone());
+        }
+        sorted_modules.sort();
+        sorted_modules.dedup();
+        Self {
+            by_module: HashMap::new(),
+            by_file: HashMap::new(),
+            sorted_modules,
+        }
+    }
+
     /// Look up the source file path for a module path.
     /// Returns `None` if the module is not in the embedded stdlib (e.g. a
     /// user-defined cog module or a forward-declared module without a
@@ -175,11 +198,33 @@ pub fn file_path_to_module_path(relative_file: &str) -> String {
 }
 
 /// Get the global module index. Builds on first call; later calls are
-/// HashMap reads. Returns `None` if the embedded stdlib is unavailable
-/// (e.g. minimal builds without `core/`).
+/// HashMap reads.  Returns `None` only when neither the legacy source
+/// archive nor the embedded VBC archive is available (true minimal
+/// builds without a stdlib).
+///
+/// #102 — preference order:
+///  1. `embedded_stdlib::get_embedded_stdlib()` — file-grained source
+///     archive provides one entry per `.vr` file, matching the
+///     reachability walker's expectation (`core.shell.exec`,
+///     `core.shell.builtins`, …).  Used while the embedded source
+///     archive remains in the binary.
+///  2. `embedded_stdlib_vbc::get_runtime_archive()` — bootstrap /
+///     `embedded_stdlib`-removed fallback.  Granularity is per-VBC-
+///     module (which may bundle several `.vr` files under one entry
+///     when source files share a `module X;` declaration), so glob
+///     expansion downstream may surface as `core.shell` rather than
+///     individual leaves like `core.shell.exec`.  Acceptable because
+///     the codegen-side archive_ctx_loader uses the same VBC module
+///     boundaries.
 pub fn get_module_index() -> Option<&'static StdlibModuleIndex> {
     MODULE_INDEX
-        .get_or_init(|| embedded_stdlib::get_embedded_stdlib().map(StdlibModuleIndex::build))
+        .get_or_init(|| {
+            if let Some(archive) = embedded_stdlib::get_embedded_stdlib() {
+                return Some(StdlibModuleIndex::build(archive));
+            }
+            crate::embedded_stdlib_vbc::get_runtime_archive()
+                .map(StdlibModuleIndex::build_from_vbc)
+        })
         .as_ref()
 }
 

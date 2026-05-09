@@ -142,10 +142,26 @@ pub struct StdlibClassificationReport {
 /// Errors that prevent the classifier from running at all.
 #[derive(Debug)]
 pub enum ClassifierError {
-    /// The compiler binary was built with the embedded stdlib disabled.
+    /// The compiler binary was built with the embedded stdlib disabled
+    /// (legacy bootstrap path).  Most production binaries hit
+    /// [`Self::SdkNotInstalled`] instead.
     EmbeddedArchiveMissing,
     /// The embedded stdlib module-path index couldn't be initialised.
     ModuleIndexMissing,
+    /// #103 — Production verum binaries don't embed stdlib source.
+    /// Source-walking dev tools require the on-disk SDK installed at
+    /// `~/.verum/sdk-<blake3>/core/`.  User remediation: run
+    /// `verum sdk install`.
+    SdkNotInstalled,
+    /// SDK directory exists but its blake3 prefix doesn't match the
+    /// embedded archive — silent classifier behaviour against drifted
+    /// source would mislead.
+    SdkVersionMismatch {
+        sdk_prefix: String,
+        expected_prefix: String,
+    },
+    /// I/O error while walking SDK directory.
+    Io(std::io::Error),
 }
 
 impl std::fmt::Display for ClassifierError {
@@ -157,24 +173,126 @@ impl std::fmt::Display for ClassifierError {
             Self::ModuleIndexMissing => {
                 f.write_str("embedded stdlib module-path index is unavailable")
             }
+            Self::SdkNotInstalled => f.write_str(
+                "Verum SDK not installed.  Stdlib source-walking tools \
+                 (classifier, audit, debugger) require the SDK at \
+                 `~/.verum/sdk-<blake3>/core/`.  Run `verum sdk install`.",
+            ),
+            Self::SdkVersionMismatch {
+                sdk_prefix,
+                expected_prefix,
+            } => write!(
+                f,
+                "Verum SDK at `~/.verum/sdk-{}/core/` doesn't match the binary's \
+                 embedded archive prefix `{}`.  Run `verum sdk install` to refresh.",
+                sdk_prefix, expected_prefix
+            ),
+            Self::Io(e) => write!(f, "I/O error walking SDK directory: {}", e),
         }
     }
 }
 
 impl std::error::Error for ClassifierError {}
 
-/// Run the classifier across every `.vr` file in the embedded stdlib
-/// archive. Returns a sorted-by-module-path report.
+/// Run the classifier across every `.vr` file in the on-disk Verum SDK.
+/// Returns a sorted-by-module-path report.
+///
+/// #103 — In production builds this consumes SDK source via
+/// [`crate::sdk_lookup::SdkLookup`] rather than the embedded source
+/// archive.  The legacy embedded-archive path remains as a fallback
+/// for bootstrap builds (compiler being built before its own SDK
+/// install lands).
 ///
 /// This is intentionally read-only — it does not mutate the session, the
 /// module registry, or any cache. It is safe to call repeatedly. The
 /// per-file parse pass runs in parallel via `rayon`.
 pub fn classify_stdlib() -> Result<StdlibClassificationReport, ClassifierError> {
+    // Prefer SDK on disk when available (production / dev-with-SDK).
+    if let Some(sdk) = crate::sdk_lookup::SdkLookup::find("") {
+        return classify_sdk(&sdk);
+    }
+    // Fallback: legacy embedded source archive.  Triggered during the
+    // bootstrap window before `verum sdk install` is available, and
+    // for in-repo development where contributors run `cargo run` from
+    // the workspace.  Will be removed alongside `embedded_stdlib`
+    // once #103 ships SDK install + downloads the right version.
     let archive = embedded_stdlib::get_embedded_stdlib()
-        .ok_or(ClassifierError::EmbeddedArchiveMissing)?;
+        .ok_or(ClassifierError::SdkNotInstalled)?;
     let index = stdlib_index::get_module_index()
         .ok_or(ClassifierError::ModuleIndexMissing)?;
     Ok(classify_archive(archive, index))
+}
+
+/// Classify every module in the on-disk SDK.  Walks `<sdk>/core/`
+/// recursively, parses each `.vr` file, and collapses the per-item
+/// classifications into a per-module layer.
+fn classify_sdk(
+    sdk: &crate::sdk_lookup::SdkRoot,
+) -> Result<StdlibClassificationReport, ClassifierError> {
+    let modules = sdk
+        .iter_modules()
+        .map_err(|e| match e {
+            crate::sdk_lookup::SdkError::Io { source, .. } => ClassifierError::Io(source),
+            crate::sdk_lookup::SdkError::VersionMismatch {
+                sdk_prefix,
+                expected_prefix,
+            } => ClassifierError::SdkVersionMismatch {
+                sdk_prefix,
+                expected_prefix,
+            },
+            _ => ClassifierError::SdkNotInstalled,
+        })?;
+
+    // Read each file's source then classify in parallel.  Same rayon
+    // 16 MB stack pool as `classify_archive` for the recursive parser.
+    let mut sources: Vec<(String, String, String)> = Vec::with_capacity(modules.len());
+    for (dotted, file_path) in modules {
+        let src = std::fs::read_to_string(&file_path).map_err(ClassifierError::Io)?;
+        let rel_path = file_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dotted.clone());
+        sources.push((dotted, rel_path, src));
+    }
+
+    let classifications = match rayon::ThreadPoolBuilder::new()
+        .stack_size(16 * 1024 * 1024)
+        .build()
+    {
+        Ok(pool) => pool.install(|| classify_owned_sources_in_parallel(&sources)),
+        Err(_) => classify_owned_sources_in_parallel(&sources),
+    };
+    let mut classifications = classifications;
+    classifications.sort_by(|a, b| a.module_path.cmp(&b.module_path));
+
+    let mut stats = ClassificationStats::default();
+    stats.total_modules = classifications.len();
+    for c in &classifications {
+        match &c.layer {
+            Ok(Layer::Runtime) => stats.runtime_count += 1,
+            Ok(Layer::Proof) => stats.proof_count += 1,
+            Ok(Layer::Meta) => stats.meta_count += 1,
+            Err(ClassificationError::Mixed { .. }) => stats.mixed_count += 1,
+            Err(ClassificationError::ParseError(_)) => stats.parse_error_count += 1,
+            Err(ClassificationError::Empty) => stats.empty_count += 1,
+        }
+    }
+
+    Ok(StdlibClassificationReport {
+        modules: classifications,
+        stats,
+    })
+}
+
+fn classify_owned_sources_in_parallel(
+    sources: &[(String, String, String)],
+) -> Vec<ModuleClassification> {
+    sources
+        .par_iter()
+        .map(|(module_path, file_path, source)| {
+            classify_one(module_path, file_path, source)
+        })
+        .collect()
 }
 
 /// Classify a specific archive — used by tests where we substitute a

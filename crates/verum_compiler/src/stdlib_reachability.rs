@@ -100,15 +100,12 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
 /// (cached by the index) and parse its `mount super.…` body to
 /// discover which trees the prelude exposes. Any future change to the
 /// prelude shape automatically flows through without a compiler rebuild.
-fn prelude_seeds(index: &StdlibModuleIndex) -> Vec<String> {
-    let archive = match crate::embedded_stdlib::get_embedded_stdlib() {
-        Some(a) => a,
-        None => return Vec::new(),
-    };
-    let Some(root_src) = index.module_source(archive, "core") else {
-        return Vec::new();
-    };
-    extract_prelude_paths(root_src)
+fn prelude_seeds(_index: &StdlibModuleIndex) -> Vec<String> {
+    // #102 — precomputed at build time; see
+    // `embedded_prelude_seeds` and `build.rs::build_prelude_seeds`.
+    // The legacy `embedded_stdlib::get_embedded_stdlib()` source-
+    // archive read is gone.
+    crate::embedded_prelude_seeds::collect_prelude_seeds()
 }
 
 /// Extract the module-paths referenced by `public mount super.X` /

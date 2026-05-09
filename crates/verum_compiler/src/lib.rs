@@ -267,6 +267,7 @@ pub mod core_compiler;
 pub mod core_loader;
 pub mod core_source; // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod diagnostics_engine;
+pub mod embedded_prelude_seeds; // #102 — precomputed prelude seed list (replaces source-archive parse at runtime)
 pub mod embedded_stdlib; // Embedded stdlib source archive (zstd-compressed core/*.vr in binary)
 pub mod embedded_stdlib_vbc; // Embedded precompiled stdlib VBC archive (Phase 5 of #precompile-stdlib epic)
 pub mod graceful_fallback;
@@ -284,6 +285,7 @@ pub mod stdlib_classifier; // Read-only audit pass: classifies stdlib modules in
 pub mod stdlib_dep_graph; // Pre-built mount-edge graph over the embedded stdlib (BFS reachability)
 pub mod stdlib_index; // Module-path index over the embedded stdlib (lazy loader keystone)
 pub mod stdlib_reachability; // AST-walking → reachable stdlib subset (Phase 2 of on-demand loader)
+pub mod sdk_lookup; // #100 — on-disk SDK resolver (LSP / debugger / audit consume source from here)
 
 // Re-export main types
 pub use compilation_metrics::{
