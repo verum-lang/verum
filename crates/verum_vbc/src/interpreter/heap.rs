@@ -55,7 +55,14 @@ use crate::types::TypeId;
 use crate::value::Value;
 
 /// Size of object header in bytes.
-pub const OBJECT_HEADER_SIZE: usize = 24;
+///
+/// Re-exports the canonical [`verum_common::layout::OBJECT_HEADER_SIZE`]
+/// — the single source of truth shared with the Tier-1 LLVM codegen
+/// (`verum_codegen::llvm::runtime::RuntimeLowering::OBJECT_HEADER_SIZE`).
+/// Both tiers MUST agree byte-for-byte; the
+/// `header_struct_size_matches_canonical` test below pins the equality
+/// against the actual `#[repr(C)] ObjectHeader` Rust struct.
+pub const OBJECT_HEADER_SIZE: usize = verum_common::layout::OBJECT_HEADER_SIZE as usize;
 
 /// Default heap size (16 MB).
 pub const DEFAULT_HEAP_SIZE: usize = 16 * 1024 * 1024;
@@ -757,6 +764,29 @@ mod tests {
     #[test]
     fn test_object_header_size() {
         assert_eq!(std::mem::size_of::<ObjectHeader>(), OBJECT_HEADER_SIZE);
+    }
+
+    /// Cross-tier drift contract: the Rust `#[repr(C)] ObjectHeader`
+    /// struct, the canonical `verum_common::layout::OBJECT_HEADER_SIZE`,
+    /// and the Tier-1 LLVM-codegen
+    /// `verum_codegen::llvm::runtime::RuntimeLowering::OBJECT_HEADER_SIZE`
+    /// MUST all agree. Drift between any two miscompiles every
+    /// heap-object field access.
+    #[test]
+    fn header_struct_size_matches_canonical() {
+        assert_eq!(
+            std::mem::size_of::<ObjectHeader>() as u64,
+            verum_common::layout::OBJECT_HEADER_SIZE,
+            "ObjectHeader Rust layout drifted from canonical OBJECT_HEADER_SIZE \
+             — check verum_codegen::llvm::runtime field-offset GEPs",
+        );
+        // Per-collection field-offset arithmetic must match the layout
+        // module's derivations exactly.
+        assert_eq!(
+            std::mem::align_of::<ObjectHeader>() as u64,
+            verum_common::layout::POINTER_SIZE,
+            "ObjectHeader alignment must match a single machine word",
+        );
     }
 
     #[test]
