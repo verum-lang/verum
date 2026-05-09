@@ -5289,6 +5289,7 @@ dependencies = [
  "criterion",
  "futures",
  "libc",
+ "once_cell",
  "parking_lot",
  "serde",
  "serde_json",
