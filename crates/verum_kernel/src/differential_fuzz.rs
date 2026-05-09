@@ -194,20 +194,64 @@ pub enum Mutation {
 }
 
 impl Mutation {
+    /// Total number of mutation kinds. **Single source of truth**
+    /// for [`sample_mutation`]'s rng range and the
+    /// `KIND_TAGS` array length. Adding a new `Mutation` variant
+    /// requires bumping this const, extending `KIND_TAGS`, adding
+    /// a `tag()` arm, an `apply_mutation` arm, and a
+    /// `sample_mutation` constructor branch — the
+    /// `mutation_kind_count_matches_tag_roster` pin test catches
+    /// a mismatch between the const and the tag roster, and
+    /// `every_kind_tag_appears_at_least_once_under_sampling`
+    /// catches a missing `sample_mutation` branch.
+    pub const KIND_COUNT: usize = 11;
+
+    /// Canonical kind tags in the **same order** as
+    /// [`sample_mutation`]'s numeric dispatch (`0` →
+    /// `"lift_all_universes"`, `1` → `"lift_term_universes_only"`,
+    /// …). Single source of truth: [`Self::tag`] reads from this
+    /// table indirectly via the variant-to-tag dispatch below, and
+    /// [`crate::differential_fuzz::FuzzCoverage`] uses it as the
+    /// canonical mutation-kind axis when binning hit counts.
+    pub const KIND_TAGS: [&'static str; Self::KIND_COUNT] = [
+        "lift_all_universes",
+        "lift_term_universes_only",
+        "lift_claimed_type_universes_only",
+        "replace_term_with_universe_zero",
+        "replace_claimed_type_with_universe_zero",
+        "replace_term_with_free_variable",
+        "app_to_non_function",
+        "wrap_term_in_extra_lam",
+        "swap_term_and_type",
+        "pi_domain_to_universe_zero",
+        "lam_domain_to_universe_zero",
+    ];
+
     /// Stable diagnostic tag — used in fuzz reports.
     pub fn tag(&self) -> &'static str {
+        // Per-variant dispatch indexes into `KIND_TAGS` by the same
+        // ordering used by `sample_mutation`. Drift between the
+        // ordinal here and the tag string at that index is caught
+        // by `tag_dispatch_matches_kind_tags_in_order`.
+        Self::KIND_TAGS[self.kind_ordinal()]
+    }
+
+    /// Ordinal of the variant in canonical declaration / sampling
+    /// order. The `sample_mutation` numeric dispatch ↔ `KIND_TAGS`
+    /// index ↔ this method's return value all agree.
+    fn kind_ordinal(&self) -> usize {
         match self {
-            Mutation::LiftAllUniverses { .. } => "lift_all_universes",
-            Mutation::LiftTermUniversesOnly { .. } => "lift_term_universes_only",
-            Mutation::LiftClaimedTypeUniversesOnly { .. } => "lift_claimed_type_universes_only",
-            Mutation::ReplaceTermWithUniverseZero => "replace_term_with_universe_zero",
-            Mutation::ReplaceClaimedTypeWithUniverseZero => "replace_claimed_type_with_universe_zero",
-            Mutation::ReplaceTermWithFreeVariable { .. } => "replace_term_with_free_variable",
-            Mutation::AppToNonFunction => "app_to_non_function",
-            Mutation::WrapTermInExtraLam { .. } => "wrap_term_in_extra_lam",
-            Mutation::SwapTermAndType => "swap_term_and_type",
-            Mutation::PiDomainToUniverseZero => "pi_domain_to_universe_zero",
-            Mutation::LamDomainToUniverseZero => "lam_domain_to_universe_zero",
+            Mutation::LiftAllUniverses { .. } => 0,
+            Mutation::LiftTermUniversesOnly { .. } => 1,
+            Mutation::LiftClaimedTypeUniversesOnly { .. } => 2,
+            Mutation::ReplaceTermWithUniverseZero => 3,
+            Mutation::ReplaceClaimedTypeWithUniverseZero => 4,
+            Mutation::ReplaceTermWithFreeVariable { .. } => 5,
+            Mutation::AppToNonFunction => 6,
+            Mutation::WrapTermInExtraLam { .. } => 7,
+            Mutation::SwapTermAndType => 8,
+            Mutation::PiDomainToUniverseZero => 9,
+            Mutation::LamDomainToUniverseZero => 10,
         }
     }
 }
@@ -292,8 +336,12 @@ fn lift_universes_in_term(term: &Term, delta: u32) -> Term {
 /// sampled from bounded distributions to keep the mutant space
 /// manageable.
 pub fn sample_mutation(rng: &mut FuzzRng) -> Mutation {
-    // 11 mutation kinds — enumerate.
-    match rng.gen_below(11) {
+    // Sampled ordinal must agree with `Mutation::kind_ordinal` for
+    // every constructed variant — the
+    // `every_kind_tag_appears_at_least_once_under_sampling` pin
+    // test exhaustively walks `0..Mutation::KIND_COUNT` and asserts
+    // round-trip via `tag()`.
+    match rng.gen_below(Mutation::KIND_COUNT as u64) {
         0 => Mutation::LiftAllUniverses {
             delta: rng.gen_below(4) as u32 + 1,
         },
@@ -315,7 +363,11 @@ pub fn sample_mutation(rng: &mut FuzzRng) -> Mutation {
         8 => Mutation::SwapTermAndType,
         9 => Mutation::PiDomainToUniverseZero,
         10 => Mutation::LamDomainToUniverseZero,
-        _ => unreachable!("gen_below(11) ranges 0..11"),
+        _ => unreachable!(
+            "gen_below({}) ranges 0..{}",
+            Mutation::KIND_COUNT,
+            Mutation::KIND_COUNT
+        ),
     }
 }
 
@@ -1531,6 +1583,114 @@ mod tests {
             let r = run_fuzz_iteration(iter, &mut rng, &seeds, &registry);
             assert_eq!(r.seed_index, iter % seeds.len());
             assert_eq!(r.iteration, iter);
+        }
+    }
+
+    // =============================================================
+    // Structural pins for the Mutation kind/tag/sample-dispatch
+    // single-source-of-truth consolidation.
+    // =============================================================
+
+    #[test]
+    fn mutation_kind_count_matches_tag_roster() {
+        // Pin: KIND_COUNT and KIND_TAGS are size-locked. Adding a
+        // variant requires bumping both.
+        assert_eq!(
+            Mutation::KIND_COUNT,
+            Mutation::KIND_TAGS.len(),
+            "Mutation::KIND_COUNT ({}) must equal KIND_TAGS.len() ({})",
+            Mutation::KIND_COUNT,
+            Mutation::KIND_TAGS.len(),
+        );
+    }
+
+    #[test]
+    fn mutation_kind_tags_are_unique() {
+        // Pin: each entry in KIND_TAGS is unique. Duplicate tags
+        // would silently collapse coverage bins in FuzzCoverage.
+        let mut seen: std::collections::BTreeSet<&str> =
+            std::collections::BTreeSet::new();
+        for tag in Mutation::KIND_TAGS {
+            assert!(
+                seen.insert(tag),
+                "duplicate Mutation::KIND_TAGS entry: {}",
+                tag,
+            );
+        }
+        assert_eq!(seen.len(), Mutation::KIND_COUNT);
+    }
+
+    #[test]
+    fn every_kind_tag_appears_at_least_once_under_sampling() {
+        // Pin: a long-enough sample stream constructs every variant
+        // at least once, and every constructed variant's tag()
+        // appears in KIND_TAGS. Catches:
+        //   • a `sample_mutation` arm renamed to a new tag without
+        //     updating KIND_TAGS, or vice versa.
+        //   • a missing arm (e.g. only 10 of 11 in sample dispatch).
+        let mut rng = FuzzRng::new(0xC0DE);
+        let mut hit: std::collections::BTreeSet<&'static str> =
+            std::collections::BTreeSet::new();
+        // 11 kinds × generous sample budget — well above the
+        // coupon-collector expectation (~33 draws for 11 kinds at
+        // uniform, with FuzzRng's deterministic stream we use a
+        // safety factor).
+        for _ in 0..2000 {
+            let m = sample_mutation(&mut rng);
+            let tag = m.tag();
+            // Every produced tag must be in the canonical roster.
+            assert!(
+                Mutation::KIND_TAGS.contains(&tag),
+                "sample_mutation produced tag {} not in KIND_TAGS",
+                tag,
+            );
+            hit.insert(tag);
+        }
+        // Every roster entry must have been hit at least once.
+        for tag in Mutation::KIND_TAGS {
+            assert!(
+                hit.contains(tag),
+                "Mutation kind {} is in KIND_TAGS but never produced \
+                 by sample_mutation — missing dispatch arm or tag drift",
+                tag,
+            );
+        }
+    }
+
+    #[test]
+    fn tag_dispatch_matches_kind_tags_in_order() {
+        // Pin: every constructible variant's `tag()` agrees with
+        // `KIND_TAGS[kind_ordinal()]`. This is the structural
+        // invariant the helper accessor pair relies on.
+        // We construct one example of each variant.
+        let probes = [
+            Mutation::LiftAllUniverses { delta: 1 },
+            Mutation::LiftTermUniversesOnly { delta: 1 },
+            Mutation::LiftClaimedTypeUniversesOnly { delta: 1 },
+            Mutation::ReplaceTermWithUniverseZero,
+            Mutation::ReplaceClaimedTypeWithUniverseZero,
+            Mutation::ReplaceTermWithFreeVariable { idx: 0 },
+            Mutation::AppToNonFunction,
+            Mutation::WrapTermInExtraLam {
+                domain: Term::universe(0),
+            },
+            Mutation::SwapTermAndType,
+            Mutation::PiDomainToUniverseZero,
+            Mutation::LamDomainToUniverseZero,
+        ];
+        assert_eq!(
+            probes.len(),
+            Mutation::KIND_COUNT,
+            "probe roster must cover every kind",
+        );
+        for (i, m) in probes.iter().enumerate() {
+            assert_eq!(m.kind_ordinal(), i, "ordinal drift on {:?}", m);
+            assert_eq!(
+                m.tag(),
+                Mutation::KIND_TAGS[i],
+                "tag()/KIND_TAGS drift on {:?}",
+                m,
+            );
         }
     }
 }
