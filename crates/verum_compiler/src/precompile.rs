@@ -199,6 +199,16 @@ fn write_core_metadata_alongside_archive(
                 root.display(),
             );
         }
+
+        // #104 — populate `metadata.content_hash` with the source-tree
+        // blake3 so the SDK lookup path (`SdkLookup::find` keyed on
+        // the hex prefix) can match installs by content.  Convention
+        // mirrors `verum stdlib install`'s
+        // `compute_source_blake3`: path-prefixed, sorted, no
+        // schema-version salt — the SDK is the *source*, not the
+        // archive, so its identity is invariant under compiler
+        // upgrades.
+        metadata.content_hash = compute_source_blake3_for_root(root);
     }
     let bytes = bincode::serialize(&metadata)
         .context("bincode serialise CoreMetadata for sidecar emit")?;
@@ -234,6 +244,56 @@ fn write_core_metadata_alongside_archive(
 /// which keeps the bincode payload reproducible across precompile
 /// invocations.
 ///
+/// #104 — Compute the blake3-32 source-tree hash for `core/`,
+/// matching the convention used by `verum stdlib install`'s
+/// `compute_source_blake3`.  Path-prefixed, byte-content-hashed,
+/// sorted lexicographically; **no schema-version salt** because
+/// the SDK is the *source* (compiler-version-invariant), not the
+/// precompile artefact.
+///
+/// Stored in `CoreMetadata.content_hash` so `SdkLookup::find` can
+/// derive the expected on-disk install prefix from the binary's
+/// embedded metadata.
+fn compute_source_blake3_for_root(root: &Path) -> [u8; 32] {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            if p.extension().and_then(|e| e.to_str()) != Some("vr") {
+                continue;
+            }
+            let rel = match p.strip_prefix(root) {
+                Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            let bytes = match std::fs::read(&p) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            out.push((rel, bytes));
+        }
+    }
+    walk(root, root, &mut files);
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut hasher = blake3::Hasher::new();
+    for (rel, bytes) in &files {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(bytes);
+        hasher.update(b"\0");
+    }
+    *hasher.finalize().as_bytes()
+}
+
 /// Result names ordered via BTreeSet for deterministic output;
 /// AST nodes follow the same key ordering via `OrderedMap`.
 fn scan_context_declarations(

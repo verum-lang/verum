@@ -2555,6 +2555,50 @@ enum StdlibSub {
         #[clap(long)]
         verbose: bool,
     },
+
+    /// Install the Verum stdlib SDK source tree to
+    /// `~/.verum/sdk-<blake3-prefix>/core/`.  Pairs with the
+    /// production verum binary's embedded archive so source-walking
+    /// dev tools (`verum audit`, LSP, debugger) consume source from
+    /// disk instead of an embedded copy.  Lookup keyed by blake3
+    /// prefix — drift between binary and SDK surfaces as
+    /// `SdkVersionMismatch` rather than silent stale-source.
+    Install {
+        /// Source directory containing `core/` (or pass `core/`
+        /// directly).  Defaults to the workspace `core/` auto-
+        /// detected by walking up from cwd.
+        #[clap(long, value_name = "DIR")]
+        from: Option<std::path::PathBuf>,
+
+        /// Reinstall even when an SDK at the same blake3 prefix
+        /// already exists.  Without this flag, an existing install
+        /// short-circuits with a notice — content-addressed installs
+        /// are intentionally idempotent.
+        #[clap(long)]
+        force: bool,
+
+        /// Verbose progress output.
+        #[clap(long)]
+        verbose: bool,
+    },
+
+    /// Verify the on-disk SDK matches the verum binary's embedded
+    /// archive prefix.  Re-computes the source-tree blake3 to
+    /// detect tampering / partial installs.  Exits non-zero on
+    /// mismatch — useful for CI gates.
+    Verify {
+        /// Verbose progress output.
+        #[clap(long)]
+        verbose: bool,
+    },
+
+    /// List every installed Verum SDK under `~/.verum/`.  Marks the
+    /// install whose blake3 prefix matches the running binary.
+    List {
+        /// Verbose output (manifest details per install).
+        #[clap(long)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4369,6 +4413,14 @@ fn run_command(cli: Cli) -> Result<()> {
                 target,
                 verbose,
             } => commands::stdlib_precompile::run(stdlib_path, out, target, verbose),
+            StdlibSub::Install { from, force, verbose } => {
+                commands::stdlib_install::run_install(from, force, verbose)
+                    .map_err(|e| crate::error::CliError::Custom(format!("{:?}", e)))
+            }
+            StdlibSub::Verify { verbose } => commands::stdlib_install::run_verify(verbose)
+                .map_err(|e| crate::error::CliError::Custom(format!("{:?}", e))),
+            StdlibSub::List { verbose } => commands::stdlib_install::run_list(verbose)
+                .map_err(|e| crate::error::CliError::Custom(format!("{:?}", e))),
         },
 
         Commands::Cog { sub } => match sub {
