@@ -13666,15 +13666,41 @@ impl TypeChecker {
                 if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
                     early_method_info
                 {
-                    // #91/#95 — inherent-method dispatch resolved to a
-                    // canonical `Type.method` qualified name.  Stamp
-                    // the side-table so the VBC compile_method_call
-                    // fast path picks it up and skips the legacy
-                    // 7-step name-resolution cascade.  Codegen will
-                    // do `lookup_function("Type.method")` directly.
-                    let qualified =
-                        format!("{}.{}", type_name_text.as_str(), method_name_text.as_str());
-                    self.record_resolved_static_call(span, qualified);
+                    // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
+                    // resolved-call-target side-table only when the
+                    // receiver is a type-name path
+                    // (`Type.method(args)`), not when it's a value
+                    // expression (`obj.method(args)`).
+                    //
+                    // Static calls compile to `Call(fn_id, args)` —
+                    // arguments map 1:1 to the function's parameters
+                    // and the codegen's `compile_static_method_call`
+                    // assumes no implicit `self`.  Instance calls
+                    // need to compile the receiver and pass it as
+                    // implicit arg 0; that lowering is handled by
+                    // the legacy CallM-based instance-dispatch path,
+                    // which stays in charge for non-stamped
+                    // method-calls.  Stamping instance calls would
+                    // miscount arity and surface
+                    // `WrongArgumentCount` at the fast path's
+                    // function-info gate.
+                    let is_static_path = matches!(
+                        &receiver.kind,
+                        verum_ast::expr::ExprKind::Path(p)
+                            if p.segments.len() == 1
+                                && matches!(
+                                    p.segments[0],
+                                    verum_ast::ty::PathSegment::Name(_)
+                                )
+                    );
+                    if is_static_path {
+                        let qualified = format!(
+                            "{}.{}",
+                            type_name_text.as_str(),
+                            method_name_text.as_str()
+                        );
+                        self.record_resolved_static_call(span, qualified);
+                    }
                     // Register type bounds for fresh type variables
                     for (fresh_var, bounds) in &type_bounds {
                         for bound in bounds {
@@ -16322,14 +16348,18 @@ impl TypeChecker {
 
             if let (
                 Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)),
-                Some(alias_name),
+                Some(_alias_name),
             ) = (alias_method_info.0, alias_method_info.1)
             {
-                // #91/#95 — alias-target dispatch resolved to
-                // `<alias_name>.<method>`.  Same architectural
-                // rationale as the direct inherent-method site.
-                let qualified = format!("{}.{}", alias_name.as_str(), method.name.as_str());
-                self.record_resolved_static_call(span, qualified);
+                // #91/#95 — alias-target dispatch.  Not stamped: the
+                // resolution path runs ONLY for instance calls
+                // (receiver is a value of the aliased type), not for
+                // `<alias>.method()` which goes through the static
+                // path.  Stamping would shape an instance call as a
+                // static Call and miscount arity.  Instance dispatch
+                // stays on the legacy CallM-based path; this
+                // resolution site contributes type-bounds context
+                // but no fast-path optimisation.
                 // Register type bounds for fresh type variables
                 for (fresh_var, bounds) in &type_bounds {
                     for bound in bounds {
