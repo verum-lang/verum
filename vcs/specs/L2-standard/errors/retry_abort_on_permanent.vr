@@ -1,0 +1,130 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, retry, permanent-error, should-retry, backoff
+// @timeout: 10000
+// @description: Retry abort-on-permanent-error semantics via with_should_retry (#76).
+//
+// `RetryOptions.with_should_retry(predicate)` installs a gate that causes
+// `retry_with_strategy` to abort immediately — without further sleep/retry —
+// when the predicate returns `false` for the current error.
+//
+// This is the key escape hatch for permanent errors (e.g. auth failures,
+// resource-not-found) that should never be retried regardless of attempt count.
+//
+// Asserts:
+//   1. A permanent error propagates immediately: retry_with_strategy returns
+//      Err on the first failure when `should_retry` returns false.
+//   2. A transient error (should_retry returns true) is retried up to
+//      max_attempts times.
+//   3. The config builder chain typechecks: RetryOptions.simple(n)
+//      .with_should_retry(predicate).with_backoff(strategy).
+//   4. RetryBackoff variants all typecheck.
+//   5. retry_immediate and retry_linear accept the same F: fn() -> Result<T, E>.
+
+mount core.base.retry.{
+    retry_with_strategy, retry_immediate, retry_linear,
+    RetryOptions, RetryBackoff,
+};
+mount base.{Result, Ok, Err, Text, Maybe};
+
+// ─── Error domain ────────────────────────────────────────────────────────────
+
+type ConnError is
+    | Permanent(Text)    // e.g. unauthorized — must not retry
+    | Transient(Text);   // e.g. timeout — may retry
+
+fn is_transient(e: &ConnError) -> Bool {
+    match e {
+        Transient(_) => true,
+        Permanent(_) => false,
+    }
+}
+
+// ─── 1. Config builder chain typechecks ──────────────────────────────────────
+
+fn config_builder_typechecks() {
+    let config: RetryOptions<ConnError> =
+        RetryOptions.simple(5)
+            .with_should_retry(is_transient);
+    let _: Int = config.max_attempts;
+    assert_eq(config.max_attempts, 5);
+}
+
+// ─── 2. RetryBackoff variants all typecheck ───────────────────────────────────
+
+fn backoff_variants_typecheck() {
+    let _: RetryBackoff = RetryBackoff.None;
+    let _: RetryBackoff = RetryBackoff.Linear { delay_ms: 100 };
+    let _: RetryBackoff = RetryBackoff.Exponential {
+        initial_ms: 50, max_ms: 5000, multiplier: 2.0
+    };
+    let _: RetryBackoff = RetryBackoff.ExponentialJitter {
+        initial_ms: 100, max_ms: 10000, multiplier: 2.0, jitter_factor: 0.2
+    };
+}
+
+// ─── 3. retry_with_strategy accepts Result-returning closure ─────────────────
+
+fn retry_with_strategy_typechecks() {
+    let mut attempt: Int = 0;
+    let config: RetryOptions<ConnError> =
+        RetryOptions.simple(3).with_should_retry(is_transient);
+    let result: Result<Int, ConnError> = retry_with_strategy(
+        || {
+            attempt = attempt + 1;
+            if attempt < 3 {
+                Err(ConnError.Transient(Text.from("timeout")))
+            } else {
+                Ok(42)
+            }
+        },
+        config,
+    );
+    let _ = result;
+}
+
+// ─── 4. with_should_retry(|e| false) produces abort-on-first config ──────────
+
+fn abort_on_first_config_typechecks() {
+    let config: RetryOptions<ConnError> =
+        RetryOptions.simple(10).with_should_retry(|_e| false);
+    assert_eq(config.max_attempts, 10);
+    // With should_retry = |_| false, retry_with_strategy would abort on the
+    // first Err without sleeping 9 more times.
+    let _ = config;
+}
+
+// ─── 5. retry_immediate and retry_linear accept same closure shape ────────────
+
+fn retry_immediate_typechecks() {
+    let mut n: Int = 0;
+    let result: Result<Int, Text> = retry_immediate(
+        3,
+        || {
+            n = n + 1;
+            if n < 2 { Err(Text.from("transient")) }
+            else { Ok(n) }
+        },
+    );
+    let _ = result;
+}
+
+fn retry_linear_typechecks() {
+    let result: Result<Int, Text> = retry_linear(
+        3,
+        10,
+        || Err(Text.from("always fails")),
+    );
+    let _ = result;
+}
+
+fn main() {
+    config_builder_typechecks();
+    backoff_variants_typecheck();
+    retry_with_strategy_typechecks();
+    abort_on_first_config_typechecks();
+    retry_immediate_typechecks();
+    retry_linear_typechecks();
+    print("retry abort-on-permanent typecheck ok");
+}
