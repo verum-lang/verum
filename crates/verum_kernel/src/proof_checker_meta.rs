@@ -122,50 +122,26 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
 /// Apply the universe-lift transformation to every type in a
 /// [`Context`]. Returns a new context with the same binder
 /// shape but every type's universe levels shifted by `lift`.
+///
+/// **Soundness**: walks raw binding-site types via
+/// [`Context::iter_outer_to_inner`] and applies [`shift_universes`]
+/// at each binder's own frame.  Inter-binder references (e.g. `B`
+/// having type `A → Type` in `[A : Type, B : A → Type]`) survive
+/// exactly: the rebuilt context preserves every de Bruijn index
+/// at its binding-site meaning.
+///
+/// The earlier implementation used `Context::lookup` (which
+/// **shifts the result up to the outer frame**) and pushed the
+/// shifted Term back without unshifting — silently corrupting any
+/// context whose types referenced outer binders.  The fix routes
+/// through the new raw-types API.
 pub fn shift_universes_in_context(ctx: &Context, lift: u32) -> Context {
     if lift == 0 {
         return ctx.clone();
     }
-    // Reconstruct the context by extending an empty context with
-    // each type one at a time, with universe shift applied. The
-    // Context API doesn't expose the inner vec directly, so we
-    // reach the goal via the public extend interface.
     let mut shifted = Context::new();
-    // We need to walk types in outer-to-inner order. The lookup
-    // API gives types in shifted form; we want the raw types,
-    // which we can rebuild from `lookup` outputs by un-shifting
-    // them.  But we don't have a public `len()` returning the
-    // raw stack OR raw type access — so instead we use a more
-    // practical strategy: lookup at each index in turn, undo the
-    // index-shift by the depth, then re-add with universe lift.
-    let depth = ctx.depth();
-    // Walk inner-most to outer-most (Var(0) is innermost).
-    let mut raw_types: Vec<Term> = Vec::with_capacity(depth);
-    for i in 0..depth {
-        // ctx.lookup(i) returns the type at index `i` shifted up
-        // by `i+1` so callers see it in their outer context.
-        // We "un-shift" by lowering back to the binding-site frame.
-        if let Some(shifted_lookup) = ctx.lookup(i) {
-            // The shifted_lookup has every Var index ≥ 0 bumped by
-            // i+1.  We want the original (binding-site) type, which
-            // doesn't reference any binders inner to its own site.
-            // Since unshift is non-trivial without exposing internals,
-            // we instead use the lookup output directly: it's still
-            // a valid Term at the i'th level, and adding it via
-            // `extend` on a fresh context restores the right shape.
-            //
-            // Subtle: this means raw_types[0] is the inner-most
-            // binder's type as seen from the OUTER context; we need
-            // to push it as the FIRST extension on the new context.
-            // The Context::extend API pushes at the inner end, so
-            // we need OUTER-TO-INNER order — reverse.
-            raw_types.push(shifted_lookup);
-        }
-    }
-    // raw_types is inner-to-outer; reverse to get outer-to-inner.
-    raw_types.reverse();
-    for ty in raw_types {
-        shifted = shifted.extend(shift_universes(&ty, lift));
+    for raw_ty in ctx.iter_outer_to_inner() {
+        shifted = shifted.extend(shift_universes(raw_ty, lift));
     }
     shifted
 }
@@ -452,5 +428,139 @@ mod tests {
         for p in &probes {
             assert_eq!(&shift_universes(p, 0), p);
         }
+    }
+
+    // ----- Soundness pins for the corrected
+    //       `shift_universes_in_context` (the fix for the
+    //       lookup-as-raw-type kludge that silently corrupted
+    //       contexts whose types referenced outer binders).
+    //
+    // The invariant: for any context Γ, the shifted context Γ′ has
+    // the SAME structural shape as Γ, with every Universe(level)
+    // replaced by Universe(level + lift).  Inter-binder references
+    // must survive verbatim — no de Bruijn index should change.
+
+    #[test]
+    fn shift_in_context_preserves_inter_binder_reference() {
+        // Γ = [A : Type@0, B : A → Type@0]
+        //   B's type is `Π(_:Var(0)). Type@0` at the binding site —
+        //   Var(0) refers to the outer A.
+        // Γ′ = shift_universes_in_context(Γ, 1) MUST give:
+        //   [A : Type@1, B : Π(_:Var(0)). Type@1]
+        //   The Var(0) in B's domain must STILL point to A.
+        let inner_ty = Term::pi(Term::Var(0), Term::universe(0));
+        let ctx = Context::new()
+            .extend(Term::universe(0))
+            .extend(inner_ty);
+        let shifted = shift_universes_in_context(&ctx, 1);
+
+        // Depth preserved.
+        assert_eq!(shifted.depth(), 2);
+
+        // Raw types: outer is Type@1, inner is Π(_:Var(0)). Type@1.
+        let raw = shifted.types();
+        assert_eq!(raw[0], Term::universe(1));
+        assert_eq!(
+            raw[1],
+            Term::pi(Term::Var(0), Term::universe(1)),
+            "inter-binder Var(0) reference must survive shift",
+        );
+    }
+
+    #[test]
+    fn shift_in_context_universe_stability_on_dependent_pi() {
+        // Pin the load-bearing universe-stability invariant on a
+        // genuinely dependent setting: a closed certificate using a
+        // dependent Π over a hypothesis context with inter-binder
+        // references must accept at every lift it accepts at lift 0.
+        //
+        // Setup: Γ = [A : Type@0]; check that
+        //   `λ(x : Var(0)). x : Π(_:Var(0)). Var(1)`
+        // type-checks under Γ at lift 0, then at lift 1, 2, 3 with
+        // shift_universes_in_context applied — they must all agree.
+        let ctx = Context::new().extend(Term::universe(0));
+        let term = Term::lam(Term::Var(0), Term::Var(0));
+        let claim = Term::pi(Term::Var(0), Term::Var(1));
+
+        // Ground-truth: lift 0 accepts.
+        let ground = check_with_universe_lift(&ctx, &term, &claim, 0);
+        assert!(ground.is_ok(), "lift=0 should accept: {:?}", ground);
+
+        // Universe-stability across non-trivial lifts.
+        for lift in [1u32, 2, 3, 7] {
+            let v = check_with_universe_lift(&ctx, &term, &claim, lift);
+            assert!(
+                v.is_ok(),
+                "lift={lift} should agree with lift=0: {:?}",
+                v,
+            );
+        }
+    }
+
+    #[test]
+    fn shift_in_context_raw_types_outer_to_inner() {
+        // The new `iter_outer_to_inner` API gives types in the
+        // order they were extended — outermost first, innermost
+        // last.  Pin the iteration order.
+        let ctx = Context::new()
+            .extend(Term::universe(0))
+            .extend(Term::universe(1))
+            .extend(Term::universe(2));
+        let collected: Vec<&Term> = ctx.iter_outer_to_inner().collect();
+        assert_eq!(collected.len(), 3);
+        assert_eq!(*collected[0], Term::universe(0));
+        assert_eq!(*collected[1], Term::universe(1));
+        assert_eq!(*collected[2], Term::universe(2));
+    }
+
+    #[test]
+    fn shift_in_context_idempotent_on_lift_zero_with_dependencies() {
+        // For non-trivial contexts, lift=0 must still produce an
+        // identical context (the early-return path).  Any drift
+        // here would mean the rewrite changed semantics on the
+        // baseline.
+        let inner_ty = Term::pi(Term::Var(0), Term::universe(0));
+        let ctx = Context::new()
+            .extend(Term::universe(0))
+            .extend(inner_ty);
+        let shifted = shift_universes_in_context(&ctx, 0);
+        assert_eq!(shifted.types(), ctx.types());
+    }
+
+    #[test]
+    fn shift_in_context_three_deep_chain() {
+        // Γ = [A : Type@0, B : A → Type@0, C : B(_) → Type@0]
+        //   Each binder references its predecessor — every de
+        //   Bruijn index must survive lift unchanged.
+        // Body of C's domain references B as Var(1) (since A's
+        // entry has shifted under B's binder); we model this
+        // structurally: ctx[2] is `Π(_:App(Var(0), Var(1))). Type@0`.
+        let outer_a = Term::universe(0);
+        let mid_b = Term::pi(Term::Var(0), Term::universe(0));
+        let inner_c = Term::pi(
+            Term::app(Term::Var(0), Term::Var(1)),
+            Term::universe(0),
+        );
+        let ctx = Context::new()
+            .extend(outer_a)
+            .extend(mid_b)
+            .extend(inner_c);
+        let shifted = shift_universes_in_context(&ctx, 4);
+        let raw = shifted.types();
+        assert_eq!(raw.len(), 3);
+        assert_eq!(raw[0], Term::universe(4));
+        assert_eq!(
+            raw[1],
+            Term::pi(Term::Var(0), Term::universe(4)),
+            "B's reference to A must survive at index 0",
+        );
+        assert_eq!(
+            raw[2],
+            Term::pi(
+                Term::app(Term::Var(0), Term::Var(1)),
+                Term::universe(4),
+            ),
+            "C's references to B (Var(0)) and A (Var(1)) must both survive",
+        );
     }
 }
