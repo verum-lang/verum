@@ -6190,54 +6190,58 @@ impl LoweringContext {
         }
     }
 
-    /// Compute the size of a type in bytes (for TypeProperty lowering)
+    /// Compute the size of a type in bytes (for TypeProperty lowering).
+    ///
+    /// Reads scalar widths from the canonical `verum_common::layout`
+    /// module — the single source of truth shared with the typechecker,
+    /// `@const` evaluator, and codegen. The fallback `POINTER_SIZE` for
+    /// unrecognized named / compound types matches the conservative
+    /// answer the legacy hand-table returned.
     fn compute_type_size(&self, ty: &verum_ast::ty::Type) -> i64 {
         use verum_ast::ty::TypeKind;
-        match &ty.kind {
+        use verum_common::layout::{
+            BOOL_SIZE, CHAR_SIZE, FLOAT_SIZE, INT_SIZE, POINTER_SIZE, TEXT_SIZE,
+            primitive_size_by_name,
+        };
+        let size: u64 = match &ty.kind {
             TypeKind::Unit => 0,
-            TypeKind::Bool => 1,
-            TypeKind::Char => 4,
-            TypeKind::Int | TypeKind::Float => 8,
-            TypeKind::Text => 24,
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    match ident.as_str() {
-                        "I8" | "U8" => 1,
-                        "I16" | "U16" => 2,
-                        "I32" | "U32" | "F32" => 4,
-                        "I64" | "U64" | "F64" | "Int" | "Float" => 8,
-                        "I128" | "U128" => 16,
-                        _ => 8,
-                    }
-                } else {
-                    8
-                }
-            }
-            _ => 8,
-        }
+            TypeKind::Bool => BOOL_SIZE,
+            TypeKind::Char => CHAR_SIZE,
+            TypeKind::Int => INT_SIZE,
+            TypeKind::Float => FLOAT_SIZE,
+            TypeKind::Text => TEXT_SIZE,
+            TypeKind::Path(path) => path
+                .as_ident()
+                .and_then(|i| primitive_size_by_name(i.as_str()))
+                .unwrap_or(POINTER_SIZE),
+            _ => POINTER_SIZE,
+        };
+        size as i64
     }
 
-    /// Compute the alignment of a type in bytes (for TypeProperty lowering)
+    /// Compute the alignment of a type in bytes (for TypeProperty lowering).
+    ///
+    /// Routes through `primitive_alignment_by_name` for known scalars and
+    /// falls back to pointer width for compound / unknown types — matches
+    /// the legacy hand-table answers and stays in sync via the canonical
+    /// `verum_common::layout` module.
     fn compute_type_alignment(&self, ty: &verum_ast::ty::Type) -> i64 {
         use verum_ast::ty::TypeKind;
-        match &ty.kind {
-            TypeKind::Unit | TypeKind::Bool => 1,
-            TypeKind::Char => 4,
-            TypeKind::Int | TypeKind::Float | TypeKind::Text => 8,
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    match ident.as_str() {
-                        "Bool" | "I8" | "U8" => 1,
-                        "I16" | "U16" => 2,
-                        "I32" | "U32" | "F32" | "Char" => 4,
-                        _ => 8,
-                    }
-                } else {
-                    8
-                }
-            }
-            _ => 8,
-        }
+        use verum_common::layout::{
+            BOOL_SIZE, CHAR_SIZE, INT_SIZE, POINTER_SIZE, primitive_alignment_by_name,
+        };
+        let align: u64 = match &ty.kind {
+            TypeKind::Unit => 1,
+            TypeKind::Bool => BOOL_SIZE,
+            TypeKind::Char => CHAR_SIZE,
+            TypeKind::Int | TypeKind::Float | TypeKind::Text => INT_SIZE,
+            TypeKind::Path(path) => path
+                .as_ident()
+                .and_then(|i| primitive_alignment_by_name(i.as_str()))
+                .unwrap_or(POINTER_SIZE),
+            _ => POINTER_SIZE,
+        };
+        align as i64
     }
 
     /// Compute the name of a type (for TypeProperty lowering)

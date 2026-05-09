@@ -247,26 +247,34 @@ fn try_const_int_u64(expr: &Expr) -> Option<u64> {
     }
 }
 
-/// Compute the size of a type in bytes
+/// Compute the size of a type in bytes.
+///
+/// All scalar / pointer / reference sizes are read from the canonical
+/// `verum_common::layout` module — the single source of truth shared
+/// with the typechecker, MIR lowering, and codegen.
 pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
+    use verum_common::layout::{
+        BOOL_SIZE, CHAR_SIZE, FLOAT_SIZE, INT_SIZE, POINTER_SIZE,
+        REF_TIER0_SIZE, REF_TIER2_SIZE, TEXT_SIZE,
+    };
     match ty {
-        // Primitives
+        // Primitives — fixed widths from the canonical layout module.
         TypeKind::Unit | TypeKind::Never => Ok(0),
-        TypeKind::Bool => Ok(1),
-        TypeKind::Char => Ok(4),    // UTF-32 code point
-        TypeKind::Int => Ok(8),     // Default 64-bit
-        TypeKind::Float => Ok(8),   // Default 64-bit
-        TypeKind::Text => Ok(24),   // ptr + len + capacity
+        TypeKind::Bool => Ok(BOOL_SIZE),
+        TypeKind::Char => Ok(CHAR_SIZE),
+        TypeKind::Int => Ok(INT_SIZE),
+        TypeKind::Float => Ok(FLOAT_SIZE),
+        TypeKind::Text => Ok(TEXT_SIZE),
         TypeKind::Unknown => Ok(0), // Unknown has no concrete size
 
-        // References (CBGR: ThinRef = 16 bytes)
-        TypeKind::Reference { .. } => Ok(16),
-        TypeKind::CheckedReference { .. } => Ok(16),
-        TypeKind::UnsafeReference { .. } => Ok(8), // Raw pointer, no CBGR
-
-        // Pointers
-        TypeKind::Pointer { .. } => Ok(8),
-        TypeKind::VolatilePointer { .. } => Ok(8),
+        // CBGR Tier-0/Tier-1 references carry generation + epoch
+        // metadata alongside the base pointer (ThinRef = 16 bytes).
+        TypeKind::Reference { .. } => Ok(REF_TIER0_SIZE),
+        TypeKind::CheckedReference { .. } => Ok(REF_TIER0_SIZE),
+        // Tier-2 references and raw pointers strip the CBGR header.
+        TypeKind::UnsafeReference { .. } => Ok(REF_TIER2_SIZE),
+        TypeKind::Pointer { .. } => Ok(POINTER_SIZE),
+        TypeKind::VolatilePointer { .. } => Ok(POINTER_SIZE),
 
         // Arrays
         TypeKind::Array { element, size } => {
@@ -291,8 +299,8 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
             }
         }
 
-        // Slices (fat pointer: ptr + len)
-        TypeKind::Slice(_) => Ok(16),
+        // Slices (fat pointer: ptr + len) — canonical SLICE_FAT_PTR_SIZE.
+        TypeKind::Slice(_) => Ok(verum_common::layout::SLICE_FAT_PTR_SIZE),
 
         // Tuples
         TypeKind::Tuple(elements) => {
@@ -312,30 +320,26 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
             Ok((offset + max_align - 1) & !(max_align - 1))
         }
 
-        // Function types (pointer size)
-        TypeKind::Function { .. } | TypeKind::Rank2Function { .. } => Ok(8),
+        // Function types lower to a single-word pointer.
+        TypeKind::Function { .. } | TypeKind::Rank2Function { .. } => Ok(POINTER_SIZE),
 
         // Generic types need instantiation
         TypeKind::Generic { base, .. } => compute_type_size(&base.kind),
 
-        // Named types - check for sized primitives first
+        // Named types — defer the primitive recognition to the canonical
+        // `verum_common::layout::primitive_size_by_name` table (the
+        // single source of truth used by typechecker / MIR / codegen).
+        // Compound types fall through to a typed-definition lookup error.
         TypeKind::Path(path) => {
             let name = path.to_string();
-            match name.as_str() {
-                // Unsigned integers
-                "U8" | "UInt8" | "I8" | "Int8" => Ok(1),
-                "U16" | "UInt16" | "I16" | "Int16" => Ok(2),
-                "U32" | "UInt32" | "I32" | "Int32" | "F32" | "Float32" => Ok(4),
-                "U64" | "UInt64" | "I64" | "Int64" | "F64" | "Float64" => Ok(8),
-                "U128" | "UInt128" | "I128" | "Int128" => Ok(16),
-                "USize" | "ISize" => Ok(8), // Assuming 64-bit architecture
-
-                // For other named types, we'd need type definition lookup
-                _ => Err(MetaError::Other(Text::from(format!(
-                    "Cannot compute size of named type '{}' without type definition",
-                    name
-                )))),
-            }
+            verum_common::layout::primitive_size_by_name(name.as_str())
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    Err(MetaError::Other(Text::from(format!(
+                        "Cannot compute size of named type '{}' without type definition",
+                        name
+                    ))))
+                })
         }
 
         // Refinement types (canonical) have same size as base
