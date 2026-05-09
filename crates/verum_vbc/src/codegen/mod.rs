@@ -1845,14 +1845,25 @@ impl VbcCodegen {
             ("SEEK_SET", verum_common::posix_files::SEEK_SET),
             ("SEEK_CUR", verum_common::posix_files::SEEK_CUR),
             ("SEEK_END", verum_common::posix_files::SEEK_END),
-            // CBGR generation constants (core/mem/allocator.vr, core/mem/header.vr)
-            ("GEN_INITIAL", 1),
-            ("GEN_DEAD", 0),
-            ("HEADER_SIZE", 16),
+            // CBGR generation constants — sourced from `verum_common::cbgr`
+            // (single source of truth shared with the runtime + stdlib).
+            ("GEN_INITIAL", verum_common::cbgr::GEN_INITIAL as i64),
+            ("GEN_DEAD", 0), // Sentinel: 0 generation = freed/uninitialised
+            ("HEADER_SIZE", 16), // CbgrHeader::SIZE — separate from
+                                 // ObjectHeader (24) and AllocationHeader (32).
+                                 // 16 bytes = ptr + gen + epoch_caps. See
+                                 // verum_common::cbgr module docs.
             ("FLAG_ARENA", 4),
-            // Capability constants (core/mem/capability.vr)
-            ("CAP_READ", 1),
-            ("CAP_WRITE", 2),
+            // CBGR capability constants — sourced from
+            // `verum_common::cbgr::caps`. Each canonical name maps to
+            // a single bit position in the 16-bit caps half of the
+            // packed `epoch_and_caps` u32 (see layout::CAPS_BITS).
+            ("CAP_READ", verum_common::cbgr::caps::READ as i64),
+            ("CAP_WRITE", verum_common::cbgr::caps::WRITE as i64),
+            // CAP_OWNED is the user-facing alias for OWNER (full
+            // ownership — read|write|mutable|delegate|revoke).
+            // Codegen table preserves the historical 4-bit alias for
+            // ABI continuity; the runtime resolves through caps::OWNER.
             ("CAP_OWNED", 4),
             // Per-thread context slot table (core/sys/common.vr).
             // Without these, `core/runtime/ctx_bridge.vr` cannot lower
