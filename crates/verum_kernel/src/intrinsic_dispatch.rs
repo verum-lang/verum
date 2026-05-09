@@ -84,9 +84,9 @@ pub enum IntrinsicValue {
 }
 
 impl IntrinsicValue {
- /// Extract the decision verdict when the value carries one.
- /// Returns `Some(b)` for `Bool(b)` and the `holds` field of
- /// `Decision { holds, .. }`; `None` otherwise.
+    /// Extract the decision verdict when the value carries one.
+    /// Returns `Some(b)` for `Bool(b)` and the `holds` field of
+    /// `Decision { holds, .. }`; `None` otherwise.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             IntrinsicValue::Bool(b) => Some(*b),
@@ -95,15 +95,45 @@ impl IntrinsicValue {
         }
     }
 
- /// Extract the textual payload when the value carries one.
- /// Returns `Some(s)` for `Text(s)`; `None` for every other
- /// variant.
+    /// Extract the integer payload when the value carries one.
+    /// Returns `Some(i)` for `Int(i)`; `None` for every other
+    /// variant. Mirror of [`Self::as_bool`] / [`Self::as_text`] —
+    /// the canonical extraction helper for `Int`-shaped intrinsic
+    /// arguments. Replaces the previously-inlined
+    /// `if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }`
+    /// pattern that was duplicated across every Int-consuming
+    /// dispatch arm.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            IntrinsicValue::Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Extract the textual payload when the value carries one.
+    /// Returns `Some(s)` for `Text(s)`; `None` for every other
+    /// variant.
     pub fn as_text(&self) -> Option<&str> {
         match self {
             IntrinsicValue::Text(s) => Some(s.as_str()),
             _ => None,
         }
     }
+}
+
+/// Build a `Some(IntrinsicValue::Decision { holds, reason })`
+/// dispatcher response. Every kernel intrinsic ultimately returns
+/// either a decision verdict (with rationale) or `None` (args
+/// rejected); this helper collapses the otherwise-five-line
+/// `Decision` literal at every dispatch arm into a single call,
+/// and accepts both `&str` and `String` inputs uniformly via
+/// `Into<String>`.
+#[inline]
+fn decision(holds: bool, reason: impl Into<String>) -> Option<IntrinsicValue> {
+    Some(IntrinsicValue::Decision {
+        holds,
+        reason: reason.into(),
+    })
 }
 
 // =============================================================================
@@ -126,95 +156,63 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // a *well-formed* ∞-category with non-negative level + at least
  // one universe. Bare-call (no args) returns None — caller must
  // supply structural data to claim Yoneda discharge.
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            let universe = args.get(1).and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 0 && universe >= 0,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            let universe = args.get(1)?.as_int()?;
+            decision(level >= 0 && universe >= 0, format!(
                     "yoneda: HTT 1.2.1 requires level≥0 (got {}) and universe≥0 (got {})",
                     level, universe
-                ),
-            })
+                ))
         }
  // **Bare-arg form** preserved for back-compat callers that don't
  // (yet) thread structural data; gated on a separate name.
-        "kernel_yoneda_embedding_bare" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "yoneda::yoneda_embedding (bare-arg back-compat — prefer the parameterised form)".into(),
-        }),
+        "kernel_yoneda_embedding_bare" => decision(true, "yoneda::yoneda_embedding (bare-arg back-compat — prefer the parameterised form)"),
         "kernel_kan_extension" => {
  // args: [is_fully_faithful: Bool, target_has_colimits: Bool]
-            let ff = args.first().and_then(|v| v.as_bool())?;
-            let colim = args.get(1).and_then(|v| v.as_bool())?;
-            Some(IntrinsicValue::Decision {
-                holds: ff && colim,
-                reason: format!(
+            let ff = args.first()?.as_bool()?;
+            let colim = args.get(1)?.as_bool()?;
+            decision(ff && colim, format!(
                     "yoneda::build_kan_extension preconditions: ff={}, colim={}",
                     ff, colim
-                ),
-            })
+                ))
         }
 
  // -- Cartesian fibration + Straightening -------------------------
         "kernel_straightening_equivalence" => {
  // args: [base_level: Int]. HTT 3.2.0.1 requires the base
  // ∞-category to live at level ≥ 1.
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 1,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            decision(level >= 1, format!(
                     "straightening: base level={} must be >=1 (HTT 3.2.0.1)",
                     level
-                ),
-            })
+                ))
         }
  // Identity-is-equivalence — DIRECT discharge for the
  // "id_X is (∞,n)-equivalence" step in Theorem 5.1.
  // args: [level: Int]. Identity is always an equivalence at any
  // non-negative ordinal level (HTT 1.2.13 / Whitehead corollary).
         "kernel_identity_is_equivalence" => {
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 0,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            decision(level >= 0, format!(
                     "identity_is_equivalence: level={} must be >=0 (kernel ALWAYS witnesses id_X)",
                     level
-                ),
-            })
+                ))
         }
         "kernel_grothendieck_construction" => {
  // args: [num_fibres: Int]; passes when num_fibres > 0
-            let n = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v {
-                    Some(*i)
-                } else {
-                    None
-                }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: n > 0,
-                reason: format!(
+            let n = args.first()?.as_int()?;
+            decision(n > 0, format!(
                     "grothendieck::build_grothendieck preconditions: |fibres|={} > 0",
                     n
-                ),
-            })
+                ))
         }
 
  // -- Adjoint Functor Theorem + Reflective ------------------------
         "kernel_saft_adjunction" => {
  // args: [src_pres, tgt_pres, preserves_colim, preserves_lim_acc]
-            let src = args.first().and_then(|v| v.as_bool())?;
-            let tgt = args.get(1).and_then(|v| v.as_bool())?;
-            let cp = args.get(2).and_then(|v| v.as_bool())?;
-            let lp = args.get(3).and_then(|v| v.as_bool())?;
+            let src = args.first()?.as_bool()?;
+            let tgt = args.get(1)?.as_bool()?;
+            let cp = args.get(2)?.as_bool()?;
+            let lp = args.get(3)?.as_bool()?;
             let pre = SaftPreconditions {
                 functor_name: verum_common::Text::from("(via intrinsic)"),
                 source_presentable: src,
@@ -223,30 +221,24 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 preserves_small_limits_and_accessible: lp,
             };
             let left_exists = crate::adjoint_functor::left_adjoint_exists(&pre);
-            Some(IntrinsicValue::Decision {
-                holds: left_exists,
-                reason: format!(
+            decision(left_exists, format!(
                     "adjoint_functor: left_adjoint_exists = {}",
                     left_exists
-                ),
-            })
+                ))
         }
         "kernel_reflective_subcategory_aft" => {
  // args: [ff: Bool, src_pres: Bool, tgt_pres: Bool,
  // preserves_limits_acc: Bool]
  // Reject if inclusion isn't fully faithful OR SAFT preconditions
  // fail. Required by HTT 5.2.7 + 5.5.2.9 dual.
-            let ff = args.first().and_then(|v| v.as_bool())?;
-            let src = args.get(1).and_then(|v| v.as_bool())?;
-            let tgt = args.get(2).and_then(|v| v.as_bool())?;
-            let lp = args.get(3).and_then(|v| v.as_bool())?;
-            Some(IntrinsicValue::Decision {
-                holds: ff && src && tgt && lp,
-                reason: format!(
+            let ff = args.first()?.as_bool()?;
+            let src = args.get(1)?.as_bool()?;
+            let tgt = args.get(2)?.as_bool()?;
+            let lp = args.get(3)?.as_bool()?;
+            decision(ff && src && tgt && lp, format!(
                     "reflective_subcategory: ff={}, src_pres={}, tgt_pres={}, lim_acc={}",
                     ff, src, tgt, lp
-                ),
-            })
+                ))
         }
 
  // -- Whitehead promote -------------------------------------------
@@ -255,50 +247,31 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // Reject when no level data supplied OR any level fails iso OR
  // the certificate is incomplete. Per HTT 1.2.4.3 the criterion
  // requires PER-LEVEL π_k iso witness for k ∈ [0, n].
-            let n = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            let all_iso = args.get(1).and_then(|v| v.as_bool())?;
-            let complete = args.get(2).and_then(|v| v.as_bool())?;
-            Some(IntrinsicValue::Decision {
-                holds: n > 0 && all_iso && complete,
-                reason: format!(
+            let n = args.first()?.as_int()?;
+            let all_iso = args.get(1)?.as_bool()?;
+            let complete = args.get(2)?.as_bool()?;
+            decision(n > 0 && all_iso && complete, format!(
                     "whitehead: n_levels={} (>0?) all_iso={} complete={}",
                     n, all_iso, complete
-                ),
-            })
+                ))
         }
 
  // -- Limits / colimits -------------------------------------------
         "kernel_compute_colimit" => {
-            let nv = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v {
-                    Some(*i)
-                } else {
-                    None
-                }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: nv > 0,
-                reason: format!(
+            let nv = args.first()?.as_int()?;
+            decision(nv > 0, format!(
                     "limits_colimits::compute_colimit_in_psh requires non-empty diagram (got {})",
                     nv
-                ),
-            })
+                ))
         }
         "kernel_specialised_limits" => {
  // args: [diagram_size: Int]. Reject negative sizes; size=0
  // is the empty (terminal) diagram, allowed.
-            let n = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: n >= 0,
-                reason: format!(
+            let n = args.first()?.as_int()?;
+            decision(n >= 0, format!(
                     "specialised_limits: diagram_size={} (must be >=0)",
                     n
-                ),
-            })
+                ))
         }
 
  // -- Truncation --------------------------------------------------
@@ -306,48 +279,31 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // args: [level: Int, source_level: Int].
  // Reject negative level. Truncation at level > source is the
  // identity (allowed); at level < 0 is undefined (rejected).
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            let _src = args.get(1).and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 0,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            let _src = args.get(1)?.as_int()?;
+            decision(level >= 0, format!(
                     "truncate_to_level: level={} must be >=0 (HTT 5.5.6)",
                     level
-                ),
-            })
+                ))
         }
 
  // -- Factorisation -----------------------------------------------
         "kernel_epi_mono_factorisation" => {
  // args: [category_level: Int]. Reject when category is below
  // (∞,1)-level (epi/mono only meaningful at level ≥ 1).
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 1,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            decision(level >= 1, format!(
                     "epi_mono: category level={} must be >=1 (HTT 5.2.8.4)",
                     level
-                ),
-            })
+                ))
         }
         "kernel_n_truncation_factorisation" => {
  // args: [trunc_level: Int]. Reject negative trunc-level.
-            let level = args.first().and_then(|v| {
-                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
-            })?;
-            Some(IntrinsicValue::Decision {
-                holds: level >= 0,
-                reason: format!(
+            let level = args.first()?.as_int()?;
+            decision(level >= 0, format!(
                     "n_truncation_factorisation: level={} must be >=0 (HTT 5.2.8.16)",
                     level
-                ),
-            })
+                ))
         }
 
  // -- Pronk -------------------------------------------------------
@@ -369,22 +325,19 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 saturated: bf[4],
             };
             let satisfied = axioms.all_satisfied();
-            Some(IntrinsicValue::Decision {
-                holds: satisfied,
-                reason: format!(
+            decision(satisfied, format!(
                     "pronk_fractions BF1-BF5 all_satisfied = {}",
                     satisfied
-                ),
-            })
+                ))
         }
 
  // -- (∞,1)-topos -------------------------------------------------
         "kernel_infinity_topos" => {
  // args: [presentable, universal_colim, disjoint_coprod, effective_grpd]
-            let g0 = args.first().and_then(|v| v.as_bool())?;
-            let g1 = args.get(1).and_then(|v| v.as_bool())?;
-            let g2 = args.get(2).and_then(|v| v.as_bool())?;
-            let g3 = args.get(3).and_then(|v| v.as_bool())?;
+            let g0 = args.first()?.as_bool()?;
+            let g1 = args.get(1)?.as_bool()?;
+            let g2 = args.get(2)?.as_bool()?;
+            let g3 = args.get(3)?.as_bool()?;
             let g = GiraudAxioms {
                 presentable: g0,
                 universal_small_colimits: g1,
@@ -392,10 +345,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 effective_groupoids: g3,
             };
             let ok = g.all_satisfied();
-            Some(IntrinsicValue::Decision {
-                holds: ok,
-                reason: format!("infinity_topos Giraud axioms all_satisfied = {}", ok),
-            })
+            decision(ok, format!("infinity_topos Giraud axioms all_satisfied = {}", ok))
         }
 
  // -- ZFC self-recognition ----------------------------------------
@@ -404,49 +354,34 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             let all_ok = KernelRuleId::full_list()
                 .iter()
                 .all(|r| is_zfc_plus_2_inacc_provable(*r));
-            Some(IntrinsicValue::Decision {
-                holds: all_ok,
-                reason: format!(
+            decision(all_ok, format!(
                     "zfc_self_recognition: every kernel rule provable in ZFC + 2-inacc = {}",
                     all_ok
-                ),
-            })
+                ))
         }
 
  // -- Gödel coding ------------------------------------------------
-        "kernel_godel_coding" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "godel_coding: Cantor pairing + PrimRec + MuRec + GodelEncoding all decidable".into(),
-        }),
+        "kernel_godel_coding" => decision(true, "godel_coding: Cantor pairing + PrimRec + MuRec + GodelEncoding all decidable"),
 
  // -- Industrial tactics ------------------------------------------
-        "kernel_tactics_industrial" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "tactics_industrial: lia/decide/induction/congruence/eauto deterministic dispatchers".into(),
-        }),
+        "kernel_tactics_industrial" => decision(true, "tactics_industrial: lia/decide/induction/congruence/eauto deterministic dispatchers"),
 
  // -- Cross-format CI ---------------------------------------------
         "kernel_cross_format_gate" => {
  // 4 bools: [coq_passed, lean_passed, isabelle_passed, dedukti_passed]
-            let coq = args.first().and_then(|v| v.as_bool())?;
-            let lean = args.get(1).and_then(|v| v.as_bool())?;
-            let isa = args.get(2).and_then(|v| v.as_bool())?;
-            let dk = args.get(3).and_then(|v| v.as_bool())?;
+            let coq = args.first()?.as_bool()?;
+            let lean = args.get(1)?.as_bool()?;
+            let isa = args.get(2)?.as_bool()?;
+            let dk = args.get(3)?.as_bool()?;
             let all_passed = coq && lean && isa && dk;
-            Some(IntrinsicValue::Decision {
-                holds: all_passed,
-                reason: format!(
+            decision(all_passed, format!(
                     "cross_format: coq={}, lean={}, isabelle={}, dedukti={}",
                     coq, lean, isa, dk
-                ),
-            })
+                ))
         }
 
  // -- Mechanisation roadmap ---------------------------------------
-        "kernel_mechanisation_roadmap" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "mechanisation_roadmap: HTT + AR 1994 enumerations always available".into(),
-        }),
+        "kernel_mechanisation_roadmap" => decision(true, "mechanisation_roadmap: HTT + AR 1994 enumerations always available"),
  // -- MSFS self-containment ---------------------------------------
  // Backed by `mechanisation_roadmap::msfs_self_contained()` —
  // returns true iff zero AxiomCited + zero Pending in MSFS scope.
@@ -455,14 +390,11 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         "kernel_msfs_self_contained" => {
             let holds = crate::mechanisation_roadmap::msfs_self_contained();
             let gaps = crate::mechanisation_roadmap::msfs_unmechanised_dependencies();
-            Some(IntrinsicValue::Decision {
-                holds,
-                reason: format!(
+            decision(holds, format!(
                     "msfs_self_contained = {} (unmechanised gaps: {})",
                     holds,
                     gaps.len()
-                ),
-            })
+                ))
         }
 
  // ─── HoTT coherence dispatch ───────────────────────────
@@ -484,74 +416,59 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // cubical naturality square + ap-functoriality.
         "kernel_equiv_inv_coherence" => {
             let well_formed = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(IntrinsicValue::Decision {
-                holds: well_formed,
-                reason: format!(
+            decision(well_formed, format!(
                     "HoTT Book §4.2.4: equiv_inv preserves IsEquiv via cubical \
                      naturality square + ap-functoriality \
                      (well_formed_input={})",
                     well_formed
-                ),
-            })
+                ))
         }
 
  // HoTT Book §4.2.5 — composition of equivalences.
         "kernel_equiv_compose_coherence" => {
             let well_formed = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(IntrinsicValue::Decision {
-                holds: well_formed,
-                reason: format!(
+            decision(well_formed, format!(
                     "HoTT Book §4.2.5: equivalences compose; section/retraction \
                      paths transport through composition \
                      (well_formed_input={})",
                     well_formed
-                ),
-            })
+                ))
         }
 
  // HoTT Book §4.4 — equiv_from_contr_map preserves IsEquiv
  // (a function with contractible fibres is an equivalence).
         "kernel_contr_fiber_coherence" => {
             let well_formed = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(IntrinsicValue::Decision {
-                holds: well_formed,
-                reason: format!(
+            decision(well_formed, format!(
                     "HoTT Book §4.4: contractible-fibre map is equivalence; \
                      section/retraction extracted from IsContr witnesses \
                      (well_formed_input={})",
                     well_formed
-                ),
-            })
+                ))
         }
 
  // HoTT Book §2.10 — transport coherence: transport along a
  // path preserves equivalence structure.
         "kernel_transport_coherence" => {
             let well_formed = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(IntrinsicValue::Decision {
-                holds: well_formed,
-                reason: format!(
+            decision(well_formed, format!(
                     "HoTT Book §2.10: transport-equivalence coherence; path \
                      algebra preserved by ap on identity components \
                      (well_formed_input={})",
                     well_formed
-                ),
-            })
+                ))
         }
 
  // HoTT Book §3.3 — propositional equivalence: in a
  // propositional type, all paths between two points coincide.
         "kernel_prop_coherence" => {
             let well_formed = args.first().and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(IntrinsicValue::Decision {
-                holds: well_formed,
-                reason: format!(
+            decision(well_formed, format!(
                     "HoTT Book §3.3: propositional-equivalence coherence; in \
                      a Prop, IsEquiv is contractible \
                      (well_formed_input={})",
                     well_formed
-                ),
-            })
+                ))
         }
 
  // -- Verified-compilation simulation theorems (#162 / CompCert-parity).
@@ -570,54 +487,30 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // canonical roster + IOU citations. The audit gate
  // (`verum audit --codegen-attestation`) cross-checks both
  // surfaces and reports per-pass discharge status.
-        "kernel_vbc_lowering_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "CompCert simulation diagram (Leroy 2009 §5.2) — TypedAST → \
+        "kernel_vbc_lowering_preserves_semantics" => decision(true, "CompCert simulation diagram (Leroy 2009 §5.2) — TypedAST → \
                      VBC lowering preserves operational semantics; admitted \
                      with framework citation, see \
-                     core/verify/codegen_soundness/vbc_lowering.vr"
-                .into(),
-        }),
-        "kernel_ssa_construction_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "Beringer-Stark CC 2002 §3 / Cytron et al TOPLAS 1991 — \
+                     core/verify/codegen_soundness/vbc_lowering.vr"),
+        "kernel_ssa_construction_preserves_semantics" => decision(true, "Beringer-Stark CC 2002 §3 / Cytron et al TOPLAS 1991 — \
                      SSA construction preserves operational semantics; admitted \
                      with framework citation, see \
-                     core/verify/codegen_soundness/ssa_construction.vr"
-                .into(),
-        }),
-        "kernel_register_allocation_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "George-Appel TOPLAS 1996 §6 — register allocation preserves \
+                     core/verify/codegen_soundness/ssa_construction.vr"),
+        "kernel_register_allocation_preserves_semantics" => decision(true, "George-Appel TOPLAS 1996 §6 — register allocation preserves \
                      observable behaviour; admitted with framework citation, see \
-                     core/verify/codegen_soundness/register_allocation.vr"
-                .into(),
-        }),
-        "kernel_linear_scan_regalloc_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "Poletto-Sarkar TOPLAS 1999 §3 / Mössenböck CC 2002 §4 — \
+                     core/verify/codegen_soundness/register_allocation.vr"),
+        "kernel_linear_scan_regalloc_preserves_semantics" => decision(true, "Poletto-Sarkar TOPLAS 1999 §3 / Mössenböck CC 2002 §4 — \
                      linear-scan regalloc preserves observable behaviour AND \
                      live-range monotonicity; admitted with framework citation, \
-                     see core/verify/codegen_soundness/linear_scan_regalloc.vr"
-                .into(),
-        }),
-        "kernel_llvm_emission_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "Vellvm POPL 2012 §4-5 — LLVM IR emission preserves \
+                     see core/verify/codegen_soundness/linear_scan_regalloc.vr"),
+        "kernel_llvm_emission_preserves_semantics" => decision(true, "Vellvm POPL 2012 §4-5 — LLVM IR emission preserves \
                      operational semantics modulo LLVM-internal scheduling; \
                      admitted with framework citation, see \
-                     core/verify/codegen_soundness/llvm_emission.vr"
-                .into(),
-        }),
-        "kernel_machine_code_emission_preserves_semantics" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "CompCertELF Wang-Wilke-Leroy POPL 2020 §6 + Leroy 2009 §6 \
+                     core/verify/codegen_soundness/llvm_emission.vr"),
+        "kernel_machine_code_emission_preserves_semantics" => decision(true, "CompCertELF Wang-Wilke-Leroy POPL 2020 §6 + Leroy 2009 §6 \
                      external-call axiom — machine-code emission boundary \
                      attestation (LLVM-version pinning + ABI conformance); \
                      admitted with framework citation, see \
-                     core/verify/codegen_soundness/machine_code_emission.vr"
-                .into(),
-        }),
+                     core/verify/codegen_soundness/machine_code_emission.vr"),
 
  // -- kernel_v0 rule soundness IOUs (#157 / minimal-CIC kernel).
  //
@@ -630,88 +523,44 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // the dispatcher returns `Decision { holds: true }` to make
  // the bidirectional contract surface in
  // `verum audit --kernel-discharged-axioms`.
-        "kernel_var" | "kernel_var_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_var_sound: variable lookup — bookkeeping rule, no \
+        "kernel_var" | "kernel_var_strict" => decision(true, "kernel_v0/k_var_sound: variable lookup — bookkeeping rule, no \
                      upstream proof obligation. See \
-                     core/verify/kernel_v0/rules/k_var.vr."
-                .into(),
-        }),
-        "kernel_universe_intro" | "kernel_universe_intro_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_univ_sound: universe-introduction soundness — \
+                     core/verify/kernel_v0/rules/k_var.vr."),
+        "kernel_universe_intro" | "kernel_universe_intro_strict" => decision(true, "kernel_v0/k_univ_sound: universe-introduction soundness — \
                      U_n : U_{n+1} cumulative hierarchy. Discharged by \
                      core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
-                     See core/verify/kernel_v0/rules/k_univ.vr."
-                .into(),
-        }),
-        "kernel_forward_axiom" | "kernel_forward_axiom_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_fwax_sound: forward-axiom witness import — relies on \
+                     See core/verify/kernel_v0/rules/k_univ.vr."),
+        "kernel_forward_axiom" | "kernel_forward_axiom_strict" => decision(true, "kernel_v0/k_fwax_sound: forward-axiom witness import — relies on \
                      foreign-system proof of the axiom in its native theory \
                      (Coq/Lean/Isabelle/Agda mathlib). See \
-                     core/verify/kernel_v0/rules/k_fwax.vr."
-                .into(),
-        }),
-        "kernel_positivity" | "kernel_positivity_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_pos_sound: strict-positivity check for inductive \
+                     core/verify/kernel_v0/rules/k_fwax.vr."),
+        "kernel_positivity" | "kernel_positivity_strict" => decision(true, "kernel_v0/k_pos_sound: strict-positivity check for inductive \
                      types — Coquand-Huet 1988. Discharged by per-rule structural \
-                     analysis. See core/verify/kernel_v0/rules/k_pos.vr."
-                .into(),
-        }),
-        "kernel_pi_form" | "kernel_pi_form_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_pi_form_sound: Π-formation rule. Discharged by \
+                     analysis. See core/verify/kernel_v0/rules/k_pos.vr."),
+        "kernel_pi_form" | "kernel_pi_form_strict" => decision(true, "kernel_v0/k_pi_form_sound: Π-formation rule. Discharged by \
                      core.verify.kernel_v0.lemmas.subst.subst_preserves_typing. \
-                     See core/verify/kernel_v0/rules/k_pi_form.vr."
-                .into(),
-        }),
-        "kernel_lam_intro" | "kernel_lam_intro_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_lam_intro_sound: λ-introduction rule. Discharged by \
+                     See core/verify/kernel_v0/rules/k_pi_form.vr."),
+        "kernel_lam_intro" | "kernel_lam_intro_strict" => decision(true, "kernel_v0/k_lam_intro_sound: λ-introduction rule. Discharged by \
                      core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi. \
-                     See core/verify/kernel_v0/rules/k_lam_intro.vr."
-                .into(),
-        }),
-        "kernel_app_elim" | "kernel_app_elim_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_app_elim_sound: application-elimination rule. \
+                     See core/verify/kernel_v0/rules/k_lam_intro.vr."),
+        "kernel_app_elim" | "kernel_app_elim_strict" => decision(true, "kernel_v0/k_app_elim_sound: application-elimination rule. \
                      Discharged by \
                      core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + \
                      core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
-                     See core/verify/kernel_v0/rules/k_app_elim.vr."
-                .into(),
-        }),
-        "kernel_beta" | "kernel_beta_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_beta_sound: β-conversion soundness — (λx.b) a ↝_β \
+                     See core/verify/kernel_v0/rules/k_app_elim.vr."),
+        "kernel_beta" | "kernel_beta_strict" => decision(true, "kernel_v0/k_beta_sound: β-conversion soundness — (λx.b) a ↝_β \
                      b[x:=a] preserves typing. Discharged by \
                      core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
-                     See core/verify/kernel_v0/rules/k_beta.vr."
-                .into(),
-        }),
-        "kernel_eta" | "kernel_eta_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_eta_sound: η-conversion soundness. Discharged by \
+                     See core/verify/kernel_v0/rules/k_beta.vr."),
+        "kernel_eta" | "kernel_eta_strict" => decision(true, "kernel_v0/k_eta_sound: η-conversion soundness. Discharged by \
                      core.verify.kernel_v0.lemmas.eta.function_extensionality. \
-                     See core/verify/kernel_v0/rules/k_eta.vr."
-                .into(),
-        }),
-        "kernel_sub" | "kernel_sub_strict" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/k_sub_sound: subsumption rule. Discharged by \
+                     See core/verify/kernel_v0/rules/k_eta.vr."),
+        "kernel_sub" | "kernel_sub_strict" => decision(true, "kernel_v0/k_sub_sound: subsumption rule. Discharged by \
                      core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
-                     See core/verify/kernel_v0/rules/k_sub.vr."
-                .into(),
-        }),
-        "kernel_soundness_v0" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "kernel_v0/kernel_soundness: master soundness theorem. \
+                     See core/verify/kernel_v0/rules/k_sub.vr."),
+        "kernel_soundness_v0" => decision(true, "kernel_v0/kernel_soundness: master soundness theorem. \
                      Discharged by per-rule case-split over the 10 k_*_sound \
-                     lemmas. See core/verify/kernel_v0/soundness.vr."
-                .into(),
-        }),
+                     lemmas. See core/verify/kernel_v0/soundness.vr."),
 
  // -- Separation-logic surface alignment (#161 V0).
  //
@@ -721,14 +570,10 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // invariant (6-variant HeapPredicate, 4-variant Capability);
  // the dispatcher returns `Decision { holds: true }` so the
  // audit gate counts the alignment as discharged.
-        "kernel_separation_logic_alignment_is_sound" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "core/logic/separation.vr ↔ verum_kernel::separation_logic \
+        "kernel_separation_logic_alignment_is_sound" => decision(true, "core/logic/separation.vr ↔ verum_kernel::separation_logic \
                      structural alignment — CI-pinned via cardinality tests in \
                      verum_kernel::separation_logic::tests. See \
-                     core/verify/separation_soundness/separation_logic_alignment.vr."
-                .into(),
-        }),
+                     core/verify/separation_soundness/separation_logic_alignment.vr."),
 
  // -- Meta-soundness escape hatch (#158 V0 — Gödel 2nd workaround).
  //
@@ -762,9 +607,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // `kernel_self_soundness_in_meta_universe`) under the hood.
         "kernel_reflection_tower_base" => {
             let d = crate::reflection_tower::discharge_at_universe_index(0);
-            Some(IntrinsicValue::Decision {
-                holds: d.holds,
-                reason: format!(
+            decision(d.holds, format!(
                     "reflection-tower REF^0 (base footprint) — {}; \
                      witness({}): a_m_cls={}, b_pi_inf_inf+1={}, \
                      b_universe_ascent={}.  See \
@@ -775,17 +618,14 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                     d.witness.a_m_cls_is_meta_cls_holds,
                     d.witness.b_pi_inf_inf_plus_1_equivalent,
                     d.witness.b_universe_ascent_with_theory_idempotence,
-                ),
-            })
+                ))
         }
         "kernel_reflection_tower_stable" => {
  // REF^≥1 — theory-level idempotence (MSFS Theorem 9.6(b)).
  // Constructively discharge at k=1; per Theorem 9.6, every
  // k ≥ 1 yields the same theory.
             let d = crate::reflection_tower::discharge_at_universe_index(1);
-            Some(IntrinsicValue::Decision {
-                holds: d.holds,
-                reason: format!(
+            decision(d.holds, format!(
                     "reflection-tower REF^≥1 (MSFS Theorem 9.6(b) — theory-level \
                      idempotence under universe-ascent) — {}; constructive \
                      dispatch through kernel_truncate_to_level={} + \
@@ -795,8 +635,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                     if d.holds { "discharged" } else { "FAILED to discharge" },
                     d.truncate_to_level_holds,
                     d.straightening_equivalence_holds,
-                ),
-            })
+                ))
         }
         "kernel_reflection_tower_omega_bounded" => {
             let report = crate::reflection_tower::build_tower_report();
@@ -805,9 +644,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 .iter()
                 .find(|v| v.stage_tag == "ref_omega_bounded");
             let holds = omega.map(|v| v.discharges).unwrap_or(false);
-            Some(IntrinsicValue::Decision {
-                holds,
-                reason: format!(
+            decision(holds, format!(
                     "reflection-tower REF^ω (MSFS Theorem 8.2 — reflective \
                      tower bounded by Con(S) + κ_inacc, exactly ONE extra \
                      strongly-inaccessible) — {}; max_inaccessible_required={} \
@@ -815,8 +652,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                      theorems/msfs/08_bypass_paths/theorems_8_1_to_8_8.vr.",
                     if holds { "discharged" } else { "FAILED to discharge" },
                     report.max_inaccessible_required,
-                ),
-            })
+                ))
         }
         "kernel_reflection_tower_absolute_boundary" => {
  // REF^Abs — MSFS Theorem 5.1 (AFN-T α): 𝓛_Abs = ∅.
@@ -825,9 +661,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
  // absoluteness). The kernel never instantiates an
  // absolute-foundation candidate.
             let holds = crate::reflection_tower::absolute_boundary_empty_discharges();
-            Some(IntrinsicValue::Decision {
-                holds,
-                reason: format!(
+            decision(holds, format!(
                     "reflection-tower REF^Abs (MSFS Theorem 5.1 — AFN-T α \
                      Boundary Lemma: 𝓛_Abs = ∅, the absolute foundation \
                      stratum is empty) — {}; uniformly closed across all \
@@ -835,8 +669,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                      absoluteness, MSFS §11). Machine-verified at \
                      MSFS corpus theorems/msfs/05_afnt_alpha/theorem_5_1.vr.",
                     if holds { "discharged" } else { "FAILED to discharge" },
-                ),
-            })
+                ))
         }
 
  // ATS-V architectural-type discharge intrinsics — .
@@ -851,147 +684,83 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         // structured Shape/Context arguments lands when the ATS-V
         // phase is implemented (the registry surface establishes the
         // dispatch endpoint independently of phase wiring).
-        "kernel_arch_capability_discipline" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V capability discipline — composes AP-001 CapabilityEscalation \
+        "kernel_arch_capability_discipline" => decision(true, "ATS-V capability discipline — composes AP-001 CapabilityEscalation \
                      (cog uses an undeclared capability) and AP-002 CapabilityLeak \
                      (linear/affine capability escapes its declared scope). \
-                     Implementation: crates/verum_kernel/src/arch_anti_pattern.rs."
-                .into(),
-        }),
-        "kernel_arch_boundary_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V boundary type check — verifies messages crossing a boundary \
+                     Implementation: crates/verum_kernel/src/arch_anti_pattern.rs."),
+        "kernel_arch_boundary_check" => decision(true, "ATS-V boundary type check — verifies messages crossing a boundary \
                      conform to declared messages_in/messages_out, capability handoffs \
                      match capability_handoff, and BoundaryInvariants hold. Detects \
                      AP-012 InvariantViolation, AP-013 DanglingMessageType, AP-014 \
-                     UnauthenticatedCrossing."
-                .into(),
-        }),
-        "kernel_arch_composition_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V composition algebra check — A ⊗ B is well-formed iff \
+                     UnauthenticatedCrossing."),
+        "kernel_arch_composition_check" => decision(true, "ATS-V composition algebra check — A ⊗ B is well-formed iff \
                      capability flow is valid (B.requires ⊆ A.exposes), foundations \
                      compatible, tiers compatible, both strata admissible, composition \
                      graph acyclic. Composition is associative + decidable. Detects \
-                     AP-003 DependencyCycle, AP-004 TierMixing, AP-005 FoundationDrift."
-                .into(),
-        }),
-        "kernel_arch_lifecycle_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V lifecycle integrity check — AP-009 LifecycleRegression. A \
+                     AP-003 DependencyCycle, AP-004 TierMixing, AP-005 FoundationDrift."),
+        "kernel_arch_lifecycle_check" => decision(true, "ATS-V lifecycle integrity check — AP-009 LifecycleRegression. A \
                      higher-rank cog (Theorem) citing a strictly-lower-rank one \
                      (Hypothesis, Interpretation, Retracted) is a defect. The check is \
-                     transitive (AP-024 catches multi-hop chains)."
-                .into(),
-        }),
-        "kernel_arch_foundation_consistency" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V foundation consistency check — AP-005 FoundationDrift. \
+                     transitive (AP-024 catches multi-hop chains)."),
+        "kernel_arch_foundation_consistency" => decision(true, "ATS-V foundation consistency check — AP-005 FoundationDrift. \
                      Composing two cogs whose foundations differ without an explicit \
                      functor-bridge is a defect. Canonical inclusions (no bridge \
-                     required): Mltt → Cic, Hott → Cubical."
-                .into(),
-        }),
-        "kernel_arch_anti_pattern_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V anti-pattern catalog check — walks the full canonical \
+                     required): Mltt → Cic, Hott → Cubical."),
+        "kernel_arch_anti_pattern_check" => decision(true, "ATS-V anti-pattern catalog check — walks the full canonical \
                      32-pattern roster (ATS-V-AP-001..032) over a Shape and aggregates \
                      structured violations. Each violation surfaces \
                      VerificationVerdict::Rejected with the stable RFC code in the \
-                     diagnostic metadata."
-                .into(),
-        }),
-        "kernel_arch_cve_closure" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V CVE-closure check — AP-010 CveIncomplete. Each public \
+                     diagnostic metadata."),
+        "kernel_arch_cve_closure" => decision(true, "ATS-V CVE-closure check — AP-010 CveIncomplete. Each public \
                      artefact in strict mode must declare all three CVE axes: \
                      Constructive witness, Verifiable strategy (from the @verify \
                      ladder), Executable artefact. Missing any axis with strict=true \
-                     raises this pattern."
-                .into(),
-        }),
-        "kernel_arch_soundness_v0" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V end-to-end soundness witness — composes the 7 base \
+                     raises this pattern."),
+        "kernel_arch_soundness_v0" => decision(true, "ATS-V end-to-end soundness witness — composes the 7 base \
                      dispatch intrinsics into a single discharge. Soundness statement: \
                      when `verum check` accepts a cog, capability discipline, \
                      composition correctness, foundation consistency, CVE closure, \
                      lifecycle integrity, and absence of the 32 canonical anti-patterns \
-                     all hold simultaneously."
-                .into(),
-        }),
+                     all hold simultaneously."),
         // ATS-V architectural-type discharge intrinsics — Verum-side
         // core/architecture/ kernel-discharge surface for the
         // Modal-Temporal Architectural Calculus (mtac), counterfactual
         // engine, adjunction analyzer, and Yoneda-equivalence checker.
-        "kernel_arch_mtac_calculus" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V MTAC primitives (TimePoint / Decision / Observer / \
+        "kernel_arch_mtac_calculus" => decision(true, "ATS-V MTAC primitives (TimePoint / Decision / Observer / \
                      ModalAssertion / ArchProposition / ArchEvolution / \
                      CounterfactualPair / AdjunctionWitness). Adds 6 modal-temporal \
                      anti-patterns AP-027..032. See \
-                     crates/verum_kernel/src/arch_mtac.rs."
-                .into(),
-        }),
-        "kernel_arch_counterfactual_engine" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V counterfactual reasoning engine — non-destructive evaluation \
+                     crates/verum_kernel/src/arch_mtac.rs."),
+        "kernel_arch_counterfactual_engine" => decision(true, "ATS-V counterfactual reasoning engine — non-destructive evaluation \
                      of CounterfactualPair against base/alt Shapes; 4-arm InvariantStatus \
                      soundness contract (HoldsBoth / HoldsBaseOnly / HoldsAltOnly / \
                      HoldsNeither). Empty stability invariants → unstable. See \
-                     crates/verum_kernel/src/arch_counterfactual.rs."
-                .into(),
-        }),
-        "kernel_arch_adjunction_analyzer" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V adjunction analyzer — refactoring as adjoint pair (F, G) per \
+                     crates/verum_kernel/src/arch_counterfactual.rs."),
+        "kernel_arch_adjunction_analyzer" => decision(true, "ATS-V adjunction analyzer — refactoring as adjoint pair (F, G) per \
                      spec §20.6. 4 canonical adjunctions (Inline⊣Extract / \
                      Specialise⊣Generalise / Decompose⊣Compose / Strengthen⊣Weaken). \
-                     See crates/verum_kernel/src/arch_adjunction.rs."
-                .into(),
-        }),
-        "kernel_arch_yoneda_equivalence" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V Yoneda-equivalence checker — two architectures are equivalent \
+                     See crates/verum_kernel/src/arch_adjunction.rs."),
+        "kernel_arch_yoneda_equivalence" => decision(true, "ATS-V Yoneda-equivalence checker — two architectures are equivalent \
                      iff every canonical Observer (EndUser / PeerCog / Stakeholder / \
                      Auditor / Adversary) projects the same observation. See \
-                     crates/verum_kernel/src/arch_yoneda.rs."
-                .into(),
-        }),
+                     crates/verum_kernel/src/arch_yoneda.rs."),
 
         // ----- Composition / corpus / phase / parse engine surface -----
-        "kernel_arch_composition_engine" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V composition algebra — A ⊗ B is well-formed iff capability flow \
+        "kernel_arch_composition_engine" => decision(true, "ATS-V composition algebra — A ⊗ B is well-formed iff capability flow \
                      is valid (B.requires ⊆ A.exposes), foundations compatible (equality \
                      or canonical inclusion), tiers compatible, both strata admissible, \
                      and the composition graph stays acyclic. Composition is associative \
-                     and decidable. See crates/verum_kernel/src/arch_composition.rs."
-                .into(),
-        }),
-        "kernel_arch_composition_associative" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V composition associativity — (A ⊗ B) ⊗ C ≡ A ⊗ (B ⊗ C) \
+                     and decidable. See crates/verum_kernel/src/arch_composition.rs."),
+        "kernel_arch_composition_associative" => decision(true, "ATS-V composition associativity — (A ⊗ B) ⊗ C ≡ A ⊗ (B ⊗ C) \
                      whenever the triple is pairwise compatible. Witness: kernel \
-                     proptest harness in crates/verum_kernel/src/arch_composition.rs."
-                .into(),
-        }),
-        "kernel_arch_corpus_verify" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V corpus-level invariants — four baseline cross-cog checks: \
+                     proptest harness in crates/verum_kernel/src/arch_composition.rs."),
+        "kernel_arch_corpus_verify" => decision(true, "ATS-V corpus-level invariants — four baseline cross-cog checks: \
                      NoCircularDependencies, FoundationConsistency, NoLAbsClaim, \
-                     CapabilityClosure. See crates/verum_kernel/src/arch_corpus.rs."
-                .into(),
-        }),
-        "kernel_arch_phase_orchestrator" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V phase orchestrator — Phase 6.5 driver, walks every module \
+                     CapabilityClosure. See crates/verum_kernel/src/arch_corpus.rs."),
+        "kernel_arch_phase_orchestrator" => decision(true, "ATS-V phase orchestrator — Phase 6.5 driver, walks every module \
                      (no early exit), parses @arch_module(...) attributes, runs the \
                      full 32-anti-pattern catalog, aggregates violations into \
-                     ArchPhaseReport. See crates/verum_kernel/src/arch_phase.rs."
-                .into(),
-        }),
+                     ArchPhaseReport. See crates/verum_kernel/src/arch_phase.rs."),
 
         // ----- Red-team closure axioms (AT-1..AT-5) -----
         //
@@ -1010,35 +779,19 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         // functions consume.  Callers never invoke the dispatcher
         // with a Shape; they invoke it with the intrinsic name to
         // assert the bridge exists.
-        "kernel_arch_capability_ontology_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V capability-ontology completeness check — closes attack-vector \
+        "kernel_arch_capability_ontology_check" => decision(true, "ATS-V capability-ontology completeness check — closes attack-vector \
                      AT-1.  Registry-attestation surface: actual per-Shape check runs \
                      through arch_phase::run_arch_phase_one_with (see \
-                     check_capability_ontology_v in arch_anti_pattern.rs)."
-                .into(),
-        }),
-        "kernel_arch_yoneda_canonical_roster_complete" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V Yoneda canonical-roster completeness — closes attack-vector \
+                     check_capability_ontology_v in arch_anti_pattern.rs)."),
+        "kernel_arch_yoneda_canonical_roster_complete" => decision(true, "ATS-V Yoneda canonical-roster completeness — closes attack-vector \
                      AT-3.  Registry-attestation surface; actual per-Shape check is \
-                     check_yoneda_canonical_roster_complete_v in arch_anti_pattern.rs."
-                .into(),
-        }),
-        "kernel_arch_theorem_cve_required" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V theorem-CVE coupling — closes attack-vector AT-2.  \
+                     check_yoneda_canonical_roster_complete_v in arch_anti_pattern.rs."),
+        "kernel_arch_theorem_cve_required" => decision(true, "ATS-V theorem-CVE coupling — closes attack-vector AT-2.  \
                      Registry-attestation surface; actual per-Shape check is \
-                     check_theorem_cve_required_v in arch_anti_pattern.rs."
-                .into(),
-        }),
-        "kernel_arch_consumes_format_check" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "ATS-V consumes-format validation — closes attack-vector AT-5.  \
+                     check_theorem_cve_required_v in arch_anti_pattern.rs."),
+        "kernel_arch_consumes_format_check" => decision(true, "ATS-V consumes-format validation — closes attack-vector AT-5.  \
                      Registry-attestation surface; actual per-Shape check is \
-                     check_consumes_format_v in arch_anti_pattern.rs."
-                .into(),
-        }),
+                     check_consumes_format_v in arch_anti_pattern.rs."),
 
         _ => None,
     }
