@@ -1047,9 +1047,9 @@ mod tests {
         assert!(!ptr.is_null(), "register {} expected to hold a heap pointer", reg.0);
         let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
         let type_id = header.type_id.0;
-        let data_start = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
-        let tag = unsafe { *(data_start as *const u32) };
-        let field_count = unsafe { *((data_start as *const u32).add(1)) };
+        // SAFETY: ptr non-null (asserted above) and points to a live
+        // variant heap object built via `emit_maybe` / canonical helpers.
+        let (tag, field_count) = unsafe { heap::variant_header_pair(ptr) };
         (tag, field_count, type_id)
     }
 

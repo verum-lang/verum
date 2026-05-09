@@ -496,9 +496,11 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let is_variant_b = verum_common::layout::is_synthetic_variant_type_id(type_id_b)
             || is_typed_sum_variant(state, type_id_b);
         if is_variant_a && is_variant_b {
-            // Both are variants - compare tags first
-            let tag_a = unsafe { *(ptr_a.add(OBJECT_HEADER_SIZE) as *const u32) };
-            let tag_b = unsafe { *(ptr_b.add(OBJECT_HEADER_SIZE) as *const u32) };
+            // Both are variants - compare tags first.  SAFETY: the
+            // synthetic-id check above already established both
+            // pointers reference live variant heap objects.
+            let tag_a = unsafe { heap::variant_tag(ptr_a) };
+            let tag_b = unsafe { heap::variant_tag(ptr_b) };
 
             if tag_a != tag_b {
                 return false; // Different variant tags

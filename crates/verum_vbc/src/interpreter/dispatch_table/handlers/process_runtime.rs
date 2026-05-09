@@ -299,9 +299,10 @@ fn read_variant_payload(v: Value) -> Option<(u32, *const Value)> {
     if ptr.is_null() {
         return None;
     }
-    let tag_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32 };
-    let tag = unsafe { *tag_ptr };
-    let payload_base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
+    // SAFETY: pointer non-null and caller already verified the value
+    // is a Maybe<Text> via type checks above.
+    let tag = unsafe { heap::variant_tag(ptr) };
+    let payload_base = unsafe { heap::variant_payload_ptr(ptr, 0) };
     Some((tag, payload_base))
 }
 

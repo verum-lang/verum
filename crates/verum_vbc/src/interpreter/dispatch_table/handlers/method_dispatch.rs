@@ -1757,33 +1757,6 @@ pub(in super::super) fn handle_call_method(
     } else {
         "<unknown-tag>"
     };
-    if std::env::var("VERUM_DBG_DISPATCH").is_ok() {
-        eprintln!(
-            "[DBG] method '{}' bare='{}' suffix='{}' qualified={} on receiver kind {}",
-            method_name, bare_method_name, method_suffix, is_already_qualified, receiver_kind
-        );
-        if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
-            let ptr = dispatch_receiver.as_ptr::<u8>();
-            if !ptr.is_null() {
-                let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-                eprintln!("[DBG] receiver type_id={}", header.type_id.0);
-            }
-        }
-        let mut hits: Vec<String> = Vec::new();
-        for func in &state.module.functions {
-            let n = state.module.strings.get(func.name).unwrap_or("");
-            if n.contains(bare_method_name.as_str()) {
-                hits.push(format!(
-                    "{} (id={}, params={}, parent={:?})",
-                    n,
-                    func.id.0,
-                    func.params.len(),
-                    func.parent_type
-                ));
-            }
-        }
-        eprintln!("[DBG] candidates: {:#?}", hits);
-    }
     Err(InterpreterError::Panic {
         message: format!(
             "method '{}' not found on receiver of runtime kind `{}`. \
@@ -6200,11 +6173,13 @@ pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
     if ptr.is_null() {
         return None;
     }
-    let tag = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32) };
+    // SAFETY: pointer non-null and points to a live variant heap object
+    // (caller checked `is_ptr` and the synthetic-id range above).
+    let tag = unsafe { heap::variant_tag(ptr) };
     if tag == 0 {
         return None;
     }
-    let payload = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value) };
+    let payload = unsafe { heap::variant_payload(ptr, 0) };
     Some(payload)
 }
 
@@ -6331,10 +6306,11 @@ pub(super) fn dispatch_variant_method(
         return Ok(None); // Not a variant object
     }
 
-    // Read tag and field_count from the data section
-    let data_start = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) };
-    let tag = unsafe { *(data_start as *const u32) };
-    let field_count = unsafe { *((data_start as *const u32).add(1)) };
+    // Read tag and field_count from the data section. SAFETY: the
+    // synthetic-id range guard above already established that
+    // `base_ptr` references a live variant heap object.
+    let (tag, field_count_u32) = unsafe { heap::variant_header_pair(base_ptr) };
+    let field_count = field_count_u32 as usize;
 
     match method {
         // Variant layout emitted by `MakeVariant` — tag encodes variant index
@@ -6384,9 +6360,7 @@ pub(super) fn dispatch_variant_method(
             if is_result {
                 // Result semantics: tag 0 = Ok, tag != 0 = Err.
                 if tag == 0 && field_count > 0 {
-                    let payload_ptr =
-                        unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-                    Ok(Some(unsafe { *payload_ptr }))
+                    Ok(Some(unsafe { heap::variant_payload(base_ptr, 0) }))
                 } else {
                     Err(InterpreterError::Panic {
                         message: format!("called `{}` on an Err value", method),
@@ -6395,9 +6369,7 @@ pub(super) fn dispatch_variant_method(
             } else if is_maybe {
                 // Maybe semantics: payload extraction iff fc > 0.
                 if field_count > 0 {
-                    let payload_ptr =
-                        unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-                    Ok(Some(unsafe { *payload_ptr }))
+                    Ok(Some(unsafe { heap::variant_payload(base_ptr, 0) }))
                 } else {
                     Err(InterpreterError::Panic {
                         message: format!("called `{}` on a None value", method),
@@ -6405,9 +6377,7 @@ pub(super) fn dispatch_variant_method(
                 }
             } else if field_count > 0 {
                 // Bare-name dispatch (no type prefix). Historic behaviour.
-                let payload_ptr =
-                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-                Ok(Some(unsafe { *payload_ptr }))
+                Ok(Some(unsafe { heap::variant_payload(base_ptr, 0) }))
             } else {
                 Err(InterpreterError::Panic {
                     message: format!("called `{}` on a None value", method),
@@ -6418,9 +6388,7 @@ pub(super) fn dispatch_variant_method(
         // payload if present (tag != 0), panics on Ok.
         "unwrap_err" => {
             if tag != 0 && field_count > 0 {
-                let payload_ptr =
-                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-                Ok(Some(unsafe { *payload_ptr }))
+                Ok(Some(unsafe { heap::variant_payload(base_ptr, 0) }))
             } else {
                 Err(InterpreterError::Panic {
                     message: "called `unwrap_err` on an Ok value".to_string(),
@@ -6431,9 +6399,7 @@ pub(super) fn dispatch_variant_method(
         // Mirrors `unwrap`'s `fc > 0` convention (see comment above).
         "unwrap_or" => {
             if field_count > 0 {
-                let payload_ptr =
-                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-                Ok(Some(unsafe { *payload_ptr }))
+                Ok(Some(unsafe { heap::variant_payload(base_ptr, 0) }))
             } else if args.count > 0 {
                 let caller_base = state.reg_base();
                 let default_val = state.registers.get(caller_base, Reg(args.start.0));
@@ -6452,11 +6418,16 @@ pub(super) fn dispatch_variant_method(
             let original = receiver;
             if field_count > 0 {
                 // Mutate in place: clear tag and field_count to turn this
-                // variant into the None/unit shape.
+                // variant into the None/unit shape.  SAFETY: `base_ptr`
+                // refers to a live variant heap object (synthetic-id
+                // guard at the function entry); the helper writes 8
+                // bytes at the data section start.
                 unsafe {
-                    let tag_ptr = base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut u32;
-                    *tag_ptr = 0;
-                    *tag_ptr.add(1) = 0;
+                    heap::write_variant_data_header(
+                        (base_ptr as *mut u8).add(heap::OBJECT_HEADER_SIZE),
+                        0,
+                        0,
+                    );
                 }
             }
             Ok(Some(original))
@@ -6556,8 +6527,7 @@ pub(super) fn dispatch_variant_method(
                 // Defensive fall-through: malformed variant data.
                 return Ok(None);
             }
-            let payload_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
-            let payload = unsafe { *payload_ptr };
+            let payload = unsafe { heap::variant_payload(base_ptr, 0) };
 
             // Invoke the closure synchronously with the payload.
             let result_val = call_closure_sync(state, closure_val, &[payload])?;
@@ -7511,16 +7481,14 @@ pub(super) fn alloc_variant_with_payload(
     let data_size = 8 + std::mem::size_of::<Value>();
     let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = tag;
-            *tag_ptr.add(1) = 1; // field_count = 1
-        }
+        // SAFETY: data is the variant data section (16 bytes total —
+        // 8-byte (tag, fc) header + 8-byte payload). The helper
+        // writes exactly 8 bytes at the start of `data`.
+        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, 1) };
     })?;
     unsafe {
         let base = obj.as_ptr() as *mut u8;
-        let payload_ptr = base.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
-        std::ptr::write(payload_ptr, payload);
+        std::ptr::write(heap::variant_payload_ptr_mut(base, 0), payload);
     }
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
@@ -7540,11 +7508,10 @@ pub(super) fn alloc_unit_variant(
     let data_size = 8;
     let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = tag;
-            *tag_ptr.add(1) = 0; // field_count = 0
-        }
+        // SAFETY: data is the 8-byte variant data section
+        // (tag + field_count, no payload). The helper writes
+        // exactly 8 bytes starting at `data`.
+        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, 0) };
     })?;
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))

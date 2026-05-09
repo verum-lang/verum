@@ -303,11 +303,9 @@ pub(in super::super) fn alloc_variant_into_with_type_id(
 ) -> InterpreterResult<()> {
     let data_size = 8 + (field_count as usize) * std::mem::size_of::<Value>();
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = tag;
-            *tag_ptr.add(1) = field_count;
-        }
+        // SAFETY: data section is exactly `8 + field_count * sizeof::<Value>()`
+        // bytes (allocated above); the helper writes the leading 8 bytes.
+        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, field_count) };
     })?;
     state.record_allocation();
 

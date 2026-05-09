@@ -545,19 +545,19 @@ impl Interpreter {
         let data_size = 8 + payload.len() * std::mem::size_of::<Value>();
         let type_id = crate::types::TypeId(verum_common::layout::synthetic_variant_type_id(tag));
         let obj = self.state.heap.alloc_with_init(type_id, data_size, |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = tag;
-                *tag_ptr.add(1) = field_count;
-            }
+            // SAFETY: `data` is `data_size` bytes; helper writes the
+            // leading 8 (the (tag, field_count) header).
+            unsafe { heap::write_variant_data_header(data.as_mut_ptr(), tag, field_count) };
         })?;
         self.state.record_allocation();
-        // Payload starts at data_ptr() + 8 (after 4-byte tag + 4-byte field_count).
-        let payload_base = unsafe { obj.data_ptr().add(8) as *mut Value };
+        // Write each payload value into its canonical slot. SAFETY:
+        // `obj.as_ptr()` points to the live heap object we just
+        // allocated; payload index < `field_count` by `i < payload.len()`.
+        let base_ptr = obj.as_ptr() as *mut u8;
         for (i, v) in payload.iter().enumerate() {
-            unsafe { *payload_base.add(i) = *v; }
+            unsafe { *heap::variant_payload_ptr_mut(base_ptr, i) = *v; }
         }
-        Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+        Ok(Value::from_ptr(base_ptr))
     }
 
     /// Allocate a `List<T>` from a slice of already-resolved VBC Values.
