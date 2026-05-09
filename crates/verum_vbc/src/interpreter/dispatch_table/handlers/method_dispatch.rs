@@ -34,7 +34,11 @@ use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable};
 use super::debug::format_value_for_print;
 
 // Import helper functions that remain in dispatch_table/mod.rs
-use super::super::{deep_value_eq, dispatch_loop_table_with_entry_depth, value_eq, value_hash};
+use super::super::{
+    alloc_list_from_values, call_closure_sync, deep_value_eq,
+    dispatch_loop_table_with_entry_depth, get_array_element, get_array_length, value_eq,
+    value_hash,
+};
 
 // ── Iterator type constants ──
 const ITER_TYPE_LIST: i64 = 0;
@@ -6057,112 +6061,30 @@ pub(super) fn dispatch_primitive_method(
     Ok(None)
 }
 
-/// Get the length of an array (Value array or List).
-pub(super) fn get_array_length(
-    ptr: *const u8,
-    header: &heap::ObjectHeader,
-) -> InterpreterResult<usize> {
-    if header.type_id.is_list_like() {
-        // LIST and BYTE_LIST share the 3-Value-header shape; len is
-        // at slot 0 of the header data regardless of the backing
-        // element stride.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        Ok(unsafe { (*data_ptr).as_i64() } as usize)
-    } else {
-        Ok(header.size as usize / std::mem::size_of::<Value>())
-    }
-}
-
-/// Get element at index from an array (Value array, List, or BYTE_LIST).
-pub(super) fn get_array_element(
-    ptr: *const u8,
-    header: &heap::ObjectHeader,
-    index: usize,
-) -> InterpreterResult<Value> {
-    if header.type_id == TypeId::LIST {
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        let elem_offset = index * std::mem::size_of::<Value>();
-        let elem_ptr =
-            unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
-        Ok(unsafe { *elem_ptr })
-    } else if header.type_id == TypeId::BYTE_LIST {
-        // Packed-byte backing: read 1 byte at index, zero-extend
-        // into a NaN-boxed Value.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-        let elem_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index) };
-        Ok(Value::from_i64(unsafe { *elem_ptr } as i64))
-    } else {
-        let elem_offset = index * std::mem::size_of::<Value>();
-        let elem_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
-        Ok(unsafe { *elem_ptr })
-    }
-}
-
-/// Call a closure synchronously, returning its result.
-/// Sets up a call frame for the closure and runs a nested dispatch loop.
-pub(crate) fn call_closure_sync(
-    state: &mut InterpreterState,
-    closure_val: Value,
-    args: &[Value],
-) -> InterpreterResult<Value> {
-    if !closure_val.is_ptr() || closure_val.is_nil() {
-        return Err(InterpreterError::TypeMismatch {
-            expected: "closure",
-            got: "non-pointer",
-            operation: "call_closure_sync",
-        });
-    }
-
-    let base_ptr = closure_val.as_ptr::<u8>();
-    let header_offset = heap::OBJECT_HEADER_SIZE;
-
-    let (func_id, capture_count) = unsafe {
-        let func_id = *(base_ptr.add(header_offset) as *const u32);
-        let capture_count = *(base_ptr.add(header_offset + 4) as *const u32);
-        (FunctionId(func_id), capture_count as usize)
-    };
-
-    let func = state
-        .module
-        .get_function(func_id)
-        .ok_or({ InterpreterError::FunctionNotFound(func_id) })?;
-
-    let reg_count = func.register_count;
-    let return_pc = state.pc();
-    let entry_depth = state.call_stack.depth();
-
-    // Use Reg(0) as a dummy dst — the return value comes from dispatch_loop_table_with_entry_depth
-    let new_base = state
-        .call_stack
-        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state.registers.push_frame(reg_count);
-
-    // Copy captured values (registers [0..capture_count))
-    unsafe {
-        let captures_offset = header_offset + 8;
-        for i in 0..capture_count {
-            let cap_ptr =
-                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
-            state
-                .registers
-                .set(new_base, Reg(i as u16), std::ptr::read(cap_ptr));
-        }
-    }
-
-    // Copy arguments (registers [capture_count..capture_count+args.len()))
-    for (i, val) in args.iter().enumerate() {
-        state
-            .registers
-            .set(new_base, Reg((capture_count + i) as u16), *val);
-    }
-
-    state.set_pc(0);
-
-    // Run nested dispatch loop — returns when the closure returns
-    dispatch_loop_table_with_entry_depth(state, entry_depth)
-}
+// `get_array_length` / `get_array_element` / `call_closure_sync`
+// formerly each had a parallel local definition here that diverged
+// from the canonical `super::super::` versions:
+//
+//   * `get_array_element` lacked the `checked_mul` overflow guard —
+//     adversarial bytecode supplying `index = usize::MAX / 4` or
+//     similar would wrap the offset and dereference a wild
+//     pointer. The canonical version returns
+//     `InterpreterError::IntegerOverflow` instead.
+//
+//   * `get_array_length` already used `is_list_like` for the
+//     LIST/BYTE_LIST family, but `get_array_element` had a separate
+//     LIST/BYTE_LIST branch that the canonical version absorbs into
+//     a single switch.
+//
+//   * `call_closure_sync` used the panic-on-overflow `push_frame`
+//     for the register file; the canonical version uses
+//     `try_push_frame` and surfaces `StackOverflow` as a typed
+//     error so adversarial closures with deep recursion don't
+//     abort the interpreter.
+//
+// All three are now imported from `super::super::` (the canonical
+// definitions in `dispatch_table/mod.rs`) — same drift-collapse
+// pattern as the `deep_value_eq` consolidation in commit 91672599e.
 
 /// Execute a function by FunctionId synchronously, returning its result.
 ///
@@ -6212,41 +6134,11 @@ pub(super) fn call_function_sync(
     dispatch_loop_table_with_entry_depth(state, entry_depth)
 }
 
-/// Allocate a new List from a Vec of Values, returning a pointer Value.
-pub(crate) fn alloc_list_from_values(
-    state: &mut InterpreterState,
-    values: Vec<Value>,
-) -> InterpreterResult<Value> {
-    let len = values.len();
-    let cap = len.max(1); // at least 1 to avoid zero-size backing
-
-    // Allocate List header: [len, cap, backing_ptr]
-    let obj = state
-        .heap
-        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-
-    // Allocate backing array
-    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
-    state.record_allocation();
-
-    // Write elements to backing
-    let backing_data =
-        unsafe { (backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, val) in values.into_iter().enumerate() {
-        unsafe { *backing_data.add(i) = val };
-    }
-
-    // Initialize List header
-    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    unsafe {
-        *data_ptr = Value::from_i64(len as i64); // len
-        *data_ptr.add(1) = Value::from_i64(cap as i64); // cap
-        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8); // backing_ptr
-    }
-
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
+// `alloc_list_from_values` formerly had a parallel local definition
+// here that was bit-identical to `super::super::alloc_list_from_values`
+// in `dispatch_table/mod.rs`. Now imported from `super::super::` so
+// any future hardening (e.g. cap > MAX_ALLOC guard, NUMA-aware
+// backing alloc) lands once and applies to every caller.
 
 /// Build a new Set from a Vec of unique (or to-be-deduplicated) values.
 /// Layout is the builtin Set shape `[count, capacity, entries_ptr]` with
