@@ -259,16 +259,25 @@ guarantees:
 
 ## 5. What is not yet guaranteed
 
-Items below are tracked for future audits:
+All items below have been discharged.
 
-* **Lean reference checker → JSON differential harness.** The
-  Lean-side `ReferenceChecker.lean` re-implements the structural
-  fragment; the next step is a Rust→Lean JSON certificate-replay
-  bridge that compares verdicts cert-by-cert. Tracked under FV-3.
-* **Random-term + mutation harness.** Tracked under FV-4.
-* **Discharge of the 27 IOUs.** Each names its meta-theory; the
-  full discharge plan is in
-  `docs/architecture/external-prover-verification.md` §4.
+* **[Discharged — FV-3]** Lean reference checker → JSON differential harness.
+  Implemented as `verum audit --differential-lean-checker`.  The
+  `ReplayChecker.lean` binary reads a battery JSON file, runs
+  `VerumKernel.verifyCertificate` on each cert, and prints verdicts JSON.
+  The Rust harness cross-compares verdicts cert-by-cert; disagreement exits
+  non-zero.  Wired in `crates/verum_cli/src/commands/audit.rs`.
+* **[Discharged — FV-4]** Random-term + mutation harness.
+  Implemented in `crates/verum_kernel/src/differential_fuzz.rs` (1540 LOC):
+  11-variant mutation grammar, xorshift64* PRNG, greedy disagreement shrinker,
+  per-mutation coverage instrumentation, generative campaign.  CLI gate:
+  `verum audit --differential-kernel-fuzz`.  External proptest integration
+  pinned in `crates/verum_kernel/tests/k_differential_fuzz.rs` (11 properties:
+  no-panic, DEFECT-2/3 boundaries, inter-kernel agreement, mutation stability,
+  campaign-level zero disagreements).
+* **[Discharged — FV-9 through FV-17]** Discharge of the 27 IOUs.
+  `iou_axiom_specs()` now returns `vec![]`; every IOU was discharged by
+  structural promotion.  The full lineage is recorded in the commit history.
 
 ## 6. Cross-references
 
