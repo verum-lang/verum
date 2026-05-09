@@ -717,7 +717,7 @@ impl TypeChecker {
     ///
 
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Glob Imports
-    fn import_all_from_inline_module(&mut self, module_name: &str) -> Result<()> {
+    pub(crate) fn import_all_from_inline_module(&mut self, module_name: &str) -> Result<()> {
         // Cycle guard: matches `import_all_from_module`. Prevents unbounded
         // recursion when an inline module's glob expansion re-enters itself
         // via transitive re-exports.
@@ -5108,7 +5108,7 @@ impl TypeChecker {
 
     /// Relies on RUST_MIN_STACK=16MB for stack safety when following
     /// deep re-export chains.
-    fn find_type_declaration_with_source_module(
+    pub(crate) fn find_type_declaration_with_source_module(
         &self,
         ast: &verum_ast::Module,
         type_name: &str,
@@ -7261,7 +7261,7 @@ impl TypeChecker {
         }
     }
 
-    fn import_all_from_module(
+    pub(crate) fn import_all_from_module(
         &mut self,
         module_path: &Text,
         registry: &verum_modules::ModuleRegistry,

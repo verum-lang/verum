@@ -1,3 +1,10 @@
+// Re-export items from crate::infer so nested test mods can find them via `use super::X`
+#[cfg(test)]
+pub(super) use super::{
+    TypeChecker, extract_quantity_from_attrs, read_param_classification,
+    has_declassify_attr_on_function,
+};
+
 #[cfg(test)]
 mod qtt_v2_enforcement_tests {
     //! QTT V2 enforcement pass tests. Validates the
