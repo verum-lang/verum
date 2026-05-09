@@ -52,33 +52,98 @@ use crate::types::TypeId;
 /// Base NaN bits for tagged values.
 /// We use a quiet NaN: 0x7FF8 (exponent=0x7FF, quiet bit set at position 51).
 /// Tag goes into bits 48-50 (3 bits), payload in bits 0-47.
-const NAN_BITS: u64 = 0x7FF8_0000_0000_0000;
+pub use nanbox::{NAN_BITS, PAYLOAD_MASK, TAG_MASK, TAG_SHIFT};
 
-/// Mask to extract the tag (bits 48-50, 3 bits for 8 tags).
-/// We deliberately avoid bit 51 which is the quiet NaN bit.
-const TAG_MASK: u64 = 0x0007_0000_0000_0000;
+// Re-export the per-tag constants and tagged-header constants from
+// the nanbox submodule into this module's namespace so existing
+// internal call sites (and downstream `use verum_vbc::value::*`
+// consumers) keep working.
+use nanbox::{
+    TAG_BOOLEAN, TAG_FUNC_REF, TAG_INTEGER, TAG_NAN, TAG_POINTER, TAG_SMALL_STRING, TAG_TYPE_REF,
+    TAG_UNIT,
+};
 
-/// Shift to position the tag.
-const TAG_SHIFT: u32 = 48;
+/// NaN-box layout — canonical tagged-header definitions shared across
+/// the toolchain.
+///
+/// All compiler crates that emit or inspect NaN-boxed Values consult
+/// this submodule rather than hand-pasting the magic u64 headers.
+/// Pre-this-module: every `0x7FFB_0000_0000_0000` literal in the LLVM
+/// codegen and interpreter handlers carried an implicit drift contract
+/// against the private `TAG_*` constants below; a single misplaced
+/// digit silently miscompiled cross-tier value boundaries.
+///
+/// **Single source of truth** for:
+/// * tag-bit layout (NAN_BITS, TAG_MASK, TAG_SHIFT, PAYLOAD_MASK)
+/// * per-tag values (TAG_POINTER..TAG_NAN — 3 bits, 8 tags)
+/// * pre-shifted tagged headers (NAN_INTEGER_HEADER..NAN_NAN_HEADER)
+///   that every codegen emit_make_<kind> / type-test should consult.
+///
+/// **Drift contract:** the `nanbox_headers_pinned` test in this module
+/// pins each tagged-header value against its canonical computation,
+/// and the `nanbox::tests` round-trip predicates verify that headers
+/// produced through this submodule are correctly classified by the
+/// runtime `is_int` / `is_unit` / `is_bool` accessors.
+pub mod nanbox {
+    /// Quiet-NaN base bits (sign 0, exponent all-1, quiet bit set).
+    pub const NAN_BITS: u64 = 0x7FF8_0000_0000_0000;
 
-/// Mask to extract the payload (bits 0-47).
-const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+    /// Mask isolating the 3-bit tag (bits 48-50).
+    pub const TAG_MASK: u64 = 0x0007_0000_0000_0000;
+
+    /// Bit position of the tag within the u64.
+    pub const TAG_SHIFT: u32 = 48;
+
+    /// Mask isolating the 48-bit payload (bits 0-47).
+    pub const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+
+    // Tag values (0-7, fits in 3 bits). `pub` so external crates can
+    // construct typed values without re-deriving the bit layout.
+    pub const TAG_POINTER: u64 = 0x0;
+    pub const TAG_INTEGER: u64 = 0x1;
+    pub const TAG_BOOLEAN: u64 = 0x2;
+    pub const TAG_UNIT: u64 = 0x3;
+    pub const TAG_SMALL_STRING: u64 = 0x4;
+    pub const TAG_TYPE_REF: u64 = 0x5;
+    pub const TAG_FUNC_REF: u64 = 0x6;
+    pub const TAG_NAN: u64 = 0x7;
+
+    /// Compose a tagged-header u64 from `NAN_BITS` and a 3-bit tag.
+    ///
+    /// `tag` MUST be in `0..=7`; otherwise the result has bits beyond
+    /// the canonical 3-bit tag region and is malformed.
+    pub const fn make_header(tag: u64) -> u64 {
+        NAN_BITS | (tag << TAG_SHIFT)
+    }
+
+    // Pre-shifted tagged headers — the *exact* u64 patterns codegen
+    // emits and the runtime is_*() predicates compare against. Every
+    // hardcoded `0x7FFB_0000_0000_0000` literal in the toolchain
+    // resolves to one of these.
+
+    /// `Value` header for heap-pointer tag: `0x7FF8_0000_0000_0000`.
+    pub const NAN_POINTER_HEADER: u64 = make_header(TAG_POINTER);
+    /// `Value` header for boxed-integer tag: `0x7FF9_0000_0000_0000`.
+    pub const NAN_INTEGER_HEADER: u64 = make_header(TAG_INTEGER);
+    /// `Value` header for Bool tag: `0x7FFA_0000_0000_0000`.
+    pub const NAN_BOOLEAN_HEADER: u64 = make_header(TAG_BOOLEAN);
+    /// `Value` header for Unit tag: `0x7FFB_0000_0000_0000`.
+    pub const NAN_UNIT_HEADER: u64 = make_header(TAG_UNIT);
+    /// `Value` header for inline small-string tag: `0x7FFC_0000_0000_0000`.
+    pub const NAN_SMALL_STRING_HEADER: u64 = make_header(TAG_SMALL_STRING);
+    /// `Value` header for type-id reference: `0x7FFD_0000_0000_0000`.
+    pub const NAN_TYPE_REF_HEADER: u64 = make_header(TAG_TYPE_REF);
+    /// `Value` header for function-id reference: `0x7FFE_0000_0000_0000`.
+    pub const NAN_FUNC_REF_HEADER: u64 = make_header(TAG_FUNC_REF);
+    /// `Value` header for the NaN sentinel itself: `0x7FFF_0000_0000_0000`.
+    pub const NAN_NAN_HEADER: u64 = make_header(TAG_NAN);
+}
 
 /// Maximum value for 48-bit signed integer (fits in payload).
 pub const MAX_SMALL_INT: i64 = (1 << 47) - 1;
 
 /// Minimum value for 48-bit signed integer.
 pub const MIN_SMALL_INT: i64 = -(1 << 47);
-
-// Tag values (0-7, fits in 3 bits)
-const TAG_POINTER: u64 = 0x0;
-const TAG_INTEGER: u64 = 0x1;
-const TAG_BOOLEAN: u64 = 0x2;
-const TAG_UNIT: u64 = 0x3;
-const TAG_SMALL_STRING: u64 = 0x4;
-const TAG_TYPE_REF: u64 = 0x5;
-const TAG_FUNC_REF: u64 = 0x6;
-const TAG_NAN: u64 = 0x7;
 
 /// High marker bit (bit 47) used for non-pointer special values.
 ///
@@ -1571,6 +1636,84 @@ mod tests {
             FAT_REF_RESERVED_OFFSET,
             "FatRef::reserved offset drifted",
         );
+    }
+
+    /// NaN-box header drift contract.
+    ///
+    /// Pre-shifted tagged headers MUST equal `NAN_BITS | (TAG << TAG_SHIFT)`.
+    /// LLVM codegen reads `verum_vbc::value::nanbox::NAN_*_HEADER` to build
+    /// Tier-1 values; the Tier-0 dispatch handlers read the same constants.
+    /// Drift between the per-tag values and the pre-shifted headers — or
+    /// between the Rust runtime tag-extraction code and the canonical
+    /// constants — would silently miscompile every cross-tier Value.
+    #[test]
+    fn nanbox_headers_pinned() {
+        use super::nanbox::*;
+        // Pre-shifted headers match the canonical computation.
+        assert_eq!(NAN_POINTER_HEADER, NAN_BITS | (TAG_POINTER << TAG_SHIFT));
+        assert_eq!(NAN_INTEGER_HEADER, NAN_BITS | (TAG_INTEGER << TAG_SHIFT));
+        assert_eq!(NAN_BOOLEAN_HEADER, NAN_BITS | (TAG_BOOLEAN << TAG_SHIFT));
+        assert_eq!(NAN_UNIT_HEADER, NAN_BITS | (TAG_UNIT << TAG_SHIFT));
+        assert_eq!(
+            NAN_SMALL_STRING_HEADER,
+            NAN_BITS | (TAG_SMALL_STRING << TAG_SHIFT)
+        );
+        assert_eq!(NAN_TYPE_REF_HEADER, NAN_BITS | (TAG_TYPE_REF << TAG_SHIFT));
+        assert_eq!(NAN_FUNC_REF_HEADER, NAN_BITS | (TAG_FUNC_REF << TAG_SHIFT));
+        assert_eq!(NAN_NAN_HEADER, NAN_BITS | (TAG_NAN << TAG_SHIFT));
+
+        // Pin the actual byte patterns — these are the values that
+        // appear (post-refactor) in codegen `i64_type.const_int(...)`
+        // calls and dispatch handlers' `is_*` predicates.
+        assert_eq!(NAN_POINTER_HEADER, 0x7FF8_0000_0000_0000);
+        assert_eq!(NAN_INTEGER_HEADER, 0x7FF9_0000_0000_0000);
+        assert_eq!(NAN_BOOLEAN_HEADER, 0x7FFA_0000_0000_0000);
+        assert_eq!(NAN_UNIT_HEADER, 0x7FFB_0000_0000_0000);
+        assert_eq!(NAN_SMALL_STRING_HEADER, 0x7FFC_0000_0000_0000);
+        assert_eq!(NAN_TYPE_REF_HEADER, 0x7FFD_0000_0000_0000);
+        assert_eq!(NAN_FUNC_REF_HEADER, 0x7FFE_0000_0000_0000);
+        assert_eq!(NAN_NAN_HEADER, 0x7FFF_0000_0000_0000);
+
+        // make_header() composition matches manual computation.
+        assert_eq!(make_header(TAG_INTEGER), NAN_INTEGER_HEADER);
+        assert_eq!(make_header(TAG_UNIT), NAN_UNIT_HEADER);
+
+        // Tag values fit in 3 bits and form a contiguous 0..=7 range.
+        for &tag in &[
+            TAG_POINTER,
+            TAG_INTEGER,
+            TAG_BOOLEAN,
+            TAG_UNIT,
+            TAG_SMALL_STRING,
+            TAG_TYPE_REF,
+            TAG_FUNC_REF,
+            TAG_NAN,
+        ] {
+            assert!(tag <= 7, "tag {} exceeds 3-bit width", tag);
+        }
+    }
+
+    /// Round-trip: a Value built through the canonical Integer / Unit /
+    /// Boolean constructors classifies correctly via the runtime tag-test
+    /// predicates. Since the constructors and the predicates both go
+    /// through the centralised constants now, drift between any two
+    /// is impossible — but pinning the round-trip explicitly catches
+    /// any future refactor that renumbered tags by accident.
+    #[test]
+    fn nanbox_roundtrip_through_runtime_predicates() {
+        use super::nanbox::{NAN_BOOLEAN_HEADER, NAN_INTEGER_HEADER, NAN_UNIT_HEADER};
+        // Integer round-trip
+        let i = Value::from_i64(42);
+        assert!(i.is_int());
+        assert_eq!(i.0 & 0x7FFF_0000_0000_0000, NAN_INTEGER_HEADER);
+        // Unit round-trip
+        let u = Value::unit();
+        assert!(u.is_unit());
+        assert_eq!(u.0, NAN_UNIT_HEADER);
+        // Bool round-trip
+        let b = Value::from_bool(true);
+        assert!(b.is_bool());
+        assert_eq!(b.0 & 0x7FFF_0000_0000_0000, NAN_BOOLEAN_HEADER);
     }
 
     /// CBGR bit-packing matches the layout-module declarations.
