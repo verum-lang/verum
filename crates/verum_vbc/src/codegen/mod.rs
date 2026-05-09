@@ -12662,6 +12662,34 @@ impl VbcCodegen {
             self.ctx.newtype_names.insert(name_str.clone());
         }
 
+        // Restore the codegen-local type-alias fast-cache for
+        // `TypeKind::Alias` archive-imported descriptors. Pre-fix,
+        // archive types preserved `alias_target` on the descriptor
+        // but `import_archive_type` skipped populating
+        // `self.type_aliases` (the HashMap consulted by
+        // `resolve_type_alias`). Result: stdlib aliases like
+        // `type TextResult<T> is Result<T, Text>;` lost the alias
+        // relation at the codegen layer, and method dispatch on
+        // `let r: TextResult<Int> = ...; r.is_ok()` emitted
+        // `CallM("TextResult.is_ok")` (the literal alias name)
+        // instead of `CallM("Result.is_ok")` — runtime then panicked
+        // with "method 'TextResult.is_ok' not found on receiver of
+        // runtime kind Object" because the function table only has
+        // the canonical `Result.is_ok` entry.
+        //
+        // Mirror the source-driven `TypeDeclBody::Alias` arm
+        // (`compile_type_decl` line ~8817): walk the alias target's
+        // `TypeRef`, recover the base type name, register
+        // `alias_name → base_name` in `self.type_aliases`. The
+        // `resolve_type_alias` lookup then returns the canonical
+        // name and method dispatch routes correctly.
+        // Alias-cache populate runs as a SECOND PASS in
+        // `import_archive_module_types` — it needs access to the
+        // archive's own type table to resolve the alias target's
+        // TypeId to a name (the cloned `alias_target` carries
+        // archive-local TypeIds that codegen-side `self.types`
+        // doesn't have at this point in the per-type-import loop).
+
         self.push_type_dedupe(imported);
     }
 
@@ -12685,6 +12713,62 @@ impl VbcCodegen {
                 continue;
             }
             self.import_archive_type(ty, &module.strings);
+        }
+        // SECOND PASS — populate `type_aliases` for every imported
+        // `TypeKind::Alias` descriptor by resolving its `alias_target`
+        // through the archive's own type table (the cloned target
+        // carries archive-local TypeIds; codegen-side `type_name_to_id`
+        // only has them mapped by name, not by id).
+        //
+        // Without this, archive aliases like
+        // `type TextResult<T> is Result<T, Text>;` lose the alias
+        // relation at the codegen layer — `r.is_ok()` (where `r:
+        // TextResult<Int>`) emits `CallM("TextResult.is_ok")`
+        // instead of `CallM("Result.is_ok")` because
+        // `compile_method_call`'s `resolve_type_alias("TextResult")`
+        // returns identity. The runtime then panics with "method
+        // 'TextResult.is_ok' not found on receiver of runtime kind
+        // Object".
+        for ty in module.types.iter() {
+            if !matches!(ty.kind, crate::types::TypeKind::Alias) {
+                continue;
+            }
+            let alias_name = match module.strings.get(ty.name) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let target_ref = match &ty.alias_target {
+                Some(t) => t,
+                None => continue,
+            };
+            // Recover the target's base TypeId, then look up its
+            // name in the archive's own type table.
+            let target_tid = match target_ref {
+                crate::types::TypeRef::Concrete(tid) => *tid,
+                crate::types::TypeRef::Instantiated { base, .. } => *base,
+                _ => continue,
+            };
+            let target_name = module
+                .types
+                .iter()
+                .find(|t| t.id == target_tid)
+                .and_then(|t| module.strings.get(t.name))
+                .map(|s| s.to_string());
+            // Fallback: when the target lives in a sibling archive
+            // module not part of this `import_archive_module_types`
+            // call, the in-archive lookup misses. Probe the codegen's
+            // own `type_name_to_id` reverse — if any type in
+            // `self.types` matches the archive TypeId by VALUE (which
+            // is the well-known-types convention for the Verum
+            // builtins like Maybe/Result/Ordering), use its name.
+            let target_name = target_name.or_else(|| {
+                self.types.iter().find(|t| t.id == target_tid).and_then(|t| {
+                    self.ctx.strings.get(t.name.0 as usize).cloned()
+                })
+            });
+            if let Some(name) = target_name {
+                self.type_aliases.insert(alias_name, name);
+            }
         }
     }
 
