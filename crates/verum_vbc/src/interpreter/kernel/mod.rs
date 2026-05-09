@@ -2295,8 +2295,9 @@ fn format_value(v: &str) -> String {
         return v.to_lowercase();
     }
 
-    // Null/None
-    if v == "null" || v == "None" || v == "nil" {
+    // Null/None — recognised through the centralized null-sentinel
+    // predicate (the canonical list lives in `verum_common::well_known_types::variant_tags::is_null_sentinel`).
+    if verum_common::well_known_types::variant_tags::is_null_sentinel(v) {
         return "null".to_string();
     }
 
