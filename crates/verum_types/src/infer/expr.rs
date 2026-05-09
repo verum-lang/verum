@@ -60,7 +60,7 @@ use verum_common::well_known_types::WellKnownType as WKT;
 #[allow(unused_imports)]
 use verum_common::well_known_types::type_names as wkt_names;
 #[allow(unused_imports)]
-use verum_common::{List, Map, Maybe, Set, Text, ToText};
+use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 #[allow(unused_imports)]
 use verum_modules::resolver::NameKind;
 
