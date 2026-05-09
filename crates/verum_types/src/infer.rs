@@ -57782,7 +57782,236 @@ impl TypeChecker {
                         .define_type(type_params_key, Type::Record(param_record));
                 }
             }
-            TypeDeclBody::Variant(variants) => {
+            TypeDeclBody::Variant(_) => self.resolve_variant_type_body(type_decl, type_name)?,
+            TypeDeclBody::Record(_) => self.resolve_record_type_body(type_decl, type_name)?,
+            TypeDeclBody::Tuple(types) => {
+                // Tuple type declaration: type Point is (Float, Float);
+                // Single-element tuples are newtypes: type UserId is (Int);
+                let type_list: Result<List<Type>> =
+                    types.iter().map(|t| self.ast_to_type(t)).collect();
+                let resolved_types = type_list?;
+
+                if resolved_types.len() == 1 {
+                    // Single-element "tuple" is a newtype with constructor
+                    let inner_type = resolved_types.first().cloned().unwrap_or(Type::Unit);
+
+                    // Create a Named type for the newtype (not an alias)
+                    let newtype_ty = Type::Named {
+                        path: Path::single(type_decl.name.clone()),
+                        args: List::new(),
+                    };
+                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+
+                    // Store inner type for field access (.0)
+                    let inner_key = format!("__newtype_inner_{}", type_name);
+                    self.ctx.define_type(inner_key, inner_type.clone());
+
+                    // Register constructor function: UserId: fn(Int) -> UserId
+                    let constructor_ty =
+                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
+                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                } else {
+                    // Multi-element tuple: create Named type with constructor
+                    let named_tuple_ty = Type::Named {
+                        path: Path::single(type_decl.name.clone()),
+                        args: List::new(),
+                    };
+                    self.ctx
+                        .define_type(type_name.clone(), named_tuple_ty.clone());
+
+                    // Store tuple fields for field access (.0, .1, .2)
+                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
+                    self.ctx
+                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
+
+                    // Register constructor function: Color: fn(Int, Int, Int) -> Color
+                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
+                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                }
+            }
+            TypeDeclBody::Newtype(inner_type) => {
+                // Newtype: type UserId is Int; (without parens)
+                // Register as a distinct named type (not just an alias)
+                let inner_resolved = self.ast_to_type(inner_type)?;
+
+                // Create the newtype as a Named type
+                let newtype_ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+
+                // Store the inner type for field access (.0)
+                let inner_key = format!("__newtype_inner_{}", type_name);
+                self.ctx.define_type(inner_key, inner_resolved.clone());
+
+                // Register a constructor function: UserId: fn(Int) -> UserId
+                let constructor_ty =
+                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
+                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+            }
+            TypeDeclBody::Protocol(_) => self.resolve_protocol_type_body(type_decl, type_name)?,
+            TypeDeclBody::Unit => {
+                // Unit type (e.g., `type Empty;` or `type Signal is ();`)
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                // Store inner type as Unit for newtype coercion checks
+                let inner_key = format!("__newtype_inner_{}", type_name);
+                self.ctx.define_type(inner_key, Type::Unit);
+            }
+            TypeDeclBody::SigmaTuple(types) => {
+                // Dependent pair / sigma type - similar to Tuple but with named components
+                let element_types: List<Type> = types
+                    .iter()
+                    .map(|t| self.ast_to_type(t))
+                    .collect::<Result<_>>()?;
+
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                let inner_key = format!("__tuple_elements_{}", type_name);
+                self.ctx.define_type(inner_key, Type::Tuple(element_types));
+
+                // Register named fields as struct fields for field access.
+                // The sigma-binding elements parse as
+                // `TypeKind::Refined` with `predicate.binding = Some(field)`.
+                let mut fields = indexmap::IndexMap::new();
+                for sigma_ty in types {
+                    if let verum_ast::ty::TypeKind::Refined {
+                        ref base,
+                        ref predicate,
+                    } = sigma_ty.kind
+                    {
+                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
+                            let field_type = self.ast_to_type(base)?;
+                            fields.insert(name.name.clone(), field_type);
+                        }
+                    }
+                }
+                if !fields.is_empty() {
+                    let struct_key = format!("__struct_fields_{}", type_name);
+                    self.ctx.define_type(struct_key, Type::Record(fields));
+                }
+            }
+            TypeDeclBody::Inductive(_) => {
+                // Dependent type features (v2.0+) - register as named type for now
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+            }
+            TypeDeclBody::Coinductive(protocol_body) => {
+                // Coinductive type (Pass 2) — resolve destructor return types and
+                // verify each declared destructor has a valid return type.
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                // Verify that all destructors have explicit, resolvable return types.
+                for item in &protocol_body.items {
+                    use verum_ast::decl::ProtocolItemKind;
+                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
+                        if let Some(ret_ty_ast) = &decl.return_type {
+                            // Attempt to resolve the return type — surface errors
+                            // that would prevent observation methods from type-checking.
+                            let _ = self.ast_to_type(ret_ty_ast)?;
+                        }
+                        // Missing return type was warned at Pass 1; nothing more to do.
+                    }
+                }
+            }
+            TypeDeclBody::Quotient { base, .. } => {
+                // T1-T Pass 2: resolve the carrier type and register
+                // the quotient as a nominal type sharing the carrier's
+                // runtime representation. The equivalence relation is
+                // a compile-time obligation discharged by the model-
+                // verification pipeline; at Tier-0 a value of Q is
+                // bit-identical to a value of the carrier.
+                //
+
+                // Two projection methods are registered here:
+                //  Q.of(rep: T) -> Q (static constructor)
+                //  q.rep(&self) -> T (instance accessor)
+                //
+
+                // Both are identity at runtime; typecheck uses them to
+                // guard the boundary between Q and its carrier so
+                // user code has to name the quotient explicitly when
+                // crossing it in either direction.
+                let base_resolved = self.ast_to_type(base)?;
+                self.ctx
+                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.unifier
+                    .register_type_alias(type_name.clone(), base_resolved.clone());
+                // Replace the Pass-1 placeholder with a concrete Named
+                // type so verify_no_placeholders sees a resolved entry.
+                let named_type = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), named_type.clone());
+
+                // Register the `of` static constructor and `rep`
+                // instance accessor in the protocol checker's method
+                // registry so `Q.of(x)` and `q.rep()` resolve against
+                // the quotient's nominal name rather than falling
+                // through to the carrier's method set.
+                use crate::core_integration::ProtocolCheckerExt;
+                use crate::protocol::MethodSignature;
+                {
+                    let mut checker = self.protocol_checker.write();
+                    let mut of_params = List::new();
+                    of_params.push(base_resolved.clone());
+                    checker.register_method_public(
+                        type_name.as_str(),
+                        MethodSignature::static_method(
+                            Text::from("of"),
+                            of_params,
+                            named_type.clone(),
+                        ),
+                    );
+                    checker.register_method_public(
+                        type_name.as_str(),
+                        MethodSignature::immutable(Text::from("rep"), List::new(), base_resolved),
+                    );
+                }
+            }
+        }
+
+        tracing::debug!("Pass 2: Resolved type definition for: {}", type_name);
+        Ok(())
+    }
+
+    /// Batch register all type names (Pass 1).
+    ///
+
+    /// Convenience method that calls `register_type_name_only` for all type
+    /// declarations in a list. Should be called before `resolve_all_type_definitions`.
+    /// Resolve a sum (variant/enum) type declaration body during two-pass resolution.
+    /// Re-resolves constructor payloads after all dependencies are available.
+    fn resolve_variant_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let verum_ast::decl::TypeDeclBody::Variant(variants) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
                 // IMPORT PROVENANCE: Protect explicitly imported variant types from being
                 // overwritten during stdlib type resolution (PRE-PASS S0b). When the user
                 // writes `mount core.base.ordering.{Ordering}`, we must not let a later
@@ -58107,8 +58336,24 @@ impl TypeChecker {
                         }
                     }
                 }
-            }
-            TypeDeclBody::Record(fields) => {
+        Ok(())
+    }
+
+    /// Resolve a record (struct-like) type declaration body during two-pass resolution.
+    /// Resolves field types and registers the Record type with protocol constraints.
+    fn resolve_record_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let verum_ast::decl::TypeDeclBody::Record(fields) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
                 let placeholder_var = TypeVar::fresh();
@@ -58374,74 +58619,24 @@ impl TypeChecker {
                             .define_type(type_params_key, Type::Record(param_record));
                     }
                 }
-            }
-            TypeDeclBody::Tuple(types) => {
-                // Tuple type declaration: type Point is (Float, Float);
-                // Single-element tuples are newtypes: type UserId is (Int);
-                let type_list: Result<List<Type>> =
-                    types.iter().map(|t| self.ast_to_type(t)).collect();
-                let resolved_types = type_list?;
+        Ok(())
+    }
 
-                if resolved_types.len() == 1 {
-                    // Single-element "tuple" is a newtype with constructor
-                    let inner_type = resolved_types.first().cloned().unwrap_or(Type::Unit);
-
-                    // Create a Named type for the newtype (not an alias)
-                    let newtype_ty = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: List::new(),
-                    };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
-
-                    // Store inner type for field access (.0)
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, inner_type.clone());
-
-                    // Register constructor function: UserId: fn(Int) -> UserId
-                    let constructor_ty =
-                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-                } else {
-                    // Multi-element tuple: create Named type with constructor
-                    let named_tuple_ty = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: List::new(),
-                    };
-                    self.ctx
-                        .define_type(type_name.clone(), named_tuple_ty.clone());
-
-                    // Store tuple fields for field access (.0, .1, .2)
-                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                    self.ctx
-                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
-
-                    // Register constructor function: Color: fn(Int, Int, Int) -> Color
-                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-                }
-            }
-            TypeDeclBody::Newtype(inner_type) => {
-                // Newtype: type UserId is Int; (without parens)
-                // Register as a distinct named type (not just an alias)
-                let inner_resolved = self.ast_to_type(inner_type)?;
-
-                // Create the newtype as a Named type
-                let newtype_ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
-
-                // Store the inner type for field access (.0)
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, inner_resolved.clone());
-
-                // Register a constructor function: UserId: fn(Int) -> UserId
-                let constructor_ty =
-                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
-                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-            }
-            TypeDeclBody::Protocol(protocol_body) => {
+    /// Resolve a protocol (trait-like) type declaration body during two-pass resolution.
+    /// Processes method signatures + associated types and updates the protocol registry.
+    fn resolve_protocol_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let verum_ast::decl::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
                 // Protocol types are registered as Named types
                 let ty = Type::Named {
                     path: Path::single(type_decl.name.clone()),
@@ -58715,153 +58910,9 @@ impl TypeChecker {
 
                 // Restore the previous current_self_type
                 self.set_current_self_type(old_self_type);
-            }
-            TypeDeclBody::Unit => {
-                // Unit type (e.g., `type Empty;` or `type Signal is ();`)
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-
-                // Store inner type as Unit for newtype coercion checks
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, Type::Unit);
-            }
-            TypeDeclBody::SigmaTuple(types) => {
-                // Dependent pair / sigma type - similar to Tuple but with named components
-                let element_types: List<Type> = types
-                    .iter()
-                    .map(|t| self.ast_to_type(t))
-                    .collect::<Result<_>>()?;
-
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-
-                let inner_key = format!("__tuple_elements_{}", type_name);
-                self.ctx.define_type(inner_key, Type::Tuple(element_types));
-
-                // Register named fields as struct fields for field access.
-                // The sigma-binding elements parse as
-                // `TypeKind::Refined` with `predicate.binding = Some(field)`.
-                let mut fields = indexmap::IndexMap::new();
-                for sigma_ty in types {
-                    if let verum_ast::ty::TypeKind::Refined {
-                        ref base,
-                        ref predicate,
-                    } = sigma_ty.kind
-                    {
-                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
-                            let field_type = self.ast_to_type(base)?;
-                            fields.insert(name.name.clone(), field_type);
-                        }
-                    }
-                }
-                if !fields.is_empty() {
-                    let struct_key = format!("__struct_fields_{}", type_name);
-                    self.ctx.define_type(struct_key, Type::Record(fields));
-                }
-            }
-            TypeDeclBody::Inductive(_) => {
-                // Dependent type features (v2.0+) - register as named type for now
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-            }
-            TypeDeclBody::Coinductive(protocol_body) => {
-                // Coinductive type (Pass 2) — resolve destructor return types and
-                // verify each declared destructor has a valid return type.
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-
-                // Verify that all destructors have explicit, resolvable return types.
-                for item in &protocol_body.items {
-                    use verum_ast::decl::ProtocolItemKind;
-                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
-                        if let Some(ret_ty_ast) = &decl.return_type {
-                            // Attempt to resolve the return type — surface errors
-                            // that would prevent observation methods from type-checking.
-                            let _ = self.ast_to_type(ret_ty_ast)?;
-                        }
-                        // Missing return type was warned at Pass 1; nothing more to do.
-                    }
-                }
-            }
-            TypeDeclBody::Quotient { base, .. } => {
-                // T1-T Pass 2: resolve the carrier type and register
-                // the quotient as a nominal type sharing the carrier's
-                // runtime representation. The equivalence relation is
-                // a compile-time obligation discharged by the model-
-                // verification pipeline; at Tier-0 a value of Q is
-                // bit-identical to a value of the carrier.
-                //
-
-                // Two projection methods are registered here:
-                //  Q.of(rep: T) -> Q (static constructor)
-                //  q.rep(&self) -> T (instance accessor)
-                //
-
-                // Both are identity at runtime; typecheck uses them to
-                // guard the boundary between Q and its carrier so
-                // user code has to name the quotient explicitly when
-                // crossing it in either direction.
-                let base_resolved = self.ast_to_type(base)?;
-                self.ctx
-                    .define_alias(type_name.clone(), base_resolved.clone());
-                self.unifier
-                    .register_type_alias(type_name.clone(), base_resolved.clone());
-                // Replace the Pass-1 placeholder with a concrete Named
-                // type so verify_no_placeholders sees a resolved entry.
-                let named_type = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), named_type.clone());
-
-                // Register the `of` static constructor and `rep`
-                // instance accessor in the protocol checker's method
-                // registry so `Q.of(x)` and `q.rep()` resolve against
-                // the quotient's nominal name rather than falling
-                // through to the carrier's method set.
-                use crate::core_integration::ProtocolCheckerExt;
-                use crate::protocol::MethodSignature;
-                {
-                    let mut checker = self.protocol_checker.write();
-                    let mut of_params = List::new();
-                    of_params.push(base_resolved.clone());
-                    checker.register_method_public(
-                        type_name.as_str(),
-                        MethodSignature::static_method(
-                            Text::from("of"),
-                            of_params,
-                            named_type.clone(),
-                        ),
-                    );
-                    checker.register_method_public(
-                        type_name.as_str(),
-                        MethodSignature::immutable(Text::from("rep"), List::new(), base_resolved),
-                    );
-                }
-            }
-        }
-
-        tracing::debug!("Pass 2: Resolved type definition for: {}", type_name);
         Ok(())
     }
 
-    /// Batch register all type names (Pass 1).
-    ///
-
-    /// Convenience method that calls `register_type_name_only` for all type
-    /// declarations in a list. Should be called before `resolve_all_type_definitions`.
     pub fn register_all_type_names(&mut self, items: &[verum_ast::Item]) {
         for item in items {
             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
