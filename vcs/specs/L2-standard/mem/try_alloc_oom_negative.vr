@@ -1,0 +1,156 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: mem, memory, allocator, try_alloc, oom, fallible, AllocError, Layout
+// @timeout: 10000
+// @description: Pins the negative-path (OOM / invalid-arg) semantics of the
+//               fallible allocator API (#80).
+//
+// The stdlib exposes two allocation patterns:
+//
+//   Infallible:  `alloc(size, align) -> &unsafe Byte`      — panics on failure
+//   Fallible:    `try_alloc(size, align) -> Result<_, AllocError>` — returns Err
+//
+// This spec verifies the Err paths:
+//
+//   1. Layout.try_from_size_align(-1, 8) → Err(AllocError.InvalidSize)
+//   2. Layout.try_from_size_align(8, 3)  → Err(AllocError.InvalidAlignment)
+//      (alignment 3 is not a power of two)
+//   3. Layout.try_repeat(-1)             → Err(AllocError.InvalidSize)
+//      (negative repeat count is nonsensical)
+//   4. Layout.try_repeat on overflow     → Err(AllocError.InvalidSize)
+//      (sentinel -1: byte count doesn't fit in Int)
+//   5. All AllocError variants are constructible and exhaustively matchable —
+//      pins the variant surface so adding a variant without a match arm
+//      fails the typecheck.
+//   6. Heap.try_new(value) → Result<Heap<T>, AllocError> typechecks —
+//      the typed OOM recovery pattern for smart-pointer allocation.
+//   7. try_alloc return type is Result<&unsafe Byte, AllocError> — callers
+//      that want OOM recovery must use the fallible variant.
+
+mount core.base.memory.{Heap, try_alloc, try_alloc_zeroed, AllocError};
+mount core.mem.allocator.{Layout};
+
+// ── 1. Layout.try_from_size_align: negative size ─────────────────────────────
+
+fn invalid_size_negative() {
+    let r: Result<Layout, AllocError> = Layout.try_from_size_align(-1, 8);
+    match r {
+        Err(AllocError.InvalidSize { size }) => assert(size == -1),
+        Ok(_) => panic("expected Err for negative size"),
+        Err(_) => panic("expected InvalidSize variant"),
+    }
+}
+
+// ── 2. Layout.try_from_size_align: non-power-of-two alignment ────────────────
+
+fn invalid_alignment_non_pow2() {
+    // 3 is not a power of two — must produce InvalidAlignment.
+    let r: Result<Layout, AllocError> = Layout.try_from_size_align(8, 3);
+    match r {
+        Err(AllocError.InvalidAlignment { alignment }) => assert(alignment == 3),
+        Ok(_) => panic("expected Err for non-pow2 alignment"),
+        Err(_) => panic("expected InvalidAlignment variant"),
+    }
+}
+
+// ── 3. Layout.try_repeat: negative count ─────────────────────────────────────
+
+fn try_repeat_negative_count() {
+    let base = Layout.from_size_align(8, 8);
+    let r: Result<Layout, AllocError> = base.try_repeat(-1);
+    match r {
+        Err(AllocError.InvalidSize { size: _ }) => {},
+        Ok(_) => panic("expected Err for negative count"),
+        Err(_) => panic("expected InvalidSize variant"),
+    }
+}
+
+// ── 4. Layout.try_repeat: overflow triggers InvalidSize sentinel ──────────────
+
+fn try_repeat_overflow() {
+    // size=8, n = Int.MAX / 4 + 2 → 8 * n overflows Int.
+    let base = Layout.from_size_align(8, 8);
+    let overflow_n = Int.MAX / 4 + 2;
+    let r: Result<Layout, AllocError> = base.try_repeat(overflow_n);
+    match r {
+        Err(AllocError.InvalidSize { size: _ }) => {},
+        Ok(_) => panic("expected Err for overflow"),
+        Err(_) => panic("expected InvalidSize variant"),
+    }
+}
+
+// ── 5. AllocError: all variants constructible and exhaustively matchable ──────
+
+fn alloc_error_exhaustive_match(e: &AllocError) -> Int {
+    match e {
+        AllocError.OutOfMemory { requested }          => *requested,
+        AllocError.InvalidSize { size }               => *size,
+        AllocError.InvalidAlignment { alignment }     => *alignment,
+        AllocError.MmapFailed { code }                => *code,
+        AllocError.MunmapFailed { code }              => *code,
+        AllocError.PageExhausted                      => -1,
+        AllocError.InvalidPointer                     => -2,
+        AllocError.CapacityOverflow { requested }     => *requested,
+        AllocError.UnsupportedOs { op: _ }            => -3,
+    }
+}
+
+fn alloc_error_constructible() {
+    // All variants can be constructed — pins the variant surface.
+    let _oom    = AllocError.OutOfMemory { requested: 1024 };
+    let _isz    = AllocError.InvalidSize { size: -1 };
+    let _ialign = AllocError.InvalidAlignment { alignment: 7 };
+    let _mmap   = AllocError.MmapFailed { code: 12 };
+    let _munmap = AllocError.MunmapFailed { code: 12 };
+    let _page   = AllocError.PageExhausted;
+    let _inv    = AllocError.InvalidPointer;
+    let _cap    = AllocError.CapacityOverflow { requested: 9 };
+    let _unos   = AllocError.UnsupportedOs { op: Text.from("mmap") };
+    // message() is available on all variants
+    assert(_oom.message().len() > 0);
+    assert(_isz.message().len() > 0);
+    assert(_cap.message().len() > 0);
+}
+
+// ── 6. Heap.try_new: typed OOM recovery ──────────────────────────────────────
+
+fn heap_try_new_typechecks() {
+    let result: Result<Heap<Int>, AllocError> = Heap.try_new(42);
+    match result {
+        Ok(h)  => { let _ = h; }
+        Err(e) => { let _ = e.message(); }
+    }
+}
+
+// ── 7. try_alloc return type ─────────────────────────────────────────────────
+
+fn try_alloc_result_type() {
+    // Allocate 64 bytes at 8-byte alignment.  The exact success/failure
+    // depends on the runtime, but the TYPE must be Result<_, AllocError>.
+    let r: Result<&unsafe Byte, AllocError> = try_alloc(64, 8);
+    match r {
+        Ok(_ptr) => {}
+        Err(e)   => { let _ = e.message(); }
+    }
+}
+
+fn try_alloc_zeroed_result_type() {
+    let r: Result<&unsafe Byte, AllocError> = try_alloc_zeroed(32, 8);
+    match r {
+        Ok(_ptr) => {}
+        Err(e)   => { let _ = e.message(); }
+    }
+}
+
+fn main() {
+    invalid_size_negative();
+    invalid_alignment_non_pow2();
+    try_repeat_negative_count();
+    try_repeat_overflow();
+    alloc_error_constructible();
+    heap_try_new_typechecks();
+    try_alloc_result_type();
+    try_alloc_zeroed_result_type();
+    print("try_alloc OOM negative-path typecheck ok");
+}
