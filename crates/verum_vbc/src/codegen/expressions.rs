@@ -492,6 +492,20 @@ impl VbcCodegen {
                 field_count,
             });
         } else {
+            // Untyped emission — runtime falls back to the global
+            // tag-scan in `format_variant_for_print_depth`, which can
+            // mis-resolve when sum types share variant tags.  Trace
+            // (under `verum_vbc::codegen=trace`) so the residual sites
+            // are discoverable; the fundamental fix is to ensure the
+            // caller routes a parent name (typechecker-resolved or
+            // syntactic-fallback) into this helper.
+            tracing::trace!(
+                target: "verum_vbc::codegen::variant",
+                tag = tag,
+                field_count = field_count,
+                parent_arg = ?parent_type_name,
+                "MakeVariant emitted without resolvable parent type — runtime will use synthetic-id fallback",
+            );
             self.ctx.emit(Instruction::MakeVariant {
                 dst,
                 tag,
