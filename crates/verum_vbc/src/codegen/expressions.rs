@@ -26629,6 +26629,20 @@ mod tests {
             resolve_stdlib_constant_value("MAP_HUGETLB", "linux"),
             0x40000,
         );
+
+        // Remaining socket constants (Phase 1.5).
+        assert_eq!(resolve_stdlib_constant_value("MSG_DONTWAIT", "linux"), 0x40);
+        assert_eq!(resolve_stdlib_constant_value("MSG_WAITALL", "linux"), 0x100);
+        assert_eq!(resolve_stdlib_constant_value("SO_ERROR", "linux"), 4);
+        assert_eq!(resolve_stdlib_constant_value("SOL_TCP", "linux"), 6);
+        assert_eq!(
+            resolve_stdlib_constant_value("SOCK_NONBLOCK", "linux"),
+            2048,
+        );
+        assert_eq!(
+            resolve_stdlib_constant_value("SOCK_CLOEXEC", "linux"),
+            524288,
+        );
     }
 
     #[test]
@@ -26668,6 +26682,14 @@ mod tests {
             0x1000,
         );
         assert_eq!(resolve_stdlib_constant_value("MADV_FREE", "darwin"), 5);
+
+        // Remaining socket constants (Phase 1.5) for Darwin.
+        assert_eq!(resolve_stdlib_constant_value("MSG_DONTWAIT", "macos"), 0x80);
+        assert_eq!(resolve_stdlib_constant_value("MSG_WAITALL", "darwin"), 0x40);
+        assert_eq!(resolve_stdlib_constant_value("SO_ERROR", "macos"), 0x1007);
+        // SOCK_NONBLOCK / SOCK_CLOEXEC don't exist on Darwin — fall
+        // through to whichever value the historical hand-table held.
+        // SOL_TCP is Linux-only — Darwin uses IPPROTO_TCP directly.
     }
 
     /// kqueue (Darwin) and epoll (Linux) event-loop constants
