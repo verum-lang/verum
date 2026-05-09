@@ -1791,20 +1791,24 @@ impl VbcCodegen {
             ("EINPROGRESS", 36),
             ("ENOTCONN", 57),
             ("EWOULDBLOCK", 35),
-            // kqueue filter constants (core/sys/darwin/libsystem.vr)
-            ("EVFILT_READ", -1),
-            ("EVFILT_WRITE", -2),
-            ("EVFILT_TIMER", -7),
-            ("EVFILT_USER", -10),
-            // kqueue flags
-            ("EV_ADD", 0x0001),
-            ("EV_DELETE", 0x0002),
-            ("EV_ENABLE", 0x0004),
-            ("EV_DISABLE", 0x0008),
-            ("EV_CLEAR", 0x0020),
-            ("EV_ONESHOT", 0x0010),
-            ("EV_EOF", 0x8000_i64),
-            ("EV_ERROR", 0x4000),
+            // kqueue filter type IDs and event flags (Darwin only).
+            // Sourced from `verum_common::os_events::kqueue` — single
+            // source of truth shared with the runtime kqueue handlers
+            // and stdlib `core/sys/darwin/libsystem.vr`. Linux targets
+            // route through the dispatch path (resolve_stdlib_constant_value)
+            // and resolve EPOLL_* names instead via `os_events::epoll`.
+            ("EVFILT_READ", verum_common::os_events::kqueue::EVFILT_READ),
+            ("EVFILT_WRITE", verum_common::os_events::kqueue::EVFILT_WRITE),
+            ("EVFILT_TIMER", verum_common::os_events::kqueue::EVFILT_TIMER),
+            ("EVFILT_USER", verum_common::os_events::kqueue::EVFILT_USER),
+            ("EV_ADD", verum_common::os_events::kqueue::EV_ADD),
+            ("EV_DELETE", verum_common::os_events::kqueue::EV_DELETE),
+            ("EV_ENABLE", verum_common::os_events::kqueue::EV_ENABLE),
+            ("EV_DISABLE", verum_common::os_events::kqueue::EV_DISABLE),
+            ("EV_CLEAR", verum_common::os_events::kqueue::EV_CLEAR),
+            ("EV_ONESHOT", verum_common::os_events::kqueue::EV_ONESHOT),
+            ("EV_EOF", verum_common::os_events::kqueue::EV_EOF),
+            ("EV_ERROR", verum_common::os_events::kqueue::EV_ERROR),
             // Once-init states
             ("ONCE_INIT", 0),
             ("ONCE_RUNNING", 1),
