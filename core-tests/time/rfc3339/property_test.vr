@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/time/rfc3339/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for RFC 3339 parse / format.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.rfc3339.{Rfc3339Time, parse, format_utc, format_utc_with_nanos, add_seconds, diff_seconds};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  parse ∘ format_utc round-trip (no nanos, UTC)
+// =============================================================================
+
+@test
+fn law_format_parse_round_trip_utc() {
+    let cases: List<Int> = [0, 3600, 86400, 1_000_000_000, 1_700_000_000];
+    for &unix in cases.iter() {
+        let formatted = format_utc(unix, 0);
+        let parsed = parse(&formatted);
+        assert(parsed.is_ok(), f"parse failed for unix={unix}: {formatted}");
+        assert_eq(parsed.unwrap().unix_seconds, unix);
+    }
+}
+
+// =============================================================================
+// §B  parse ∘ format_utc_with_nanos round-trip
+// =============================================================================
+
+@test
+fn law_format_with_nanos_round_trip() {
+    let unix = 1_600_000_000;
+    let nanos = 123_456_789;
+    let formatted = format_utc_with_nanos(unix, nanos);
+    let parsed = parse(&formatted).unwrap();
+    assert_eq(parsed.unix_seconds, unix);
+    assert_eq(parsed.nanos, nanos);
+}
+
+// =============================================================================
+// §C  diff_seconds is antisymmetric: diff(a,b) = -diff(b,a)
+// =============================================================================
+
+@test
+fn law_diff_seconds_antisymmetric() {
+    let cases: List<(Int, Int)> = [
+        (0, 100), (500, 1000), (1_000_000, 2_000_000),
+    ];
+    for &(a_unix, b_unix) in cases.iter() {
+        let a = Rfc3339Time { unix_seconds: a_unix, nanos: 0, offset_minutes: 0 };
+        let b = Rfc3339Time { unix_seconds: b_unix, nanos: 0, offset_minutes: 0 };
+        assert_eq(diff_seconds(&a, &b), -diff_seconds(&b, &a));
+    }
+}
+
+// =============================================================================
+// §D  add_seconds additivity: add(add(t, a), b) = add(t, a+b)
+// =============================================================================
+
+@test
+fn law_add_seconds_additive() {
+    let t = Rfc3339Time { unix_seconds: 1000, nanos: 0, offset_minutes: 0 };
+    let step_a = 300;
+    let step_b = 700;
+    let via_two = add_seconds(&add_seconds(&t, step_a), step_b);
+    let via_one = add_seconds(&t, step_a + step_b);
+    assert_eq(via_two.unix_seconds, via_one.unix_seconds);
+}
+
+// =============================================================================
+// §E  Rfc3339Error variants are distinct
+// =============================================================================
+
+@test
+fn law_error_variants_distinct() {
+    let malformed    = parse(&"bad".to_text()).unwrap_err();
+    let out_of_range = parse(&"2026-13-01T00:00:00Z".to_text()).unwrap_err();
+    assert(malformed != out_of_range);
+}
+
+// =============================================================================
+// §F  @test_case — known unix seconds for well-known dates
+// =============================================================================
+
+@test_case("1970-01-01T00:00:00Z",  0)
+@test_case("1970-01-01T00:01:00Z",  60)
+@test_case("1970-01-01T01:00:00Z",  3600)
+@test_case("1970-01-02T00:00:00Z",  86400)
+@test_case("2001-09-09T01:46:40Z",  1_000_000_000)
+fn parametrised_known_unix_seconds(ts: &Text, expected: Int) {
+    let parsed = parse(ts).unwrap();
+    assert_eq(parsed.unix_seconds, expected);
+}
+
+fn main() {}

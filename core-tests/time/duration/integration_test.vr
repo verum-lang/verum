@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/time/duration/integration_test.vr
+// =============================================================================
+//
+// Integration scenarios for Duration: arithmetic chains, comparison ordering,
+// and interaction with other time APIs.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Arithmetic chains
+// =============================================================================
+
+@test
+fn test_build_1h_30m_15s_from_parts() {
+    let d = Duration.hours(1) + Duration.mins(30) + Duration.secs(15);
+    let expected_ns = 3_600_000_000_000 + 1_800_000_000_000 + 15_000_000_000;
+    assert_eq(d.as_nanos(), expected_ns);
+    assert_eq(d.as_secs(), 5415);
+}
+
+@test
+fn test_subtract_sub_interval() {
+    let total = Duration.hours(2);
+    let elapsed = Duration.mins(45);
+    let remaining = total - elapsed;
+    assert_eq(remaining.as_secs(), 4500);
+}
+
+@test
+fn test_divide_then_multiply_is_approximately_identity() {
+    let d = Duration.secs(100);
+    let halved = d / 2;
+    let restored = halved * 2;
+    assert_eq(restored, d);
+}
+
+// =============================================================================
+// Section 2: Comparison ordering across units
+// =============================================================================
+
+@test
+fn test_ordering_across_units() {
+    let nanos  = Duration.nanos(1);
+    let micros = Duration.micros(1);
+    let millis = Duration.millis(1);
+    let secs   = Duration.secs(1);
+    let mins   = Duration.mins(1);
+    let hours  = Duration.hours(1);
+    let days   = Duration.from_days(1);
+
+    assert(nanos  < micros);
+    assert(micros < millis);
+    assert(millis < secs);
+    assert(secs   < mins);
+    assert(mins   < hours);
+    assert(hours  < days);
+}
+
+// =============================================================================
+// Section 3: Checked arithmetic safety under edge conditions
+// =============================================================================
+
+@test
+fn test_checked_add_chain_three_durations() {
+    let a = Duration.secs(10);
+    let b = Duration.secs(20);
+    let c = Duration.secs(30);
+    let result = a.checked_add(b)
+        .and_then(|ab| ab.checked_add(c));
+    assert(result.is_some());
+    assert_eq(result.unwrap().as_secs(), 60);
+}
+
+@test
+fn test_saturating_operations_chain() {
+    let base = Duration.millis(1000);
+    let doubled = base.saturating_mul(2);
+    let halved = doubled.saturating_sub(base);
+    assert_eq(halved, base);
+}
+
+// =============================================================================
+// Section 4: Sort List<Duration>
+// =============================================================================
+
+@test
+fn test_sorted_durations_list() {
+    let mut ds: List<Duration> = [
+        Duration.secs(5),
+        Duration.millis(100),
+        Duration.secs(1),
+        Duration.nanos(1),
+    ];
+    ds.sort();
+    assert(ds[0].as_nanos() <= ds[1].as_nanos());
+    assert(ds[1].as_nanos() <= ds[2].as_nanos());
+    assert(ds[2].as_nanos() <= ds[3].as_nanos());
+}
+
+// =============================================================================
+// Section 5: from_secs_f64 interop
+// =============================================================================
+
+@test
+fn test_from_secs_f64_one_and_half() {
+    let d = Duration.from_secs_f64(1.5);
+    // Should be exactly 1.5s expressed as nanos; allow ±1 for float rounding
+    let ns = d.as_nanos();
+    assert(ns >= 1_499_999_999 && ns <= 1_500_000_001);
+}
+
+@test
+fn test_from_secs_f64_tiny_sub_millisecond() {
+    // 0.001 sec = 1ms
+    let d = Duration.from_secs_f64(0.001);
+    assert(d.as_micros() >= 999 && d.as_micros() <= 1001);
+}
+
+// =============================================================================
+// Section 6: Default and Clone
+// =============================================================================
+
+@test
+fn test_default_is_zero() {
+    let d: Duration = Duration.default();
+    assert(d.is_zero());
+}
+
+@test
+fn test_clone_equals_original() {
+    let d = Duration.secs(7);
+    let cloned = d.clone();
+    assert_eq(d, cloned);
+}
+
+fn main() {}

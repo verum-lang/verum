@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/time/instant/integration_test.vr
+// =============================================================================
+//
+// Integration scenarios for Instant: timing, sorting, interaction with
+// Duration, and cross-module usage.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Relative ordering of constructed future instants
+// =============================================================================
+
+@test
+fn test_future_instants_sort_correctly() {
+    let base = Instant.now();
+    let t1 = base + Duration.secs(10);
+    let t2 = base + Duration.secs(20);
+    let t3 = base + Duration.secs(5);
+
+    let mut ts: List<Instant> = [t1, t2, t3];
+    ts.sort();
+
+    assert(ts[0] <= ts[1]);
+    assert(ts[1] <= ts[2]);
+}
+
+// =============================================================================
+// Section 2: Duration arithmetic chains with Instant
+// =============================================================================
+
+@test
+fn test_timeout_deadline_check() {
+    let start = Instant.now();
+    let timeout = Duration.secs(300); // 5-minute timeout
+    let deadline = start + timeout;
+
+    // Sanity: deadline is after start
+    assert(deadline > start);
+
+    // elapsed() from start must be much less than 300s
+    let elapsed = start.elapsed();
+    assert(elapsed < timeout);
+}
+
+@test
+fn test_multiple_snapshots_stay_ordered() {
+    let snaps: List<Instant> = [
+        Instant.now(), Instant.now(), Instant.now(),
+    ];
+    assert(snaps[0] <= snaps[1]);
+    assert(snaps[1] <= snaps[2]);
+}
+
+// =============================================================================
+// Section 3: Duration arithmetic from Instant differences
+// =============================================================================
+
+@test
+fn test_constructed_difference_equals_offset() {
+    let base = Instant.now();
+    let one_sec_later = base + Duration.secs(1);
+    let five_sec_later = base + Duration.secs(5);
+
+    let diff = five_sec_later.saturating_duration_since(one_sec_later);
+    assert_eq(diff, Duration.secs(4));
+}
+
+@test
+fn test_difference_between_same_instant_is_zero() {
+    let t = Instant.now();
+    let diff: Duration = t - t;
+    assert(diff.is_zero());
+}
+
+// =============================================================================
+// Section 4: as_nanos() consistency with Duration arithmetic
+// =============================================================================
+
+@test
+fn test_add_duration_nanos_matches_as_nanos_offset() {
+    let t = Instant.now();
+    let offset = Duration.millis(7);
+    let t2 = t + offset;
+    assert_eq(t2.as_nanos() - t.as_nanos(), offset.as_nanos());
+}
+
+// =============================================================================
+// Section 5: Clone and equality
+// =============================================================================
+
+@test
+fn test_clone_is_equal_and_same_nanos() {
+    let t = Instant.now();
+    let cloned = t.clone();
+    assert_eq(t, cloned);
+    assert_eq(t.as_nanos(), cloned.as_nanos());
+}
+
+fn main() {}

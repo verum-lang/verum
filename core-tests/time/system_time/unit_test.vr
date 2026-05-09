@@ -1,0 +1,203 @@
+// =============================================================================
+// core-tests/time/system_time/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.system_time.SystemTime` and `SystemTimeError`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.system_time.{SystemTime, SystemTimeError};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Section 1: UNIX_EPOCH
+// =============================================================================
+
+@test
+fn test_unix_epoch_secs_is_zero() {
+    let e = SystemTime.UNIX_EPOCH();
+    assert_eq(e.secs, 0);
+}
+
+@test
+fn test_unix_epoch_nanos_is_zero() {
+    let e = SystemTime.UNIX_EPOCH();
+    assert_eq(e.nanos, 0);
+}
+
+@test
+fn test_unix_epoch_timestamp_is_zero() {
+    assert_eq(SystemTime.UNIX_EPOCH().timestamp(), 0);
+}
+
+@test
+fn test_unix_epoch_timestamp_millis_is_zero() {
+    assert_eq(SystemTime.UNIX_EPOCH().timestamp_millis(), 0);
+}
+
+@test
+fn test_unix_epoch_timestamp_nanos_is_zero() {
+    assert_eq(SystemTime.UNIX_EPOCH().timestamp_nanos(), 0);
+}
+
+// =============================================================================
+// Section 2: from_timestamp / timestamp round-trip
+// =============================================================================
+
+@test
+fn test_from_timestamp_round_trip() {
+    let ts = 1_700_000_000;
+    let st = SystemTime.from_timestamp(ts);
+    assert_eq(st.timestamp(), ts);
+}
+
+@test
+fn test_from_timestamp_nanos_zero() {
+    let st = SystemTime.from_timestamp(999);
+    assert_eq(st.nanos, 0);
+}
+
+@test
+fn test_from_timestamp_millis_round_trip() {
+    let ms = 1_700_000_000_000;
+    let st = SystemTime.from_timestamp_millis(ms);
+    assert_eq(st.timestamp_millis(), ms);
+}
+
+@test
+fn test_from_timestamp_millis_sub_second() {
+    let st = SystemTime.from_timestamp_millis(1500);
+    assert_eq(st.secs, 1);
+    assert_eq(st.nanos, 500_000_000);
+}
+
+// =============================================================================
+// Section 3: timestamp_nanos composition
+// =============================================================================
+
+@test
+fn test_timestamp_nanos_composition() {
+    let st = SystemTime { secs: 2, nanos: 500_000_000 };
+    assert_eq(st.timestamp_nanos(), 2_500_000_000);
+}
+
+@test
+fn test_timestamp_millis_from_subsec_nanos() {
+    let st = SystemTime { secs: 1, nanos: 750_000_000 };
+    assert_eq(st.timestamp_millis(), 1750);
+}
+
+// =============================================================================
+// Section 4: duration_since
+// =============================================================================
+
+@test
+fn test_duration_since_later_is_ok() {
+    let earlier = SystemTime.from_timestamp(100);
+    let later   = SystemTime.from_timestamp(200);
+    let r = later.duration_since(&earlier);
+    assert(r.is_ok());
+    assert_eq(r.unwrap().as_secs(), 100);
+}
+
+@test
+fn test_duration_since_earlier_is_err() {
+    let a = SystemTime.from_timestamp(200);
+    let b = SystemTime.from_timestamp(100);
+    let r = b.duration_since(&a);
+    assert(r.is_err());
+}
+
+@test
+fn test_duration_since_self_is_zero() {
+    let t = SystemTime.from_timestamp(12345);
+    let d = t.duration_since(&t).unwrap();
+    assert(d.is_zero());
+}
+
+// =============================================================================
+// Section 5: SystemTimeError.WentBackwards
+// =============================================================================
+
+@test
+fn test_went_backwards_carries_duration() {
+    let later   = SystemTime.from_timestamp(100);
+    let earlier = SystemTime.from_timestamp(200);
+    let err = earlier.duration_since(&later).unwrap_err();
+    match err {
+        SystemTimeError.WentBackwards(d) => {
+            assert_eq(d.as_secs(), 100);
+        },
+    }
+}
+
+@test
+fn test_went_backwards_duration_method() {
+    let a = SystemTime.from_timestamp(50);
+    let b = SystemTime.from_timestamp(100);
+    let err = a.duration_since(&b).unwrap_err();
+    assert_eq(err.duration().as_secs(), 50);
+}
+
+// =============================================================================
+// Section 6: checked_add / checked_sub
+// =============================================================================
+
+@test
+fn test_checked_add_adds_seconds() {
+    let t = SystemTime.from_timestamp(1000);
+    let t2 = t.checked_add(Duration.secs(60)).unwrap();
+    assert_eq(t2.timestamp(), 1060);
+}
+
+@test
+fn test_checked_sub_subtracts_seconds() {
+    let t = SystemTime.from_timestamp(1000);
+    let t2 = t.checked_sub(Duration.secs(100)).unwrap();
+    assert_eq(t2.timestamp(), 900);
+}
+
+@test
+fn test_checked_sub_before_epoch_returns_none() {
+    let t = SystemTime.from_timestamp(10);
+    let result = t.checked_sub(Duration.secs(100));
+    assert(result.is_none());
+}
+
+// =============================================================================
+// Section 7: Operator Add<Duration> / Sub<Duration>
+// =============================================================================
+
+@test
+fn test_add_operator_duration() {
+    let t = SystemTime.from_timestamp(0);
+    let t2 = t + Duration.secs(86400);
+    assert_eq(t2.timestamp(), 86400);
+}
+
+@test
+fn test_duration_since_epoch_consistency() {
+    let t = SystemTime.from_timestamp(3600);
+    let d = t.duration_since_epoch();
+    assert_eq(d.as_secs(), 3600);
+}
+
+// =============================================================================
+// Section 8: Eq and Ord
+// =============================================================================
+
+@test
+fn test_system_time_eq() {
+    let a = SystemTime.from_timestamp(42);
+    let b = SystemTime.from_timestamp(42);
+    assert_eq(a, b);
+}
+
+@test
+fn test_system_time_lt() {
+    let a = SystemTime.from_timestamp(100);
+    let b = SystemTime.from_timestamp(200);
+    assert(a < b);
+}
+
+fn main() {}

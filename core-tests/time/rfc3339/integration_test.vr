@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/time/rfc3339/integration_test.vr
+// =============================================================================
+//
+// Integration tests for RFC 3339: cross-API consistency, real-world timestamp
+// patterns, and interaction with SystemTime.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc, format_utc_with_nanos, format_with_offset, add_seconds, diff_seconds, now_utc};
+mount core.time.system_time.{SystemTime};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: now_utc sanity checks
+// =============================================================================
+
+@test
+fn test_now_utc_offset_is_zero() {
+    let t = now_utc();
+    assert_eq(t.offset_minutes, 0);
+}
+
+@test
+fn test_now_utc_unix_seconds_after_2020() {
+    let t = now_utc();
+    // 2020-01-01T00:00:00Z = 1577836800
+    assert(t.unix_seconds > 1_577_836_800,
+        "system clock appears to be before 2020");
+}
+
+@test
+fn test_now_utc_nanos_in_range() {
+    let t = now_utc();
+    assert(t.nanos >= 0 && t.nanos < 1_000_000_000);
+}
+
+// =============================================================================
+// Section 2: Parse → format → parse idempotence for real dates
+// =============================================================================
+
+@test
+fn test_real_timestamps_parse_format_parse_stable() {
+    let inputs: List<Text> = [
+        "2023-06-15T12:30:45Z".to_text(),
+        "2000-02-29T00:00:00Z".to_text(), // leap year
+        "1999-12-31T23:59:59Z".to_text(), // eve of Y2K
+    ];
+    for s in inputs.iter() {
+        let t1 = parse(s).unwrap();
+        let formatted = format_utc(t1.unix_seconds, t1.nanos);
+        let t2 = parse(&formatted).unwrap();
+        assert_eq(t1.unix_seconds, t2.unix_seconds);
+    }
+}
+
+// =============================================================================
+// Section 3: Timezone offset round-trip
+// =============================================================================
+
+@test
+fn test_same_moment_different_offsets_equal_unix() {
+    // Same UTC moment expressed in two timezones
+    let utc_form   = parse(&"2026-01-01T12:00:00Z".to_text()).unwrap();
+    let plus5_form = parse(&"2026-01-01T17:00:00+05:00".to_text()).unwrap();
+    assert_eq(utc_form.unix_seconds, plus5_form.unix_seconds);
+}
+
+@test
+fn test_format_with_offset_then_parse_recovers_unix() {
+    let unix = 1_700_000_000;
+    let offset = 120; // +02:00
+    let formatted = format_with_offset(unix, 0, offset);
+    let parsed = parse(&formatted).unwrap();
+    assert_eq(parsed.unix_seconds, unix);
+    assert_eq(parsed.offset_minutes, offset);
+}
+
+// =============================================================================
+// Section 4: diff_seconds / add_seconds in calendar arithmetic
+// =============================================================================
+
+@test
+fn test_one_day_diff_in_seconds() {
+    let day1 = parse(&"2026-01-01T00:00:00Z".to_text()).unwrap();
+    let day2 = parse(&"2026-01-02T00:00:00Z".to_text()).unwrap();
+    assert_eq(diff_seconds(&day2, &day1), 86400);
+}
+
+@test
+fn test_add_one_hour_then_diff() {
+    let t = Rfc3339Time { unix_seconds: 0, nanos: 0, offset_minutes: 0 };
+    let t_plus_1h = add_seconds(&t, 3600);
+    assert_eq(diff_seconds(&t_plus_1h, &t), 3600);
+}
+
+// =============================================================================
+// Section 5: Consistent with SystemTime
+// =============================================================================
+
+@test
+fn test_now_utc_unix_seconds_close_to_system_time() {
+    let rfc_t = now_utc();
+    let sys_t = SystemTime.now();
+    // Both read the same wall clock; allow ±1 second for two separate reads
+    let diff = if rfc_t.unix_seconds > sys_t.secs {
+        rfc_t.unix_seconds - sys_t.secs
+    } else {
+        sys_t.secs - rfc_t.unix_seconds
+    };
+    assert(diff <= 1, "now_utc and SystemTime.now diverged by more than 1 second");
+}
+
+// =============================================================================
+// Section 6: Error message rendering
+// =============================================================================
+
+@test
+fn test_malformed_error_display_non_empty() {
+    let err = parse(&"bad-input".to_text()).unwrap_err();
+    let msg = f"{err}";
+    assert(msg.len() > 0);
+}
+
+@test
+fn test_out_of_range_error_is_distinct() {
+    let malformed    = parse(&"x".to_text()).unwrap_err();
+    let out_of_range = parse(&"2026-00-01T00:00:00Z".to_text()).unwrap_err();
+    assert(malformed != out_of_range);
+}
+
+fn main() {}

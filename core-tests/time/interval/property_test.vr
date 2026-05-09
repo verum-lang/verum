@@ -1,0 +1,91 @@
+// =============================================================================
+// core-tests/time/interval/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for Interval and AsyncInterval.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Interval.period() round-trip
+// =============================================================================
+
+@test
+fn law_interval_period_round_trip() {
+    let cases: List<Duration> = [
+        Duration.zero(),
+        Duration.nanos(1),
+        Duration.millis(100),
+        Duration.secs(1),
+        Duration.mins(5),
+    ];
+    for d in cases.iter() {
+        let timer = Interval.new(*d);
+        assert_eq(timer.period(), *d);
+    }
+}
+
+// =============================================================================
+// §B  AsyncInterval period_ns = Duration.as_nanos()
+// =============================================================================
+
+@test
+fn law_async_interval_period_ns_eq_duration_nanos() {
+    let cases: List<Duration> = [
+        Duration.zero(),
+        Duration.millis(50),
+        Duration.secs(10),
+        Duration.hours(1),
+    ];
+    for d in cases.iter() {
+        let ai = AsyncInterval.new(*d);
+        assert_eq(ai.period_ns, d.as_nanos());
+    }
+}
+
+// =============================================================================
+// §C  interval(d).period_ns = d.as_nanos()
+// =============================================================================
+
+@test
+fn law_interval_factory_period_ns() {
+    let durations: List<Duration> = [
+        Duration.millis(100), Duration.secs(1), Duration.mins(1),
+    ];
+    for d in durations.iter() {
+        let ai = interval(*d);
+        assert_eq(ai.period_ns, d.as_nanos());
+    }
+}
+
+// =============================================================================
+// §D  interval_ms(n).period_ns = n * 1_000_000
+// =============================================================================
+
+@test
+fn law_interval_ms_period_ns_eq_n_times_million() {
+    let ns_per_ms = 1_000_000;
+    let cases: List<Int> = [0, 1, 100, 1000, 60000];
+    for &n in cases.iter() {
+        let ai = interval_ms(n);
+        assert_eq(ai.period_ns, n * ns_per_ms);
+    }
+}
+
+// =============================================================================
+// §E  @test_case — interval_ms factored correctly
+// =============================================================================
+
+@test_case(0,    0)
+@test_case(1,    1_000_000)
+@test_case(100,  100_000_000)
+@test_case(1000, 1_000_000_000)
+fn parametrised_interval_ms_period_ns(ms: Int, expected_ns: Int) {
+    assert_eq(interval_ms(ms).period_ns, expected_ns);
+}
+
+fn main() {}

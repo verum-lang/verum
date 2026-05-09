@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/time/cron/integration_test.vr
+// =============================================================================
+//
+// Integration tests for CronExpr: realistic scheduling scenarios,
+// cross-field constraint interaction, and edge calendar arithmetic.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.cron.{CronExpr, CronError};
+mount core.collections.list.List;
+
+// 1970-01-01T00:00:00Z = unix 0; day 0 was Thursday (dow=4)
+const EPOCH: Int = 0;
+
+// =============================================================================
+// Section 1: Business-hours schedule
+// =============================================================================
+
+@test
+fn test_business_hours_next_fire_on_weekday() {
+    // "0 9 * * MON-FRI" fires at 09:00 on workdays
+    let c = CronExpr.parse(&"0 9 * * MON-FRI".to_text()).unwrap();
+    // 1970-01-01T00:00:00 = unix 0, Thursday (dow=4=Thursday)
+    // Next 09:00 = 9h = 32400
+    let next = c.next_after_unix(EPOCH).unwrap();
+    assert_eq(next, 32400); // Thursday 09:00
+}
+
+@test
+fn test_end_of_day_schedule_next_is_next_morning() {
+    // "0 18 * * MON-FRI" — fire at 18:00 on weekdays
+    let c = CronExpr.parse(&"0 18 * * MON-FRI".to_text()).unwrap();
+    // Start at 17:59 on Thursday (unix = 17*3600 + 59*60 = 64740)
+    let next = c.next_after_unix(64740).unwrap();
+    // Should fire at 18:00 same day = 64800
+    assert_eq(next, 64800);
+}
+
+// =============================================================================
+// Section 2: Monthly and weekly schedules
+// =============================================================================
+
+@test
+fn test_monthly_1st_at_midnight_next_from_epoch() {
+    // "0 0 1 * *" fires at midnight on the 1st of each month
+    let c = CronExpr.parse(&"0 0 1 * *".to_text()).unwrap();
+    // Start at epoch (1970-01-01); dom=1 matches but time 00:00 requires
+    // strictly after 0, so next = February 1 = 2678400
+    let next = c.next_after_unix(EPOCH).unwrap();
+    // 1970-02-01T00:00:00Z = 31 days from epoch
+    assert_eq(next, 31 * 86400);
+}
+
+@test
+fn test_every_5_minutes_collects_multiple_fires() {
+    let c = CronExpr.parse(&"*/5 * * * *".to_text()).unwrap();
+    let mut fires: List<Int> = [];
+    let mut t = EPOCH;
+    let mut i = 0;
+    while i < 12 { // 1 hour worth of 5-min fires
+        t = c.next_after_unix(t).unwrap();
+        fires.push(t);
+        i = i + 1;
+    }
+    assert_eq(fires.len(), 12);
+    // Each fire should be 5 minutes apart
+    let mut j = 1;
+    while j < fires.len() {
+        assert_eq(fires[j] - fires[j - 1], 300);
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: Step and range combination
+// =============================================================================
+
+@test
+fn test_range_with_step_0_to_59_step_15() {
+    // "0,15,30,45 * * * *" = */15 * * * *
+    let c1 = CronExpr.parse(&"0,15,30,45 * * * *".to_text()).unwrap();
+    let c2 = CronExpr.parse(&"*/15 * * * *".to_text()).unwrap();
+    // Both should produce the same next-fire times
+    let n1 = c1.next_after_unix(EPOCH).unwrap();
+    let n2 = c2.next_after_unix(EPOCH).unwrap();
+    assert_eq(n1, n2);
+}
+
+@test
+fn test_restricted_hour_range_fires_within_range() {
+    // "0 8-17 * * *" fires hourly between 08:00 and 17:00
+    let c = CronExpr.parse(&"0 8-17 * * *".to_text()).unwrap();
+    let first = c.next_after_unix(EPOCH).unwrap();
+    // First fire should be at 08:00 on 1970-01-01 = 8*3600 = 28800
+    assert_eq(first, 28800);
+
+    // Verify next 10 fires are all within the 8-17 hour window
+    let mut t = EPOCH;
+    let mut k = 0;
+    while k < 10 {
+        t = c.next_after_unix(t).unwrap();
+        let hour = (t % 86400) / 3600;
+        assert(hour >= 8 && hour <= 17,
+            f"hour {hour} is outside 8-17 window");
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// Section 4: OR-semantics when both DOM and DOW are constrained
+// =============================================================================
+
+@test
+fn test_or_semantics_dom_and_dow_constrained() {
+    // "0 0 1 * MON" fires on the 1st OR on Mondays (vixie-cron OR)
+    let c = CronExpr.parse(&"0 0 1 * MON".to_text()).unwrap();
+    assert(c.dom_constrained);
+    assert(c.dow_constrained);
+    // Should fire sometime without error
+    let next = c.next_after_unix(EPOCH);
+    assert(next.is_ok());
+}
+
+// =============================================================================
+// Section 5: Textual alias coverage
+// =============================================================================
+
+@test
+fn test_all_month_aliases_parse() {
+    let months: List<Text> = [
+        "JAN".to_text(), "FEB".to_text(), "MAR".to_text(), "APR".to_text(),
+        "MAY".to_text(), "JUN".to_text(), "JUL".to_text(), "AUG".to_text(),
+        "SEP".to_text(), "OCT".to_text(), "NOV".to_text(), "DEC".to_text(),
+    ];
+    for m in months.iter() {
+        let spec = f"0 0 1 {m} *";
+        assert(CronExpr.parse(&spec).is_ok(), f"failed to parse: {spec}");
+    }
+}
+
+@test
+fn test_all_dow_aliases_parse() {
+    let days: List<Text> = [
+        "SUN".to_text(), "MON".to_text(), "TUE".to_text(), "WED".to_text(),
+        "THU".to_text(), "FRI".to_text(), "SAT".to_text(),
+    ];
+    for d in days.iter() {
+        let spec = f"0 0 * * {d}";
+        assert(CronExpr.parse(&spec).is_ok(), f"failed to parse: {spec}");
+    }
+}
+
+fn main() {}

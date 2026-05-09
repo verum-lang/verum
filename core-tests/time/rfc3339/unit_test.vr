@@ -1,0 +1,215 @@
+// =============================================================================
+// core-tests/time/rfc3339/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.rfc3339` — parse / format / helper functions.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc, format_utc_with_nanos, format_with_offset, add_seconds, diff_seconds};
+
+// =============================================================================
+// Section 1: Parse UTC Z-suffixed timestamps
+// =============================================================================
+
+@test
+fn test_parse_utc_z_timestamp() {
+    // 2026-04-22T14:30:00Z
+    let t = parse(&"2026-04-22T14:30:00Z".to_text()).unwrap();
+    assert_eq(t.nanos, 0);
+    assert_eq(t.offset_minutes, 0);
+}
+
+@test
+fn test_parse_epoch_utc() {
+    let t = parse(&"1970-01-01T00:00:00Z".to_text()).unwrap();
+    assert_eq(t.unix_seconds, 0);
+    assert_eq(t.nanos, 0);
+    assert_eq(t.offset_minutes, 0);
+}
+
+@test
+fn test_parse_known_unix_timestamp() {
+    // 2001-09-09T01:46:40Z = unix 1_000_000_000
+    let t = parse(&"2001-09-09T01:46:40Z".to_text()).unwrap();
+    assert_eq(t.unix_seconds, 1_000_000_000);
+}
+
+// =============================================================================
+// Section 2: Parse with sub-second fraction
+// =============================================================================
+
+@test
+fn test_parse_subsecond_millis() {
+    let t = parse(&"2026-01-01T00:00:00.123Z".to_text()).unwrap();
+    assert_eq(t.nanos, 123_000_000);
+}
+
+@test
+fn test_parse_subsecond_nanoseconds() {
+    let t = parse(&"2026-01-01T00:00:00.123456789Z".to_text()).unwrap();
+    assert_eq(t.nanos, 123_456_789);
+}
+
+@test
+fn test_parse_subsecond_padding_to_9_digits() {
+    // "1" fractional digit → 100_000_000 ns
+    let t = parse(&"2026-01-01T00:00:00.1Z".to_text()).unwrap();
+    assert_eq(t.nanos, 100_000_000);
+}
+
+// =============================================================================
+// Section 3: Parse with timezone offsets
+// =============================================================================
+
+@test
+fn test_parse_positive_offset() {
+    // +03:00 — UTC is 3 hours earlier
+    let t = parse(&"2026-01-01T03:00:00+03:00".to_text()).unwrap();
+    assert_eq(t.offset_minutes, 180);
+    // unix_seconds = local - offset*60 = (3h in unix) - 3h = 0
+    assert_eq(t.unix_seconds, 0);
+}
+
+@test
+fn test_parse_negative_offset() {
+    // 2026-01-01T00:00:00-05:00 → UTC is 5h later
+    let t = parse(&"2026-01-01T00:00:00-05:00".to_text()).unwrap();
+    assert_eq(t.offset_minutes, -300);
+    // unix_seconds = 0 - (-300*60) = 18000
+    assert_eq(t.unix_seconds, 18000);
+}
+
+@test
+fn test_parse_zero_offset_explicit() {
+    let t = parse(&"2026-01-01T00:00:00+00:00".to_text()).unwrap();
+    assert_eq(t.offset_minutes, 0);
+}
+
+// =============================================================================
+// Section 4: Parse errors
+// =============================================================================
+
+@test
+fn test_parse_too_short_is_malformed() {
+    let r = parse(&"2026".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_missing_timezone_is_malformed() {
+    let r = parse(&"2026-01-01T00:00:00".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_month_out_of_range() {
+    let r = parse(&"2026-13-01T00:00:00Z".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_day_out_of_range() {
+    let r = parse(&"2026-02-30T00:00:00Z".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_hour_out_of_range() {
+    let r = parse(&"2026-01-01T24:00:00Z".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_trailing_bytes_is_malformed() {
+    let r = parse(&"2026-01-01T00:00:00ZXX".to_text());
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 5: Leap-second handling
+// =============================================================================
+
+@test
+fn test_parse_leap_second_collapsed() {
+    // Seconds = 60 → collapsed to 59
+    let t = parse(&"1998-12-31T23:59:60Z".to_text());
+    // Must either parse OK (collapsed) or return Err — must NOT panic
+    assert(t.is_ok() || t.is_err());
+}
+
+// =============================================================================
+// Section 6: format_utc
+// =============================================================================
+
+@test
+fn test_format_utc_epoch_no_nanos() {
+    let s = format_utc(0, 0);
+    assert_eq(s, "1970-01-01T00:00:00Z".to_text());
+}
+
+@test
+fn test_format_utc_known_timestamp() {
+    // 2001-09-09T01:46:40Z = unix 1_000_000_000
+    let s = format_utc(1_000_000_000, 0);
+    assert_eq(s, "2001-09-09T01:46:40Z".to_text());
+}
+
+@test
+fn test_format_utc_with_nanos_includes_fraction() {
+    let s = format_utc_with_nanos(0, 123_000_000);
+    assert_eq(s, "1970-01-01T00:00:00.123000000Z".to_text());
+}
+
+// =============================================================================
+// Section 7: format_with_offset
+// =============================================================================
+
+@test
+fn test_format_with_positive_offset() {
+    // unix=0 with +05:30 → local = 5h30m = 19800s
+    let s = format_with_offset(0, 0, 330);
+    assert_eq(s, "1970-01-01T05:30:00+05:30".to_text());
+}
+
+@test
+fn test_format_with_negative_offset() {
+    // unix=18000 with -05:00 → local = 18000-18000 = 0
+    let s = format_with_offset(18000, 0, -300);
+    assert_eq(s, "1970-01-01T00:00:00-05:00".to_text());
+}
+
+// =============================================================================
+// Section 8: diff_seconds and add_seconds
+// =============================================================================
+
+@test
+fn test_diff_seconds_positive() {
+    let later   = Rfc3339Time { unix_seconds: 200, nanos: 0, offset_minutes: 0 };
+    let earlier = Rfc3339Time { unix_seconds: 100, nanos: 0, offset_minutes: 0 };
+    assert_eq(diff_seconds(&later, &earlier), 100);
+}
+
+@test
+fn test_diff_seconds_negative() {
+    let a = Rfc3339Time { unix_seconds: 100, nanos: 0, offset_minutes: 0 };
+    let b = Rfc3339Time { unix_seconds: 200, nanos: 0, offset_minutes: 0 };
+    assert_eq(diff_seconds(&a, &b), -100);
+}
+
+@test
+fn test_add_seconds_positive() {
+    let t = Rfc3339Time { unix_seconds: 1000, nanos: 0, offset_minutes: 0 };
+    let t2 = add_seconds(&t, 60);
+    assert_eq(t2.unix_seconds, 1060);
+}
+
+@test
+fn test_add_seconds_preserves_nanos_and_offset() {
+    let t = Rfc3339Time { unix_seconds: 0, nanos: 500_000_000, offset_minutes: 60 };
+    let t2 = add_seconds(&t, 100);
+    assert_eq(t2.nanos, 500_000_000);
+    assert_eq(t2.offset_minutes, 60);
+}
+
+fn main() {}

@@ -1,0 +1,121 @@
+// =============================================================================
+// core-tests/time/duration_parse/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for duration_parse.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration_parse.{parse, DurationParseError};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Compact ≡ ISO 8601 for equivalent strings
+// =============================================================================
+
+@test
+fn law_compact_equals_iso_for_hours() {
+    let compact = parse(&"1h".to_text()).unwrap();
+    let iso     = parse(&"PT1H".to_text()).unwrap();
+    assert_eq(compact, iso);
+}
+
+@test
+fn law_compact_equals_iso_for_minutes() {
+    let compact = parse(&"30m".to_text()).unwrap();
+    let iso     = parse(&"PT30M".to_text()).unwrap();
+    assert_eq(compact, iso);
+}
+
+@test
+fn law_compact_equals_iso_for_seconds() {
+    let compact = parse(&"45s".to_text()).unwrap();
+    let iso     = parse(&"PT45S".to_text()).unwrap();
+    assert_eq(compact, iso);
+}
+
+@test
+fn law_compact_equals_iso_for_days() {
+    let compact = parse(&"1d".to_text()).unwrap();
+    let iso     = parse(&"P1D".to_text()).unwrap();
+    assert_eq(compact, iso);
+}
+
+// =============================================================================
+// §B  Additive law: parse("Xh") + parse("Ym") = parse("XhYm")
+// =============================================================================
+
+@test
+fn law_composite_equals_sum_of_parts() {
+    let composite = parse(&"1h30m".to_text()).unwrap();
+    let sum       = parse(&"1h".to_text()).unwrap() + parse(&"30m".to_text()).unwrap();
+    assert_eq(composite, sum);
+}
+
+@test
+fn law_three_part_composite_equals_sum() {
+    let composite = parse(&"1h15m30s".to_text()).unwrap();
+    let sum = parse(&"1h".to_text()).unwrap()
+            + parse(&"15m".to_text()).unwrap()
+            + parse(&"30s".to_text()).unwrap();
+    assert_eq(composite, sum);
+}
+
+// =============================================================================
+// §C  Unit consistency: parsed values match Duration constructors
+// =============================================================================
+
+@test
+fn law_parse_1s_eq_duration_secs_1() {
+    assert_eq(parse(&"1s".to_text()).unwrap(), Duration.secs(1));
+}
+
+@test
+fn law_parse_1m_eq_duration_mins_1() {
+    assert_eq(parse(&"1m".to_text()).unwrap(), Duration.mins(1));
+}
+
+@test
+fn law_parse_1h_eq_duration_hours_1() {
+    assert_eq(parse(&"1h".to_text()).unwrap(), Duration.hours(1));
+}
+
+@test
+fn law_parse_1d_eq_duration_from_days_1() {
+    assert_eq(parse(&"1d".to_text()).unwrap(), Duration.from_days(1));
+}
+
+@test
+fn law_parse_1w_eq_duration_from_weeks_1() {
+    assert_eq(parse(&"1w".to_text()).unwrap(), Duration.from_weeks(1));
+}
+
+// =============================================================================
+// §D  DurationParseError variant discrimination
+// =============================================================================
+
+@test
+fn law_error_variants_distinct() {
+    let empty         = parse(&"".to_text()).unwrap_err();
+    let bad_unit      = parse(&"5x".to_text()).unwrap_err();
+    assert(empty != bad_unit);
+}
+
+// =============================================================================
+// §E  @test_case truth table for exact nanosecond values
+// =============================================================================
+
+@test_case("1ns",   1)
+@test_case("1us",   1_000)
+@test_case("1ms",   1_000_000)
+@test_case("1s",    1_000_000_000)
+@test_case("1m",    60_000_000_000)
+@test_case("1h",    3_600_000_000_000)
+@test_case("1d",    86_400_000_000_000)
+@test_case("1w",    604_800_000_000_000)
+fn parametrised_single_unit_nanos(input: &Text, expected_ns: Int) {
+    assert_eq(parse(input).unwrap().as_nanos(), expected_ns);
+}
+
+fn main() {}
