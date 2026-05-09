@@ -275,6 +275,9 @@ fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
     if let Some(v) = verum_common::os_events::os_event_const_for_target(name, target_os) {
         return v;
     }
+    if let Some(v) = verum_common::posix_signals::signal_value(name, target_os) {
+        return v;
+    }
     match name {
         // Atomic ordering (core/intrinsics/atomic.vr) — target-independent.
         "ORDERING_RELAXED" => 0,
@@ -431,6 +434,15 @@ impl VbcCodegen {
         // would reject leak out.
         let parent_type_id =
             parent_type_name.and_then(|name| self.type_name_to_id.get(name).copied());
+        if std::env::var("VERUM_DIAG_MAKEVARIANT").is_ok() {
+            let desc_variants_len = parent_type_id
+                .and_then(|tid| self.types.iter().find(|d| d.id == tid))
+                .map(|d| d.variants.len());
+            eprintln!(
+                "[diag-makevariant] parent={:?} parent_tid={:?} tag={} field_count={} desc_variants_len={:?} self.types.len={}",
+                parent_type_name, parent_type_id, tag, field_count, desc_variants_len, self.types.len()
+            );
+        }
         let typed_ok = parent_type_id.and_then(|tid| {
             let desc = self.types.iter().find(|d| d.id == tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
@@ -26712,6 +26724,39 @@ mod tests {
         assert_eq!(resolve_stdlib_constant_value("EPOLLET", "linux"), 1 << 31);
         assert_eq!(resolve_stdlib_constant_value("EPOLL_CTL_ADD", "linux"), 1);
         assert_eq!(resolve_stdlib_constant_value("EPOLL_CTL_DEL", "linux"), 2);
+    }
+
+    /// POSIX signal numbers diverge between Linux and Darwin for
+    /// most signals beyond the first 6 (SIGHUP..SIGABRT). Programs
+    /// referencing `@const SIGCHLD` / `@const SIGUSR1` etc. MUST
+    /// receive the build target's value, not the host's.
+    #[test]
+    fn target_conditional_constants_signals() {
+        // Cross-platform signals — target-independent.
+        for target in ["linux", "macos", "darwin", "ios"] {
+            assert_eq!(resolve_stdlib_constant_value("SIGTERM", target), 15);
+            assert_eq!(resolve_stdlib_constant_value("SIGKILL", target), 9);
+            assert_eq!(resolve_stdlib_constant_value("SIGSEGV", target), 11);
+            assert_eq!(resolve_stdlib_constant_value("SIGINT", target), 2);
+        }
+
+        // Platform-divergent: SIGCHLD = 17 (Linux) / 20 (Darwin).
+        assert_eq!(resolve_stdlib_constant_value("SIGCHLD", "linux"), 17);
+        assert_eq!(resolve_stdlib_constant_value("SIGCHLD", "macos"), 20);
+
+        // SIGUSR1 = 10 (Linux) / 30 (Darwin) — the most extreme
+        // divergence; sending the wrong number delivers a different
+        // signal than the program intended.
+        assert_eq!(resolve_stdlib_constant_value("SIGUSR1", "linux"), 10);
+        assert_eq!(resolve_stdlib_constant_value("SIGUSR1", "darwin"), 30);
+
+        // SIGSYS = 31 (Linux) / 12 (Darwin).
+        assert_eq!(resolve_stdlib_constant_value("SIGSYS", "linux"), 31);
+        assert_eq!(resolve_stdlib_constant_value("SIGSYS", "macos"), 12);
+
+        // SIGBUS = 7 (Linux) / 10 (Darwin).
+        assert_eq!(resolve_stdlib_constant_value("SIGBUS", "linux"), 7);
+        assert_eq!(resolve_stdlib_constant_value("SIGBUS", "darwin"), 10);
     }
 
     /// Windows-only constants resolve correctly when target is windows.
