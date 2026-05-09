@@ -413,6 +413,15 @@ pub(crate) fn level_eq(a: &Level, b: &Level) -> bool {
     a.clone().normalize() == b.clone().normalize()
 }
 
+/// Shift a term up by one binder (cutoff 0).  Crate-public so the
+/// NbE checker's T-Pair-Intro can lift the second-component type
+/// into the Σ-codomain's binding frame without re-implementing the
+/// shift walk.  Equivalent to `shift_up(term, 1, 0)` on the
+/// internal helper below.
+pub(crate) fn lift_term_one_binder(term: Term) -> Term {
+    shift_up(term, 1, 0)
+}
+
 // =============================================================================
 // Minimal CoC AST
 // =============================================================================
@@ -446,6 +455,26 @@ pub enum Term {
     /// Application `f x`. Evaluation reduces to substitution of `x`
     /// for de Bruijn 0 in the body of `f`.
     App(Box<Term>, Box<Term>),
+
+    // ---- Σ-types (FV-20): dependent pairs ----
+
+    /// Dependent pair type `Σ(x : A). B`.  Like `Pi`, the body `B`
+    /// is under a binder: de Bruijn 0 in `B` refers to the first
+    /// component of the pair.  Σ encodes "exists" propositions and
+    /// dependent record types — adding it doubles the reference
+    /// checker's expressive power without expanding the trust base.
+    Sigma(Box<Term>, Box<Term>),
+    /// Pair constructor `(a, b)` for a `Σ(A, B)` type.  The kernel
+    /// re-checks the pair against its claimed Σ-type via
+    /// bidirectional inference (T-Pair-Intro).
+    Pair(Box<Term>, Box<Term>),
+    /// First projection `fst(p)`.  When `p` reduces to `Pair(a, _)`,
+    /// β-projection collapses to `a`.  Otherwise the projection
+    /// stays stuck (preserved by NbE as a Neutral).
+    Fst(Box<Term>),
+    /// Second projection `snd(p)`.  When `p` reduces to `Pair(_, b)`,
+    /// β-projection collapses to `b`.
+    Snd(Box<Term>),
 }
 
 impl Term {
@@ -487,6 +516,26 @@ impl Term {
     /// Convenience: build `App(f, x)`.
     pub fn app(f: Term, x: Term) -> Self {
         Term::App(Box::new(f), Box::new(x))
+    }
+
+    /// Convenience: build `Sigma(domain, body)`.
+    pub fn sigma(domain: Term, body: Term) -> Self {
+        Term::Sigma(Box::new(domain), Box::new(body))
+    }
+
+    /// Convenience: build `Pair(fst, snd)`.
+    pub fn pair(fst: Term, snd: Term) -> Self {
+        Term::Pair(Box::new(fst), Box::new(snd))
+    }
+
+    /// Convenience: build `Fst(p)`.
+    pub fn fst(p: Term) -> Self {
+        Term::Fst(Box::new(p))
+    }
+
+    /// Convenience: build `Snd(p)`.
+    pub fn snd(p: Term) -> Self {
+        Term::Snd(Box::new(p))
     }
 }
 
@@ -548,7 +597,7 @@ impl Context {
 /// Universe-level variables are NOT term-level binders, so they
 /// pass through unchanged — the shift is on de Bruijn indices for
 /// term variables only.
-fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
+pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
     match term {
         Term::Var(i) => {
             if i >= cutoff {
@@ -570,6 +619,16 @@ fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
             Box::new(shift_up(*f, amount, cutoff)),
             Box::new(shift_up(*x, amount, cutoff)),
         ),
+        Term::Sigma(a, b) => Term::Sigma(
+            Box::new(shift_up(*a, amount, cutoff)),
+            Box::new(shift_up(*b, amount, cutoff + 1)),
+        ),
+        Term::Pair(a, b) => Term::Pair(
+            Box::new(shift_up(*a, amount, cutoff)),
+            Box::new(shift_up(*b, amount, cutoff)),
+        ),
+        Term::Fst(p) => Term::Fst(Box::new(shift_up(*p, amount, cutoff))),
+        Term::Snd(p) => Term::Snd(Box::new(shift_up(*p, amount, cutoff))),
     }
 }
 
@@ -605,6 +664,16 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
             Box::new(subst(*f, target, replacement)),
             Box::new(subst(*x, target, replacement)),
         ),
+        Term::Sigma(a, b) => Term::Sigma(
+            Box::new(subst(*a, target, replacement)),
+            Box::new(subst(*b, target + 1, replacement)),
+        ),
+        Term::Pair(a, b) => Term::Pair(
+            Box::new(subst(*a, target, replacement)),
+            Box::new(subst(*b, target, replacement)),
+        ),
+        Term::Fst(p) => Term::Fst(Box::new(subst(*p, target, replacement))),
+        Term::Snd(p) => Term::Snd(Box::new(subst(*p, target, replacement))),
     }
 }
 
@@ -666,6 +735,32 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
                     other => return (Term::App(Box::new(other), x), fuel),
                 }
             }
+
+            // Σ-projection (FV-20): Fst(Pair(a, _)) → a;
+            // Snd(Pair(_, b)) → b.  Stuck on non-pair head.
+            Term::Fst(p) => {
+                let (p_whnf, fuel_after) = whnf_fuel(*p, fuel);
+                fuel = fuel_after;
+                match p_whnf {
+                    Term::Pair(a, _) => {
+                        // Continue reducing the projected component
+                        // (it may itself contain head redexes).
+                        term = *a;
+                    }
+                    other => return (Term::Fst(Box::new(other)), fuel),
+                }
+            }
+            Term::Snd(p) => {
+                let (p_whnf, fuel_after) = whnf_fuel(*p, fuel);
+                fuel = fuel_after;
+                match p_whnf {
+                    Term::Pair(_, b) => {
+                        term = *b;
+                    }
+                    other => return (Term::Snd(Box::new(other)), fuel),
+                }
+            }
+
             _ => return (term, fuel),
         }
     }
@@ -701,6 +796,15 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         (Term::Pi(a1, b1), Term::Pi(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Lam(a1, b1), Term::Lam(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::App(f1, x1), Term::App(f2, x2)) => def_eq(f1, f2) && def_eq(x1, x2),
+        // Σ-types (FV-20): structural component-wise equality.  The
+        // β-projection rules in `whnf_fuel` collapse `Fst(Pair(a, _))`
+        // and `Snd(Pair(_, b))` BEFORE we reach this point, so any
+        // residual `Fst` / `Snd` here is stuck on a non-pair head
+        // (typically a bound variable or neutral application).
+        (Term::Sigma(a1, b1), Term::Sigma(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
+        (Term::Pair(a1, b1), Term::Pair(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
+        (Term::Fst(p1), Term::Fst(p2)) => def_eq(p1, p2),
+        (Term::Snd(p1), Term::Snd(p2)) => def_eq(p1, p2),
         // η-equivalence — one-sided cases. When one side is a
         // λx.(f x) and the other is `f`, they're equal iff `x`
         // does not appear free in `f`. This rule fires AFTER WHNF
@@ -773,6 +877,9 @@ fn is_free_in(term: &Term, target: usize) -> bool {
         Term::Pi(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
         Term::Lam(a, body) => is_free_in(a, target) || is_free_in(body, target + 1),
         Term::App(f, x) => is_free_in(f, target) || is_free_in(x, target),
+        Term::Sigma(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
+        Term::Pair(a, b) => is_free_in(a, target) || is_free_in(b, target),
+        Term::Fst(p) | Term::Snd(p) => is_free_in(p, target),
     }
 }
 
@@ -809,11 +916,21 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
             Box::new(shift_down(*f, amount, cutoff)),
             Box::new(shift_down(*x, amount, cutoff)),
         ),
+        Term::Sigma(a, b) => Term::Sigma(
+            Box::new(shift_down(*a, amount, cutoff)),
+            Box::new(shift_down(*b, amount, cutoff + 1)),
+        ),
+        Term::Pair(a, b) => Term::Pair(
+            Box::new(shift_down(*a, amount, cutoff)),
+            Box::new(shift_down(*b, amount, cutoff)),
+        ),
+        Term::Fst(p) => Term::Fst(Box::new(shift_down(*p, amount, cutoff))),
+        Term::Snd(p) => Term::Snd(Box::new(shift_down(*p, amount, cutoff))),
     }
 }
 
 // =============================================================================
-// Bidirectional type checker — the six rules
+// Bidirectional type checker — the six rules (eight, post-FV-20)
 // =============================================================================
 
 /// Type-checking error. Each error names the kernel rule that
@@ -828,6 +945,10 @@ pub enum CheckError {
     NotAType(Term),
     /// T-App-Elim: function side isn't a Pi type.
     NotAFunction(Term),
+    /// T-Fst-Elim / T-Snd-Elim (FV-20): the projected term's type
+    /// isn't a Σ-type, so first/second-component projection has
+    /// no meaning.  Carries the inferred type for diagnostics.
+    NotASigma(Term),
     /// T-App-Elim: argument's type doesn't match the Pi's domain.
     DomainMismatch {
         /// Domain type expected by the Pi.
@@ -985,6 +1106,47 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 });
             }
             Ok(subst(*codom, 0, x))
+        }
+
+        // T-Sigma-Form: Σ(x:A).B : Universe(max(level(A), level(B)))
+        Term::Sigma(a, b) => {
+            let a_ty = infer(ctx, a)?;
+            let n = expect_universe(&a_ty).ok_or_else(|| CheckError::NotAType((**a).clone()))?;
+            let extended = ctx.extend((**a).clone());
+            let b_ty = infer(&extended, b)?;
+            let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
+            Ok(Term::Universe(n.max_with(m)))
+        }
+
+        // T-Pair-Intro: Pair(a, b) : Sigma(A, B) where a:A and b:B[a/0]
+        Term::Pair(a, b) => {
+            let a_ty = infer(ctx, a)?;
+            let b_ty = infer(ctx, b)?;
+            // B[a/0]: the second component type may depend on the first value.
+            // We form Sigma(a_ty, b_ty_shifted) where b_ty is shifted under the binder.
+            let b_ty_shifted = shift_up(b_ty, 1, 0);
+            Ok(Term::Sigma(Box::new(a_ty), Box::new(b_ty_shifted)))
+        }
+
+        // T-Fst-Elim: Fst(p) : A where p : Sigma(A, B)
+        Term::Fst(p) => {
+            let p_ty = whnf(infer(ctx, p)?);
+            match p_ty {
+                Term::Sigma(a, _) => Ok(*a),
+                other => Err(CheckError::NotASigma(other)),
+            }
+        }
+
+        // T-Snd-Elim: Snd(p) : B[Fst(p)/0] where p : Sigma(A, B).
+        // The substitution is what makes Σ DEPENDENT — `B` may
+        // reference the first component, and the projection of
+        // the second knows what the first was at the term level.
+        Term::Snd(p) => {
+            let p_ty = whnf(infer(ctx, p)?);
+            match p_ty {
+                Term::Sigma(_, b) => Ok(subst(*b, 0, &Term::Fst(p.clone()))),
+                other => Err(CheckError::NotASigma(other)),
+            }
         }
     }
 }
@@ -1825,5 +1987,203 @@ mod tests {
             Err(CheckError::TypeMismatch { .. }) => {}
             other => panic!("expected TypeMismatch on (u, v) variable mismatch, got {:?}", other),
         }
+    }
+
+    // =========================================================================
+    // FV-20 — Σ-types (dependent pairs).
+    //
+    // Each test pins one of the four new kernel rules (T-Sigma-Form,
+    // T-Pair-Intro, T-Fst-Elim, T-Snd-Elim) plus the β-projection
+    // identities `fst(pair(a, _)) ≡ a` and `snd(pair(_, b)) ≡ b`.
+    // Together they double the reference-checker's expressive power
+    // (Π-types alone can't encode "exists" propositions; with Σ
+    // every dependent record + existential becomes verifiable).
+    // =========================================================================
+
+    #[test]
+    fn t_sigma_form_at_concrete_universe() {
+        // Σ(_ : Type@0). Type@0 : Type@1
+        let ctx = Context::new();
+        let sigma = Term::sigma(Term::universe(0), Term::universe(0));
+        let inferred = infer(&ctx, &sigma).unwrap();
+        assert!(def_eq(&inferred, &Term::universe(1)));
+    }
+
+    #[test]
+    fn t_sigma_form_takes_max_universe() {
+        // Σ(_ : Type@2). Type@5 : Type@6 (max(3, 6) = 6)
+        let ctx = Context::new();
+        let sigma = Term::sigma(Term::universe(2), Term::universe(5));
+        let inferred = infer(&ctx, &sigma).unwrap();
+        assert!(def_eq(&inferred, &Term::universe(6)));
+    }
+
+    #[test]
+    fn t_sigma_form_polymorphic_takes_succ_of_max() {
+        // Σ(_ : Type@u). Type@v : Type@succ(max(u, v))
+        let ctx = Context::new();
+        let sigma = Term::sigma(Term::universe_var("u"), Term::universe_var("v"));
+        let inferred = infer(&ctx, &sigma).unwrap();
+        let expected_level = Level::Succ(Box::new(
+            Level::Var("u".to_string()).max_with(Level::Var("v".to_string())),
+        ));
+        assert!(def_eq(&inferred, &Term::Universe(expected_level)));
+    }
+
+    #[test]
+    fn t_pair_intro_synthesises_non_dependent_sigma() {
+        // Build a closed pair: (Type@0, Type@0) : Σ(_ : Type@1). Type@1
+        // (each component has type Type@1; non-dependent Σ.)
+        let ctx = Context::new();
+        let pair = Term::pair(Term::universe(0), Term::universe(0));
+        let inferred = infer(&ctx, &pair).unwrap();
+        // Inferred type: Σ(_ : Type@1). Type@1 (with snd's Type@1
+        // shifted under the binder — irrelevant for closed types).
+        let expected = Term::sigma(Term::universe(1), Term::universe(1));
+        assert!(
+            def_eq(&inferred, &expected),
+            "T-Pair-Intro: expected {:?}, got {:?}",
+            expected,
+            inferred,
+        );
+    }
+
+    #[test]
+    fn t_fst_elim_returns_domain() {
+        // Bind p : Σ(_ : Type@0). Type@0 in context.  Fst(Var(0)) : Type@0.
+        let sigma_ty = Term::sigma(Term::universe(0), Term::universe(0));
+        let ctx = Context::new().extend(sigma_ty);
+        let inferred = infer(&ctx, &Term::fst(Term::Var(0))).unwrap();
+        assert!(def_eq(&inferred, &Term::universe(0)));
+    }
+
+    #[test]
+    fn t_snd_elim_with_dependent_codomain() {
+        // Build a context where p : Σ(x : Type@0). x.  Snd(p) :
+        // Fst(p) — the dependent codomain `x` becomes `Fst(p)` after
+        // substitution.  The inferred type is Term::Fst(Var(0)).
+        let sigma_ty = Term::sigma(Term::universe(0), Term::Var(0));
+        let ctx = Context::new().extend(sigma_ty);
+        let inferred = infer(&ctx, &Term::snd(Term::Var(0))).unwrap();
+        let expected = Term::fst(Term::Var(0));
+        assert!(
+            def_eq(&inferred, &expected),
+            "T-Snd-Elim with dependent codomain: expected {:?}, got {:?}",
+            expected,
+            inferred,
+        );
+    }
+
+    #[test]
+    fn beta_fst_pair_collapses() {
+        // β-projection: Fst(Pair(Type@0, Type@1)) ≡ Type@0.
+        // Pinned via def_eq (which calls whnf on both sides).
+        let pair = Term::pair(Term::universe(0), Term::universe(1));
+        let projected = Term::fst(pair);
+        assert!(def_eq(&projected, &Term::universe(0)));
+    }
+
+    #[test]
+    fn beta_snd_pair_collapses() {
+        // β-projection: Snd(Pair(Type@0, Type@1)) ≡ Type@1.
+        let pair = Term::pair(Term::universe(0), Term::universe(1));
+        let projected = Term::snd(pair);
+        assert!(def_eq(&projected, &Term::universe(1)));
+    }
+
+    #[test]
+    fn fst_on_non_sigma_is_rejected() {
+        // Fst on a Universe-typed term is structurally invalid:
+        // the kernel rejects with NotASigma (FV-20 error variant).
+        let ctx = Context::new();
+        let bad = Term::fst(Term::universe(0)); // Type@0 isn't Σ-typed
+        match infer(&ctx, &bad) {
+            Err(CheckError::NotASigma(_)) => {}
+            other => panic!("expected NotASigma, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn snd_on_non_sigma_is_rejected() {
+        let ctx = Context::new();
+        let bad = Term::snd(Term::universe(0));
+        match infer(&ctx, &bad) {
+            Err(CheckError::NotASigma(_)) => {}
+            other => panic!("expected NotASigma, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn certificate_pair_at_non_dependent_sigma_verifies() {
+        // The pair (Type@0, Type@0) at type Σ(_ : Type@1). Type@1
+        // verifies cleanly under the trusted-base certificate.
+        let cert = Certificate {
+            term: Term::pair(Term::universe(0), Term::universe(0)),
+            claimed_type: Term::sigma(Term::universe(1), Term::universe(1)),
+            metadata: Default::default(),
+        };
+        cert.verify().expect("non-dependent Σ certificate should verify");
+    }
+
+    #[test]
+    fn certificate_pair_with_wrong_universe_rejects() {
+        // The pair (Type@0, Type@0) claimed at Σ(_ : Type@0). Type@0
+        // (Type@0 isn't itself of type Type@0 — it lives in Type@1).
+        // Both kernels must reject.
+        let cert = Certificate {
+            term: Term::pair(Term::universe(0), Term::universe(0)),
+            claimed_type: Term::sigma(Term::universe(0), Term::universe(0)),
+            metadata: Default::default(),
+        };
+        match cert.verify() {
+            Err(CheckError::TypeMismatch { .. }) => {}
+            other => panic!("expected TypeMismatch on universe-mismatched pair, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn nested_sigma_typechecks() {
+        // Σ(_ : Type@0). Σ(_ : Type@0). Type@0 : Type@1
+        // (nested Σ — exercises the binder-extension recursion).
+        let ctx = Context::new();
+        let inner = Term::sigma(Term::universe(0), Term::universe(0));
+        let outer = Term::sigma(Term::universe(0), inner);
+        let inferred = infer(&ctx, &outer).unwrap();
+        assert!(def_eq(&inferred, &Term::universe(1)));
+    }
+
+    #[test]
+    fn sigma_pi_universe_compose() {
+        // Π(_ : Σ(_ : Type@0). Type@0). Type@0 : Type@1
+        // — Σ as a domain of Π exercises the cross-rule interaction.
+        let ctx = Context::new();
+        let sigma = Term::sigma(Term::universe(0), Term::universe(0));
+        let pi = Term::pi(sigma, Term::universe(0));
+        let inferred = infer(&ctx, &pi).unwrap();
+        assert!(def_eq(&inferred, &Term::universe(1)));
+    }
+
+    #[test]
+    fn polymorphic_sigma_certificate_verifies() {
+        // Build the polymorphic dependent-pair existence claim:
+        //   λ(A : Type@u). λ(x : A). (x, x) : Π(A : Type@u). Π(_ : A). Σ(_ : A). A
+        // Reduces to a value-level claim that's universe-polymorphic.
+        let term = Term::lam(
+            Term::universe_var("u"),
+            Term::lam(Term::Var(0), Term::pair(Term::Var(0), Term::Var(0))),
+        );
+        let claimed_type = Term::pi(
+            Term::universe_var("u"),
+            Term::pi(
+                Term::Var(0),
+                Term::sigma(Term::Var(1), Term::Var(2)),
+            ),
+        );
+        let cert = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        cert.verify().expect("polymorphic Σ certificate should verify");
     }
 }

@@ -305,6 +305,14 @@ fn term_to_expr_placeholder(term: &Term, role: &str) -> Expr {
         Term::Pi { .. } => format!("__verum_kernel_pi_{role}"),
         Term::Lam { .. } => format!("__verum_kernel_lam_{role}"),
         Term::App { .. } => format!("__verum_kernel_app_{role}"),
+        // Σ-types (FV-20): same shape-class placeholder strategy.
+        // Different terms still produce different placeholder names
+        // through the rest of the encoding pipeline; the distinction
+        // we need at this layer is only that Σ ≠ Π and Pair ≠ App.
+        Term::Sigma { .. } => format!("__verum_kernel_sigma_{role}"),
+        Term::Pair { .. } => format!("__verum_kernel_pair_{role}"),
+        Term::Fst { .. } => format!("__verum_kernel_fst_{role}"),
+        Term::Snd { .. } => format!("__verum_kernel_snd_{role}"),
     };
     Expr::new(
         ExprKind::Path(Path::new(

@@ -91,6 +91,16 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
             Box::new(shift_universes(f, lift)),
             Box::new(shift_universes(x, lift)),
         ),
+        Term::Sigma(a, b) => Term::Sigma(
+            Box::new(shift_universes(a, lift)),
+            Box::new(shift_universes(b, lift)),
+        ),
+        Term::Pair(a, b) => Term::Pair(
+            Box::new(shift_universes(a, lift)),
+            Box::new(shift_universes(b, lift)),
+        ),
+        Term::Fst(p) => Term::Fst(Box::new(shift_universes(p, lift))),
+        Term::Snd(p) => Term::Snd(Box::new(shift_universes(p, lift))),
     }
 }
 
