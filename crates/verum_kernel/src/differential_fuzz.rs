@@ -266,50 +266,21 @@ pub fn apply_mutation(cert: &Certificate, mutation: &Mutation) -> Certificate {
     }
 }
 
-/// Recursively add `delta` to every `Universe(n)` in `term`.
-/// Bounded by `u32::MAX` — saturating add for defensive safety.
+/// Recursively add `delta` to every `Universe(level)` in `term`.
+///
+/// Single-source-of-truth wrapper around
+/// [`crate::proof_checker_meta::shift_universes`]: previously this
+/// module hand-coded its own term-walk, which had to be extended in
+/// lock-step with every new `Term` variant in the kernel — a
+/// structural redundancy that silently rotted (a missing arm here
+/// would have meant the fuzzer skipped the variant on the
+/// universe-lift mutation path).  Routing through the canonical
+/// helper closes that drift surface and keeps the saturating-add
+/// semantics intact (the helper uses `Level::shifted_by`, which is
+/// itself saturating on `Concrete(u32::MAX)`).
+#[inline]
 fn lift_universes_in_term(term: &Term, delta: u32) -> Term {
-    match term {
-        Term::Var(i) => Term::Var(*i),
-        Term::Universe(level) => Term::Universe(level.clone().shifted_by(delta)),
-        Term::Pi(domain, body) => Term::Pi(
-            Box::new(lift_universes_in_term(domain, delta)),
-            Box::new(lift_universes_in_term(body, delta)),
-        ),
-        Term::Lam(domain, body) => Term::Lam(
-            Box::new(lift_universes_in_term(domain, delta)),
-            Box::new(lift_universes_in_term(body, delta)),
-        ),
-        Term::App(f, x) => Term::App(
-            Box::new(lift_universes_in_term(f, delta)),
-            Box::new(lift_universes_in_term(x, delta)),
-        ),
-        Term::Sigma(a, b) => Term::Sigma(
-            Box::new(lift_universes_in_term(a, delta)),
-            Box::new(lift_universes_in_term(b, delta)),
-        ),
-        Term::Pair(a, b) => Term::Pair(
-            Box::new(lift_universes_in_term(a, delta)),
-            Box::new(lift_universes_in_term(b, delta)),
-        ),
-        Term::Fst(p) => Term::Fst(Box::new(lift_universes_in_term(p, delta))),
-        Term::Snd(p) => Term::Snd(Box::new(lift_universes_in_term(p, delta))),
-        Term::Id { ty, lhs, rhs } => Term::Id {
-            ty: Box::new(lift_universes_in_term(ty, delta)),
-            lhs: Box::new(lift_universes_in_term(lhs, delta)),
-            rhs: Box::new(lift_universes_in_term(rhs, delta)),
-        },
-        Term::Refl(value) => Term::Refl(Box::new(lift_universes_in_term(value, delta))),
-        Term::J {
-            motive,
-            base,
-            scrutinee,
-        } => Term::J {
-            motive: Box::new(lift_universes_in_term(motive, delta)),
-            base: Box::new(lift_universes_in_term(base, delta)),
-            scrutinee: Box::new(lift_universes_in_term(scrutinee, delta)),
-        },
-    }
+    crate::proof_checker_meta::shift_universes(term, delta)
 }
 
 // =============================================================================
