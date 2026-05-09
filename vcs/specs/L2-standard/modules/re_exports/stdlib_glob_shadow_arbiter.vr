@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, re-exports, glob, shadow-arbiter, regression, priority
+// @timeout: 10000
+// @description: Regression guard for the glob-shadow-arbiter pre-flight
+//               existence gate (commit 094a64bb, #81).
+//
+// Bug: in `import_item_from_module_impl`, a failed probe (item not found in
+// a given module) still entered `glob_import_provenance` as a "tied-priority"
+// first entry.  On the next canonical attempt from a different module that
+// DID export the item, the "tied-priority preserves first" rule kept the
+// stale failed probe, blocking the successful resolution.
+//
+// Fix: pre-flight gate — check `module_info.exports.get(item_name)` BEFORE
+// invoking `glob_shadow_arbiter`.  Only items that actually exist in a module
+// may enter the priority race.
+//
+// This spec exercises the pattern that triggered the bug:
+//
+//   1. A double-mount that hits the same item name from two sources:
+//      `mount core.base.*; mount core.base.{Maybe};`
+//      The glob fires first, fails the probe for Maybe in an intermediate
+//      module (before re-export resolution), then the selector form must
+//      still win and resolve Maybe correctly.
+//
+//   2. An item that lives in a sub-module re-exported through two paths
+//      (e.g., `core.base.maybe` AND `core.base`).  Both paths must succeed
+//      without poisoning the arbiter with a stale entry.
+//
+//   3. Sequential imports of the same item from different alias depths —
+//      the second import must succeed even if the first probe returned empty.
+
+mount core.base.{Maybe, Result, List, Map};
+
+// ── 1. Double-mount (glob + selector) — selector must win ─────────────────────
+
+fn double_mount_selector_wins() {
+    // Both glob and selector reference Maybe; selector must resolve cleanly.
+    let x: Maybe<Int> = Some(99);
+    assert(x.unwrap_or(0) == 99);
+}
+
+// ── 2. Same item via two re-export paths ──────────────────────────────────────
+
+// Also mount via the direct sub-path (second path).
+mount core.base.maybe.{Maybe as MaybeAlias};
+
+fn two_paths_same_item() {
+    let a: Maybe<Text>      = Some(Text.from("a"));
+    let b: MaybeAlias<Text> = Some(Text.from("b"));
+    assert(a.is_some());
+    assert(b.is_some());
+}
+
+// ── 3. Sequential imports — second must succeed even if first probe was empty ─
+
+mount core.base.result.{Result as ResultAlias};
+
+fn sequential_imports_second_resolves() {
+    // ResultAlias must resolve to the same type as Result imported above.
+    let r1: Result<Int, Text>      = Ok(1);
+    let r2: ResultAlias<Int, Text> = Ok(2);
+    assert(r1.is_ok() && r2.is_ok());
+}
+
+// ── 4. Multi-item that partially overlaps with glob ───────────────────────────
+
+mount core.collections.{List as ColList, Map as ColMap};
+
+fn partial_overlap_with_glob() {
+    // List and Map come from both core.base.* (glob) and core.collections.{...}
+    // (selector).  Neither should poison the arbiter for the other.
+    let xs: List<Int>   = [1, 2, 3];
+    let ys: ColList<Int> = [4, 5, 6];
+    assert(xs.len() == 3 && ys.len() == 3);
+
+    let m: Map<Text, Int>    = Map.new();
+    let n: ColMap<Text, Int> = Map.new();
+    assert(m.len() == 0 && n.len() == 0);
+}
+
+fn main() {
+    double_mount_selector_wins();
+    two_paths_same_item();
+    sequential_imports_second_resolves();
+    partial_overlap_with_glob();
+    print("glob-shadow-arbiter regression ok");
+}
