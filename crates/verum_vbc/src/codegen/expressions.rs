@@ -44,6 +44,7 @@ use verum_common::well_known_types::{
     WellKnownProtocol as WKP, WellKnownType as WKT, type_names,
     MAYBE_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT,
     maybe_success_tag, result_success_tag,
+    variant_tags,
 };
 
 use verum_ast::pattern::VariantPatternData;
@@ -623,6 +624,162 @@ impl VbcCodegen {
                 })
             });
         self.emit_make_variant(dst, tag, field_count, parent_name.as_deref());
+    }
+
+    // =====================================================================
+    // Stdlib variant constructors — single source of truth for codegen.
+    //
+    // `emit_make_result_*` / `emit_make_maybe_*` centralize the construction
+    // of canonical stdlib `Result<T, E>` / `Maybe<T>` values. They consult
+    // `variant_tags::{OK, ERR, SOME, NONE}` constants for constructor names
+    // and the canonical `RESULT_VARIANT_LAYOUT` / `MAYBE_VARIANT_LAYOUT` for
+    // tag values, so no codegen path hardcodes a variant-name string or
+    // a literal tag integer.
+    //
+    // The variant lookup ladder is uniform: bare canonical name (e.g. `"Ok"`,
+    // succeeds when `Result` is imported via `mount`), then fully-qualified
+    // (`"Result::Ok"`, the cross-module form), then a structured CodegenError
+    // citing the missing type and the usage context.
+    // =====================================================================
+
+    /// Resolve a stdlib variant constructor's runtime tag through the
+    /// canonical `bare → qualified → error` ladder.
+    ///
+    /// Callers pass `canonical` from `variant_tags::{OK, ERR, SOME, NONE}` —
+    /// never raw string literals — and `qualified` as the cross-module form
+    /// (e.g., `"Result::Ok"`). On failure the error message names the
+    /// missing stdlib type and the operator that demanded it.
+    fn lookup_stdlib_variant_tag(
+        &self,
+        canonical: &'static str,
+        qualified: &'static str,
+        type_display_name: &'static str,
+        usage_context: &str,
+    ) -> CodegenResult<u32> {
+        self.ctx
+            .lookup_function(canonical)
+            .and_then(|info| info.variant_tag)
+            .or_else(|| {
+                self.ctx
+                    .lookup_function(qualified)
+                    .and_then(|info| info.variant_tag)
+            })
+            .ok_or_else(|| {
+                CodegenError::internal(format!(
+                    "variant '{}' not defined: {} type must be in scope for {}",
+                    canonical, type_display_name, usage_context,
+                ))
+            })
+    }
+
+    /// Materialize `Result::Ok(payload)` into `dst`.
+    ///
+    /// `usage_context` appears in the error message if `Result` isn't in
+    /// scope (e.g., `"@catch"`, `"try-recover wrapping"`).
+    pub(super) fn emit_make_result_ok(
+        &mut self,
+        dst: Reg,
+        payload: Reg,
+        usage_context: &str,
+    ) -> CodegenResult<()> {
+        let tag = self.lookup_stdlib_variant_tag(
+            variant_tags::OK,
+            "Result::Ok",
+            "Result",
+            usage_context,
+        )?;
+        self.emit_make_variant_for_function(
+            dst,
+            tag,
+            1,
+            variant_tags::OK,
+            Some("Result::Ok"),
+        );
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: dst,
+            field: 0,
+            value: payload,
+        });
+        Ok(())
+    }
+
+    /// Materialize `Result::Err(payload)` into `dst`. Mirror of
+    /// [`emit_make_result_ok`].
+    pub(super) fn emit_make_result_err(
+        &mut self,
+        dst: Reg,
+        payload: Reg,
+        usage_context: &str,
+    ) -> CodegenResult<()> {
+        let tag = self.lookup_stdlib_variant_tag(
+            variant_tags::ERR,
+            "Result::Err",
+            "Result",
+            usage_context,
+        )?;
+        self.emit_make_variant_for_function(
+            dst,
+            tag,
+            1,
+            variant_tags::ERR,
+            Some("Result::Err"),
+        );
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: dst,
+            field: 0,
+            value: payload,
+        });
+        Ok(())
+    }
+
+    /// Materialize `Maybe::Some(payload)` into `dst`.
+    pub(super) fn emit_make_maybe_some(
+        &mut self,
+        dst: Reg,
+        payload: Reg,
+        usage_context: &str,
+    ) -> CodegenResult<()> {
+        let tag = self.lookup_stdlib_variant_tag(
+            variant_tags::SOME,
+            "Maybe::Some",
+            "Maybe",
+            usage_context,
+        )?;
+        self.emit_make_variant_for_function(
+            dst,
+            tag,
+            1,
+            variant_tags::SOME,
+            Some("Maybe::Some"),
+        );
+        self.ctx.emit(Instruction::SetVariantData {
+            variant: dst,
+            field: 0,
+            value: payload,
+        });
+        Ok(())
+    }
+
+    /// Materialize `Maybe::None` into `dst`. Zero-arity variant.
+    pub(super) fn emit_make_maybe_none(
+        &mut self,
+        dst: Reg,
+        usage_context: &str,
+    ) -> CodegenResult<()> {
+        let tag = self.lookup_stdlib_variant_tag(
+            variant_tags::NONE,
+            "Maybe::None",
+            "Maybe",
+            usage_context,
+        )?;
+        self.emit_make_variant_for_function(
+            dst,
+            tag,
+            0,
+            variant_tags::NONE,
+            Some("Maybe::None"),
+        );
+        Ok(())
     }
 
     /// Detects if an expression is an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
@@ -9903,14 +10060,16 @@ impl VbcCodegen {
                             .unwrap_or(false);
 
                         if is_partial {
-                            // Partial pattern: test that result is Some(...), not None
-                            // Maybe<T> is None | Some(T), so Some has tag 1
-                            // Look up the actual tag from the "Some" variant constructor
+                            // Partial pattern: test that result is Some(...), not None.
+                            // Tag is read from the canonical MAYBE_VARIANT_LAYOUT
+                            // (single source of truth) — falls back via runtime
+                            // lookup of `variant_tags::SOME` only if the registry
+                            // has been overridden by a user-defined Maybe.
                             let some_tag = self
                                 .ctx
-                                .lookup_function("Some")
+                                .lookup_function(variant_tags::SOME)
                                 .and_then(|info| info.variant_tag)
-                                .unwrap_or(1); // fallback: Some is typically tag 1
+                                .unwrap_or_else(maybe_success_tag);
                             self.ctx.emit(Instruction::IsVar {
                                 dst: result,
                                 value: call_result,
@@ -13472,24 +13631,8 @@ impl VbcCodegen {
         self.ctx.try_recover_depth -= 1;
         self.ctx.emit(Instruction::TryEnd);
 
-        // Success path: wrap result in Ok variant
-        let ok_tag = self
-            .ctx
-            .lookup_function("Ok")
-            .and_then(|info| info.variant_tag)
-            .unwrap_or_else(|| {
-                "Ok".as_bytes()
-                    .iter()
-                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
-                    % 256
-            });
-
-        self.emit_make_variant_for_function(result, ok_tag, 1, "Ok", None);
-        self.ctx.emit(Instruction::SetVariantData {
-            variant: result,
-            field: 0,
-            value: inner_reg,
-        });
+        // Success path: wrap result in `Result::Ok(inner_reg)`.
+        self.emit_make_result_ok(result, inner_reg, "try-recover wrapping")?;
         self.ctx.free_temp(inner_reg);
 
         // Jump past the error handler
@@ -13497,29 +13640,14 @@ impl VbcCodegen {
             .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
 
         // Error handler: the thrown value is the unwrapped error payload.
-        // Re-wrap it in Err() to produce a proper Result::Err variant.
+        // Re-wrap it in `Result::Err(exception_reg)` to produce a proper
+        // Result::Err variant.
         self.ctx.define_label(&handler_label);
         let exception_reg = self.ctx.alloc_temp();
         self.ctx
             .emit(Instruction::GetException { dst: exception_reg });
 
-        let err_tag = self
-            .ctx
-            .lookup_function("Err")
-            .and_then(|info| info.variant_tag)
-            .unwrap_or_else(|| {
-                "Err"
-                    .as_bytes()
-                    .iter()
-                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
-                    % 256
-            });
-        self.emit_make_variant_for_function(result, err_tag, 1, "Err", None);
-        self.ctx.emit(Instruction::SetVariantData {
-            variant: result,
-            field: 0,
-            value: exception_reg,
-        });
+        self.emit_make_result_err(result, exception_reg, "try-recover error path")?;
         self.ctx.free_temp(exception_reg);
 
         self.ctx.define_label(&end_label);
@@ -17985,52 +18113,14 @@ impl VbcCodegen {
                 };
                 self.ctx.try_recover_depth -= 1;
                 self.ctx.emit(Instruction::TryEnd);
-                let okt = self
-                    .ctx
-                    .lookup_function("Ok")
-                    .and_then(|i| i.variant_tag)
-                    .or_else(|| {
-                        self.ctx
-                            .lookup_function("Result::Ok")
-                            .and_then(|i| i.variant_tag)
-                    })
-                    .ok_or_else(|| {
-                        CodegenError::internal(
-                            "variant 'Ok' not defined: Result type must be in scope for @catch",
-                        )
-                    })?;
-                self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: dest,
-                    field: 0,
-                    value: ir,
-                });
+                self.emit_make_result_ok(dest, ir, "@catch")?;
                 self.ctx.free_temp(ir);
                 self.ctx
                     .emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
                 self.ctx.define_label(&hl);
                 let ex = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::GetException { dst: ex });
-                let ert = self
-                    .ctx
-                    .lookup_function("Err")
-                    .and_then(|i| i.variant_tag)
-                    .or_else(|| {
-                        self.ctx
-                            .lookup_function("Result::Err")
-                            .and_then(|i| i.variant_tag)
-                    })
-                    .ok_or_else(|| {
-                        CodegenError::internal(
-                            "variant 'Err' not defined: Result type must be in scope for @catch",
-                        )
-                    })?;
-                self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: dest,
-                    field: 0,
-                    value: ex,
-                });
+                self.emit_make_result_err(dest, ex, "@catch")?;
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
             }
@@ -18066,30 +18156,14 @@ impl VbcCodegen {
                 };
                 self.ctx.try_recover_depth -= 1;
                 self.ctx.emit(Instruction::TryEnd);
-                let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
-                    .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
-                    .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
-                self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: dest,
-                    field: 0,
-                    value: ir,
-                });
+                self.emit_make_result_ok(dest, ir, "@catch_cbgr_violation")?;
                 self.ctx.free_temp(ir);
                 self.ctx
                     .emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
                 self.ctx.define_label(&hl);
                 let ex = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::GetException { dst: ex });
-                let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
-                    .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
-                    .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
-                self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
-                self.ctx.emit(Instruction::SetVariantData {
-                    variant: dest,
-                    field: 0,
-                    value: ex,
-                });
+                self.emit_make_result_err(dest, ex, "@catch_cbgr_violation")?;
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
             }
