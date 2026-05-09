@@ -1016,6 +1016,50 @@ pub enum CubicalSubOpcode {
     EquivBwd = 0x33,
 }
 
+// =========================================================================
+// CubicalSubOpcode metadata — single source of truth for the 17 variants.
+//
+// Same drift-collapse pattern as CharSubOpcode.meta() (d45d7ace5) and
+// the rest of the sub-opcode meta() series.  `category()` was driven
+// by `match self as u8` over 16-byte windows so renumbering a variant
+// could silently shift its band.
+// =========================================================================
+
+/// Functional band a `CubicalSubOpcode` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CubicalCategory {
+    /// `PathRefl` / `PathLambda` / `PathApp` / `PathSym` /
+    /// `PathTrans` / `PathAp`.
+    PathConstruction,
+    /// `Transport` (path-indexed type transport) and `Hcomp`
+    /// (homogeneous composition).
+    TransportComposition,
+    /// Interval algebra: `I0` / `I1` / `Meet` / `Join` / `Rev`.
+    IntervalOperations,
+    /// `Ua` / `UaInv` / `EquivFwd` / `EquivBwd`.
+    Univalence,
+}
+
+impl CubicalCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PathConstruction     => "Path Construction",
+            Self::TransportComposition => "Transport and Composition",
+            Self::IntervalOperations   => "Interval Operations",
+            Self::Univalence           => "Univalence",
+        }
+    }
+}
+
+/// Co-located metadata for one `CubicalSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct CubicalOpMeta {
+    /// All-caps mnemonic prefixed with `"CUB_"`.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: CubicalCategory,
+}
+
 impl CubicalSubOpcode {
     /// Creates a cubical sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -1050,42 +1094,59 @@ impl CubicalSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this cubical sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` and `category`.
+    pub const fn meta(self) -> CubicalOpMeta {
+        use CubicalCategory::{
+            IntervalOperations, PathConstruction, TransportComposition, Univalence,
+        };
+        macro_rules! m {
+            ($mn:expr, $cat:ident $(,)?) => {
+                CubicalOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                }
+            };
+        }
         match self {
-            // Path Construction
-            Self::PathRefl => "CUB_PATH_REFL",
-            Self::PathLambda => "CUB_PATH_LAMBDA",
-            Self::PathApp => "CUB_PATH_APP",
-            Self::PathSym => "CUB_PATH_SYM",
-            Self::PathTrans => "CUB_PATH_TRANS",
-            Self::PathAp => "CUB_PATH_AP",
-            // Transport and Composition
-            Self::Transport => "CUB_TRANSPORT",
-            Self::Hcomp => "CUB_HCOMP",
-            // Interval Operations
-            Self::IntervalI0 => "CUB_INTERVAL_I0",
-            Self::IntervalI1 => "CUB_INTERVAL_I1",
-            Self::IntervalMeet => "CUB_INTERVAL_MEET",
-            Self::IntervalJoin => "CUB_INTERVAL_JOIN",
-            Self::IntervalRev => "CUB_INTERVAL_REV",
-            // Univalence
-            Self::Ua => "CUB_UA",
-            Self::UaInv => "CUB_UA_INV",
-            Self::EquivFwd => "CUB_EQUIV_FWD",
-            Self::EquivBwd => "CUB_EQUIV_BWD",
+            // ===== Path Construction (0x00-0x0F) =====
+            Self::PathRefl     => m!("CUB_PATH_REFL",      PathConstruction),
+            Self::PathLambda   => m!("CUB_PATH_LAMBDA",    PathConstruction),
+            Self::PathApp      => m!("CUB_PATH_APP",       PathConstruction),
+            Self::PathSym      => m!("CUB_PATH_SYM",       PathConstruction),
+            Self::PathTrans    => m!("CUB_PATH_TRANS",     PathConstruction),
+            Self::PathAp       => m!("CUB_PATH_AP",        PathConstruction),
+
+            // ===== Transport and Composition (0x10-0x1F) =====
+            Self::Transport    => m!("CUB_TRANSPORT",      TransportComposition),
+            Self::Hcomp        => m!("CUB_HCOMP",          TransportComposition),
+
+            // ===== Interval Operations (0x20-0x2F) =====
+            Self::IntervalI0   => m!("CUB_INTERVAL_I0",    IntervalOperations),
+            Self::IntervalI1   => m!("CUB_INTERVAL_I1",    IntervalOperations),
+            Self::IntervalMeet => m!("CUB_INTERVAL_MEET",  IntervalOperations),
+            Self::IntervalJoin => m!("CUB_INTERVAL_JOIN",  IntervalOperations),
+            Self::IntervalRev  => m!("CUB_INTERVAL_REV",   IntervalOperations),
+
+            // ===== Univalence (0x30-0x3F) =====
+            Self::Ua           => m!("CUB_UA",             Univalence),
+            Self::UaInv        => m!("CUB_UA_INV",         Univalence),
+            Self::EquivFwd     => m!("CUB_EQUIV_FWD",      Univalence),
+            Self::EquivBwd     => m!("CUB_EQUIV_BWD",      Univalence),
         }
     }
 
+    /// Returns the mnemonic string for this cubical sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
+    }
+
     /// Returns the category of this cubical sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self as u8 {
-            0x00..=0x0F => "Path Construction",
-            0x10..=0x1F => "Transport and Composition",
-            0x20..=0x2F => "Interval Operations",
-            0x30..=0x3F => "Univalence",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 }
 
@@ -9628,6 +9689,30 @@ pub enum LogSubOpcode {
     GetLevel = 0x22,
 }
 
+// =========================================================================
+// LogSubOpcode metadata — single source of truth for the 9 variants.
+//
+// Same drift-collapse pattern as the rest of the sub-opcode meta()
+// series.  No drift defects in the pre-fix state — every accessor
+// already had structural definitions; meta() consolidation is purely
+// for symmetry with the other sub-opcodes.
+// =========================================================================
+
+/// Co-located metadata for one `LogSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct LogOpMeta {
+    /// All-caps mnemonic prefixed with `"LOG_"`.
+    pub mnemonic: &'static str,
+    /// Numeric severity (lower = more severe).  `255` for control
+    /// ops (Structured / Flush / SetLevel / GetLevel) that aren't
+    /// themselves a level.
+    pub severity: u8,
+    /// True for ops that actually emit a log entry at a level
+    /// (the five named levels + Structured); false for the
+    /// control ops.
+    pub is_log_level: bool,
+}
+
 impl LogSubOpcode {
     /// Creates a Log sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -9650,39 +9735,52 @@ impl LogSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this Log sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::Info => "LOG_INFO",
-            Self::Warning => "LOG_WARNING",
-            Self::Error => "LOG_ERROR",
-            Self::Debug => "LOG_DEBUG",
-            Self::Trace => "LOG_TRACE",
-            Self::Structured => "LOG_STRUCTURED",
-            Self::Flush => "LOG_FLUSH",
-            Self::SetLevel => "LOG_SET_LEVEL",
-            Self::GetLevel => "LOG_GET_LEVEL",
+    /// Returns co-located metadata for this sub-opcode.
+    pub const fn meta(self) -> LogOpMeta {
+        macro_rules! m {
+            ($mn:expr, sev=$sev:expr, lvl=$lvl:literal $(,)?) => {
+                LogOpMeta {
+                    mnemonic: $mn,
+                    severity: $sev,
+                    is_log_level: $lvl,
+                }
+            };
         }
+        match self {
+            // Severity-named log entries (lower number = more severe).
+            Self::Error      => m!("LOG_ERROR",      sev=0,   lvl=true),
+            Self::Warning    => m!("LOG_WARNING",    sev=1,   lvl=true),
+            Self::Info       => m!("LOG_INFO",       sev=2,   lvl=true),
+            Self::Debug      => m!("LOG_DEBUG",      sev=3,   lvl=true),
+            Self::Trace      => m!("LOG_TRACE",      sev=4,   lvl=true),
+            // Structured emits a log entry but at a runtime-chosen
+            // level — counts as is_log_level=true with severity=255
+            // sentinel.
+            Self::Structured => m!("LOG_STRUCTURED", sev=255, lvl=true),
+            // Control ops — neither level emitters nor severity-
+            // ordered.
+            Self::Flush      => m!("LOG_FLUSH",      sev=255, lvl=false),
+            Self::SetLevel   => m!("LOG_SET_LEVEL",  sev=255, lvl=false),
+            Self::GetLevel   => m!("LOG_GET_LEVEL",  sev=255, lvl=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this Log sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the log level as a numeric value (lower = more severe).
+    #[inline]
     pub fn severity(self) -> u8 {
-        match self {
-            Self::Error => 0,
-            Self::Warning => 1,
-            Self::Info => 2,
-            Self::Debug => 3,
-            Self::Trace => 4,
-            Self::Structured | Self::Flush | Self::SetLevel | Self::GetLevel => 255,
-        }
+        self.meta().severity
     }
 
     /// Returns true if this is a log level operation (not a control operation).
+    #[inline]
     pub fn is_log_level(self) -> bool {
-        matches!(
-            self,
-            Self::Info | Self::Warning | Self::Error | Self::Debug | Self::Trace | Self::Structured
-        )
+        self.meta().is_log_level
     }
 }
 
@@ -9909,6 +10007,55 @@ pub enum TextSubOpcode {
     AsBytes = 0x34,
 }
 
+// =========================================================================
+// TextSubOpcode metadata — single source of truth for the 10 variants.
+//
+// Same drift-collapse pattern as the rest of the sub-opcode meta()
+// series.  Variants are scattered across four byte ranges
+// (0x00-0x0F construction, 0x10-0x1F parse, 0x20-0x2F to-text,
+// 0x30-0x3F manipulation) but only `mnemonic` / `returns_text` /
+// `is_parse_operation` were exposed; `category()` was never
+// implemented.  meta() now adds it for symmetry.
+// =========================================================================
+
+/// Functional band a `TextSubOpcode` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextCategory {
+    /// `FromStatic` — Text constructors.
+    Construction,
+    /// `ParseInt` / `ParseFloat`.
+    ParseFromText,
+    /// `IntToText` / `FloatToText`.
+    ConvertToText,
+    /// `ByteLen` / `CharLen` / `IsEmpty` / `IsUtf8` / `AsBytes`.
+    Manipulation,
+}
+
+impl TextCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Construction   => "Construction",
+            Self::ParseFromText  => "Parse from Text",
+            Self::ConvertToText  => "Convert to Text",
+            Self::Manipulation   => "Manipulation",
+        }
+    }
+}
+
+/// Co-located metadata for one `TextSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct TextOpMeta {
+    /// All-caps mnemonic prefixed with `"TEXT_"`.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: TextCategory,
+    /// True for ops that produce a `Text` result
+    /// (`FromStatic` / `IntToText` / `FloatToText`).
+    pub returns_text: bool,
+    /// True for parse-from-text ops (`ParseInt` / `ParseFloat`).
+    pub is_parse_operation: bool,
+}
+
 impl TextSubOpcode {
     /// Creates a Text sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -9932,30 +10079,66 @@ impl TextSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this Text sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
+    /// Returns co-located metadata for this sub-opcode.
+    pub const fn meta(self) -> TextOpMeta {
+        use TextCategory::{Construction, ConvertToText, Manipulation, ParseFromText};
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             rtext=$rtext:literal, parse=$parse:literal $(,)?) => {
+                TextOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    returns_text: $rtext,
+                    is_parse_operation: $parse,
+                }
+            };
+        }
         match self {
-            Self::FromStatic => "TEXT_FROM_STATIC",
-            Self::ParseInt => "TEXT_PARSE_INT",
-            Self::ParseFloat => "TEXT_PARSE_FLOAT",
-            Self::IntToText => "TEXT_INT_TO_TEXT",
-            Self::FloatToText => "TEXT_FLOAT_TO_TEXT",
-            Self::ByteLen => "TEXT_BYTE_LEN",
-            Self::CharLen => "TEXT_CHAR_LEN",
-            Self::IsEmpty => "TEXT_IS_EMPTY",
-            Self::IsUtf8 => "TEXT_IS_UTF8",
-            Self::AsBytes => "TEXT_AS_BYTES",
+            // ===== Construction (0x00-0x0F) =====
+            Self::FromStatic   => m!("TEXT_FROM_STATIC",    Construction,   rtext=true,  parse=false),
+
+            // ===== Parse from Text (0x10-0x1F) =====
+            Self::ParseInt     => m!("TEXT_PARSE_INT",      ParseFromText,  rtext=false, parse=true),
+            Self::ParseFloat   => m!("TEXT_PARSE_FLOAT",    ParseFromText,  rtext=false, parse=true),
+
+            // ===== Convert to Text (0x20-0x2F) =====
+            Self::IntToText    => m!("TEXT_INT_TO_TEXT",    ConvertToText,  rtext=true,  parse=false),
+            Self::FloatToText  => m!("TEXT_FLOAT_TO_TEXT",  ConvertToText,  rtext=true,  parse=false),
+
+            // ===== Manipulation (0x30-0x3F) =====
+            Self::ByteLen      => m!("TEXT_BYTE_LEN",       Manipulation,   rtext=false, parse=false),
+            Self::CharLen      => m!("TEXT_CHAR_LEN",       Manipulation,   rtext=false, parse=false),
+            Self::IsEmpty      => m!("TEXT_IS_EMPTY",       Manipulation,   rtext=false, parse=false),
+            Self::IsUtf8       => m!("TEXT_IS_UTF8",        Manipulation,   rtext=false, parse=false),
+            Self::AsBytes      => m!("TEXT_AS_BYTES",       Manipulation,   rtext=false, parse=false),
         }
     }
 
+    /// Returns the mnemonic string for this Text sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
+    }
+
+    /// Returns the functional band of this Text sub-opcode.
+    ///
+    /// Newly added accessor — completes the meta() symmetry across
+    /// every sub-opcode in the file.
+    #[inline]
+    pub fn category(self) -> &'static str {
+        self.meta().category.as_str()
+    }
+
     /// Returns true if this operation returns a Text value.
+    #[inline]
     pub fn returns_text(self) -> bool {
-        matches!(self, Self::FromStatic | Self::IntToText | Self::FloatToText)
+        self.meta().returns_text
     }
 
     /// Returns true if this operation parses input.
+    #[inline]
     pub fn is_parse_operation(self) -> bool {
-        matches!(self, Self::ParseInt | Self::ParseFloat)
+        self.meta().is_parse_operation
     }
 }
 
@@ -17122,5 +17305,216 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 32);
+    }
+
+    // ========================================================================
+    // CubicalSubOpcode meta() drift pins
+    // ========================================================================
+
+    fn for_every_cubical_sub_opcode<F: FnMut(CubicalSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = CubicalSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn cubical_meta_count_pinned_at_seventeen() {
+        let mut count = 0;
+        for_every_cubical_sub_opcode(|_| count += 1);
+        assert_eq!(count, 17,
+            "CubicalSubOpcode variant count drift: expected 17, got {}", count);
+    }
+
+    #[test]
+    fn cubical_meta_category_matches_byte_range_band() {
+        for_every_cubical_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => CubicalCategory::PathConstruction,
+                0x10..=0x1F => CubicalCategory::TransportComposition,
+                0x20..=0x2F => CubicalCategory::IntervalOperations,
+                0x30..=0x3F => CubicalCategory::Univalence,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn cubical_meta_mnemonic_uniqueness_and_prefix() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(17);
+        for_every_cubical_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("CUB_"),
+                "{:?}: mnemonic {:?} not in `CUB_*` namespace", op, m);
+            assert!(!seen.contains(&m), "duplicate mnemonic {:?}", m);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 17);
+    }
+
+    // ========================================================================
+    // LogSubOpcode meta() drift pins
+    // ========================================================================
+
+    fn for_every_log_sub_opcode<F: FnMut(LogSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = LogSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn log_meta_count_pinned_at_nine() {
+        let mut count = 0;
+        for_every_log_sub_opcode(|_| count += 1);
+        assert_eq!(count, 9,
+            "LogSubOpcode variant count drift: expected 9, got {}", count);
+    }
+
+    #[test]
+    fn log_meta_severity_ordering() {
+        // Strict severity ordering: Error < Warning < Info < Debug < Trace.
+        // (Lower number = more severe.)
+        assert_eq!(LogSubOpcode::Error.severity(), 0);
+        assert_eq!(LogSubOpcode::Warning.severity(), 1);
+        assert_eq!(LogSubOpcode::Info.severity(), 2);
+        assert_eq!(LogSubOpcode::Debug.severity(), 3);
+        assert_eq!(LogSubOpcode::Trace.severity(), 4);
+        // Non-severity ops use 255 sentinel.
+        for op in [LogSubOpcode::Structured, LogSubOpcode::Flush,
+                   LogSubOpcode::SetLevel, LogSubOpcode::GetLevel] {
+            assert_eq!(op.severity(), 255,
+                "{:?}: non-severity op must use 255 sentinel", op);
+        }
+    }
+
+    #[test]
+    fn log_meta_is_log_level_partition() {
+        // is_log_level=true ⇔ op emits a log entry (the five
+        // named levels + Structured).  Flush/SetLevel/GetLevel
+        // are pure control ops.
+        let level_emitters = [
+            LogSubOpcode::Info,
+            LogSubOpcode::Warning,
+            LogSubOpcode::Error,
+            LogSubOpcode::Debug,
+            LogSubOpcode::Trace,
+            LogSubOpcode::Structured,
+        ];
+        let control_ops = [
+            LogSubOpcode::Flush,
+            LogSubOpcode::SetLevel,
+            LogSubOpcode::GetLevel,
+        ];
+        for op in &level_emitters {
+            assert!(op.is_log_level(), "{:?} should be is_log_level", op);
+        }
+        for op in &control_ops {
+            assert!(!op.is_log_level(), "{:?} is a control op", op);
+        }
+        let mut count = 0;
+        for_every_log_sub_opcode(|op| {
+            if op.is_log_level() { count += 1; }
+        });
+        assert_eq!(count, 6, "is_log_level count drift: expected 6");
+    }
+
+    #[test]
+    fn log_meta_mnemonic_uniqueness_and_prefix() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(9);
+        for_every_log_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("LOG_"),
+                "{:?}: mnemonic {:?} not in `LOG_*` namespace", op, m);
+            assert!(!seen.contains(&m), "duplicate mnemonic {:?}", m);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 9);
+    }
+
+    // ========================================================================
+    // TextSubOpcode meta() drift pins
+    // ========================================================================
+
+    fn for_every_text_sub_opcode<F: FnMut(TextSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = TextSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn text_meta_count_pinned_at_ten() {
+        let mut count = 0;
+        for_every_text_sub_opcode(|_| count += 1);
+        assert_eq!(count, 10,
+            "TextSubOpcode variant count drift: expected 10, got {}", count);
+    }
+
+    #[test]
+    fn text_meta_category_matches_byte_range_band() {
+        for_every_text_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => TextCategory::Construction,
+                0x10..=0x1F => TextCategory::ParseFromText,
+                0x20..=0x2F => TextCategory::ConvertToText,
+                0x30..=0x3F => TextCategory::Manipulation,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn text_meta_returns_text_xor_is_parse() {
+        // returns_text and is_parse_operation are disjoint —
+        // parsing produces a non-text result; producing text
+        // doesn't parse.
+        for_every_text_sub_opcode(|op| {
+            assert!(!(op.returns_text() && op.is_parse_operation()),
+                "{:?}: tagged both returns_text and is_parse_operation", op);
+        });
+    }
+
+    #[test]
+    fn text_meta_returns_text_iff_construction_or_convert_band() {
+        // returns_text ⇔ Construction band ∪ ConvertToText band.
+        for_every_text_sub_opcode(|op| {
+            let in_band = matches!(op.meta().category,
+                TextCategory::Construction | TextCategory::ConvertToText);
+            assert_eq!(op.returns_text(), in_band,
+                "{:?}: returns_text={} but text-producing-band={}",
+                op, op.returns_text(), in_band);
+        });
+    }
+
+    #[test]
+    fn text_meta_is_parse_iff_parse_band() {
+        for_every_text_sub_opcode(|op| {
+            let in_band = op.meta().category == TextCategory::ParseFromText;
+            assert_eq!(op.is_parse_operation(), in_band);
+        });
+    }
+
+    #[test]
+    fn text_meta_mnemonic_uniqueness_and_prefix() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(10);
+        for_every_text_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("TEXT_"),
+                "{:?}: mnemonic {:?} not in `TEXT_*` namespace", op, m);
+            assert!(!seen.contains(&m), "duplicate mnemonic {:?}", m);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 10);
     }
 }
