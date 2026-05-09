@@ -1,0 +1,149 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, cell, RefCell, borrow, double-borrow, assert_panics, interior-mutability
+// @timeout: 10000
+// @description: Pins the double-borrow-mut panic contract for RefCell (#71).
+//
+// `RefCell<T>` enforces Verum's borrowing rules dynamically:
+//
+//   borrow()     — panics with "already mutably borrowed"
+//                  if a mutable borrow is currently active (count < 0).
+//   borrow_mut() — panics with "already borrowed"
+//                  if any borrow (shared OR exclusive) is active (count != 0).
+//
+// Fallible variants:
+//   try_borrow()     → Err(BorrowError)     when mutable borrow is active.
+//   try_borrow_mut() → Err(BorrowMutError)  when any borrow is active.
+//
+// This spec pins:
+//   1. RefCell.new / borrow / borrow_mut / try_borrow / try_borrow_mut API surface.
+//   2. BorrowError and BorrowMutError are constructible and carry a `message` field.
+//   3. assert_panics closure shape typechecks for the double-borrow-mut scenario.
+//   4. try_borrow_mut returns Err(BorrowMutError) when already mutably borrowed.
+//   5. try_borrow returns Err(BorrowError) when already mutably borrowed.
+//   6. Normal (non-overlapping) borrows typecheck and compose correctly.
+
+mount core.base.cell.{RefCell, BorrowError, BorrowMutError, Ref, RefMut};
+mount core.base.panic.{assert_panics, catch_unwind};
+
+// ── 1. Basic API surface typechecks ──────────────────────────────────────────
+
+fn refcell_new_and_borrow() {
+    let cell: RefCell<Int> = RefCell.new(42);
+    let r: Ref<Int> = cell.borrow();
+    assert(*r.value == 42);
+    // r is dropped here — borrow_state.count returns to 0
+}
+
+fn refcell_borrow_mut_basic() {
+    let cell: RefCell<Int> = RefCell.new(0);
+    let mut m: RefMut<Int> = cell.borrow_mut();
+    *m.value = 99;
+    // m dropped — exclusive borrow released
+    let r: Ref<Int> = cell.borrow();
+    assert(*r.value == 99);
+}
+
+// ── 2. BorrowError and BorrowMutError are constructible / matchable ───────────
+
+fn borrow_error_constructible() {
+    let _e = BorrowError { message: Text.from("already mutably borrowed") };
+    assert(_e.message.len() > 0);
+}
+
+fn borrow_mut_error_constructible() {
+    let _e = BorrowMutError { message: Text.from("already borrowed") };
+    assert(_e.message.len() > 0);
+}
+
+// ── 3. assert_panics closure shape typechecks ─────────────────────────────────
+//
+// This pins that `assert_panics(|| { ... })` typechecks for the
+// double-borrow-mut scenario.  The closure captures a RefCell and attempts
+// a second borrow_mut while the first is still active.
+//
+// NOTE: this is a typecheck-pass spec — the assert_panics call itself
+// is not executed at tier 0 (typecheck-only).  A companion `run` spec
+// should be added when the runtime supports catch_unwind.
+
+fn double_borrow_mut_panic_shape_typechecks() {
+    // Shape: assert_panics takes fn() -> T — the closure has type fn() -> ().
+    assert_panics(|| {
+        let cell: RefCell<Int> = RefCell.new(0);
+        let _m1 = cell.borrow_mut();  // first exclusive borrow
+        let _m2 = cell.borrow_mut();  // should panic: "already borrowed"
+    });
+}
+
+fn borrow_while_mutably_borrowed_panic_shape_typechecks() {
+    assert_panics(|| {
+        let cell: RefCell<Int> = RefCell.new(0);
+        let _m = cell.borrow_mut();  // exclusive borrow
+        let _r = cell.borrow();      // should panic: "already mutably borrowed"
+    });
+}
+
+// ── 4. try_borrow_mut returns Err when already mutably borrowed ───────────────
+
+fn try_borrow_mut_err_when_active() {
+    let cell: RefCell<Int> = RefCell.new(7);
+    let _guard = cell.borrow_mut();  // exclusive borrow active
+    let result: Result<RefMut<Int>, BorrowMutError> = cell.try_borrow_mut();
+    match result {
+        Err(e) => assert(e.message.len() > 0),
+        Ok(_)  => panic("expected Err: borrow_mut should fail while exclusive borrow is active"),
+    }
+    // _guard dropped here — borrow released
+}
+
+// ── 5. try_borrow returns Err when mutably borrowed ───────────────────────────
+
+fn try_borrow_err_when_mutably_borrowed() {
+    let cell: RefCell<Text> = RefCell.new(Text.from("hello"));
+    let _guard = cell.borrow_mut();  // exclusive borrow active
+    let result: Result<Ref<Text>, BorrowError> = cell.try_borrow();
+    match result {
+        Err(e) => assert(e.message.len() > 0),
+        Ok(_)  => panic("expected Err: borrow should fail while exclusive borrow is active"),
+    }
+}
+
+// ── 6. Non-overlapping borrows compose correctly ──────────────────────────────
+
+fn sequential_borrows_ok() {
+    let cell: RefCell<Int> = RefCell.new(10);
+    {
+        let r: Ref<Int> = cell.borrow();
+        assert(*r.value == 10);
+    }  // r dropped
+    {
+        let mut m: RefMut<Int> = cell.borrow_mut();
+        *m.value = 20;
+    }  // m dropped
+    {
+        let r: Ref<Int> = cell.borrow();
+        assert(*r.value == 20);
+    }
+}
+
+fn multiple_shared_borrows_ok() {
+    let cell: RefCell<Bool> = RefCell.new(true);
+    let r1: Ref<Bool> = cell.borrow();
+    let r2: Ref<Bool> = cell.borrow();  // two shared borrows are allowed
+    assert(*r1.value && *r2.value);
+}
+
+fn main() {
+    refcell_new_and_borrow();
+    refcell_borrow_mut_basic();
+    borrow_error_constructible();
+    borrow_mut_error_constructible();
+    double_borrow_mut_panic_shape_typechecks();
+    borrow_while_mutably_borrowed_panic_shape_typechecks();
+    try_borrow_mut_err_when_active();
+    try_borrow_err_when_mutably_borrowed();
+    sequential_borrows_ok();
+    multiple_shared_borrows_ok();
+    print("RefCell double-borrow-mut panic typecheck ok");
+}
