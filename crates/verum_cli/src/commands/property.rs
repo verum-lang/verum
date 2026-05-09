@@ -438,7 +438,10 @@ impl TreeValue {
     }
 
     pub fn to_vbc_value(&self, interp: &mut verum_vbc::interpreter::Interpreter) -> Result<Value> {
-        use verum_common::well_known_types::{MAYBE_VARIANT_LAYOUT, ORDERING_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT};
+        use verum_common::well_known_types::{
+            maybe_none_tag, maybe_success_tag, ordering_tag_for_std,
+            result_error_tag, result_success_tag,
+        };
         Ok(match self {
             TreeValue::Bool(b) => Value::from_bool(*b),
             TreeValue::Int { value, .. } => Value::from_i64(*value),
@@ -446,27 +449,25 @@ impl TreeValue {
             TreeValue::Text { value, .. } => interp
                 .alloc_string(value)
                 .map_err(|e| CliError::RuntimeError(format!("alloc_string: {:?}", e)))?,
-            TreeValue::Maybe(None) => {
-                let none_tag = MAYBE_VARIANT_LAYOUT[0].1;  // None = 0
-                interp.alloc_variant(none_tag, &[])
-                    .map_err(|e| CliError::RuntimeError(format!("alloc_variant(None): {:?}", e)))?
-            }
+            TreeValue::Maybe(None) => interp
+                .alloc_variant(maybe_none_tag(), &[])
+                .map_err(|e| CliError::RuntimeError(format!("alloc_variant(None): {:?}", e)))?,
             TreeValue::Maybe(Some(inner)) => {
-                let some_tag = MAYBE_VARIANT_LAYOUT[1].1;  // Some = 1
                 let v = inner.to_vbc_value(interp)?;
-                interp.alloc_variant(some_tag, &[v])
+                interp
+                    .alloc_variant(maybe_success_tag(), &[v])
                     .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Some): {:?}", e)))?
             }
             TreeValue::ResultVal { is_ok: true, inner } => {
-                let ok_tag = RESULT_VARIANT_LAYOUT[0].1;  // Ok = 0
                 let v = inner.to_vbc_value(interp)?;
-                interp.alloc_variant(ok_tag, &[v])
+                interp
+                    .alloc_variant(result_success_tag(), &[v])
                     .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Ok): {:?}", e)))?
             }
             TreeValue::ResultVal { is_ok: false, inner } => {
-                let err_tag = RESULT_VARIANT_LAYOUT[1].1;  // Err = 1
                 let v = inner.to_vbc_value(interp)?;
-                interp.alloc_variant(err_tag, &[v])
+                interp
+                    .alloc_variant(result_error_tag(), &[v])
                     .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Err): {:?}", e)))?
             }
             TreeValue::List(elems) => {
@@ -474,17 +475,21 @@ impl TreeValue {
                     .iter()
                     .map(|e| e.to_vbc_value(interp))
                     .collect::<Result<Vec<_>>>()?;
-                interp.alloc_list(&vs)
+                interp
+                    .alloc_list(&vs)
                     .map_err(|e| CliError::RuntimeError(format!("alloc_list: {:?}", e)))?
             }
             TreeValue::Ordering(ord) => {
-                // Less=-1→tag 0, Equal=0→tag 1, Greater=1→tag 2
-                let tag = ORDERING_VARIANT_LAYOUT[match ord {
-                    -1 => 0,
-                    0 => 1,
-                    _ => 2,
-                }].1;
-                interp.alloc_variant(tag, &[])
+                // -1 → Less, 0 → Equal, 1 (or anything else) → Greater
+                // matches what `Ord::cmp` returns at the std level, then
+                // translates through the canonical Verum layout.
+                let std_ord = match ord {
+                    -1 => std::cmp::Ordering::Less,
+                    0 => std::cmp::Ordering::Equal,
+                    _ => std::cmp::Ordering::Greater,
+                };
+                interp
+                    .alloc_variant(ordering_tag_for_std(std_ord), &[])
                     .map_err(|e| CliError::RuntimeError(format!("alloc_variant(Ordering): {:?}", e)))?
             }
             TreeValue::Tuple(fields) => {
@@ -492,7 +497,8 @@ impl TreeValue {
                     .iter()
                     .map(|f| f.to_vbc_value(interp))
                     .collect::<Result<Vec<_>>>()?;
-                interp.alloc_tuple(&vs)
+                interp
+                    .alloc_tuple(&vs)
                     .map_err(|e| CliError::RuntimeError(format!("alloc_tuple: {:?}", e)))?
             }
         })

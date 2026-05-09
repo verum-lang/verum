@@ -7548,101 +7548,72 @@ pub(super) fn dispatch_array_method(
 
 /// Create a Maybe variant: Some(int_value) or None
 /// Maybe variant tags follow declaration order: `type Maybe<T> is None | Some(T);`
-/// so None=0 and Some=1. Must agree with register_type_constructors and the
-/// hard-coded constant/variant tables in codegen/mod.rs.
+/// so None=0 and Some=1. Tags are sourced from the canonical
+/// `MAYBE_VARIANT_LAYOUT` via [`maybe_success_tag`] / [`maybe_none_tag`] —
+/// any reorder in `core/base/maybe.vr` flows through automatically.
 pub(super) fn make_maybe_int(
     state: &mut InterpreterState,
     opt: Option<i64>,
 ) -> InterpreterResult<Value> {
     match opt {
-        Some(v) => {
-            // MakeVariant tag=1 (Some), field_count=1, then set field 0
-            let data_size = 8 + std::mem::size_of::<Value>();
-            let type_id = TypeId(0x8001); // tag 1
-            let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-                let tag_ptr = data.as_mut_ptr() as *mut u32;
-                unsafe {
-                    *tag_ptr = 1; // Some tag
-                    *tag_ptr.add(1) = 1; // field_count = 1
-                }
-            })?;
-            // Set payload
-            unsafe {
-                let base = obj.as_ptr() as *mut u8;
-                let payload_ptr = base.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
-                std::ptr::write(payload_ptr, Value::from_i64(v));
-            }
-            state.record_allocation();
-            Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-        }
-        None => {
-            // MakeVariant tag=0 (None), field_count=0
-            let data_size = 8 + std::mem::size_of::<Value>(); // min 1 field
-            let type_id = TypeId(0x8000); // tag 0
-            let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-                let tag_ptr = data.as_mut_ptr() as *mut u32;
-                unsafe {
-                    *tag_ptr = 0; // None tag
-                    *tag_ptr.add(1) = 0; // field_count = 0
-                }
-            })?;
-            state.record_allocation();
-            Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-        }
+        Some(v) => make_some_value(state, Value::from_i64(v)),
+        None => make_none_value(state),
     }
 }
 
 /// Create a Some variant wrapping any value.
-/// Maybe is declared `None | Some(T)`, so Some gets tag=1.
+///
+/// Tag is read from `MAYBE_VARIANT_LAYOUT` via [`maybe_success_tag`].
+/// Layout (`[header][tag: u32][field_count: u32][payload: Value]`) is
+/// shared with the `MakeVariant` opcode handler — see
+/// [`alloc_variant_with_payload`].
 pub(super) fn make_some_value(
     state: &mut InterpreterState,
     value: Value,
 ) -> InterpreterResult<Value> {
-    let data_size = 8 + std::mem::size_of::<Value>();
-    let type_id = TypeId(0x8001); // tag 1 for Some
-    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = 1; // Some tag
-            *tag_ptr.add(1) = 1; // field_count = 1
-        }
-    })?;
-    // Set payload
-    unsafe {
-        let base = obj.as_ptr() as *mut u8;
-        let payload_ptr = base.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
-        std::ptr::write(payload_ptr, value);
-    }
-    state.record_allocation();
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    alloc_variant_with_payload(
+        state,
+        verum_common::well_known_types::maybe_success_tag(),
+        value,
+    )
 }
 
 /// Create a None variant.
-/// Maybe is declared `None | Some(T)`, so None gets tag=0.
+///
+/// Tag is read from `MAYBE_VARIANT_LAYOUT` via [`maybe_none_tag`].
+/// Field count is zero (None is unit-shaped per the canonical layout).
 pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult<Value> {
-    let data_size = 8;
-    let type_id = TypeId(0x8000); // tag 0 for None
-    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = 0; // None tag
-            *tag_ptr.add(1) = 0; // field_count = 0
-        }
-    })?;
-    state.record_allocation();
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+    alloc_unit_variant(state, verum_common::well_known_types::maybe_none_tag())
 }
 
-/// Create a Result variant carrying `payload` with the given tag
-/// (0 = Ok, 1 = Err). Used by Result combinator handlers
-/// (`map_err`, `map`, …) to wrap the closure result without going
-/// through user-compiled code paths.
+/// Create a Result variant carrying `payload` with the given tag.
+/// Tags are sourced from `RESULT_VARIANT_LAYOUT` via
+/// [`result_success_tag`] / [`result_error_tag`]. Used by Result
+/// combinator handlers (`map_err`, `map`, …) to wrap the closure
+/// result without going through user-compiled code paths.
 ///
-
 /// Layout matches `MakeVariant` (`pattern_matching::handle_make_variant`)
-/// and `make_some_value` / `make_none_value` above:
-///  `[ObjectHeader][tag: u32][field_count: u32][payload: Value]`.
+/// and `make_some_value` / `make_none_value` above —
+/// `[ObjectHeader][tag: u32][field_count: u32][payload: Value]` — via
+/// the shared [`alloc_variant_with_payload`] helper.
 fn make_result_variant(
+    state: &mut InterpreterState,
+    tag: u32,
+    payload: Value,
+) -> InterpreterResult<Value> {
+    alloc_variant_with_payload(state, tag, payload)
+}
+
+/// Allocate a 1-field variant with `tag` and `payload`.
+///
+/// Uses the canonical synthetic-TypeId formula `0x8000 + tag` —
+/// matches `pattern_matching::alloc_variant_into` for `MakeVariant`,
+/// so values produced here are bit-equivalent to those from the
+/// canonical opcode path. The single shared implementation eliminates
+/// the parallel alloc-with-init blocks `make_some_value` /
+/// `make_result_variant` previously each carried.
+#[inline]
+fn alloc_variant_with_payload(
     state: &mut InterpreterState,
     tag: u32,
     payload: Value,
@@ -7653,7 +7624,7 @@ fn make_result_variant(
         let tag_ptr = data.as_mut_ptr() as *mut u32;
         unsafe {
             *tag_ptr = tag;
-            *tag_ptr.add(1) = 1; // field_count = 1 (Ok(T) / Err(E))
+            *tag_ptr.add(1) = 1; // field_count = 1
         }
     })?;
     unsafe {
@@ -7665,29 +7636,47 @@ fn make_result_variant(
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
-/// Create an Ordering variant.
+/// Allocate a 0-field (unit-shaped) variant with `tag`.
 ///
-/// Variant tags are obtained from the canonical layout
-/// (`verum_common::well_known_types::ORDERING_VARIANT_LAYOUT`) — NOT from a
-/// local hardcode. Sibling consumer is the codegen builtin variant registry
-/// in `verum_vbc/src/codegen/mod.rs` (the `builtins` array near the
-/// `register_function` loop). Both consult the same constant, so if the
-/// layout in `core/base/ordering.vr` is reordered, both sides update at once.
-pub(super) fn make_ordering(
+/// Layout mirrors [`alloc_variant_with_payload`] but writes
+/// `field_count = 0`. Allocates the same 8-byte data slot as `MakeVariant
+/// (tag=N, field_count=0)` so `deep_value_eq` against an opcode-built
+/// counterpart matches bit-for-bit.
+#[inline]
+fn alloc_unit_variant(
     state: &mut InterpreterState,
-    ord: std::cmp::Ordering,
+    tag: u32,
 ) -> InterpreterResult<Value> {
-    let tag = verum_common::well_known_types::ordering_tag_for_std(ord);
-    // Ordering variants are unit types (no payload); allocate the minimum
-    // 8-byte slot for the tag word (header layout matches `MakeVariant`).
     let data_size = 8;
     let type_id = TypeId(0x8000 + tag);
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
         let tag_ptr = data.as_mut_ptr() as *mut u32;
         unsafe {
             *tag_ptr = tag;
+            *tag_ptr.add(1) = 0; // field_count = 0
         }
     })?;
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+/// Create an Ordering variant.
+///
+/// Variant tags are obtained from the canonical layout
+/// (`verum_common::well_known_types::ORDERING_VARIANT_LAYOUT`) — NOT
+/// from a local hardcode. Sibling consumer is the codegen builtin
+/// variant registry in `verum_vbc/src/codegen/mod.rs` (the `builtins`
+/// array near the `register_function` loop). Both consult the same
+/// constant, so if the layout in `core/base/ordering.vr` is reordered,
+/// both sides update at once.
+///
+/// Ordering variants are unit-shaped (no payload); routes through the
+/// shared [`alloc_unit_variant`] helper so the layout matches `MakeVariant`
+/// for unit variants exactly.
+pub(super) fn make_ordering(
+    state: &mut InterpreterState,
+    ord: std::cmp::Ordering,
+) -> InterpreterResult<Value> {
+    let tag = verum_common::well_known_types::ordering_tag_for_std(ord);
+    alloc_unit_variant(state, tag)
 }
