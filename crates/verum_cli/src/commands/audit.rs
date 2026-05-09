@@ -3907,20 +3907,40 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
  // in the JSON. A discharged-or-admitted manifest entry whose .vr
  // citation OR dispatcher is missing flips the audit verdict to
  // failure — the architecture's bidirectional contract.
+    // #103 — primary source for audit citation files is the on-disk
+    // SDK installed at `~/.verum/sdk-<blake3>/core/`.  Production
+    // verum binaries no longer embed stdlib source, so audit-time
+    // citation checks consume source via `SdkLookup`.  Falls back to
+    // the legacy embedded archive (when the binary was bootstrap-
+    // built with embed enabled) and finally to a workspace-relative
+    // disk path (in-repo `cargo run` flow).
+    let sdk = verum_compiler::sdk_lookup::SdkLookup::find("");
     let embedded = verum_compiler::embedded_stdlib::get_embedded_stdlib();
     let stdlib_root_disk = locate_stdlib_root(&manifest_dir);
     let mut vr_missing: Vec<String> = Vec::new();
     let mut dispatcher_missing: Vec<String> = Vec::new();
     let vr_present = |tag: &str| -> bool {
- // Embedded paths are relative to core/, so the lookup key is
- // `verify/codegen_soundness/<tag>.vr`.
+        // Primary: SDK on disk under `<sdk>/core/verify/codegen_soundness/<tag>.vr`.
+        if let Some(ref sdk) = sdk {
+            let path = sdk
+                .core_path()
+                .join("verify")
+                .join("codegen_soundness")
+                .join(format!("{}.vr", tag));
+            if path.is_file() {
+                return true;
+            }
+        }
+        // Fallback 1: embedded source archive (bootstrap builds).
+        // Embedded paths are relative to core/, so the lookup key is
+        // `verify/codegen_soundness/<tag>.vr`.
         let embedded_key = format!("verify/codegen_soundness/{}.vr", tag);
         if let Some(archive) = embedded {
             if archive.get_file(&embedded_key).is_some() {
                 return true;
             }
         }
- // Disk fallback for source-tree builds with empty archive.
+        // Fallback 2: workspace-relative disk path (in-repo `cargo run`).
         if let Some(root) = stdlib_root_disk.as_ref() {
             let path = root
                 .join("core")
