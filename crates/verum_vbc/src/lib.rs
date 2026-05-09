@@ -177,7 +177,7 @@ pub use instruction::{
     ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode, FloatWidth, GpuCategory, GpuOpMeta,
     GpuSubOpcode, Instruction, MachSubOpcode, MathCategory, MathOpMeta, MathSubOpcode, Opcode,
     Reg, RegRange, SyncSubOpcode, SysSubOpcode, SystemCategory, SystemOpMeta, SystemSubOpcode,
-    TimeSubOpcode,
+    TensorCategory, TensorOpMeta, TensorSubOpcode, TimeSubOpcode,
 };
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{

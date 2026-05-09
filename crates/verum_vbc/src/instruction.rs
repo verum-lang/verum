@@ -3465,6 +3465,138 @@ impl TensorExtSubOpcode {
     }
 }
 
+// =========================================================================
+// TensorSubOpcode metadata — single source of truth for the 149 variants.
+//
+// The legacy implementation maintained four parallel match-arm
+// methods (`mnemonic`, `category`, `has_multiple_outputs`,
+// `requires_square`).  `category()` was driven by `match self as
+// u8` over irregular byte ranges (mostly 16-byte windows but with
+// a 32-byte band for matrix decompositions and a 4/28-byte split
+// at the top), so renumbering a variant could silently move it
+// between bands.  Three latent drift defects:
+//
+// * Duplicate mnemonic: both `Self::Norm` (matrix norm, 0x64) and
+//   `Self::TensorNorm` (general tensor norm, 0xB4) returned
+//   `"TENSOR_NORM"` — diagnostic output is ambiguous and the
+//   uniqueness pin would have caught a renumbering long ago.
+// * `has_multiple_outputs()` missed `Self::Topk` (whose format is
+//   `values:reg, indices:reg, src:reg, k:reg, dim:i8` — two
+//   outputs) and `Self::SplitAt` (whose format is `dst_a:reg,
+//   dst_b:reg, src:reg, index:u32, dim:i8` — two outputs).
+// * `requires_square()` missed `Self::Inverse` (matrix inverse is
+//   only defined for square matrices), `Self::LU` (LU
+//   decomposition with pivoting on a non-square matrix is rare
+//   and not what callers expect), and `Self::Cholesky` (requires
+//   symmetric positive-definite, which is square).
+//
+// Same drift-collapse pattern as GpuSubOpcode.meta() (dd84a929b),
+// SystemSubOpcode.meta() (60b4cc3b9), MathSubOpcode.meta()
+// (4b2792881), KernelRule.meta() (ec9cfc411).
+// =========================================================================
+
+/// Functional band a `TensorSubOpcode` belongs to.  Bands are
+/// stamped per-variant in `meta()` rather than inferred from
+/// byte-range arithmetic, so renumbering a variant can no longer
+/// silently move it between bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TensorCategory {
+    /// `Pool` (single op + register-based factory carryovers).
+    Pooling,
+    /// `Argmin` / `Nansum` / `Nanmean` (and register-based op
+    /// carryovers in the same 16-byte band).
+    ReductionVariants,
+    /// `Gather` / `Permute` / `Flip` / `Roll`.
+    AdvancedIndexing,
+    /// `Solve` / `Lstsq` / `TriSolve`.
+    LinearSystemSolvers,
+    /// `QR` / `SVD` / `LU` / `Eig` / `EigSymmetric` / `Schur`.
+    MatrixDecompositions,
+    /// `Det` / `Rank` / `Cond` / `Trace` / `Norm`.
+    MatrixProperties,
+    /// `Kron` / `Cross` / `Contract` / `MatrixPower` / `Expm` /
+    /// `Logm` / `Inverse` / `Rfft` / `Irfft` / `ComplexMul` /
+    /// `ComplexPow` / `SsmScan` / `Uniform` / `Bincount` /
+    /// `GatherNd` / `ArangeUsize`.
+    AdvancedOperations,
+    /// `Repeat` / `Tanh` / `SumAll` / `FromArray` / `IsTraining`
+    /// / `RandomFloat01` / `MaskedSelect` / `LeakyRelu` / `Diag`
+    /// / `Triu` / `Tril` / `Nonzero` / `OneHot` / `Split` /
+    /// `SplitAt` / `GetScalar`.
+    ExtendedTensorOperations,
+    /// BPE/SPM tokenizer load + encode + decode.
+    TokenizerOperations,
+    /// `SampleTopP` / `SampleTemperature` / `PagedAttention`.
+    SamplingOperations,
+    /// `ParseToolCall` / `FormatValue` / `TensorFromSliceUsize`
+    /// / `QuantizedMatmul` / `TensorNorm` / `GenerateRequestId`
+    /// / `JsonSchemaToJson` / `FunctionSchemaToJson` /
+    /// `ParseFunctionCalls`.
+    InferenceUtility,
+    /// All-reduce / all-gather / broadcast / reduce-scatter +
+    /// pmap/vmap collectives + process-group / point-to-point.
+    DistributedCollective,
+    /// Gradient bucketing / get/set / module backward + actor
+    /// mesh + RDMA + shape-manipulation ops collected in the
+    /// 0xD0-0xDF band.
+    GradientRdma,
+    /// `RegexFindAll` / `RegexReplaceAll` / `RegexIsMatch` /
+    /// `RegexSplit`.
+    Regex,
+    /// `Arange` / `Linspace` / `Rand` / `Clone` / `Identity` /
+    /// `Index` / `Concat` / `Stack` / `BroadcastToShape` /
+    /// `Squeeze` / `Cmp` / `Where` / `Clamp` / `Cast` /
+    /// `MaskedFill` / `Lerp` / `Dot` / `Conv` / `BatchMatmul` /
+    /// `Einsum` / `Outer` / `Cholesky` / `Argmax` / `Topk` /
+    /// `Cumulative` / `Softmax` / `LayerNorm` / `BatchNorm`.
+    TensorCreationUtility,
+}
+
+impl TensorCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pooling                  => "Pooling",
+            Self::ReductionVariants        => "Reduction Variants",
+            Self::AdvancedIndexing         => "Advanced Indexing",
+            Self::LinearSystemSolvers      => "Linear System Solvers",
+            Self::MatrixDecompositions     => "Matrix Decompositions",
+            Self::MatrixProperties         => "Matrix Properties",
+            Self::AdvancedOperations       => "Advanced Operations",
+            Self::ExtendedTensorOperations => "Extended Tensor Operations",
+            Self::TokenizerOperations      => "Tokenizer Operations",
+            Self::SamplingOperations       => "Sampling Operations",
+            Self::InferenceUtility         => "Inference Utility Operations",
+            Self::DistributedCollective    => "Distributed/Collective Operations",
+            Self::GradientRdma             => "Gradient/RDMA Operations",
+            Self::Regex                    => "Regex Operations",
+            Self::TensorCreationUtility    => "Tensor Creation & Utility Operations",
+        }
+    }
+}
+
+/// Co-located metadata for one `TensorSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; `TensorSubOpcode::meta()` is the only site that
+/// constructs values of this type, so a single match keeps every
+/// accessor consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct TensorOpMeta {
+    /// All-caps mnemonic (`"TENSOR_QR"`, `"COLLECTIVE_BROADCAST"`).
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: TensorCategory,
+    /// The op writes more than one destination register.
+    /// Ownership of the additional outputs is part of the op's
+    /// contract — codegen + dispatch must reserve regs for each.
+    pub has_multiple_outputs: bool,
+    /// The op is only well-defined on a square matrix
+    /// (n×n).  Diagnostics + verification surfaces use this to
+    /// flag shape mismatches early.
+    pub requires_square: bool,
+}
+
 impl TensorSubOpcode {
     /// Creates a tensor sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -3650,230 +3782,254 @@ impl TensorSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this tensor sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            // Pooling
-            Self::Pool => "TENSOR_POOL",
-            // Register-based ops
-            Self::NewFromArgs => "TENSOR_NEW_ARGS",
-            Self::FillFromArgs => "TENSOR_FILL_ARGS",
-            Self::FromSliceArgs => "TENSOR_FROM_SLICE_ARGS",
-            Self::BinopFromArgs => "TENSOR_BINOP_ARGS",
-            Self::UnopFromArgs => "TENSOR_UNOP_ARGS",
-            Self::MatmulFromArgs => "TENSOR_MATMUL_ARGS",
-            Self::ReduceFromArgs => "TENSOR_REDUCE_ARGS",
-            Self::ReshapeFromArgs => "TENSOR_RESHAPE_ARGS",
-            Self::TransposeFromArgs => "TENSOR_TRANSPOSE_ARGS",
-            Self::SliceFromArgs => "TENSOR_SLICE_ARGS",
-            Self::GetElementFromArgs => "TENSOR_GET_ELEMENT_ARGS",
-            Self::SetElementFromArgs => "TENSOR_SET_ELEMENT_ARGS",
-            // Reduction Variants
-            Self::Argmin => "TENSOR_ARGMIN_EXT",
-            Self::Nansum => "TENSOR_NANSUM",
-            Self::Nanmean => "TENSOR_NANMEAN",
-            // Advanced Indexing
-            Self::Gather => "TENSOR_GATHER",
-            Self::Permute => "TENSOR_PERMUTE",
-            Self::Flip => "TENSOR_FLIP",
-            Self::Roll => "TENSOR_ROLL",
-            // Linear System Solvers
-            Self::Solve => "TENSOR_SOLVE",
-            Self::Lstsq => "TENSOR_LSTSQ",
-            Self::TriSolve => "TENSOR_TRI_SOLVE_EXT",
-            // Matrix Decompositions
-            Self::QR => "TENSOR_QR",
-            Self::SVD => "TENSOR_SVD",
-            Self::LU => "TENSOR_LU",
-            Self::Eig => "TENSOR_EIG",
-            Self::EigSymmetric => "TENSOR_EIG_SYM",
-            Self::Schur => "TENSOR_SCHUR",
-            // Matrix Properties
-            Self::Det => "TENSOR_DET",
-            Self::Rank => "TENSOR_RANK",
-            Self::Cond => "TENSOR_COND",
-            Self::Trace => "TENSOR_TRACE",
-            Self::Norm => "TENSOR_NORM",
-            // Advanced Operations
-            Self::Kron => "TENSOR_KRON",
-            Self::Cross => "TENSOR_CROSS",
-            Self::Contract => "TENSOR_CONTRACT",
-            Self::MatrixPower => "TENSOR_MATRIX_POW",
-            Self::Expm => "TENSOR_EXPM",
-            Self::Logm => "TENSOR_LOGM",
-            Self::Inverse => "TENSOR_INVERSE",
-            Self::Rfft => "TENSOR_RFFT",
-            Self::Irfft => "TENSOR_IRFFT",
-            Self::ComplexMul => "TENSOR_COMPLEX_MUL",
-            Self::ComplexPow => "TENSOR_COMPLEX_POW",
-            Self::SsmScan => "TENSOR_SSM_SCAN",
-            Self::Uniform => "TENSOR_UNIFORM",
-            Self::Bincount => "TENSOR_BINCOUNT",
-            Self::GatherNd => "TENSOR_GATHER_ND",
-            Self::ArangeUsize => "TENSOR_ARANGE_USIZE",
-            // Extended Tensor Operations
-            Self::Repeat => "TENSOR_REPEAT",
-            Self::Tanh => "TENSOR_TANH",
-            Self::SumAll => "TENSOR_SUM_ALL",
-            Self::FromArray => "TENSOR_FROM_ARRAY",
-            Self::IsTraining => "TENSOR_IS_TRAINING",
-            Self::RandomFloat01 => "TENSOR_RANDOM_FLOAT_01",
-            Self::MaskedSelect => "TENSOR_MASKED_SELECT",
-            Self::LeakyRelu => "TENSOR_LEAKY_RELU",
-            Self::Diag => "TENSOR_DIAG",
-            Self::Triu => "TENSOR_TRIU",
-            Self::Tril => "TENSOR_TRIL",
-            Self::Nonzero => "TENSOR_NONZERO",
-            Self::OneHot => "TENSOR_ONE_HOT",
-            Self::Split => "TENSOR_SPLIT",
-            Self::SplitAt => "TENSOR_SPLIT_AT",
-            Self::GetScalar => "TENSOR_GET_SCALAR",
-            // Tokenizer Operations
-            Self::TokenizerLoadBpe => "TOKENIZER_LOAD_BPE",
-            Self::TokenizerLoadPretrained => "TOKENIZER_LOAD_PRETRAINED",
-            Self::TokenizerEncode => "TOKENIZER_ENCODE",
-            Self::TokenizerDecode => "TOKENIZER_DECODE",
-            Self::TokenizerLoadSpm => "TOKENIZER_LOAD_SPM",
-            Self::TokenizerSpmEncode => "TOKENIZER_SPM_ENCODE",
-            Self::TokenizerSpmDecode => "TOKENIZER_SPM_DECODE",
-            // Sampling Operations
-            Self::SampleTopP => "SAMPLE_TOP_P",
-            Self::SampleTemperature => "SAMPLE_TEMPERATURE",
-            Self::PagedAttention => "PAGED_ATTENTION",
-            // Inference Utility Operations
-            Self::ParseToolCall => "PARSE_TOOL_CALL",
-            Self::FormatValue => "FORMAT_VALUE",
-            Self::TensorFromSliceUsize => "TENSOR_FROM_SLICE_USIZE",
-            Self::QuantizedMatmul => "QUANTIZED_MATMUL",
-            Self::TensorNorm => "TENSOR_NORM",
-            Self::GenerateRequestId => "GENERATE_REQUEST_ID",
-            Self::JsonSchemaToJson => "JSON_SCHEMA_TO_JSON",
-            Self::FunctionSchemaToJson => "FUNCTION_SCHEMA_TO_JSON",
-            Self::ParseFunctionCalls => "PARSE_FUNCTION_CALLS",
-            // Distributed/Collective Operations
-            Self::AllReduce => "COLLECTIVE_ALL_REDUCE",
-            Self::AllGather => "COLLECTIVE_ALL_GATHER",
-            Self::Broadcast => "COLLECTIVE_BROADCAST",
-            Self::ReduceScatter => "COLLECTIVE_REDUCE_SCATTER",
-            Self::Barrier => "COLLECTIVE_BARRIER",
-            Self::PmapPsum => "PMAP_PSUM",
-            Self::PmapPmean => "PMAP_PMEAN",
-            Self::PmapPmax => "PMAP_PMAX",
-            Self::PmapAllGather => "PMAP_ALL_GATHER",
-            Self::VmapTransform => "VMAP_TRANSFORM",
-            Self::PmapTransform => "PMAP_TRANSFORM",
-            // Process Group Operations
-            Self::DistWorldGroup => "DIST_WORLD_GROUP",
-            Self::DistNewGroup => "DIST_NEW_GROUP",
-            Self::DistGetRank => "DIST_GET_RANK",
-            // Point-to-Point Operations
-            Self::P2PSend => "P2P_SEND",
-            Self::P2PRecv => "P2P_RECV",
-            // Additional Collective Operations
-            Self::CollectiveGather => "COLLECTIVE_GATHER",
-            Self::CollectiveScatter => "COLLECTIVE_SCATTER",
-            // Gradient Operations
-            Self::BucketGradients => "BUCKET_GRADIENTS",
-            Self::GetGrad => "GET_GRAD",
-            Self::SetGrad => "SET_GRAD",
-            Self::ModuleBackward => "MODULE_BACKWARD",
-            // Actor Mesh Operations
-            Self::MeshSelect => "MESH_SELECT",
-            Self::ActorNewId => "ACTOR_NEW_ID",
-            // RDMA Operations
-            Self::RdmaCreateRef => "RDMA_CREATE_REF",
-            Self::RdmaFetch => "RDMA_FETCH",
-            Self::RdmaWrite => "RDMA_WRITE",
-            Self::RdmaCheckValid => "RDMA_CHECK_VALID",
-            // Shape Manipulation Operations
-            Self::Unsqueeze => "TENSOR_UNSQUEEZE",
-            Self::SetScalar => "TENSOR_SET_SCALAR",
-            Self::Contiguous => "TENSOR_CONTIGUOUS",
-            Self::ToDevice => "TENSOR_TO_DEVICE",
-            // Regex Operations
-            Self::RegexFindAll => "REGEX_FIND_ALL",
-            Self::RegexReplaceAll => "REGEX_REPLACE_ALL",
-            Self::RegexIsMatch => "REGEX_IS_MATCH",
-            Self::RegexSplit => "REGEX_SPLIT",
-            // Tensor Creation & Utility Operations
-            Self::Arange => "TENSOR_ARANGE",
-            Self::Linspace => "TENSOR_LINSPACE",
-            Self::Rand => "TENSOR_RAND",
-            Self::Clone => "TENSOR_CLONE",
-            Self::Identity => "TENSOR_IDENTITY",
-            Self::Index => "TENSOR_INDEX",
-            Self::Concat => "TENSOR_CONCAT",
-            Self::Stack => "TENSOR_STACK",
-            Self::BroadcastToShape => "TENSOR_BROADCAST_TO_SHAPE",
-            Self::Squeeze => "TENSOR_SQUEEZE",
-            Self::Cmp => "TENSOR_CMP",
-            Self::Where => "TENSOR_WHERE",
-            Self::Clamp => "TENSOR_CLAMP",
-            Self::Cast => "TENSOR_CAST",
-            Self::MaskedFill => "TENSOR_MASKED_FILL",
-            Self::Lerp => "TENSOR_LERP",
-            Self::Dot => "TENSOR_DOT",
-            Self::Conv => "TENSOR_CONV",
-            Self::BatchMatmul => "TENSOR_BATCH_MATMUL",
-            Self::Einsum => "TENSOR_EINSUM",
-            Self::Outer => "TENSOR_OUTER",
-            Self::Cholesky => "TENSOR_CHOLESKY",
-            Self::Argmax => "TENSOR_ARGMAX",
-            Self::Topk => "TENSOR_TOPK",
-            Self::Cumulative => "TENSOR_CUMULATIVE",
-            Self::Softmax => "TENSOR_SOFTMAX",
-            Self::LayerNorm => "TENSOR_LAYER_NORM",
-            Self::BatchNorm => "TENSOR_BATCH_NORM",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `has_multiple_outputs` / `requires_square`.  Adding a new
+    /// variant requires exactly one entry here; sibling accessors
+    /// are `#[inline]` projections through this method's return
+    /// value.
+    pub const fn meta(self) -> TensorOpMeta {
+        use TensorCategory::{
+            AdvancedIndexing, AdvancedOperations, DistributedCollective,
+            ExtendedTensorOperations, GradientRdma, InferenceUtility, LinearSystemSolvers,
+            MatrixDecompositions, MatrixProperties, Pooling, ReductionVariants, Regex,
+            SamplingOperations, TensorCreationUtility, TokenizerOperations,
+        };
+
+        // Field order: mnemonic, category, has_multiple_outputs,
+        // requires_square.  Single-line entries keep drift between
+        // sibling rows obvious.
+        macro_rules! m {
+            ($mn:expr, $cat:ident, multi=$multi:literal, square=$square:literal $(,)?) => {
+                TensorOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    has_multiple_outputs: $multi,
+                    requires_square: $square,
+                }
+            };
         }
+
+        match self {
+            // ===== Pooling (0x00-0x0F) =====
+            Self::Pool                  => m!("TENSOR_POOL",               Pooling,                  multi=false, square=false),
+            Self::NewFromArgs           => m!("TENSOR_NEW_ARGS",           Pooling,                  multi=false, square=false),
+            Self::FillFromArgs          => m!("TENSOR_FILL_ARGS",          Pooling,                  multi=false, square=false),
+            Self::FromSliceArgs         => m!("TENSOR_FROM_SLICE_ARGS",    Pooling,                  multi=false, square=false),
+
+            // ===== Reduction Variants (0x10-0x1F) =====
+            Self::Argmin                => m!("TENSOR_ARGMIN_EXT",         ReductionVariants,        multi=false, square=false),
+            Self::Nansum                => m!("TENSOR_NANSUM",             ReductionVariants,        multi=false, square=false),
+            Self::Nanmean               => m!("TENSOR_NANMEAN",            ReductionVariants,        multi=false, square=false),
+            Self::BinopFromArgs         => m!("TENSOR_BINOP_ARGS",         ReductionVariants,        multi=false, square=false),
+            Self::UnopFromArgs          => m!("TENSOR_UNOP_ARGS",          ReductionVariants,        multi=false, square=false),
+            Self::MatmulFromArgs        => m!("TENSOR_MATMUL_ARGS",        ReductionVariants,        multi=false, square=false),
+            Self::ReduceFromArgs        => m!("TENSOR_REDUCE_ARGS",        ReductionVariants,        multi=false, square=false),
+            Self::ReshapeFromArgs       => m!("TENSOR_RESHAPE_ARGS",       ReductionVariants,        multi=false, square=false),
+            Self::TransposeFromArgs     => m!("TENSOR_TRANSPOSE_ARGS",     ReductionVariants,        multi=false, square=false),
+            Self::SliceFromArgs         => m!("TENSOR_SLICE_ARGS",         ReductionVariants,        multi=false, square=false),
+            Self::GetElementFromArgs    => m!("TENSOR_GET_ELEMENT_ARGS",   ReductionVariants,        multi=false, square=false),
+            Self::SetElementFromArgs    => m!("TENSOR_SET_ELEMENT_ARGS",   ReductionVariants,        multi=false, square=false),
+
+            // ===== Advanced Indexing (0x20-0x2F) =====
+            Self::Gather                => m!("TENSOR_GATHER",             AdvancedIndexing,         multi=false, square=false),
+            Self::Permute               => m!("TENSOR_PERMUTE",            AdvancedIndexing,         multi=false, square=false),
+            Self::Flip                  => m!("TENSOR_FLIP",               AdvancedIndexing,         multi=false, square=false),
+            Self::Roll                  => m!("TENSOR_ROLL",               AdvancedIndexing,         multi=false, square=false),
+
+            // ===== Linear System Solvers (0x30-0x3F) =====
+            // Lstsq returns (x, residuals, rank, s) — multi-output.
+            Self::Solve                 => m!("TENSOR_SOLVE",              LinearSystemSolvers,      multi=false, square=false),
+            Self::Lstsq                 => m!("TENSOR_LSTSQ",              LinearSystemSolvers,      multi=true,  square=false),
+            Self::TriSolve              => m!("TENSOR_TRI_SOLVE_EXT",      LinearSystemSolvers,      multi=false, square=false),
+
+            // ===== Matrix Decompositions (0x40-0x5F) =====
+            // QR/SVD work on rectangular too; LU pivoting is
+            // square-only by convention; Eig/EigSym/Schur strictly
+            // square.  Closes the legacy requires_square gap on LU.
+            Self::QR                    => m!("TENSOR_QR",                 MatrixDecompositions,     multi=true,  square=false),
+            Self::SVD                   => m!("TENSOR_SVD",                MatrixDecompositions,     multi=true,  square=false),
+            Self::LU                    => m!("TENSOR_LU",                 MatrixDecompositions,     multi=true,  square=true),
+            Self::Eig                   => m!("TENSOR_EIG",                MatrixDecompositions,     multi=true,  square=true),
+            Self::EigSymmetric          => m!("TENSOR_EIG_SYM",            MatrixDecompositions,     multi=true,  square=true),
+            Self::Schur                 => m!("TENSOR_SCHUR",              MatrixDecompositions,     multi=true,  square=true),
+
+            // ===== Matrix Properties (0x60-0x6F) =====
+            // Disambiguate: rename Norm → TENSOR_MATRIX_NORM so
+            // the inference-utility TensorNorm at 0xB4 keeps its
+            // canonical "TENSOR_NORM".  The matrix-norm op takes a
+            // distinguishing `ord:i8` parameter.
+            Self::Det                   => m!("TENSOR_DET",                MatrixProperties,         multi=false, square=true),
+            Self::Rank                  => m!("TENSOR_RANK",               MatrixProperties,         multi=false, square=false),
+            Self::Cond                  => m!("TENSOR_COND",               MatrixProperties,         multi=false, square=false),
+            Self::Trace                 => m!("TENSOR_TRACE",              MatrixProperties,         multi=false, square=false),
+            Self::Norm                  => m!("TENSOR_MATRIX_NORM",        MatrixProperties,         multi=false, square=false),
+
+            // ===== Advanced Operations (0x70-0x7F) =====
+            // Inverse, MatrixPower, Expm, Logm all square-only.
+            // Closes the legacy requires_square gap on Inverse.
+            Self::Kron                  => m!("TENSOR_KRON",               AdvancedOperations,       multi=false, square=false),
+            Self::Cross                 => m!("TENSOR_CROSS",              AdvancedOperations,       multi=false, square=false),
+            Self::Contract              => m!("TENSOR_CONTRACT",           AdvancedOperations,       multi=false, square=false),
+            Self::MatrixPower           => m!("TENSOR_MATRIX_POW",         AdvancedOperations,       multi=false, square=true),
+            Self::Expm                  => m!("TENSOR_EXPM",               AdvancedOperations,       multi=false, square=true),
+            Self::Logm                  => m!("TENSOR_LOGM",               AdvancedOperations,       multi=false, square=true),
+            Self::Inverse               => m!("TENSOR_INVERSE",            AdvancedOperations,       multi=false, square=true),
+            Self::Rfft                  => m!("TENSOR_RFFT",               AdvancedOperations,       multi=false, square=false),
+            Self::Irfft                 => m!("TENSOR_IRFFT",              AdvancedOperations,       multi=false, square=false),
+            Self::ComplexMul            => m!("TENSOR_COMPLEX_MUL",        AdvancedOperations,       multi=false, square=false),
+            Self::ComplexPow            => m!("TENSOR_COMPLEX_POW",        AdvancedOperations,       multi=false, square=false),
+            Self::SsmScan               => m!("TENSOR_SSM_SCAN",           AdvancedOperations,       multi=false, square=false),
+            Self::Uniform               => m!("TENSOR_UNIFORM",            AdvancedOperations,       multi=false, square=false),
+            Self::Bincount              => m!("TENSOR_BINCOUNT",           AdvancedOperations,       multi=false, square=false),
+            Self::GatherNd              => m!("TENSOR_GATHER_ND",          AdvancedOperations,       multi=false, square=false),
+            Self::ArangeUsize           => m!("TENSOR_ARANGE_USIZE",       AdvancedOperations,       multi=false, square=false),
+
+            // ===== Extended Tensor Operations (0x80-0x8F) =====
+            // SplitAt returns (dst_a, dst_b) — closes the legacy
+            // has_multiple_outputs undercount.
+            Self::Repeat                => m!("TENSOR_REPEAT",             ExtendedTensorOperations, multi=false, square=false),
+            Self::Tanh                  => m!("TENSOR_TANH",               ExtendedTensorOperations, multi=false, square=false),
+            Self::SumAll                => m!("TENSOR_SUM_ALL",            ExtendedTensorOperations, multi=false, square=false),
+            Self::FromArray             => m!("TENSOR_FROM_ARRAY",         ExtendedTensorOperations, multi=false, square=false),
+            Self::IsTraining            => m!("TENSOR_IS_TRAINING",        ExtendedTensorOperations, multi=false, square=false),
+            Self::RandomFloat01         => m!("TENSOR_RANDOM_FLOAT_01",    ExtendedTensorOperations, multi=false, square=false),
+            Self::MaskedSelect          => m!("TENSOR_MASKED_SELECT",      ExtendedTensorOperations, multi=false, square=false),
+            Self::LeakyRelu             => m!("TENSOR_LEAKY_RELU",         ExtendedTensorOperations, multi=false, square=false),
+            Self::Diag                  => m!("TENSOR_DIAG",               ExtendedTensorOperations, multi=false, square=false),
+            Self::Triu                  => m!("TENSOR_TRIU",               ExtendedTensorOperations, multi=false, square=false),
+            Self::Tril                  => m!("TENSOR_TRIL",               ExtendedTensorOperations, multi=false, square=false),
+            Self::Nonzero               => m!("TENSOR_NONZERO",            ExtendedTensorOperations, multi=false, square=false),
+            Self::OneHot                => m!("TENSOR_ONE_HOT",            ExtendedTensorOperations, multi=false, square=false),
+            Self::Split                 => m!("TENSOR_SPLIT",              ExtendedTensorOperations, multi=false, square=false),
+            Self::SplitAt               => m!("TENSOR_SPLIT_AT",           ExtendedTensorOperations, multi=true,  square=false),
+            Self::GetScalar             => m!("TENSOR_GET_SCALAR",         ExtendedTensorOperations, multi=false, square=false),
+
+            // ===== Tokenizer Operations (0x90-0x9F) =====
+            Self::TokenizerLoadBpe         => m!("TOKENIZER_LOAD_BPE",         TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerLoadPretrained  => m!("TOKENIZER_LOAD_PRETRAINED",  TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerEncode          => m!("TOKENIZER_ENCODE",           TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerDecode          => m!("TOKENIZER_DECODE",           TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerLoadSpm         => m!("TOKENIZER_LOAD_SPM",         TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerSpmEncode       => m!("TOKENIZER_SPM_ENCODE",       TokenizerOperations,      multi=false, square=false),
+            Self::TokenizerSpmDecode       => m!("TOKENIZER_SPM_DECODE",       TokenizerOperations,      multi=false, square=false),
+
+            // ===== Sampling Operations (0xA0-0xAF) =====
+            Self::SampleTopP            => m!("SAMPLE_TOP_P",              SamplingOperations,       multi=false, square=false),
+            Self::SampleTemperature     => m!("SAMPLE_TEMPERATURE",        SamplingOperations,       multi=false, square=false),
+            Self::PagedAttention        => m!("PAGED_ATTENTION",           SamplingOperations,       multi=false, square=false),
+
+            // ===== Inference Utility (0xB0-0xBF) =====
+            Self::ParseToolCall         => m!("PARSE_TOOL_CALL",           InferenceUtility,         multi=false, square=false),
+            Self::FormatValue           => m!("FORMAT_VALUE",              InferenceUtility,         multi=false, square=false),
+            Self::TensorFromSliceUsize  => m!("TENSOR_FROM_SLICE_USIZE",   InferenceUtility,         multi=false, square=false),
+            Self::QuantizedMatmul       => m!("QUANTIZED_MATMUL",          InferenceUtility,         multi=false, square=false),
+            Self::TensorNorm            => m!("TENSOR_NORM",               InferenceUtility,         multi=false, square=false),
+            Self::GenerateRequestId     => m!("GENERATE_REQUEST_ID",       InferenceUtility,         multi=false, square=false),
+            Self::JsonSchemaToJson      => m!("JSON_SCHEMA_TO_JSON",       InferenceUtility,         multi=false, square=false),
+            Self::FunctionSchemaToJson  => m!("FUNCTION_SCHEMA_TO_JSON",   InferenceUtility,         multi=false, square=false),
+            Self::ParseFunctionCalls    => m!("PARSE_FUNCTION_CALLS",      InferenceUtility,         multi=false, square=false),
+
+            // ===== Distributed/Collective (0xC0-0xCF) =====
+            Self::AllReduce             => m!("COLLECTIVE_ALL_REDUCE",     DistributedCollective,    multi=false, square=false),
+            Self::AllGather             => m!("COLLECTIVE_ALL_GATHER",     DistributedCollective,    multi=false, square=false),
+            Self::Broadcast             => m!("COLLECTIVE_BROADCAST",      DistributedCollective,    multi=false, square=false),
+            Self::ReduceScatter         => m!("COLLECTIVE_REDUCE_SCATTER", DistributedCollective,    multi=false, square=false),
+            Self::Barrier               => m!("COLLECTIVE_BARRIER",        DistributedCollective,    multi=false, square=false),
+            Self::PmapPsum              => m!("PMAP_PSUM",                 DistributedCollective,    multi=false, square=false),
+            Self::PmapPmean             => m!("PMAP_PMEAN",                DistributedCollective,    multi=false, square=false),
+            Self::PmapPmax              => m!("PMAP_PMAX",                 DistributedCollective,    multi=false, square=false),
+            Self::PmapAllGather         => m!("PMAP_ALL_GATHER",           DistributedCollective,    multi=false, square=false),
+            Self::VmapTransform         => m!("VMAP_TRANSFORM",            DistributedCollective,    multi=false, square=false),
+            Self::PmapTransform         => m!("PMAP_TRANSFORM",            DistributedCollective,    multi=false, square=false),
+            Self::DistWorldGroup        => m!("DIST_WORLD_GROUP",          DistributedCollective,    multi=false, square=false),
+            Self::DistNewGroup          => m!("DIST_NEW_GROUP",            DistributedCollective,    multi=false, square=false),
+            Self::DistGetRank           => m!("DIST_GET_RANK",             DistributedCollective,    multi=false, square=false),
+            Self::P2PSend               => m!("P2P_SEND",                  DistributedCollective,    multi=false, square=false),
+            Self::P2PRecv               => m!("P2P_RECV",                  DistributedCollective,    multi=false, square=false),
+
+            // ===== Gradient/RDMA (0xD0-0xDF) =====
+            Self::CollectiveGather      => m!("COLLECTIVE_GATHER",         GradientRdma,             multi=false, square=false),
+            Self::CollectiveScatter     => m!("COLLECTIVE_SCATTER",        GradientRdma,             multi=false, square=false),
+            Self::BucketGradients       => m!("BUCKET_GRADIENTS",          GradientRdma,             multi=false, square=false),
+            Self::GetGrad               => m!("GET_GRAD",                  GradientRdma,             multi=false, square=false),
+            Self::SetGrad               => m!("SET_GRAD",                  GradientRdma,             multi=false, square=false),
+            Self::ModuleBackward        => m!("MODULE_BACKWARD",           GradientRdma,             multi=false, square=false),
+            Self::MeshSelect            => m!("MESH_SELECT",               GradientRdma,             multi=false, square=false),
+            Self::ActorNewId            => m!("ACTOR_NEW_ID",              GradientRdma,             multi=false, square=false),
+            Self::RdmaCreateRef         => m!("RDMA_CREATE_REF",           GradientRdma,             multi=false, square=false),
+            Self::RdmaFetch             => m!("RDMA_FETCH",                GradientRdma,             multi=false, square=false),
+            Self::RdmaWrite             => m!("RDMA_WRITE",                GradientRdma,             multi=false, square=false),
+            Self::RdmaCheckValid        => m!("RDMA_CHECK_VALID",          GradientRdma,             multi=false, square=false),
+            Self::Unsqueeze             => m!("TENSOR_UNSQUEEZE",          GradientRdma,             multi=false, square=false),
+            Self::SetScalar             => m!("TENSOR_SET_SCALAR",         GradientRdma,             multi=false, square=false),
+            Self::Contiguous            => m!("TENSOR_CONTIGUOUS",         GradientRdma,             multi=false, square=false),
+            Self::ToDevice              => m!("TENSOR_TO_DEVICE",          GradientRdma,             multi=false, square=false),
+
+            // ===== Regex Operations (0xE0-0xE3) =====
+            Self::RegexFindAll          => m!("REGEX_FIND_ALL",            Regex,                    multi=false, square=false),
+            Self::RegexReplaceAll       => m!("REGEX_REPLACE_ALL",         Regex,                    multi=false, square=false),
+            Self::RegexIsMatch          => m!("REGEX_IS_MATCH",            Regex,                    multi=false, square=false),
+            Self::RegexSplit            => m!("REGEX_SPLIT",               Regex,                    multi=false, square=false),
+
+            // ===== Tensor Creation & Utility (0xE4-0xFF) =====
+            // Cholesky requires symmetric positive-definite (square).
+            // Topk returns (values, indices) — closes the legacy
+            // has_multiple_outputs gap.
+            Self::Arange                => m!("TENSOR_ARANGE",             TensorCreationUtility,    multi=false, square=false),
+            Self::Linspace              => m!("TENSOR_LINSPACE",           TensorCreationUtility,    multi=false, square=false),
+            Self::Rand                  => m!("TENSOR_RAND",               TensorCreationUtility,    multi=false, square=false),
+            Self::Clone                 => m!("TENSOR_CLONE",              TensorCreationUtility,    multi=false, square=false),
+            Self::Identity              => m!("TENSOR_IDENTITY",           TensorCreationUtility,    multi=false, square=false),
+            Self::Index                 => m!("TENSOR_INDEX",              TensorCreationUtility,    multi=false, square=false),
+            Self::Concat                => m!("TENSOR_CONCAT",             TensorCreationUtility,    multi=false, square=false),
+            Self::Stack                 => m!("TENSOR_STACK",              TensorCreationUtility,    multi=false, square=false),
+            Self::BroadcastToShape      => m!("TENSOR_BROADCAST_TO_SHAPE", TensorCreationUtility,    multi=false, square=false),
+            Self::Squeeze               => m!("TENSOR_SQUEEZE",            TensorCreationUtility,    multi=false, square=false),
+            Self::Cmp                   => m!("TENSOR_CMP",                TensorCreationUtility,    multi=false, square=false),
+            Self::Where                 => m!("TENSOR_WHERE",              TensorCreationUtility,    multi=false, square=false),
+            Self::Clamp                 => m!("TENSOR_CLAMP",              TensorCreationUtility,    multi=false, square=false),
+            Self::Cast                  => m!("TENSOR_CAST",               TensorCreationUtility,    multi=false, square=false),
+            Self::MaskedFill            => m!("TENSOR_MASKED_FILL",        TensorCreationUtility,    multi=false, square=false),
+            Self::Lerp                  => m!("TENSOR_LERP",               TensorCreationUtility,    multi=false, square=false),
+            Self::Dot                   => m!("TENSOR_DOT",                TensorCreationUtility,    multi=false, square=false),
+            Self::Conv                  => m!("TENSOR_CONV",               TensorCreationUtility,    multi=false, square=false),
+            Self::BatchMatmul           => m!("TENSOR_BATCH_MATMUL",       TensorCreationUtility,    multi=false, square=false),
+            Self::Einsum                => m!("TENSOR_EINSUM",             TensorCreationUtility,    multi=false, square=false),
+            Self::Outer                 => m!("TENSOR_OUTER",              TensorCreationUtility,    multi=false, square=false),
+            Self::Cholesky              => m!("TENSOR_CHOLESKY",           TensorCreationUtility,    multi=false, square=true),
+            Self::Argmax                => m!("TENSOR_ARGMAX",             TensorCreationUtility,    multi=false, square=false),
+            Self::Topk                  => m!("TENSOR_TOPK",               TensorCreationUtility,    multi=true,  square=false),
+            Self::Cumulative            => m!("TENSOR_CUMULATIVE",         TensorCreationUtility,    multi=false, square=false),
+            Self::Softmax               => m!("TENSOR_SOFTMAX",            TensorCreationUtility,    multi=false, square=false),
+            Self::LayerNorm             => m!("TENSOR_LAYER_NORM",         TensorCreationUtility,    multi=false, square=false),
+            Self::BatchNorm             => m!("TENSOR_BATCH_NORM",         TensorCreationUtility,    multi=false, square=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this tensor sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category of this tensor sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self as u8 {
-            0x00..=0x0F => "Pooling",
-            0x10..=0x1F => "Reduction Variants",
-            0x20..=0x2F => "Advanced Indexing",
-            0x30..=0x3F => "Linear System Solvers",
-            0x40..=0x5F => "Matrix Decompositions",
-            0x60..=0x6F => "Matrix Properties",
-            0x70..=0x7F => "Advanced Operations",
-            0x80..=0x8F => "Extended Tensor Operations",
-            0x90..=0x9F => "Tokenizer Operations",
-            0xA0..=0xAF => "Sampling Operations",
-            0xB0..=0xBF => "Inference Utility Operations",
-            0xC0..=0xCF => "Distributed/Collective Operations",
-            0xD0..=0xDF => "Gradient/RDMA Operations",
-            0xE0..=0xE3 => "Regex Operations",
-            0xE4..=0xFF => "Tensor Creation & Utility Operations",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this operation produces multiple outputs.
+    #[inline]
     pub fn has_multiple_outputs(self) -> bool {
-        matches!(
-            self,
-            Self::QR
-                | Self::SVD
-                | Self::LU
-                | Self::Eig
-                | Self::EigSymmetric
-                | Self::Schur
-                | Self::Lstsq
-        )
+        self.meta().has_multiple_outputs
     }
 
     /// Returns true if this operation requires square input.
+    #[inline]
     pub fn requires_square(self) -> bool {
-        matches!(
-            self,
-            Self::Det
-                | Self::Eig
-                | Self::EigSymmetric
-                | Self::Schur
-                | Self::MatrixPower
-                | Self::Expm
-                | Self::Logm
-        )
+        self.meta().requires_square
     }
 }
 
@@ -15632,5 +15788,150 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 97);
+    }
+
+    // ========================================================================
+    // TensorSubOpcode meta() drift pins
+    //
+    // The legacy `category()` accessor used `match self as u8` over
+    // irregular byte ranges (most 16-byte windows but a 32-byte
+    // band for matrix decompositions and a 4/28-byte split at the
+    // top).  Three latent drift defects: (a) duplicate mnemonic
+    // `"TENSOR_NORM"` between Self::Norm and Self::TensorNorm;
+    // (b) `has_multiple_outputs()` undercount on Topk + SplitAt;
+    // (c) `requires_square()` undercount on Inverse, LU, Cholesky.
+    // ========================================================================
+
+    fn for_every_tensor_sub_opcode<F: FnMut(TensorSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = TensorSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "TensorSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn tensor_meta_count_pinned_at_one_forty_nine() {
+        let mut count = 0;
+        for_every_tensor_sub_opcode(|_| count += 1);
+        assert_eq!(count, 149,
+            "TensorSubOpcode variant count drift: expected 149, got {}", count);
+    }
+
+    #[test]
+    fn tensor_meta_category_matches_byte_range_band() {
+        // Pin meta()'s structural categorisation against the prior
+        // irregular byte-range table.  The 0x40-0x5F range is a
+        // single 32-byte MatrixDecompositions band; 0xE0-0xE3
+        // and 0xE4-0xFF split the top quarter into Regex vs
+        // TensorCreationUtility.  Renumbering a variant either
+        // keeps it in band or surfaces a test failure here.
+        for_every_tensor_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => TensorCategory::Pooling,
+                0x10..=0x1F => TensorCategory::ReductionVariants,
+                0x20..=0x2F => TensorCategory::AdvancedIndexing,
+                0x30..=0x3F => TensorCategory::LinearSystemSolvers,
+                0x40..=0x5F => TensorCategory::MatrixDecompositions,
+                0x60..=0x6F => TensorCategory::MatrixProperties,
+                0x70..=0x7F => TensorCategory::AdvancedOperations,
+                0x80..=0x8F => TensorCategory::ExtendedTensorOperations,
+                0x90..=0x9F => TensorCategory::TokenizerOperations,
+                0xA0..=0xAF => TensorCategory::SamplingOperations,
+                0xB0..=0xBF => TensorCategory::InferenceUtility,
+                0xC0..=0xCF => TensorCategory::DistributedCollective,
+                0xD0..=0xDF => TensorCategory::GradientRdma,
+                0xE0..=0xE3 => TensorCategory::Regex,
+                0xE4..=0xFF => TensorCategory::TensorCreationUtility,
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn tensor_meta_mnemonic_uniqueness() {
+        // Every mnemonic must be distinct so diagnostic output and
+        // grep-driven debugging stay unambiguous.  The legacy
+        // implementation had a `"TENSOR_NORM"` collision between
+        // Self::Norm (matrix norm @ 0x64) and Self::TensorNorm
+        // (general tensor norm @ 0xB4) — Self::Norm is now spelled
+        // `"TENSOR_MATRIX_NORM"` to disambiguate.
+        let mut seen: Vec<&'static str> = Vec::with_capacity(149);
+        for_every_tensor_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 149);
+    }
+
+    #[test]
+    fn tensor_meta_has_multiple_outputs_set_pinned() {
+        // The set of multi-output ops:
+        //   * Lstsq           — (x, residuals, rank, s)
+        //   * QR / SVD / LU   — decomposition factors
+        //   * Eig / EigSym    — eigenvalues + eigenvectors
+        //   * Schur           — (T, Z)
+        //   * SplitAt         — (dst_a, dst_b)        — closes legacy gap
+        //   * Topk            — (values, indices)    — closes legacy gap
+        // = 9 multi-output variants total (legacy was 7).
+        let mut count = 0;
+        for_every_tensor_sub_opcode(|op| {
+            if op.has_multiple_outputs() { count += 1; }
+        });
+        assert_eq!(count, 9,
+            "multi-output variant count drift: expected 9 (was 7 pre-fix)");
+
+        // Pin specific variants:
+        assert!(TensorSubOpcode::Topk.has_multiple_outputs(),
+            "Topk returns (values, indices) — must be multi-output");
+        assert!(TensorSubOpcode::SplitAt.has_multiple_outputs(),
+            "SplitAt returns (dst_a, dst_b) — must be multi-output");
+    }
+
+    #[test]
+    fn tensor_meta_requires_square_set_pinned() {
+        // The set of square-only ops:
+        //   * Det                         — determinant
+        //   * Eig / EigSymmetric / Schur  — eigendecompositions
+        //   * MatrixPower / Expm / Logm   — matrix-function primitives
+        //   * Inverse                     — closes legacy gap
+        //   * LU                          — closes legacy gap (LU
+        //                                    with pivoting on
+        //                                    rectangular is rare)
+        //   * Cholesky                    — closes legacy gap (SPD
+        //                                    is square by
+        //                                    definition)
+        // = 10 square-only variants total (legacy was 7).
+        let mut count = 0;
+        for_every_tensor_sub_opcode(|op| {
+            if op.requires_square() { count += 1; }
+        });
+        assert_eq!(count, 10,
+            "square-only variant count drift: expected 10 (was 7 pre-fix)");
+
+        // Pin specific variants:
+        assert!(TensorSubOpcode::Inverse.requires_square(),
+            "matrix Inverse is only defined on square matrices");
+        assert!(TensorSubOpcode::LU.requires_square(),
+            "LU decomposition with pivoting is square-only by convention");
+        assert!(TensorSubOpcode::Cholesky.requires_square(),
+            "Cholesky requires symmetric positive-definite (square)");
+    }
+
+    #[test]
+    fn tensor_meta_norm_mnemonics_disambiguated() {
+        // Pin the disambiguation: matrix-specific Norm is
+        // "TENSOR_MATRIX_NORM"; general tensor-norm utility is
+        // "TENSOR_NORM".  Reverting either spelling brings the
+        // collision back.
+        assert_eq!(TensorSubOpcode::Norm.mnemonic(), "TENSOR_MATRIX_NORM");
+        assert_eq!(TensorSubOpcode::TensorNorm.mnemonic(), "TENSOR_NORM");
     }
 }
