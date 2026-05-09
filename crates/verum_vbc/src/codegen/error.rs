@@ -170,14 +170,6 @@ impl CodegenError {
         Self::new(CodegenErrorKind::UndefinedFunction(name.into()))
     }
 
-    /// Creates a type mismatch error.
-    pub fn type_mismatch(expected: impl Into<String>, found: impl Into<String>) -> Self {
-        Self::new(CodegenErrorKind::TypeMismatch {
-            expected: expected.into(),
-            found: found.into(),
-        })
-    }
-
     /// Creates an internal error.
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(CodegenErrorKind::Internal(msg.into()))
@@ -186,11 +178,6 @@ impl CodegenError {
     /// Creates a not implemented error.
     pub fn not_implemented(feature: impl Into<String>) -> Self {
         Self::new(CodegenErrorKind::NotImplemented(feature.into()))
-    }
-
-    /// Creates a register overflow error.
-    pub fn register_overflow(needed: usize, max: usize) -> Self {
-        Self::new(CodegenErrorKind::RegisterOverflow { needed, max })
     }
 }
 
