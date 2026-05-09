@@ -613,6 +613,7 @@ impl MacroExpansionPhase {
                     span: expr.span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 })
             }
 
@@ -643,6 +644,7 @@ impl MacroExpansionPhase {
                     span: expr.span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 })
             }
 
@@ -667,6 +669,7 @@ impl MacroExpansionPhase {
                     span: expr.span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 })
             }
 
@@ -677,6 +680,7 @@ impl MacroExpansionPhase {
                     span: expr.span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 })
             }
 
@@ -761,6 +765,7 @@ impl MacroExpansionPhase {
                         span,
                         ref_kind: None,
                         check_eliminated: false,
+        resolved_call_target: None,
                     })
                 }
             }
@@ -816,6 +821,7 @@ impl MacroExpansionPhase {
                             span,
                             ref_kind: None,
                             check_eliminated: false,
+        resolved_call_target: None,
                         })
                     }
                 }
@@ -915,6 +921,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -1060,6 +1067,7 @@ impl MacroExpansionPhase {
                     span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 });
             }
             ConstValue::Array(items) => {
@@ -1073,6 +1081,7 @@ impl MacroExpansionPhase {
                     span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 });
             }
             other => {
@@ -1090,6 +1099,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -1110,6 +1120,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -1210,6 +1221,7 @@ impl MacroExpansionPhase {
                             span,
                             ref_kind: None,
                             check_eliminated: false,
+        resolved_call_target: None,
                         })
                     }
                 }
@@ -1231,6 +1243,7 @@ impl MacroExpansionPhase {
                             span,
                             ref_kind: None,
                             check_eliminated: false,
+        resolved_call_target: None,
                         })
                     }
                 }
@@ -1266,6 +1279,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -1396,6 +1410,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
 
         // Re-enter literal processing so the resulting InterpolatedString
@@ -1447,6 +1462,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         });
 
         // Second arg: list of parameters
@@ -1455,6 +1471,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         args.push(params_list);
 
@@ -1465,6 +1482,7 @@ impl MacroExpansionPhase {
                     span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 }),
                 type_args: List::new(),
                 args: args.into(),
@@ -1472,6 +1490,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -1505,6 +1524,7 @@ impl MacroExpansionPhase {
                 span,
                 ref_kind: None,
                 check_eliminated: false,
+        resolved_call_target: None,
             })
             .collect();
 
@@ -1525,6 +1545,7 @@ impl MacroExpansionPhase {
                             span,
                             ref_kind: None,
                             check_eliminated: false,
+        resolved_call_target: None,
                         }),
                         type_args: List::new(),
                         args: List::from(vec![e.clone()]),
@@ -1532,6 +1553,7 @@ impl MacroExpansionPhase {
                     span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 }
             })
             .collect();
@@ -1542,12 +1564,14 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         });
         args.push(Expr {
             kind: ExprKind::Array(ArrayExpr::List(escaped_exprs.into_iter().collect())),
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         });
 
         Ok(Expr {
@@ -1557,6 +1581,7 @@ impl MacroExpansionPhase {
                     span,
                     ref_kind: None,
                     check_eliminated: false,
+        resolved_call_target: None,
                 }),
                 type_args: List::new(),
                 args: args.into(),
@@ -1564,6 +1589,7 @@ impl MacroExpansionPhase {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         })
     }
 
@@ -2009,6 +2035,7 @@ mod tests {
             span,
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         let body_block = Block {
             stmts: List::new(),

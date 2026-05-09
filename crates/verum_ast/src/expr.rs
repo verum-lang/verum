@@ -2544,26 +2544,32 @@ pub enum ReferenceKind {
 /// the cascade missed) silently producing nonsense bytecode.
 /// Persisting the resolution onto the AST closes that gap.
 ///
-/// `function_id` is the `verum_vbc::module::FunctionId.0` carrier;
-/// stored as `u32` to keep this enum free of a verum_vbc dependency
-/// (verum_ast must not depend on verum_vbc — separation of layers).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `qualified_name` is the canonical key both typechecker and codegen
+/// agree on — typically `"Type.method"` for inherent methods and
+/// `"module.path.fn"` for free functions.  The codegen's
+/// `lookup_function(name)` returns the same `FunctionInfo` regardless
+/// of which side resolved the name first; using a string-typed
+/// canonical key avoids embedding the codegen's `FunctionId` space
+/// into the AST (verum_ast must not depend on verum_vbc).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResolvedCallTarget {
     /// Direct call to a registered global function — both inherent
     /// methods (`Duration.nanos`) and free functions reachable via
-    /// method-syntax dispatch.
-    StaticCall { function_id: u32 },
+    /// method-syntax dispatch.  `qualified_name` is the canonical
+    /// `"Type.method"` form codegen looks up via `lookup_function`.
+    StaticCall { qualified_name: Text },
     /// Variant constructor: `Maybe.Some(x)`, `Result.Ok(y)`,
     /// `Ordering.Less`, …  Codegen emits `MakeVariant{Typed}` rather
     /// than `Call` for these so the heap object carries the correct
     /// tag + parent type id.
     VariantCtor {
         tag: u32,
-        /// Carrier-type id for the typed variant emit path.  Zero
-        /// when the typechecker resolved to an untyped variant
-        /// (legacy archives, or variants whose parent type lost its
-        /// TypeId during cross-module loading).
-        parent_type_id: u32,
+        /// Parent type's canonical name — used by the typed-emit path
+        /// to look up the parent's `TypeId` via `type_name_to_id`.
+        /// `None` when the typechecker couldn't recover the parent
+        /// (cross-module imports without full type metadata); codegen
+        /// falls back to the legacy untyped `MakeVariant` form.
+        parent_type_name: Option<Text>,
     },
 }
 

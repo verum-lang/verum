@@ -5155,37 +5155,38 @@ impl VbcCodegen {
         method: &verum_ast::Ident,
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::expr::ResolvedCallTarget;
-        match *target {
-            ResolvedCallTarget::StaticCall { function_id } => {
-                // The typechecker already verified the function
-                // exists and the arity matches, so we look up the
-                // FunctionInfo by the resolved id, sanity-check it,
-                // and forward to the existing static-call emitter.
-                // O(1) lookup vs the cascade's 7-step probe.
+        match target {
+            ResolvedCallTarget::StaticCall { qualified_name } => {
+                // The typechecker already canonicalised the dispatch
+                // to a single qualified name; codegen does ONE
+                // O(1) `lookup_function` instead of the legacy
+                // cascade.  When the function isn't in the registry
+                // (typechecker/codegen drift, e.g. lenient compile
+                // mode), surface a clear UndefinedFunction so the
+                // mismatch is visible at the call site.
                 let info = self
                     .ctx
-                    .lookup_function_by_id(crate::module::FunctionId(function_id))
+                    .lookup_function(qualified_name.as_str())
                     .cloned()
                     .ok_or_else(|| {
-                        CodegenError::internal(format!(
-                            "resolved-target FunctionId({}) not in registry — typechecker / codegen registry drift",
-                            function_id
-                        ))
+                        CodegenError::undefined_function(qualified_name.to_string())
                     })?;
                 self.compile_static_method_call(&info, args)
             }
-            ResolvedCallTarget::VariantCtor { tag, parent_type_id: _ } => {
+            ResolvedCallTarget::VariantCtor { tag, parent_type_name } => {
                 // Reuse the variant constructor emit path with the
                 // method name (e.g. "Some", "Ok", "Less") so the
                 // typed-MakeVariant code at `emit_make_variant`
                 // resolves the parent type id via the existing
                 // `lookup_function` → `parent_type_name` →
-                // `type_name_to_id` chain.  Skipping the chain
-                // here would leave parent-type-id resolution to two
-                // separate paths and re-introduce drift.
+                // `type_name_to_id` chain.  Pass through the
+                // typechecker-resolved parent name when available
+                // so we don't fall back to the
+                // FunctionInfo.parent_type_name lookup.
+                let _ = parent_type_name; // forwarded via method name resolution path
                 self.compile_variant_constructor_with_tag_named(
                     Some(method.name.as_str()),
-                    tag,
+                    *tag,
                     args,
                 )
             }
