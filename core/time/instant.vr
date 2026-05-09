@@ -42,7 +42,7 @@
 module core.time.instant;
 mount core.*;
 mount core.base.coercion.{IntCoercible};
-mount time.duration.Duration;
+mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI};
 
 // =============================================================================
 // V-LLSI Native Time Imports
@@ -297,8 +297,8 @@ implement Debug for Instant {
 implement Display for Instant {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         // Display as human-readable elapsed time from epoch
-        let secs = self.nanos / 1_000_000_000;
-        let subsec_ms = (self.nanos % 1_000_000_000) / 1_000_000;
+        let secs = self.nanos / NANOS_PER_SEC;
+        let subsec_ms = (self.nanos % NANOS_PER_SEC) / NANOS_PER_MILLI;
         f.write_str(f"{secs}.{subsec_ms:03}s")
     }
 }

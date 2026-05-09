@@ -63,7 +63,13 @@ module core.time.duration_parse;
 
 mount core.*;
 mount core.collections.List;
-mount core.time.duration.{Duration};
+mount core.time.duration.{Duration, NANOS_PER_MICRO, NANOS_PER_MILLI, NANOS_PER_SEC, NANOS_PER_MIN, NANOS_PER_HOUR};
+
+/// Nanoseconds per day.
+const NANOS_PER_DAY: Int = 86_400_000_000_000;
+
+/// Nanoseconds per week.
+const NANOS_PER_WEEK: Int = 604_800_000_000_000;
 
 public type DurationParseError is
       Empty
@@ -261,15 +267,15 @@ fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
         let int_part = parse_int_bytes(b, int_start, int_end)?;
         let unit_ns: Int = if in_time {
             match desig {
-                0x48_u8 /* H */ | 0x68_u8 /* h */ => 3_600_000_000_000,
-                0x4D_u8 /* M */ | 0x6D_u8 /* m */ => 60_000_000_000,
-                0x53_u8 /* S */ | 0x73_u8 /* s */ => 1_000_000_000,
+                0x48_u8 /* H */ | 0x68_u8 /* h */ => NANOS_PER_HOUR,
+                0x4D_u8 /* M */ | 0x6D_u8 /* m */ => NANOS_PER_MIN,
+                0x53_u8 /* S */ | 0x73_u8 /* s */ => NANOS_PER_SEC,
                 _ => return Err(DurationParseError.UnknownUnit(Text.from("iso time"))),
             }
         } else {
             match desig {
-                0x44_u8 /* D */ | 0x64_u8 /* d */ => 86_400_000_000_000,
-                0x57_u8 /* W */ | 0x77_u8 /* w */ => 604_800_000_000_000,
+                0x44_u8 /* D */ | 0x64_u8 /* d */ => NANOS_PER_DAY,
+                0x57_u8 /* W */ | 0x77_u8 /* w */ => NANOS_PER_WEEK,
                 _ => return Err(DurationParseError.UnknownUnit(Text.from("iso date"))),
             }
         };
@@ -302,23 +308,23 @@ fn unit_nanoseconds(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationPar
     // Single-char units.
     if len == 1 {
         match b[start] {
-            0x73_u8 /* s */ => return Ok(1_000_000_000),
-            0x6D_u8 /* m */ => return Ok(60_000_000_000),
-            0x68_u8 /* h */ => return Ok(3_600_000_000_000),
-            0x64_u8 /* d */ => return Ok(86_400_000_000_000),
-            0x77_u8 /* w */ => return Ok(604_800_000_000_000),
+            0x73_u8 /* s */ => return Ok(NANOS_PER_SEC),
+            0x6D_u8 /* m */ => return Ok(NANOS_PER_MIN),
+            0x68_u8 /* h */ => return Ok(NANOS_PER_HOUR),
+            0x64_u8 /* d */ => return Ok(NANOS_PER_DAY),
+            0x77_u8 /* w */ => return Ok(NANOS_PER_WEEK),
             _ => {},
         }
     }
     // Two-char.
     if len == 2 {
         if b[start] == ('n' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1); }
-        if b[start] == ('u' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1_000); }
-        if b[start] == ('m' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1_000_000); }
+        if b[start] == ('u' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(NANOS_PER_MICRO); }
+        if b[start] == ('m' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(NANOS_PER_MILLI); }
     }
     // µs — 3 bytes in UTF-8 (0xC2 0xB5 0x73 = "µs").
     if len == 3 && b[start] == 0xC2_u8 && b[start + 1] == 0xB5_u8 && b[start + 2] == ('s' as Byte) {
-        return Ok(1_000);
+        return Ok(NANOS_PER_MICRO);
     }
     Err(DurationParseError.UnknownUnit(slice_text(b, start, end)))
 }
