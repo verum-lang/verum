@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, string, distance, unicode, utf8, byte-semantics
+// @timeout: 10000
+// @description: Pins the byte-slice semantics of string_distance functions on
+//               multi-byte UTF-8 input (#77).
+//
+// All string_distance functions operate on *byte slices*, not Unicode code
+// points.  This spec documents the contract and pins the observable behaviour:
+//
+//   * Multi-byte UTF-8 characters (e.g., é = 0xC3 0xA9) count as 2 bytes,
+//     so `levenshtein("café", "cafe")` = 2, not 1 (two byte substitutions
+//     for é → e: 0xC3 and 0xA9 are replaced by 0x65).
+//   * No panic on arbitrary valid UTF-8 byte sequences.
+//   * ASCII-only input behaviour is unchanged (regression guard).
+//   * The distance is symmetric: dist(a,b) == dist(b,a).
+//   * jaro / jaro_winkler handle multibyte without crashing.
+//
+// Callers that need Unicode code-point semantics should decompose their Text
+// to a List<UInt32> codepoints and supply custom edit-distance logic.
+
+mount core.base.string_distance.{
+    levenshtein, levenshtein_bounded, jaro, jaro_winkler,
+};
+
+// ─── Helper: byte-literal equality ───────────────────────────────────────────
+
+fn assert_dist_eq(label: Text, got: Int, expected: Int) {
+    assert(got == expected);
+}
+
+// -----------------------------------------------------------------------------
+// 1. ASCII-only regression guard — must match the existing spec values
+// -----------------------------------------------------------------------------
+
+fn ascii_regression() {
+    assert_dist_eq(Text.from("kitten→sitting"), levenshtein(b"kitten", b"sitting"), 3);
+    assert_dist_eq(Text.from("empty"),           levenshtein(b"", b""), 0);
+    assert_dist_eq(Text.from("hello→hello"),     levenshtein(b"hello", b"hello"), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 2. Multi-byte UTF-8: é is 2 bytes (0xC3 0xA9)
+//    "café" is 5 bytes: c-a-f-0xC3-0xA9
+//    "cafe" is 4 bytes: c-a-f-e
+//    levenshtein = 2 (substitute 0xC3→nothing + 0xA9→0x65, or delete + subst)
+//    Actually:
+//      delete 0xC3 and substitute 0xA9 → 0x65 = 2 ops
+// -----------------------------------------------------------------------------
+
+fn cafe_vs_cafe_utf8_bytes() {
+    // é in UTF-8: 0xC3 0xA9
+    let cafe_accent: [Byte; 5] = [0x63_u8, 0x61_u8, 0x66_u8, 0xC3_u8, 0xA9_u8];  // "café"
+    let cafe_plain:  [Byte; 4] = [0x63_u8, 0x61_u8, 0x66_u8, 0x65_u8];           // "cafe"
+    let d = levenshtein(&cafe_accent[..], &cafe_plain[..]);
+    // Distance is 2 (byte-level: delete 0xC3, substitute 0xA9 → 0x65)
+    assert_dist_eq(Text.from("café vs cafe (bytes)"), d, 2);
+}
+
+// -----------------------------------------------------------------------------
+// 3. Symmetry: dist(a, b) == dist(b, a) for multi-byte input
+// -----------------------------------------------------------------------------
+
+fn symmetry_utf8() {
+    let cafe_accent: [Byte; 5] = [0x63_u8, 0x61_u8, 0x66_u8, 0xC3_u8, 0xA9_u8];
+    let cafe_plain:  [Byte; 4] = [0x63_u8, 0x61_u8, 0x66_u8, 0x65_u8];
+    let d_ab = levenshtein(&cafe_accent[..], &cafe_plain[..]);
+    let d_ba = levenshtein(&cafe_plain[..], &cafe_accent[..]);
+    assert_dist_eq(Text.from("symmetry café/cafe"), d_ab, d_ba);
+}
+
+// -----------------------------------------------------------------------------
+// 4. Two multi-byte strings: "naïve" vs "naive"
+//    ï = 0xC3 0xAF → 2 bytes
+//    "naïve" = n-a-0xC3-0xAF-v-e = 6 bytes
+//    "naive" = n-a-i-v-e = 5 bytes
+//    edit distance = 2 (delete 0xC3, substitute 0xAF → 0x69)
+// -----------------------------------------------------------------------------
+
+fn naive_utf8() {
+    let naive_accent: [Byte; 6] = [
+        0x6E_u8, 0x61_u8, 0xC3_u8, 0xAF_u8, 0x76_u8, 0x65_u8,  // "naïve"
+    ];
+    let naive_plain: [Byte; 5] = [
+        0x6E_u8, 0x61_u8, 0x69_u8, 0x76_u8, 0x65_u8,            // "naive"
+    ];
+    let d = levenshtein(&naive_accent[..], &naive_plain[..]);
+    assert_dist_eq(Text.from("naïve vs naive (bytes)"), d, 2);
+}
+
+// -----------------------------------------------------------------------------
+// 5. levenshtein_bounded handles multi-byte without crash
+// -----------------------------------------------------------------------------
+
+fn bounded_utf8_no_crash() {
+    let a: [Byte; 5] = [0x63_u8, 0x61_u8, 0x66_u8, 0xC3_u8, 0xA9_u8];  // "café"
+    let b: [Byte; 4] = [0x63_u8, 0x61_u8, 0x66_u8, 0x65_u8];            // "cafe"
+    let r1 = levenshtein_bounded(&a[..], &b[..], 1);
+    let r2 = levenshtein_bounded(&a[..], &b[..], 2);
+    // dist=2 > 1 → None; dist=2 ≤ 2 → Some(2)
+    match r1 { None => {}, Some(_) => panic("expected None for max=1") }
+    match r2 { Some(d) => assert_dist_eq(Text.from("bounded max=2"), d, 2), None => panic("expected Some for max=2") }
+}
+
+// -----------------------------------------------------------------------------
+// 6. jaro and jaro_winkler accept multi-byte input without crash
+// -----------------------------------------------------------------------------
+
+fn jaro_utf8_no_crash() {
+    let a: [Byte; 5] = [0x63_u8, 0x61_u8, 0x66_u8, 0xC3_u8, 0xA9_u8];
+    let b: [Byte; 4] = [0x63_u8, 0x61_u8, 0x66_u8, 0x65_u8];
+    let j  = jaro(&a[..], &b[..]);
+    let jw = jaro_winkler(&a[..], &b[..]);
+    assert(j >= 0.0 && j <= 1.0);
+    assert(jw >= j);
+}
+
+fn main() {
+    ascii_regression();
+    cafe_vs_cafe_utf8_bytes();
+    symmetry_utf8();
+    naive_utf8();
+    bounded_utf8_no_crash();
+    jaro_utf8_no_crash();
+    print("string_distance unicode contract typecheck ok");
+}
