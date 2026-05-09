@@ -117,7 +117,18 @@ impl<'s> CompilationPipeline<'s> {
         }
     }
 
-    /// Phase 3: Type checking
+    /// Phase 3: Type checking.
+    ///
+    /// Resolution side-table from inference is drained into
+    /// `self.resolved_call_targets` for the caller to apply via
+    /// `apply_resolved_call_targets(&mut module)` once it has
+    /// mutable access to the AST (#91/#95 fast path — codegen reads
+    /// `Expr::resolved_call_target` to skip the legacy 7-step
+    /// name-resolution cascade).  Splitting into "type-check (&Mod)"
+    /// + "apply (&mut Mod)" keeps the immutable-AST contract every
+    /// other phase relies on while still routing the typechecker's
+    /// resolutions to the AST without &mut plumbing through eight
+    /// upstream phases.
     pub(super) fn phase_type_check(&mut self, module: &Module) -> Result<()> {
         debug!("Type checking module");
 
@@ -996,6 +1007,18 @@ impl<'s> CompilationPipeline<'s> {
             self.session.emit_diagnostic(diag);
         }
 
+        // #91/#95 — drain the typechecker-resolved call-target
+        // side-table into the pipeline so the caller (which owns
+        // `&mut Module`) can stamp the AST via
+        // `apply_resolved_call_targets`.  Codegen's
+        // `compile_method_call` fast path then picks up
+        // `Expr::resolved_call_target` and skips the legacy 7-step
+        // cascade in `try_resolve_static_method`.  Empty when no
+        // resolution sites have been instrumented yet — codegen
+        // falls through to the cascade which is the existing
+        // happy-path behaviour.
+        self.resolved_call_targets = checker.take_resolved_call_targets();
+
         // Store the type registry for later use by codegen
         // This enables closure parameter type inference without explicit annotations
         self.type_registry = Some(checker.take_type_registry());
@@ -1004,6 +1027,20 @@ impl<'s> CompilationPipeline<'s> {
         self.session.abort_if_errors()?;
 
         Ok(())
+    }
+
+    /// #91/#95 — apply the typechecker's resolved-call-target
+    /// side-table (drained from `TypeChecker` at the end of
+    /// `phase_type_check` into `self.resolved_call_targets`) to the
+    /// supplied AST module.  Stamps `Expr::resolved_call_target` for
+    /// every `MethodCall` whose span is in the table.  Idempotent;
+    /// no-op when the side-table is empty.
+    ///
+    /// Call this AFTER `phase_type_check` but BEFORE the codegen
+    /// phase so the codegen's `compile_method_call` fast path picks
+    /// up the resolutions.
+    pub(super) fn apply_resolved_call_targets(&self, module: &mut Module) {
+        verum_types::apply_resolved_call_targets(module, &self.resolved_call_targets);
     }
 
     /// Phase 3b: Dependency analysis for embedded constraints

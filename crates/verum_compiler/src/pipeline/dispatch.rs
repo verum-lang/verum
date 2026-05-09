@@ -59,7 +59,7 @@ impl<'s> CompilationPipeline<'s> {
         let file_id = self.phase_load_source()?;
 
         // Phase 2: Parsing
-        let module = self.phase_parse(file_id)?;
+        let mut module = self.phase_parse(file_id)?;
 
         // Lazy-stdlib prune (#281): match the AOT and interpreter paths
         // by dropping stdlib modules outside the user's mount tree before
@@ -70,6 +70,9 @@ impl<'s> CompilationPipeline<'s> {
 
         // Phase 3: Type checking
         self.phase_type_check(&module)?;
+        // Apply typechecker-resolved call targets to the AST so the
+        // VBC fast path in `compile_method_call` picks them up.
+        self.apply_resolved_call_targets(&mut module);
 
         // Phase 3b: Dependency analysis
         self.phase_dependency_analysis(&module)?;
@@ -309,7 +312,7 @@ impl<'s> CompilationPipeline<'s> {
         let file_id = self.phase_load_source()?;
         if trace { eprintln!("[run_interpreter] phase_load_source: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
         let t = std::time::Instant::now();
-        let module = self.phase_parse(file_id)?;
+        let mut module = self.phase_parse(file_id)?;
         if trace { eprintln!("[run_interpreter] phase_parse: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
         // Lazy-stdlib prune (#281, parity with run_native_compilation):
@@ -338,6 +341,10 @@ impl<'s> CompilationPipeline<'s> {
         if self.session.options().verify_mode != VerifyMode::Runtime {
             let t = std::time::Instant::now();
             self.phase_type_check(&module)?;
+            // #91/#95 — apply the typechecker's resolution side-table
+            // to the AST so the VBC compile_method_call fast path
+            // can pick up `Expr::resolved_call_target` directly.
+            self.apply_resolved_call_targets(&mut module);
             if trace { eprintln!("[run_interpreter] phase_type_check: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
 
             let t = std::time::Instant::now();
