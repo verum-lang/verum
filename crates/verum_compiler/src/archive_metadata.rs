@@ -395,6 +395,9 @@ fn register_module_metadata(
                         associated_types: List::new(),
                         required_methods: required_methods.clone(),
                         default_methods: List::new(),
+                        // #101 — span population deferred to a source-walk
+                        // pass in `precompile.rs::write_core_metadata_alongside_archive`.
+                        decl_span: verum_common::Maybe::None,
                     }
                 });
                 TypeDescriptorKind::Protocol {
@@ -470,6 +473,8 @@ fn register_module_metadata(
             },
             methods: List::new(),
             implements,
+            // #101 — span population deferred to source-walk pass.
+            decl_span: Maybe::None,
         };
         meta.types.insert(type_name.clone(), descriptor);
         meta.type_declaration_order.push(type_name);
@@ -525,6 +530,8 @@ fn register_module_metadata(
             parent_type: parent_type.clone(),
             // #97 — round-trip the const-storage marker.
             is_const: fn_desc.is_const,
+            // #101 — span population deferred to source-walk pass.
+            decl_span: Maybe::None,
         };
 
         // Mirror the SIMPLE method name (no `Type.` prefix) into
