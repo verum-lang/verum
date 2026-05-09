@@ -1685,14 +1685,99 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
                 || var_occurs_free(lhs, name)
                 || var_occurs_free(rhs, name)
         }
-        // Catch-all: conservatively use the full free_vars walker
-        // for any variant not enumerated above — keeps correctness
-        // even as new variants are added (the perf impact is
-        // bounded because catch-all only fires for the rarer
-        // cubical variants like HComp / Transp / Glue / etc., where
-        // the term shape is small relative to the per-leaf
-        // overhead).
-        _ => free_vars(term).contains(name),
+
+        // Cubical primitives: descend through every component with
+        // proper early-exit (no top-level binders).
+        CoreTerm::HComp { phi, walls, base } => {
+            var_occurs_free(phi, name)
+                || var_occurs_free(walls, name)
+                || var_occurs_free(base, name)
+        }
+        CoreTerm::Transp {
+            path,
+            regular,
+            value,
+        } => {
+            var_occurs_free(path, name)
+                || var_occurs_free(regular, name)
+                || var_occurs_free(value, name)
+        }
+        CoreTerm::Glue {
+            carrier,
+            phi,
+            fiber,
+            equiv,
+        } => {
+            var_occurs_free(carrier, name)
+                || var_occurs_free(phi, name)
+                || var_occurs_free(fiber, name)
+                || var_occurs_free(equiv, name)
+        }
+
+        // Refinement: descend into base; descend into predicate
+        // only when the binder doesn't shadow `name`.
+        CoreTerm::Refine {
+            base,
+            binder,
+            predicate,
+        } => {
+            var_occurs_free(base, name)
+                || (binder.as_str() != name && var_occurs_free(predicate, name))
+        }
+
+        // Quotients: no binders at the top level.
+        CoreTerm::Quotient { base, equiv } => {
+            var_occurs_free(base, name) || var_occurs_free(equiv, name)
+        }
+        CoreTerm::QuotIntro { value, base, equiv } => {
+            var_occurs_free(value, name)
+                || var_occurs_free(base, name)
+                || var_occurs_free(equiv, name)
+        }
+        CoreTerm::QuotElim {
+            scrutinee,
+            motive,
+            case,
+        } => {
+            var_occurs_free(scrutinee, name)
+                || var_occurs_free(motive, name)
+                || var_occurs_free(case, name)
+        }
+
+        // Inductive: qualified path is a global identifier (not a
+        // free variable); only generic args need scanning.
+        CoreTerm::Inductive { args, .. } => {
+            args.iter().any(|a| var_occurs_free(a, name))
+        }
+
+        // Elim: scrutinee + motive + every case.
+        CoreTerm::Elim {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            var_occurs_free(scrutinee, name)
+                || var_occurs_free(motive, name)
+                || cases.iter().any(|c| var_occurs_free(c, name))
+        }
+
+        // Axiom: name is a global identifier; descend into ty
+        // defensively (matches free_vars_rec).
+        CoreTerm::Axiom { ty, .. } => var_occurs_free(ty, name),
+
+        // Diakrisis morphism + ε-of: descend through wrapped term.
+        CoreTerm::EpsilonOf(t) | CoreTerm::AlphaOf(t) => var_occurs_free(t, name),
+
+        // Modal operators: descend through the boxed/diamonded term.
+        CoreTerm::ModalBox(t) | CoreTerm::ModalDiamond(t) => var_occurs_free(t, name),
+        CoreTerm::ModalBigAnd(args) => {
+            args.iter().any(|a| var_occurs_free(a, name))
+        }
+
+        // Cohesive modalities: descend through inner.
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
+            var_occurs_free(t, name)
+        }
     }
 }
 
