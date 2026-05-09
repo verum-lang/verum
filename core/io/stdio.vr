@@ -74,6 +74,13 @@ const STDERR_FD: Int = 2;
 
 const STDIN_BUFFER_SIZE: Int = 1024;
 
+/// Maximum line length for `read_line`.  Lines longer than this are
+/// truncated at the boundary; subsequent calls continue from the
+/// next byte.  4 KiB matches POSIX `getline` typical buffer growth
+/// step and the page size; longer lines are exceptionally rare in
+/// terminal input.
+const STDIN_LINE_MAX: Int = 4096;
+
 // =============================================================================
 // Stdin
 // =============================================================================
@@ -105,12 +112,12 @@ implement Stdin {
     // Read line.
     // Reads bytes until a newline is encountered or buffer is full.
     public fn read_line(&mut self, buf: &mut Text) -> IoResult<Int> {
-        let mut bytes = [0_u8; 4096];
+        let mut bytes = [0_u8; STDIN_LINE_MAX];
         let mut total = 0;
 
         // Read one byte at a time until newline (simple implementation)
         loop {
-            if total >= 4096 {
+            if total >= STDIN_LINE_MAX {
                 break;
             }
 
