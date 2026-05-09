@@ -595,6 +595,28 @@ impl VbcCodegen {
         }
     }
 
+    /// Single source of truth for resolving a variant constructor's
+    /// parent sum type from a `FunctionInfo` + the constructor's
+    /// reference name.  Use this anywhere a variant emission needs the
+    /// parent — passing `info.parent_type_name.as_deref()` directly
+    /// loses the syntactic-recovery layer that catches cross-module
+    /// variants whose registration stripped the parent metadata.
+    ///
+    /// Resolution order (each step closes a distinct registration gap):
+    ///   1. `info.parent_type_name` — the canonical metadata answer.
+    ///   2. `parent_type_from_qualified_name(name)` — recovered from
+    ///      the constructor's qualified path (`Maybe.Some` → `Maybe`,
+    ///      `core::result::Result::Ok` → `core::result::Result`).
+    pub(super) fn resolve_variant_parent(
+        &self,
+        info: &super::FunctionInfo,
+        constructor_name: &str,
+    ) -> Option<String> {
+        info.parent_type_name
+            .clone()
+            .or_else(|| self.parent_type_from_qualified_name(constructor_name))
+    }
+
     /// Convenience wrapper: resolve the parent type from a function
     /// (variant constructor) info and route through `emit_make_variant`.
     /// Used by call-form and record-form variant constructor paths
@@ -1444,7 +1466,7 @@ impl VbcCodegen {
                             // sum-type id (when known) lands in the heap
                             // header for downstream variant-name lookup.
                             let dest = self.ctx.alloc_temp();
-                            let parent = func_info.parent_type_name.clone();
+                            let parent = self.resolve_variant_parent(&func_info, name);
                             self.emit_make_variant(dest, tag, 0, parent.as_deref());
                             return Ok(Some(dest));
                         } else {
@@ -1471,7 +1493,7 @@ impl VbcCodegen {
                         // treats an Int 0 as "tag 0".
                         if let Some(tag) = func_info.variant_tag {
                             let dest = self.ctx.alloc_temp();
-                            let parent = func_info.parent_type_name.clone();
+                            let parent = self.resolve_variant_parent(&func_info, name);
                             self.emit_make_variant(dest, tag, 0, parent.as_deref());
                             return Ok(Some(dest));
                         }
@@ -1580,7 +1602,7 @@ impl VbcCodegen {
                     {
                         let result = self.ctx.alloc_temp();
                         if info.param_count == 0 {
-                            let parent = info.parent_type_name.clone();
+                            let parent = self.resolve_variant_parent(&info, &suffix);
                             self.emit_make_variant(result, tag, 0, parent.as_deref());
                         } else {
                             self.ctx.emit(Instruction::LoadI {
@@ -3750,12 +3772,8 @@ impl VbcCodegen {
             // `emit_make_variant`'s docstring for the SHELL-5a-related
             // rationale (sum types sharing variant tags need the
             // concrete TypeId in the heap header to disambiguate).
-            self.emit_make_variant(
-                result,
-                final_tag,
-                args.len() as u32,
-                func_info.parent_type_name.as_deref(),
-            );
+            let parent = self.resolve_variant_parent(&func_info, &func_name);
+            self.emit_make_variant(result, final_tag, args.len() as u32, parent.as_deref());
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
