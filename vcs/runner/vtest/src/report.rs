@@ -410,6 +410,7 @@ impl Reporter {
             timestamp: Utc::now(),
             compiler_version: self.compiler_version.clone(),
             vcs_version: env!("CARGO_PKG_VERSION").to_string().into(),
+            schema_version: REPORT_SCHEMA_VERSION,
             summary,
             results: results_data,
             failures,
