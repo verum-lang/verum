@@ -147,6 +147,27 @@ const S_IFREG: UInt32 = 0o100000;  // Regular file
 const S_IFDIR: UInt32 = 0o040000;  // Directory
 const S_IFLNK: UInt32 = 0o120000;  // Symbolic link
 
+// =============================================================================
+// File permission bits (Unix) — POSIX `<sys/stat.h>` naming
+// =============================================================================
+// Centralised so the magic octals don't drift between is_readonly /
+// set_readonly / from_mode / create_dir.  Names follow `<sys/stat.h>`
+// so anyone reading the code with POSIX context recognises them
+// immediately.
+
+/// Permission bit mask — the low 12 bits cover sticky/setuid/setgid
+/// plus rwx for owner/group/other.  `mode & PERM_MASK` strips file
+/// type bits, leaving only permissions.
+const PERM_MASK: Int = 0o7777;
+
+/// Owner-write bit.  Setting clears it makes the file owner-readonly.
+const S_IWUSR: Int = 0o200;
+
+/// Default mode for `mkdir`: rwxr-xr-x — owner gets full access,
+/// group/other read+execute.  Matches the POSIX-blessed default that
+/// `umask(022)` produces from `mkdir(... 0777)`.
+const DEFAULT_DIR_MODE: Int = 0o755;
+
 /// Internal metadata structure derived from syscall Stat.
 /// Public so test suites can inspect the raw fields.
 public type FsMetadataRaw is {
@@ -293,7 +314,7 @@ implement Metadata {
     /// Check if file is read-only.
     public fn is_readonly(&self) -> Bool {
         // On Unix, check if user has no write permission
-        (self.raw.mode & 0o200) == 0
+        (self.raw.mode & S_IWUSR) == 0
     }
 }
 
@@ -383,7 +404,7 @@ public type Permissions is {
 implement Permissions {
     /// Create permissions from a Unix mode.
     public fn from_mode(mode: Int) -> Permissions {
-        Permissions { mode: mode & 0o7777 }
+        Permissions { mode: mode & PERM_MASK }
     }
 
     /// Get the Unix mode.
@@ -393,15 +414,15 @@ implement Permissions {
 
     /// Check if the file is read-only (no write permission for owner).
     public fn readonly(&self) -> Bool {
-        (self.mode & 0o200) == 0
+        (self.mode & S_IWUSR) == 0
     }
 
     /// Set read-only (remove write permission for owner).
     public fn set_readonly(&mut self, readonly: Bool) {
         if readonly {
-            self.mode = self.mode & !0o200;
+            self.mode = self.mode & !S_IWUSR;
         } else {
-            self.mode = self.mode | 0o200;
+            self.mode = self.mode | S_IWUSR;
         }
     }
 }
@@ -719,8 +740,7 @@ public fn is_symlink(path: &Path) -> Bool {
 public fn create_dir(path: &Path) -> IoResult<()> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    // Default mode: rwxr-xr-x (0755)
-    let mode = 0o755;
+    let mode = DEFAULT_DIR_MODE;
 
     match sys_mkdir(path_bytes, mode) {
         Ok(()) => Ok(()),
