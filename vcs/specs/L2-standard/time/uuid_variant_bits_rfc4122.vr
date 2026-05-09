@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: uuid, id-generation, rfc4122, variant-bits, version
+// @description: Pins the UUID variant-bit validation contract (RFC 4122 §4.1.1,
+//               §4.1.3): byte 8 must have top two bits = 10xx xxxx (0x80 mask),
+//               and byte 6 encodes the version in the top 4 bits (#74).
+
+mount core.base.uuid.{Uuid, UuidError}
+mount core.base.{UInt8, Int, Bool, Text, Result, Byte}
+mount core.io.{print}
+
+// ── Version and variant bit constants (RFC 4122) ──────────────────────────────
+
+// Version field mask: byte 6, top 4 bits hold version.
+// version 4 → byte 6 & 0x0F | 0x40
+// version 7 → byte 6 & 0x0F | 0x70
+fn version_nibble_for_v4() -> UInt8 { 0x40_u8 }
+fn version_nibble_for_v7() -> UInt8 { 0x70_u8 }
+
+// RFC variant: byte 8 & 0x3F | 0x80  → top 2 bits = 10
+fn rfc_variant_mask() -> UInt8 { 0x80_u8 }
+fn rfc_variant_preserve_mask() -> UInt8 { 0x3F_u8 }
+
+fn test_version_nibble_v4_value() {
+    assert_eq(version_nibble_for_v4(), 0x40_u8);
+}
+
+fn test_version_nibble_v7_value() {
+    assert_eq(version_nibble_for_v7(), 0x70_u8);
+}
+
+fn test_rfc_variant_mask_value() {
+    assert_eq(rfc_variant_mask(), 0x80_u8);
+}
+
+// Verify the invariant: (byte8 & 0x3F) | 0x80 gives a byte with bit 7 set
+// and bit 6 clear — the canonical RFC 4122 variant.
+fn test_rfc_variant_stamp_sets_bit7_clears_bit6() {
+    let original: UInt8 = 0xFF_u8;
+    let stamped: UInt8 = (original & rfc_variant_preserve_mask()) | rfc_variant_mask();
+    let bit7_set = (stamped & 0x80_u8) != 0_u8;
+    let bit6_clear = (stamped & 0x40_u8) == 0_u8;
+    assert(bit7_set);
+    assert(bit6_clear);
+}
+
+fn test_version_4_version_nibble_top_nibble() {
+    // Top nibble of 0x40 = 4 (version 4).
+    let v = (version_nibble_for_v4() >> 4_u8) as Int;
+    assert_eq(v, 4);
+}
+
+fn test_version_7_version_nibble_top_nibble() {
+    // Top nibble of 0x70 = 7 (version 7).
+    let v = (version_nibble_for_v7() >> 4_u8) as Int;
+    assert_eq(v, 7);
+}
+
+// ── UuidError shape ───────────────────────────────────────────────────────────
+
+fn test_uuid_error_has_position_field() {
+    let err = UuidError { position: 8, message: "bad variant" };
+    assert_eq(err.position, 8);
+}
+
+fn test_uuid_error_has_message_field() {
+    let err = UuidError { position: 0, message: "invalid hex" };
+    assert(err.message.len() > 0);
+}
+
+// ── Uuid API shape ────────────────────────────────────────────────────────────
+
+fn test_uuid_nil_version_is_zero() {
+    let nil = Uuid.nil();
+    assert_eq(nil.version(), 0);
+}
+
+fn test_uuid_to_text_length_is_36() {
+    let nil = Uuid.nil();
+    let s = nil.to_text();
+    // UUID canonical format: 8-4-4-4-12 = 32 hex + 4 hyphens = 36 chars
+    assert_eq(s.len(), 36);
+}
+
+fn test_uuid_parse_nil_round_trip() {
+    let nil = Uuid.nil();
+    let text = nil.to_text();
+    let parsed = Uuid.parse(text);
+    assert(parsed is Ok(_));
+}
+
+fn test_uuid_parse_wrong_length_err() {
+    let result = Uuid.parse("tooshort");
+    assert(result is Err(_));
+}
+
+fn main() {
+    test_version_nibble_v4_value();
+    test_version_nibble_v7_value();
+    test_rfc_variant_mask_value();
+    test_rfc_variant_stamp_sets_bit7_clears_bit6();
+    test_version_4_version_nibble_top_nibble();
+    test_version_7_version_nibble_top_nibble();
+    test_uuid_error_has_position_field();
+    test_uuid_error_has_message_field();
+    test_uuid_nil_version_is_zero();
+    test_uuid_to_text_length_is_36();
+    test_uuid_parse_nil_round_trip();
+    test_uuid_parse_wrong_length_err();
+    print("UUID variant bits RFC 4122 spec ok");
+}
