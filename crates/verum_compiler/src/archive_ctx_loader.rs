@@ -904,12 +904,37 @@ impl ArchiveCtxCache {
                     next_id_ref,
                 );
                 fn_modules += 1;
-                // Skip the type-side push for unqualified-wanted — at
-                // this point we're already deep in the slow fallback;
-                // type printing of these typically falls under the
-                // legacy global tag scan and that's fine because
-                // unqualified-wanted is narrow (`Maybe.Some`,
-                // `Result.Ok`, …) and covered by built-in variants.
+
+                // ALSO import the parent type's descriptor so the
+                // typed-form `MakeVariantTyped` gate at
+                // `vbc/codegen/expressions.rs::emit_make_variant`
+                // succeeds.  Pre-fix this branch deliberately skipped
+                // type imports under the assumption that variant-ctor
+                // dispatch would survive via the runtime's global-
+                // tag-scan fallback in `format_variant_for_print_depth`.
+                // That assumption breaks when the binary loads
+                // multiple types whose variant tags collide — e.g.
+                // user code mounts `core.collections.{map.Map,
+                // set.Set}` (which transitively brings in
+                // `core.collections.alias_sampler.AliasError` with
+                // variants `EmptyWeights` (tag=0) and
+                // `NonFiniteWeight(_)` (tag=1)) AND uses
+                // `Maybe<Int>` (with `None` (tag=0) and
+                // `Some(_)` (tag=1)).  When `Some(3)` lands in the
+                // archive via the unqualified-wanted pass but
+                // Maybe's TypeDescriptor doesn't, codegen demotes
+                // to untyped `MakeVariant` and the runtime's
+                // global tag scan picks `NonFiniteWeight(3)` instead
+                // of `Some(3)` because AliasError's descriptor
+                // appears first in the type table.  Importing the
+                // parent type alongside its variant constructors
+                // closes that hole — the typed form keeps `Some(3)`
+                // tagged with Maybe's TypeId and the runtime
+                // resolves the variant name correctly.
+                if !module.types.is_empty() {
+                    codegen.import_archive_module_types(module);
+                    type_modules += 1;
+                }
             }
         }
         (fn_modules, type_modules)

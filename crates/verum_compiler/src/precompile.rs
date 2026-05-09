@@ -209,6 +209,15 @@ fn write_core_metadata_alongside_archive(
         // archive, so its identity is invariant under compiler
         // upgrades.
         metadata.content_hash = compute_source_blake3_for_root(root);
+
+        // #101 — populate `decl_span` on every `TypeDescriptor`,
+        // `FunctionDescriptor`, and `ProtocolDescriptor` in the
+        // metadata so the diagnostic emitter can point at stdlib
+        // declaration sites without consulting source.  Single
+        // source-walk visits every `.vr`; the resulting map is keyed
+        // by `<module_path>.<simple_name>` so injection is O(1) per
+        // descriptor.
+        inject_decl_spans(&mut metadata, root, verbose);
     }
     let bytes = bincode::serialize(&metadata)
         .context("bincode serialise CoreMetadata for sidecar emit")?;
@@ -358,6 +367,251 @@ fn scan_context_declarations(
         decl_map.insert(verum_common::Text::from(k.as_str()), v);
     }
     (names, decl_map)
+}
+
+/// #101 — populate `decl_span` on every `TypeDescriptor`,
+/// `FunctionDescriptor`, and `ProtocolDescriptor` in `metadata` by
+/// walking the stdlib source tree under `root`.
+///
+/// Single source-walk visits every `.vr`, parses it into an AST, and
+/// records the byte range of each top-level declaration's `name`
+/// token alongside the canonical module path
+/// (`stdlib_index::file_path_to_module_path`).  The resulting
+/// `(module_path, name) → DeclSpan` map is then used to populate
+/// every descriptor in `metadata` whose key matches.
+///
+/// Descriptors whose key has no source-side match keep
+/// `decl_span: Maybe::None` (the field's `#[serde(default)]` value).
+/// This is graceful degradation — non-fatal — and surfaces in the
+/// `verbose` log line as a populated/total ratio.
+fn inject_decl_spans(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    root: &Path,
+    verbose: bool,
+) {
+    use std::collections::HashMap;
+    use verum_ast::ItemKind;
+    use verum_common::{Maybe, Text};
+    use verum_types::core_metadata::DeclSpan;
+
+    /// Per-name source-side decl candidate. The metadata's
+    /// `module_path` is COARSER than the source-walk's file-grained
+    /// path (multiple files coalesce into one VBC archive entry —
+    /// e.g. `core/architecture/{types,anti_patterns}.vr` both land
+    /// under archive entry `core.architecture`).  We index every
+    /// candidate by name and resolve to the closest matching
+    /// descriptor via descendant-or-equal `module_path` matching.
+    struct Candidate {
+        /// File-grained module path the source walk would assign,
+        /// e.g. `core.architecture.types` for
+        /// `core/architecture/types.vr`.
+        source_module: String,
+        /// Span+filename the diagnostic emitter ultimately renders.
+        decl_span: DeclSpan,
+    }
+
+    let mut name_index: HashMap<String, Vec<Candidate>> = HashMap::with_capacity(8192);
+    let mut files_visited: usize = 0;
+    let mut files_parsed: usize = 0;
+
+    fn visit_dir(
+        root: &Path,
+        dir: &Path,
+        name_index: &mut HashMap<String, Vec<Candidate>>,
+        files_visited: &mut usize,
+        files_parsed: &mut usize,
+    ) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit_dir(root, &path, name_index, files_visited, files_parsed);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            *files_visited += 1;
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            *files_parsed += 1;
+
+            let rel_path = match path.strip_prefix(root) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+            let source_module = crate::stdlib_index::file_path_to_module_path(&rel_str);
+
+            let record_decl = |ident: &verum_ast::Ident,
+                               name_index: &mut HashMap<String, Vec<Candidate>>| {
+                let span = ident.span;
+                name_index
+                    .entry(ident.name.as_str().to_string())
+                    .or_default()
+                    .push(Candidate {
+                        source_module: source_module.clone(),
+                        decl_span: DeclSpan {
+                            file: Text::from(rel_str.as_str()),
+                            start: span.start,
+                            end: span.end,
+                        },
+                    });
+            };
+
+            for item in &module.items {
+                match &item.kind {
+                    ItemKind::Function(d) => record_decl(&d.name, name_index),
+                    ItemKind::Type(d) => record_decl(&d.name, name_index),
+                    ItemKind::Protocol(d) => record_decl(&d.name, name_index),
+                    ItemKind::Const(d) => record_decl(&d.name, name_index),
+                    ItemKind::Static(d) => record_decl(&d.name, name_index),
+                    // Impl blocks carry inherent / protocol-impl
+                    // methods + associated types + consts whose
+                    // FunctionDescriptor.parent_type points at the
+                    // impl receiver — so the metadata side has them
+                    // and our diagnostic emitter wants their decl
+                    // sites too.
+                    ItemKind::Impl(d) => {
+                        for impl_item in d.items.iter() {
+                            match &impl_item.kind {
+                                verum_ast::decl::ImplItemKind::Function(fd) => {
+                                    record_decl(&fd.name, name_index);
+                                }
+                                verum_ast::decl::ImplItemKind::Type { name, .. }
+                                | verum_ast::decl::ImplItemKind::Const { name, .. } => {
+                                    record_decl(name, name_index);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    visit_dir(root, root, &mut name_index, &mut files_visited, &mut files_parsed);
+
+    /// Pick the candidate whose `source_module` is the descriptor's
+    /// `module_path` (exact match) or its strict descendant (e.g.
+    /// `core.architecture.types` for descriptor `core.architecture`).
+    /// Among descendants prefer the SHORTEST source_module — the
+    /// closest source file.  Returns `None` if nothing matches.
+    fn resolve<'a>(
+        candidates: &'a [Candidate],
+        descriptor_module: &str,
+    ) -> Option<&'a Candidate> {
+        // Exact-match first — strongest signal.
+        for c in candidates {
+            if c.source_module == descriptor_module {
+                return Some(c);
+            }
+        }
+        // Strict-descendant fallback: source is e.g.
+        // `core.architecture.types` and descriptor is
+        // `core.architecture`.  Pick the shortest such — closest in
+        // the module tree.
+        let mut best: Option<&Candidate> = None;
+        let prefix = format!("{}.", descriptor_module);
+        for c in candidates {
+            if c.source_module.starts_with(&prefix) {
+                match best {
+                    None => best = Some(c),
+                    Some(prev) if c.source_module.len() < prev.source_module.len() => {
+                        best = Some(c);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+        // Last-ditch fallback: if only ONE candidate exists for this
+        // name across the entire stdlib, use it regardless of
+        // module_path.  This catches descriptors whose module_path
+        // is empty or oddly-namespaced; the diagnostic still points
+        // at the real declaration site.
+        if candidates.len() == 1 {
+            return candidates.first();
+        }
+        None
+    }
+
+    fn populate<V, F>(
+        map: &mut verum_common::OrderedMap<Text, V>,
+        name_index: &HashMap<String, Vec<Candidate>>,
+        get_module_and_name: F,
+        get_decl_span: impl Fn(&mut V) -> &mut Maybe<DeclSpan>,
+    ) -> usize
+    where
+        F: Fn(&V) -> (&str, &str),
+    {
+        let mut populated = 0;
+        for (_, val) in map.iter_mut() {
+            if matches!(get_decl_span(val), Maybe::Some(_)) {
+                continue;
+            }
+            let (module_path, name) = get_module_and_name(val);
+            if let Some(cands) = name_index.get(name)
+                && let Some(found) = resolve(cands, module_path)
+            {
+                *get_decl_span(val) = Maybe::Some(found.decl_span.clone());
+                populated += 1;
+            }
+        }
+        populated
+    }
+
+    let total_types = metadata.types.len();
+    let populated_types = populate(
+        &mut metadata.types,
+        &name_index,
+        |t| (t.module_path.as_str(), t.name.as_str()),
+        |t| &mut t.decl_span,
+    );
+
+    let total_fns = metadata.functions.len();
+    let populated_fns = populate(
+        &mut metadata.functions,
+        &name_index,
+        |f| (f.module_path.as_str(), f.name.as_str()),
+        |f| &mut f.decl_span,
+    );
+
+    let total_protos = metadata.protocols.len();
+    let populated_protos = populate(
+        &mut metadata.protocols,
+        &name_index,
+        |p| (p.module_path.as_str(), p.name.as_str()),
+        |p| &mut p.decl_span,
+    );
+
+    if verbose {
+        let total_candidates: usize = name_index.values().map(|v| v.len()).sum();
+        eprintln!(
+            "verum stdlib precompile: inject_decl_spans — {}/{} types, {}/{} functions, {}/{} protocols populated from {} parsed files ({} visited, {} unique names / {} candidates indexed)",
+            populated_types, total_types,
+            populated_fns, total_fns,
+            populated_protos, total_protos,
+            files_parsed,
+            files_visited,
+            name_index.len(),
+            total_candidates,
+        );
+    }
 }
 
 // ============================================================================
