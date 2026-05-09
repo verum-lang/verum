@@ -181,6 +181,33 @@ pub enum ReflectedTerm {
         /// Reflected pair.
         pair: Box<ReflectedTerm>,
     },
+
+    /// Mirror of [`Term::Id`] — identity type `Id(A, a, b)`.
+    Id {
+        /// Reflected carrier type `A`.
+        ty: Box<ReflectedTerm>,
+        /// Reflected left endpoint `a`.
+        lhs: Box<ReflectedTerm>,
+        /// Reflected right endpoint `b`.
+        rhs: Box<ReflectedTerm>,
+    },
+
+    /// Mirror of [`Term::Refl`] — reflexivity proof.
+    Refl {
+        /// Reflected reflected-at value (the canonical inhabitant
+        /// of `Id(A, value, value)`).
+        value: Box<ReflectedTerm>,
+    },
+
+    /// Mirror of [`Term::J`] — Paulin-Mohring path induction.
+    J {
+        /// Reflected motive `P : Π(_ : A). Universe(_)`.
+        motive: Box<ReflectedTerm>,
+        /// Reflected base case `h : P(a)`.
+        base: Box<ReflectedTerm>,
+        /// Reflected scrutinee `eq : Id(A, a, b)`.
+        scrutinee: Box<ReflectedTerm>,
+    },
 }
 
 // =============================================================================
@@ -254,6 +281,23 @@ impl From<&Term> for ReflectedTerm {
             Term::Snd(p) => ReflectedTerm::Snd {
                 pair: Box::new(ReflectedTerm::from(p.as_ref())),
             },
+            Term::Id { ty, lhs, rhs } => ReflectedTerm::Id {
+                ty: Box::new(ReflectedTerm::from(ty.as_ref())),
+                lhs: Box::new(ReflectedTerm::from(lhs.as_ref())),
+                rhs: Box::new(ReflectedTerm::from(rhs.as_ref())),
+            },
+            Term::Refl(value) => ReflectedTerm::Refl {
+                value: Box::new(ReflectedTerm::from(value.as_ref())),
+            },
+            Term::J {
+                motive,
+                base,
+                scrutinee,
+            } => ReflectedTerm::J {
+                motive: Box::new(ReflectedTerm::from(motive.as_ref())),
+                base: Box::new(ReflectedTerm::from(base.as_ref())),
+                scrutinee: Box::new(ReflectedTerm::from(scrutinee.as_ref())),
+            },
         }
     }
 }
@@ -287,6 +331,23 @@ impl TryFrom<&ReflectedTerm> for Term {
             )),
             ReflectedTerm::Fst { pair } => Ok(Term::Fst(Box::new(Term::try_from(pair.as_ref())?))),
             ReflectedTerm::Snd { pair } => Ok(Term::Snd(Box::new(Term::try_from(pair.as_ref())?))),
+            ReflectedTerm::Id { ty, lhs, rhs } => Ok(Term::Id {
+                ty: Box::new(Term::try_from(ty.as_ref())?),
+                lhs: Box::new(Term::try_from(lhs.as_ref())?),
+                rhs: Box::new(Term::try_from(rhs.as_ref())?),
+            }),
+            ReflectedTerm::Refl { value } => {
+                Ok(Term::Refl(Box::new(Term::try_from(value.as_ref())?)))
+            }
+            ReflectedTerm::J {
+                motive,
+                base,
+                scrutinee,
+            } => Ok(Term::J {
+                motive: Box::new(Term::try_from(motive.as_ref())?),
+                base: Box::new(Term::try_from(base.as_ref())?),
+                scrutinee: Box::new(Term::try_from(scrutinee.as_ref())?),
+            }),
         }
     }
 }
@@ -602,6 +663,21 @@ fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
         }
         ReflectedTerm::Fst { pair } => debruijn_in_range(pair, depth),
         ReflectedTerm::Snd { pair } => debruijn_in_range(pair, depth),
+        ReflectedTerm::Id { ty, lhs, rhs } => {
+            debruijn_in_range(ty, depth)
+                && debruijn_in_range(lhs, depth)
+                && debruijn_in_range(rhs, depth)
+        }
+        ReflectedTerm::Refl { value } => debruijn_in_range(value, depth),
+        ReflectedTerm::J {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            debruijn_in_range(motive, depth)
+                && debruijn_in_range(base, depth)
+                && debruijn_in_range(scrutinee, depth)
+        }
     }
 }
 
