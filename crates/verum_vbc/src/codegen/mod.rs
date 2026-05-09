@@ -1753,44 +1753,52 @@ impl VbcCodegen {
             ("ORDERING_RELEASE", 2),
             ("ORDERING_ACQ_REL", 3),
             ("ORDERING_SEQ_CST", 4),
-            // POSIX errno constants (core/sys/darwin/errno.vr, core/sys/linux/errno.vr)
-            ("EPERM", 1),
-            ("ENOENT", 2),
-            ("ESRCH", 3),
-            ("EINTR", 4),
-            ("EIO", 5),
-            ("ENXIO", 6),
-            ("E2BIG", 7),
-            ("ENOEXEC", 8),
-            ("EBADF", 9),
-            ("ECHILD", 10),
-            ("EAGAIN", 11),
-            ("ENOMEM", 12),
-            ("EACCES", 13),
-            ("EFAULT", 14),
-            ("EBUSY", 16),
-            ("EEXIST", 17),
-            ("ENODEV", 19),
-            ("ENOTDIR", 20),
-            ("EISDIR", 21),
-            ("EINVAL", 22),
-            ("EMFILE", 24),
-            ("ENOSPC", 28),
-            ("EPIPE", 32),
-            ("ERANGE", 34),
-            ("ENOSYS", 78),
-            ("ENOTEMPTY", 66),
-            ("ECONNREFUSED", 61),
-            ("ECONNRESET", 54),
-            ("ECONNABORTED", 53),
-            ("ETIMEDOUT", 60),
-            ("EADDRINUSE", 48),
-            ("EADDRNOTAVAIL", 49),
-            ("ENETUNREACH", 51),
-            ("EALREADY", 37),
-            ("EINPROGRESS", 36),
-            ("ENOTCONN", 57),
-            ("EWOULDBLOCK", 35),
+            // POSIX errno constants — sourced from `verum_common::errno`
+            // single source of truth. Cross-platform values use module-
+            // level constants; platform-divergent values reference
+            // the per-platform submodules with historical assignments
+            // preserved (Phase-2 dispatch in resolve_stdlib_constant_value
+            // wins per build target).
+            ("EPERM", verum_common::errno::EPERM),
+            ("ENOENT", verum_common::errno::ENOENT),
+            ("ESRCH", verum_common::errno::ESRCH),
+            ("EINTR", verum_common::errno::EINTR),
+            ("EIO", verum_common::errno::EIO),
+            ("ENXIO", verum_common::errno::ENXIO),
+            ("E2BIG", verum_common::errno::E2BIG),
+            ("ENOEXEC", verum_common::errno::ENOEXEC),
+            ("EBADF", verum_common::errno::EBADF),
+            ("ECHILD", verum_common::errno::ECHILD),
+            ("EAGAIN", verum_common::errno::linux::EAGAIN),     // 11 (Linux); Darwin=35
+            ("ENOMEM", verum_common::errno::ENOMEM),
+            ("EACCES", verum_common::errno::EACCES),
+            ("EFAULT", verum_common::errno::EFAULT),
+            ("EBUSY", verum_common::errno::EBUSY),
+            ("EEXIST", verum_common::errno::EEXIST),
+            ("ENODEV", verum_common::errno::ENODEV),
+            ("ENOTDIR", verum_common::errno::ENOTDIR),
+            ("EISDIR", verum_common::errno::EISDIR),
+            ("EINVAL", verum_common::errno::EINVAL),
+            ("EMFILE", verum_common::errno::EMFILE),
+            ("ENOSPC", verum_common::errno::ENOSPC),
+            ("EPIPE", verum_common::errno::EPIPE),
+            ("ERANGE", verum_common::errno::ERANGE),
+            // Platform-divergent errno values (Darwin assignments
+            // preserved for ABI continuity; Phase-2 dispatch wins
+            // per build target via `errno::errno_value`).
+            ("ENOSYS", verum_common::errno::darwin::ENOSYS),         // 78 (Darwin); Linux=38
+            ("ENOTEMPTY", verum_common::errno::darwin::ENOTEMPTY),   // 66 (Darwin); Linux=39
+            ("ECONNREFUSED", verum_common::errno::darwin::ECONNREFUSED), // 61 (Darwin); Linux=111
+            ("ECONNRESET", verum_common::errno::darwin::ECONNRESET),     // 54 (Darwin); Linux=104
+            ("ECONNABORTED", verum_common::errno::darwin::ECONNABORTED), // 53 (Darwin); Linux=103
+            ("ETIMEDOUT", verum_common::errno::darwin::ETIMEDOUT),       // 60 (Darwin); Linux=110
+            ("EADDRINUSE", verum_common::errno::darwin::EADDRINUSE),     // 48 (Darwin); Linux=98
+            ("EADDRNOTAVAIL", verum_common::errno::darwin::EADDRNOTAVAIL), // 49 (Darwin); Linux=99
+            ("ENETUNREACH", verum_common::errno::darwin::ENETUNREACH),   // 51 (Darwin); Linux=101
+            ("EALREADY", verum_common::errno::darwin::EALREADY),         // 37 (Darwin); Linux=114
+            ("EINPROGRESS", verum_common::errno::darwin::EINPROGRESS),   // 36 (Darwin); Linux=115
+            ("ENOTCONN", verum_common::errno::darwin::ENOTCONN),         // 57 (Darwin); Linux=107
+            ("EWOULDBLOCK", verum_common::errno::darwin::EWOULDBLOCK),   // 35 (Darwin); Linux=11
             // kqueue filter type IDs and event flags (Darwin only).
             // Sourced from `verum_common::os_events::kqueue` — single
             // source of truth shared with the runtime kqueue handlers
