@@ -173,7 +173,7 @@ fn test_count_stdlib_internal_type_errors() {
 /// to identify all type errors. This is the comprehensive test that exposes the
 /// ~950 errors that were previously hidden by skipping stdlib body checking.
 #[test]
-#[ignore = "takes ~220s; run with: RUST_MIN_STACK=134217728 cargo test -p verum_compiler --test core_stdlib_validation_test test_count_stdlib_body_errors -- --ignored --nocapture"]
+#[ignore = "takes 60-120min (2540 stdlib files incl. 1548 database); run with: RUST_MIN_STACK=134217728 cargo test -p verum_compiler --test core_stdlib_validation_test test_count_stdlib_body_errors -- --ignored --nocapture"]
 fn test_count_stdlib_body_errors() {
     let handle = std::thread::Builder::new()
         .stack_size(128 * 1024 * 1024) // 128 MB stack
