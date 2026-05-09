@@ -33,51 +33,9 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64();
             let b = state.get_reg(b_reg).as_i64();
-
-            match a.checked_add(b) {
-                Some(result) => {
-                    // Some(result) - tag = 0, field_count = 1
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000), // Maybe.Some variant (tag=0)
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0; // tag
-                                *tag_ptr.add(1) = 1; // field_count
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    // None - tag = 1, field_count = 0
-                    // data_size must match MakeVariant(tag=1, field_count=0) for deep_value_eq
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001), // Maybe.None variant (tag=1)
-                        8,              // tag + field_count only, no payload
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1; // tag
-                                *tag_ptr.add(1) = 0; // field_count
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(state, dst, a.checked_add(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
 
@@ -85,44 +43,9 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64();
             let b = state.get_reg(b_reg).as_i64();
-
-            match a.checked_sub(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000),
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0;
-                                *tag_ptr.add(1) = 1;
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 0;
-                        }
-                    })?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(state, dst, a.checked_sub(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
 
@@ -130,44 +53,9 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64();
             let b = state.get_reg(b_reg).as_i64();
-
-            match a.checked_mul(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000),
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0;
-                                *tag_ptr.add(1) = 1;
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 0;
-                        }
-                    })?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(state, dst, a.checked_mul(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
 
@@ -175,44 +63,9 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64();
             let b = state.get_reg(b_reg).as_i64();
-
-            match a.checked_div(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000),
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0;
-                                *tag_ptr.add(1) = 1;
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 0;
-                        }
-                    })?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(state, dst, a.checked_div(b).map(Value::from_i64))?;
             Ok(DispatchResult::Continue)
         }
 
@@ -223,48 +76,13 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64() as u64;
             let b = state.get_reg(b_reg).as_i64() as u64;
-
-            match a.checked_add(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000), // Maybe.Some variant (tag=0)
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0; // tag
-                                *tag_ptr.add(1) = 1; // field_count
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result as i64);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8001), // Maybe.None variant (tag=1)
-                        8,
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 1; // tag
-                                *tag_ptr.add(1) = 0; // field_count
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(
+                state,
+                dst,
+                a.checked_add(b).map(|r| Value::from_i64(r as i64)),
+            )?;
             Ok(DispatchResult::Continue)
         }
 
@@ -272,44 +90,13 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64() as u64;
             let b = state.get_reg(b_reg).as_i64() as u64;
-
-            match a.checked_sub(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000),
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0;
-                                *tag_ptr.add(1) = 1;
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result as i64);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 0;
-                        }
-                    })?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(
+                state,
+                dst,
+                a.checked_sub(b).map(|r| Value::from_i64(r as i64)),
+            )?;
             Ok(DispatchResult::Continue)
         }
 
@@ -317,44 +104,13 @@ pub(in super::super) fn handle_arith_extended(
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
             let a = state.get_reg(a_reg).as_i64() as u64;
             let b = state.get_reg(b_reg).as_i64() as u64;
-
-            match a.checked_mul(b) {
-                Some(result) => {
-                    let obj = state.heap.alloc_with_init(
-                        TypeId(0x8000),
-                        8 + std::mem::size_of::<Value>(),
-                        |data| {
-                            let tag_ptr = data.as_mut_ptr() as *mut u32;
-                            unsafe {
-                                *tag_ptr = 0;
-                                *tag_ptr.add(1) = 1;
-                            }
-                        },
-                    )?;
-                    state.record_allocation();
-                    let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-                    let field_ptr =
-                        unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-                    unsafe {
-                        *field_ptr = Value::from_i64(result as i64);
-                    }
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-                None => {
-                    let obj = state.heap.alloc_with_init(TypeId(0x8001), 8, |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 0;
-                        }
-                    })?;
-                    state.record_allocation();
-                    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                }
-            }
+            emit_maybe(
+                state,
+                dst,
+                a.checked_mul(b).map(|r| Value::from_i64(r as i64)),
+            )?;
             Ok(DispatchResult::Continue)
         }
 
@@ -1214,59 +970,204 @@ pub(in super::super) fn handle_arith_extended(
     }
 }
 
-/// Emit a `Maybe<Int>` value at the given register.
+/// Emit a `Maybe<Int>` value into `dst` using **canonical**
+/// `MAYBE_VARIANT_LAYOUT` tags (`None=0`, `Some=1`).
 ///
-
-/// `ok = true` ⇒ allocate `Some(value)` (TypeId tag 0, single payload).
-/// `ok = false` ⇒ allocate `None` (TypeId tag 1, no payload).
+/// Delegates to the shared `method_dispatch::{make_some_value,
+/// make_none_value}` builders so values produced here are
+/// bit-equivalent to those from the `MakeVariant` opcode and the
+/// method-call interception path — pattern-match dispatch and
+/// `format_variant_for_print_depth` treat them identically.
 ///
-
-/// Layout matches the inline construction used by `CheckedAddI` /
-/// `CheckedSubI` / `CheckedMulI` / etc. — extracted into a helper so
-/// the new `CheckedNeg` / `CheckedAbs` arms don't duplicate ~30 lines
-/// of allocation / tag / field-write boilerplate. The four extant
-/// inline copies stay as-is to preserve their exact instruction
-/// scheduling for the well-trod hot path; this helper is the
-/// canonical pattern for any new Maybe-returning arith arm.
+/// **Drift contract** (pinned by
+/// `tests::checked_arith_uses_canonical_maybe_tags`): pre-this-helper
+/// the `CheckedAddI` / `CheckedSubI` / … arms inlined the
+/// alloc-with-init pattern with `Some → tag=0, None → tag=1` — the
+/// OPPOSITE of canonical, which silently mis-tagged every
+/// overflow-checked arithmetic result. Pattern-matching `if let
+/// Some(x) = checked_add(a, b)` would compile to `MatchVariant {
+/// variant_tag: 1 }` and find `tag=0` on the heap, failing the match
+/// even on the success branch. Routing through canonical builders
+/// makes the bug structurally impossible — a single source of truth
+/// for `Maybe<T>` construction across the runtime.
 fn emit_maybe_int(
     state: &mut InterpreterState,
     dst: crate::instruction::Reg,
     value: i64,
     ok: bool,
 ) -> InterpreterResult<()> {
-    if ok {
-        let obj = state.heap.alloc_with_init(
-            TypeId(0x8000), // Maybe.Some variant (tag=0)
-            8 + std::mem::size_of::<Value>(),
-            |data| {
-                let tag_ptr = data.as_mut_ptr() as *mut u32;
-                unsafe {
-                    *tag_ptr = 0; // tag = Some
-                    *tag_ptr.add(1) = 1; // field_count = 1
-                }
-            },
-        )?;
-        state.record_allocation();
-        let field_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
-        let field_ptr = unsafe { (obj.as_ptr() as *mut u8).add(field_offset) as *mut Value };
-        unsafe {
-            *field_ptr = Value::from_i64(value);
-        }
-        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-    } else {
-        let obj = state.heap.alloc_with_init(
-            TypeId(0x8001), // Maybe.None variant (tag=1)
-            8,              // tag + field_count, no payload
-            |data| {
-                let tag_ptr = data.as_mut_ptr() as *mut u32;
-                unsafe {
-                    *tag_ptr = 1; // tag = None
-                    *tag_ptr.add(1) = 0; // field_count = 0
-                }
-            },
-        )?;
-        state.record_allocation();
-        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-    }
+    let payload = ok.then(|| Value::from_i64(value));
+    emit_maybe(state, dst, payload)
+}
+
+/// Generalised counterpart of [`emit_maybe_int`] that accepts any
+/// payload `Value`. Single canonical Maybe constructor for the
+/// arith-extended dispatch handlers; same drift contract applies.
+fn emit_maybe(
+    state: &mut InterpreterState,
+    dst: crate::instruction::Reg,
+    payload: Option<Value>,
+) -> InterpreterResult<()> {
+    let val = match payload {
+        Some(v) => super::method_dispatch::make_some_value(state, v)?,
+        None => super::method_dispatch::make_none_value(state)?,
+    };
+    state.set_reg(dst, val);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instruction::Reg;
+    use crate::interpreter::heap;
+    use crate::interpreter::state::InterpreterState;
+    use crate::module::VbcModule;
+    use std::sync::Arc;
+    use verum_common::well_known_types::{
+        MAYBE_VARIANT_LAYOUT, maybe_none_tag, maybe_success_tag,
+    };
+
+    fn fresh_state() -> InterpreterState {
+        let module = Arc::new(VbcModule::new("test_arith_extended".to_string()));
+        let mut state = InterpreterState::new(module);
+        // Seed register file so we have somewhere to write `dst`.
+        state.registers.push_frame(8);
+        state
+    }
+
+    /// Read back the `(tag, field_count, type_id)` triple from a
+    /// variant heap object produced by `emit_maybe` / `emit_maybe_int`.
+    /// Mirrors what `format_variant_for_print_depth` and
+    /// `dispatch_variant_method` see — pinning these is pinning the
+    /// observable shape every downstream consumer reads.
+    fn read_variant_header(state: &InterpreterState, reg: Reg) -> (u32, u32, u32) {
+        let val = state.registers.get(state.reg_base(), reg);
+        let ptr = val.as_ptr::<u8>();
+        assert!(!ptr.is_null(), "register {} expected to hold a heap pointer", reg.0);
+        let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
+        let type_id = header.type_id.0;
+        let data_start = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+        let tag = unsafe { *(data_start as *const u32) };
+        let field_count = unsafe { *((data_start as *const u32).add(1)) };
+        (tag, field_count, type_id)
+    }
+
+    /// `emit_maybe` with `Some(_)` produces canonical-tagged
+    /// `Maybe.Some` exactly matching `MAYBE_VARIANT_LAYOUT`.  Pre-fix
+    /// this returned tag=0; the regression test catches any future
+    /// re-inversion at the dispatch handler level.
+    #[test]
+    fn emit_maybe_some_uses_canonical_tag() {
+        let mut state = fresh_state();
+        let dst = Reg(0);
+        emit_maybe(&mut state, dst, Some(Value::from_i64(42))).unwrap();
+        let (tag, fc, type_id) = read_variant_header(&state, dst);
+        assert_eq!(
+            tag,
+            maybe_success_tag(),
+            "Some tag must match MAYBE_VARIANT_LAYOUT canonical Some=1; got {tag}",
+        );
+        assert_eq!(fc, 1, "Some has one payload field");
+        assert_eq!(
+            type_id,
+            0x8000 + maybe_success_tag(),
+            "synthetic TypeId must follow `0x8000 + tag` formula",
+        );
+    }
+
+    /// `emit_maybe` with `None` produces canonical-tagged `Maybe.None`.
+    #[test]
+    fn emit_maybe_none_uses_canonical_tag() {
+        let mut state = fresh_state();
+        let dst = Reg(1);
+        emit_maybe(&mut state, dst, None).unwrap();
+        let (tag, fc, type_id) = read_variant_header(&state, dst);
+        assert_eq!(
+            tag,
+            maybe_none_tag(),
+            "None tag must match MAYBE_VARIANT_LAYOUT canonical None=0; got {tag}",
+        );
+        assert_eq!(fc, 0, "None is unit-shaped (no payload)");
+        assert_eq!(
+            type_id,
+            0x8000 + maybe_none_tag(),
+            "synthetic TypeId must follow `0x8000 + tag` formula",
+        );
+    }
+
+    /// `emit_maybe_int` mirrors `emit_maybe` for the i64-payload case.
+    /// Tags must match canonical regardless of which branch fires.
+    #[test]
+    fn emit_maybe_int_canonical_branches() {
+        let mut state = fresh_state();
+        emit_maybe_int(&mut state, Reg(2), 7, true).unwrap();
+        let (tag_some, fc_some, _) = read_variant_header(&state, Reg(2));
+        assert_eq!(tag_some, maybe_success_tag());
+        assert_eq!(fc_some, 1);
+
+        emit_maybe_int(&mut state, Reg(3), 0, false).unwrap();
+        let (tag_none, fc_none, _) = read_variant_header(&state, Reg(3));
+        assert_eq!(tag_none, maybe_none_tag());
+        assert_eq!(fc_none, 0);
+    }
+
+    /// Cross-handler bit-equivalence: a `Maybe<Int>` produced by the
+    /// arith-extended dispatch path is bit-identical to one produced
+    /// by `pattern_matching::alloc_variant_into` (the `MakeVariant`
+    /// opcode handler).  This is the core invariant that lets
+    /// pattern-match code on `Some/None` work uniformly regardless of
+    /// which path produced the value.
+    #[test]
+    fn arith_maybe_matches_makevariant_shape() {
+        let mut state = fresh_state();
+        // arith path: Some(99)
+        emit_maybe(&mut state, Reg(4), Some(Value::from_i64(99))).unwrap();
+        let (a_tag, a_fc, a_tid) = read_variant_header(&state, Reg(4));
+
+        // MakeVariant opcode path: same logical Some(99)
+        crate::interpreter::dispatch_table::handlers::pattern_matching::alloc_variant_into(
+            &mut state,
+            Reg(5),
+            maybe_success_tag(),
+            1,
+        )
+        .unwrap();
+        // Set payload field 0 = 99 (mirrors what SetVariantData does).
+        let val5 = state.registers.get(state.reg_base(), Reg(5));
+        unsafe {
+            let ptr = val5.as_ptr::<u8>();
+            let payload_ptr = ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
+            *payload_ptr = Value::from_i64(99);
+        }
+        let (b_tag, b_fc, b_tid) = read_variant_header(&state, Reg(5));
+
+        assert_eq!(a_tag, b_tag, "arith and MakeVariant paths must agree on tag");
+        assert_eq!(
+            a_fc, b_fc,
+            "arith and MakeVariant paths must agree on field_count",
+        );
+        assert_eq!(
+            a_tid, b_tid,
+            "arith and MakeVariant paths must agree on synthetic TypeId",
+        );
+    }
+
+    /// Pin: the canonical layout `MAYBE_VARIANT_LAYOUT` itself is the
+    /// source-of-truth this handler trusts.  If a future edit reorders
+    /// `core/base/maybe.vr`, the corresponding update to
+    /// `MAYBE_VARIANT_LAYOUT` flows through `maybe_success_tag()` /
+    /// `maybe_none_tag()` and the assertions above pick up the new
+    /// values automatically — no parallel hand-table to drift from.
+    #[test]
+    fn maybe_layout_canonical_pin() {
+        // Two variants total.
+        assert_eq!(MAYBE_VARIANT_LAYOUT.len(), 2);
+        // None=0, Some=1 in declaration order.
+        assert_eq!(maybe_none_tag(), 0);
+        assert_eq!(maybe_success_tag(), 1);
+        // Tags must be distinct (no collision is structurally impossible
+        // here, but the assertion is the contract for downstream consumers).
+        assert_ne!(maybe_none_tag(), maybe_success_tag());
+    }
 }

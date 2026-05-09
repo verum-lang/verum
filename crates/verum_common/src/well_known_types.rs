@@ -514,24 +514,20 @@ pub const VARERROR_VARIANT_LAYOUT: &[(&str, u32)] = &[
     ("NotUnicode", 1),
 ];
 
-/// Returns the canonical tag for `VarError::NotPresent` (tag 0).
+/// Returns the canonical tag for `VarError::NotPresent`.
 ///
 /// Use this instead of the literal `0` in `wrap_in_variant(state, "VarError", ...)`.
+/// Derived from `VARERROR_VARIANT_LAYOUT` via [`tag_of_or_drift`].
 pub fn varerror_not_present_tag() -> u32 {
-    VARERROR_VARIANT_LAYOUT
-        .iter()
-        .find_map(|&(n, t)| if n == "NotPresent" { Some(t) } else { None })
-        .expect("VARERROR_VARIANT_LAYOUT must contain 'NotPresent'")
+    tag_of_or_drift(VARERROR_VARIANT_LAYOUT, "NotPresent", "VARERROR_VARIANT_LAYOUT")
 }
 
-/// Returns the canonical tag for `VarError::NotUnicode` (tag 1).
+/// Returns the canonical tag for `VarError::NotUnicode`.
 ///
 /// Use this instead of the literal `1` in `wrap_in_variant(state, "VarError", ...)`.
+/// Derived from `VARERROR_VARIANT_LAYOUT` via [`tag_of_or_drift`].
 pub fn varerror_not_unicode_tag() -> u32 {
-    VARERROR_VARIANT_LAYOUT
-        .iter()
-        .find_map(|&(n, t)| if n == "NotUnicode" { Some(t) } else { None })
-        .expect("VARERROR_VARIANT_LAYOUT must contain 'NotUnicode'")
+    tag_of_or_drift(VARERROR_VARIANT_LAYOUT, "NotUnicode", "VARERROR_VARIANT_LAYOUT")
 }
 
 /// Canonical list of marker protocol names in `core::base::protocols`.
@@ -550,59 +546,86 @@ pub fn varerror_not_unicode_tag() -> u32 {
 /// catch the gap.
 pub const MARKER_PROTOCOL_NAMES: &[&str] = &["Sized", "Send", "Sync", "Unpin"];
 
+/// Look up a variant's canonical tag by name in any
+/// `*_VARIANT_LAYOUT` slice. Returns `None` when the name is absent —
+/// signalling drift between the caller's expectation and the
+/// canonical source-of-truth.
+///
+/// This is the single primitive every per-variant tag accessor in this
+/// module composes around. Callers that know the name MUST be present
+/// (because they sourced it from the same .vr declaration as the
+/// layout) should prefer [`tag_of_or_drift`] which panics with a
+/// structured drift message instead of silently producing `None`.
+#[inline]
+pub fn tag_of(layout: &[(&str, u32)], name: &str) -> Option<u32> {
+    layout
+        .iter()
+        .find_map(|&(n, t)| (n == name).then_some(t))
+}
+
+/// Like [`tag_of`] but panics with a structured drift message when
+/// `name` is absent from `layout`. Use this at sites that source the
+/// name from the canonical Verum declaration the layout describes —
+/// absence is a programming error, not a recoverable runtime
+/// condition.
+///
+/// `layout_name` is the constant identifier (e.g. `"MAYBE_VARIANT_LAYOUT"`),
+/// included in the panic message so the operator can locate the
+/// canonical-source-of-truth definition without grep.
+#[inline]
+pub fn tag_of_or_drift(layout: &[(&str, u32)], name: &str, layout_name: &str) -> u32 {
+    tag_of(layout, name).unwrap_or_else(|| {
+        panic!(
+            "{} is missing variant `{}` — drift between caller and the \
+             canonical layout. Check the .vr source-of-truth and the \
+             layout constant in verum_common/src/well_known_types.rs",
+            layout_name, name
+        )
+    })
+}
+
 /// Returns the canonical success variant tag for `Maybe<T>` (the tag for `Some`).
 ///
 /// Derived from `MAYBE_VARIANT_LAYOUT` — same source of truth used by
 /// `compile_try`, MakeVariant, and @property generators.
-///
-/// # Panics
-/// Panics if `MAYBE_VARIANT_LAYOUT` is missing the `"Some"` entry, which
-/// would indicate an inconsistency between the constant and `core/base/maybe.vr`.
 pub fn maybe_success_tag() -> u32 {
-    MAYBE_VARIANT_LAYOUT
-        .iter()
-        .find_map(|&(n, t)| if n == "Some" { Some(t) } else { None })
-        .expect("MAYBE_VARIANT_LAYOUT must contain 'Some'")
+    tag_of_or_drift(MAYBE_VARIANT_LAYOUT, "Some", "MAYBE_VARIANT_LAYOUT")
+}
+
+/// Returns the canonical `None` variant tag for `Maybe<T>`.
+///
+/// Mirror of [`maybe_success_tag`]; both derive from the same
+/// canonical layout so a future reorder in `core/base/maybe.vr`
+/// flows through automatically.
+pub fn maybe_none_tag() -> u32 {
+    tag_of_or_drift(MAYBE_VARIANT_LAYOUT, "None", "MAYBE_VARIANT_LAYOUT")
 }
 
 /// Returns the canonical success variant tag for `Result<T, E>` (the tag for `Ok`).
 ///
 /// Derived from `RESULT_VARIANT_LAYOUT` — same source of truth used by
 /// `compile_try`, MakeVariant, and @property generators.
-///
-/// # Panics
-/// Panics if `RESULT_VARIANT_LAYOUT` is missing the `"Ok"` entry.
 pub fn result_success_tag() -> u32 {
-    RESULT_VARIANT_LAYOUT
-        .iter()
-        .find_map(|&(n, t)| if n == "Ok" { Some(t) } else { None })
-        .expect("RESULT_VARIANT_LAYOUT must contain 'Ok'")
+    tag_of_or_drift(RESULT_VARIANT_LAYOUT, "Ok", "RESULT_VARIANT_LAYOUT")
+}
+
+/// Returns the canonical `Err` variant tag for `Result<T, E>`.
+pub fn result_error_tag() -> u32 {
+    tag_of_or_drift(RESULT_VARIANT_LAYOUT, "Err", "RESULT_VARIANT_LAYOUT")
 }
 
 /// Look up the canonical Verum tag for a Rust `std::cmp::Ordering` value.
 ///
 /// Translates `std::cmp::Ordering` → variant name → tag from the canonical
-/// layout. Panics with a structured message if the layout is missing a
-/// well-known variant — that would indicate `ORDERING_VARIANT_LAYOUT` was
-/// edited in a way that drops a variant, which is a programming error
-/// rather than a recoverable runtime condition.
+/// layout via [`tag_of_or_drift`]. The match below is the std → Verum
+/// name table; the layout itself owns the name → tag mapping.
 pub fn ordering_tag_for_std(ord: std::cmp::Ordering) -> u32 {
     let name = match ord {
         std::cmp::Ordering::Less => "Less",
         std::cmp::Ordering::Equal => "Equal",
         std::cmp::Ordering::Greater => "Greater",
     };
-    ORDERING_VARIANT_LAYOUT
-        .iter()
-        .find_map(|(n, t)| if *n == name { Some(*t) } else { None })
-        .unwrap_or_else(|| {
-            panic!(
-                "ORDERING_VARIANT_LAYOUT is missing variant `{}` — \
-                 check core/base/ordering.vr and the layout constant in \
-                 verum_common/src/well_known_types.rs",
-                name
-            )
-        })
+    tag_of_or_drift(ORDERING_VARIANT_LAYOUT, name, "ORDERING_VARIANT_LAYOUT")
 }
 
 #[cfg(test)]
@@ -796,6 +819,113 @@ mod ordering_layout_tests {
         assert_eq!(varerror_not_present_tag(), 0);
         assert_eq!(varerror_not_unicode_tag(), 1);
         assert_ne!(varerror_not_present_tag(), varerror_not_unicode_tag());
+    }
+
+    // =========================================================================
+    // tag_of / tag_of_or_drift — canonical layout-name → tag primitive
+    //
+    // These pin the contract that every per-variant tag accessor in this
+    // module routes through the same primitive: a future caller adding a
+    // new variant lookup gets the drift-protection panic for free, and a
+    // future reorder of the canonical layout flows through to every
+    // accessor automatically.
+    // =========================================================================
+
+    /// `tag_of` returns the right tag for every name in a layout.
+    #[test]
+    fn tag_of_resolves_every_canonical_layout_entry() {
+        let layouts: &[(&[(&str, u32)], &str)] = &[
+            (MAYBE_VARIANT_LAYOUT, "MAYBE"),
+            (RESULT_VARIANT_LAYOUT, "RESULT"),
+            (ORDERING_VARIANT_LAYOUT, "ORDERING"),
+            (DATA_VARIANT_LAYOUT, "DATA"),
+            (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW"),
+            (VARERROR_VARIANT_LAYOUT, "VARERROR"),
+        ];
+        for (layout, layout_name) in layouts {
+            for &(name, expected_tag) in *layout {
+                assert_eq!(
+                    tag_of(layout, name),
+                    Some(expected_tag),
+                    "{} layout: tag_of({:?}) should return Some({})",
+                    layout_name,
+                    name,
+                    expected_tag,
+                );
+            }
+        }
+    }
+
+    /// `tag_of` returns `None` for names that don't appear in the layout.
+    #[test]
+    fn tag_of_rejects_unknown_names() {
+        assert_eq!(tag_of(MAYBE_VARIANT_LAYOUT, "Just"), None);
+        assert_eq!(tag_of(RESULT_VARIANT_LAYOUT, ""), None);
+        assert_eq!(tag_of(ORDERING_VARIANT_LAYOUT, "less"), None); // case-sensitive
+    }
+
+    /// Every per-variant accessor in this module agrees with
+    /// `tag_of_or_drift` against the same layout — this is the
+    /// drift-protection invariant that lets us swap any accessor for
+    /// the primitive without breaking callers.
+    #[test]
+    fn per_variant_accessors_agree_with_primitive() {
+        assert_eq!(
+            maybe_success_tag(),
+            tag_of_or_drift(MAYBE_VARIANT_LAYOUT, "Some", "MAYBE_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            maybe_none_tag(),
+            tag_of_or_drift(MAYBE_VARIANT_LAYOUT, "None", "MAYBE_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            result_success_tag(),
+            tag_of_or_drift(RESULT_VARIANT_LAYOUT, "Ok", "RESULT_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            result_error_tag(),
+            tag_of_or_drift(RESULT_VARIANT_LAYOUT, "Err", "RESULT_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            varerror_not_present_tag(),
+            tag_of_or_drift(VARERROR_VARIANT_LAYOUT, "NotPresent", "VARERROR_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            varerror_not_unicode_tag(),
+            tag_of_or_drift(VARERROR_VARIANT_LAYOUT, "NotUnicode", "VARERROR_VARIANT_LAYOUT"),
+        );
+        assert_eq!(
+            ordering_tag_for_std(std::cmp::Ordering::Less),
+            tag_of_or_drift(ORDERING_VARIANT_LAYOUT, "Less", "ORDERING_VARIANT_LAYOUT"),
+        );
+    }
+
+    /// `maybe_none_tag()` returns the canonical None tag (0). Pairs with
+    /// `maybe_success_tag()` for the Some/None pair-asymmetry contract:
+    /// before this addition only `Some` had a named accessor, leaving
+    /// `None` callers using `0` literals.
+    #[test]
+    fn maybe_none_tag_is_zero() {
+        assert_eq!(maybe_none_tag(), 0, "None is tag 0 per MAYBE_VARIANT_LAYOUT");
+        assert_ne!(maybe_none_tag(), maybe_success_tag());
+    }
+
+    /// `result_error_tag()` returns the canonical Err tag (1). Pairs
+    /// with `result_success_tag()` for symmetry — same rationale as
+    /// `maybe_none_tag` above.
+    #[test]
+    fn result_error_tag_is_one() {
+        assert_eq!(result_error_tag(), 1, "Err is tag 1 per RESULT_VARIANT_LAYOUT");
+        assert_ne!(result_error_tag(), result_success_tag());
+    }
+
+    /// `tag_of_or_drift` panics with a structured message that names
+    /// the layout when the variant is absent — the operator can locate
+    /// the canonical-source-of-truth without grep.
+    #[test]
+    #[should_panic(expected = "MAYBE_VARIANT_LAYOUT is missing variant `Bogus`")]
+    fn tag_of_or_drift_panics_with_layout_name() {
+        let _ = tag_of_or_drift(MAYBE_VARIANT_LAYOUT, "Bogus", "MAYBE_VARIANT_LAYOUT");
     }
 
     // =========================================================================
