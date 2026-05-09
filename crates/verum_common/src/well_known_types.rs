@@ -57,8 +57,12 @@ pub enum WellKnownType {
     // Time
     Duration,
     Instant,
+    Stopwatch,
+    PerfCounter,
+    DeadlineTimer,
 
     // Misc
+    Never,
     Ordering,
     Range,
 }
@@ -96,6 +100,10 @@ impl WellKnownType {
             Self::AtomicBool => "AtomicBool",
             Self::Duration => "Duration",
             Self::Instant => "Instant",
+            Self::Stopwatch => "Stopwatch",
+            Self::PerfCounter => "PerfCounter",
+            Self::DeadlineTimer => "DeadlineTimer",
+            Self::Never => "Never",
             Self::Ordering => "Ordering",
             Self::Range => "Range",
         }
@@ -133,6 +141,10 @@ impl WellKnownType {
             "AtomicBool" => Some(Self::AtomicBool),
             "Duration" => Some(Self::Duration),
             "Instant" => Some(Self::Instant),
+            "Stopwatch" => Some(Self::Stopwatch),
+            "PerfCounter" => Some(Self::PerfCounter),
+            "DeadlineTimer" => Some(Self::DeadlineTimer),
+            "Never" => Some(Self::Never),
             "Ordering" => Some(Self::Ordering),
             "Range" => Some(Self::Range),
             _ => None,

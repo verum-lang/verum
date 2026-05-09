@@ -352,41 +352,469 @@ pub fn structural_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 /// positives.
 pub const NORMALIZE_STEP_LIMIT: u32 = 10_000;
 
-/// β-normalise a [`CoreTerm`] to a fixed point or
-/// the [`NORMALIZE_STEP_LIMIT`] step limit, whichever comes
-/// first.
+/// Context threaded through the unified normaliser
+/// [`normalize_core`].  Carries the step budget plus optional
+/// axiom and inductive registries that gate δ-reduction (axiom
+/// unfolding) and HIT-eliminator β-reduction respectively.
 ///
+/// When both fields are `None` the normaliser delivers plain β
+/// + Σ-projection + cubical reductions + QuotElim β + PathOver
+/// degenerate-case collapse.  When `axioms` is `Some` it adds
+/// δ-reduction; when `inductives` is `Some` it adds HIT-elim β
+/// and path-constructor β; both can be active simultaneously.
+struct NormaliseCtx<'a> {
+    /// Step budget — decremented at every recursive call.  When
+    /// it reaches zero the normaliser returns the partially
+    /// reduced term unchanged (sound: incomplete reduction yields
+    /// false negatives in `definitional_eq`, never false positives).
+    budget: u32,
+    /// δ-reduction registry.  When `Some`, transparent axioms
+    /// (those carrying a body) unfold during normalisation;
+    /// opaque postulates remain residual.
+    axioms: Option<&'a crate::AxiomRegistry>,
+    /// HIT-eliminator registry.  When `Some`, `Elim { scrutinee,
+    /// motive, cases }` fires the dependent-eliminator β-rule
+    /// against the scrutinee's point/path constructor.
+    inductives: Option<&'a crate::InductiveRegistry>,
+}
 
-/// Reduction strategy: outermost-leftmost (call-by-name on the
-/// β-redex at the head, then recursive descent through all
-/// sub-terms). This is the *complete* β-normaliser for the SN
-/// fragment — every β-equivalent pair of terms reduces to the
-/// same unique normal form.
+impl<'a> NormaliseCtx<'a> {
+    /// Construct a fresh context with the given budget and no
+    /// registries.  Equivalent to the plain `normalize` regime.
+    fn new(budget: u32) -> Self {
+        Self {
+            budget,
+            axioms: None,
+            inductives: None,
+        }
+    }
+}
+
+/// Unified normaliser for [`CoreTerm`] — the single source of
+/// truth for the kernel's reduction rules.
 ///
+/// Replaces the previous fan-out into three near-identical
+/// `_with_budget` helpers (plain / axiom-aware / inductive-aware)
+/// that drifted in which reductions they fired — the
+/// axiom-aware and inductive-aware variants silently skipped the
+/// cubical reductions that the plain path performed.
+///
+/// Reductions fired (uniformly, with the gates noted):
+///
+///   * β at App                   — always
+///   * Σ-projection at Fst/Snd    — always
+///   * QuotElim β                 — always
+///   * PathOver-degenerate        — always (closed-loop collapse)
+///   * HComp face-bot / face-top  — always
+///   * Transp i1 / Refl / const   — always
+///   * Glue face-bot / face-top   — always
+///   * δ at Axiom                 — when `ctx.axioms.is_some()`
+///   * HIT-elim β at Elim         — when `ctx.inductives.is_some()`
+///   * path-constructor β at Elim — when `ctx.inductives.is_some()`
+fn normalize_core(term: &CoreTerm, ctx: &mut NormaliseCtx<'_>) -> CoreTerm {
+    if ctx.budget == 0 {
+        return term.clone();
+    }
+    ctx.budget -= 1;
+    match term {
+        CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
 
+        // δ-reduction at Axiom — fires only when the axiom
+        // registry is supplied and the postulate has an attached
+        // body (transparent definitions).  Opaque postulates and
+        // unknown names normalise their type defensively.
+        CoreTerm::Axiom {
+            name,
+            ty,
+            framework,
+        } => {
+            if let Some(axs) = ctx.axioms
+                && let verum_common::Maybe::Some(entry) = axs.get(name.as_str())
+                && let Some(body) = &entry.body
+            {
+                return normalize_core(body, ctx);
+            }
+            CoreTerm::Axiom {
+                name: name.clone(),
+                ty: Heap::new(normalize_core(ty, ctx)),
+                framework: framework.clone(),
+            }
+        }
+
+        // β at App.
+        CoreTerm::App(f, arg) => {
+            let f_norm = normalize_core(f, ctx);
+            match f_norm {
+                CoreTerm::Lam { binder, body, .. } => {
+                    let arg_norm = normalize_core(arg, ctx);
+                    let beta = substitute(&body, binder.as_str(), &arg_norm);
+                    normalize_core(&beta, ctx)
+                }
+                neutral => {
+                    let arg_norm = normalize_core(arg, ctx);
+                    CoreTerm::App(Heap::new(neutral), Heap::new(arg_norm))
+                }
+            }
+        }
+
+        CoreTerm::Pi {
+            binder,
+            domain,
+            codomain,
+        } => CoreTerm::Pi {
+            binder: binder.clone(),
+            domain: Heap::new(normalize_core(domain, ctx)),
+            codomain: Heap::new(normalize_core(codomain, ctx)),
+        },
+        CoreTerm::Lam {
+            binder,
+            domain,
+            body,
+        } => CoreTerm::Lam {
+            binder: binder.clone(),
+            domain: Heap::new(normalize_core(domain, ctx)),
+            body: Heap::new(normalize_core(body, ctx)),
+        },
+        CoreTerm::Sigma {
+            binder,
+            fst_ty,
+            snd_ty,
+        } => CoreTerm::Sigma {
+            binder: binder.clone(),
+            fst_ty: Heap::new(normalize_core(fst_ty, ctx)),
+            snd_ty: Heap::new(normalize_core(snd_ty, ctx)),
+        },
+        CoreTerm::Pair(a, b) => CoreTerm::Pair(
+            Heap::new(normalize_core(a, ctx)),
+            Heap::new(normalize_core(b, ctx)),
+        ),
+
+        // Σ-projection β at Fst/Snd.
+        CoreTerm::Fst(p) => {
+            let p_norm = normalize_core(p, ctx);
+            match p_norm {
+                CoreTerm::Pair(a, _) => normalize_core(&a, ctx),
+                neutral => CoreTerm::Fst(Heap::new(neutral)),
+            }
+        }
+        CoreTerm::Snd(p) => {
+            let p_norm = normalize_core(p, ctx);
+            match p_norm {
+                CoreTerm::Pair(_, b) => normalize_core(&b, ctx),
+                neutral => CoreTerm::Snd(Heap::new(neutral)),
+            }
+        }
+
+        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
+            carrier: Heap::new(normalize_core(carrier, ctx)),
+            lhs: Heap::new(normalize_core(lhs, ctx)),
+            rhs: Heap::new(normalize_core(rhs, ctx)),
+        },
+
+        // PathOver — degenerate-case rewrite to homogeneous PathTy
+        // when the constructor-path's endpoints coincide.
+        CoreTerm::PathOver {
+            motive,
+            path,
+            lhs,
+            rhs,
+        } => {
+            let lhs_n = normalize_core(lhs, ctx);
+            let rhs_n = normalize_core(rhs, ctx);
+            let path_n = normalize_core(path, ctx);
+            let motive_n = normalize_core(motive, ctx);
+            if let CoreTerm::PathTy {
+                lhs: pl, rhs: pr, ..
+            } = &path_n
+                && structural_eq(pl, pr)
+            {
+                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), pl.clone());
+                return CoreTerm::PathTy {
+                    carrier: Heap::new(normalize_core(&carrier, ctx)),
+                    lhs: Heap::new(lhs_n),
+                    rhs: Heap::new(rhs_n),
+                };
+            }
+            CoreTerm::PathOver {
+                motive: Heap::new(motive_n),
+                path: Heap::new(path_n),
+                lhs: Heap::new(lhs_n),
+                rhs: Heap::new(rhs_n),
+            }
+        }
+
+        CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(normalize_core(x, ctx))),
+
+        // HComp face reductions:
+        //   hcomp {⊥} u a ↪ a            (empty face system)
+        //   hcomp {⊤} u a ↪ u i1 1=1     (whole face constrained)
+        CoreTerm::HComp { phi, walls, base } => {
+            let phi_n = normalize_core(phi, ctx);
+            let walls_n = normalize_core(walls, ctx);
+            let base_n = normalize_core(base, ctx);
+            if is_face_bot(&phi_n) {
+                return base_n;
+            }
+            if is_face_top(&phi_n) {
+                if let CoreTerm::Lam { binder, body, .. } = &walls_n {
+                    let i1_term = CoreTerm::Var(Text::from("i1"));
+                    let applied = substitute(body, binder.as_str(), &i1_term);
+                    return normalize_core(&applied, ctx);
+                }
+                return CoreTerm::App(
+                    Heap::new(walls_n),
+                    Heap::new(CoreTerm::Var(Text::from("i1"))),
+                );
+            }
+            CoreTerm::HComp {
+                phi: Heap::new(phi_n),
+                walls: Heap::new(walls_n),
+                base: Heap::new(base_n),
+            }
+        }
+
+        // Transp identity reductions:
+        //   transp A 1 a ↪ a              (transp-fill)
+        //   transp refl _ a ↪ a           (transp-on-refl)
+        //   transp (λ_. A) _ a ↪ a        (transp-const, binder unused)
+        CoreTerm::Transp {
+            path,
+            regular,
+            value,
+        } => {
+            let path_n = normalize_core(path, ctx);
+            let regular_n = normalize_core(regular, ctx);
+            let value_n = normalize_core(value, ctx);
+            if is_interval_one(&regular_n) {
+                return value_n;
+            }
+            if let CoreTerm::Refl(_) = &path_n {
+                return value_n;
+            }
+            if let CoreTerm::Lam { binder, body, .. } = &path_n
+                && !body_uses_binder(body, binder.as_str())
+            {
+                return value_n;
+            }
+            CoreTerm::Transp {
+                path: Heap::new(path_n),
+                regular: Heap::new(regular_n),
+                value: Heap::new(value_n),
+            }
+        }
+
+        // Glue face reductions:
+        //   Glue A {⊥} T e ↪ A     (no face constrained)
+        //   Glue A {⊤} T e ↪ T 1=1 (whole face constrained)
+        CoreTerm::Glue {
+            carrier,
+            phi,
+            fiber,
+            equiv,
+        } => {
+            let carrier_n = normalize_core(carrier, ctx);
+            let phi_n = normalize_core(phi, ctx);
+            let fiber_n = normalize_core(fiber, ctx);
+            let equiv_n = normalize_core(equiv, ctx);
+            if is_face_bot(&phi_n) {
+                return carrier_n;
+            }
+            if is_face_top(&phi_n) {
+                if let CoreTerm::Lam { binder, body, .. } = &fiber_n {
+                    let unit_witness = CoreTerm::Var(Text::from("1=1"));
+                    let applied = substitute(body, binder.as_str(), &unit_witness);
+                    return normalize_core(&applied, ctx);
+                }
+                return fiber_n;
+            }
+            CoreTerm::Glue {
+                carrier: Heap::new(carrier_n),
+                phi: Heap::new(phi_n),
+                fiber: Heap::new(fiber_n),
+                equiv: Heap::new(equiv_n),
+            }
+        }
+
+        CoreTerm::Refine {
+            base,
+            binder,
+            predicate,
+        } => CoreTerm::Refine {
+            base: Heap::new(normalize_core(base, ctx)),
+            binder: binder.clone(),
+            predicate: Heap::new(normalize_core(predicate, ctx)),
+        },
+
+        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
+            base: Heap::new(normalize_core(base, ctx)),
+            equiv: Heap::new(normalize_core(equiv, ctx)),
+        },
+        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
+            value: Heap::new(normalize_core(value, ctx)),
+            base: Heap::new(normalize_core(base, ctx)),
+            equiv: Heap::new(normalize_core(equiv, ctx)),
+        },
+
+        // QuotElim β: when scrutinee normalises to QuotIntro,
+        // collapse to `case applied to value`.
+        CoreTerm::QuotElim {
+            scrutinee,
+            motive,
+            case,
+        } => {
+            let scrut_norm = normalize_core(scrutinee, ctx);
+            match &scrut_norm {
+                CoreTerm::QuotIntro { value, .. } => {
+                    let case_norm = normalize_core(case, ctx);
+                    let v_norm = normalize_core(value, ctx);
+                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
+                    normalize_core(&app, ctx)
+                }
+                _ => CoreTerm::QuotElim {
+                    scrutinee: Heap::new(scrut_norm),
+                    motive: Heap::new(normalize_core(motive, ctx)),
+                    case: Heap::new(normalize_core(case, ctx)),
+                },
+            }
+        }
+
+        CoreTerm::Inductive { path, args } => {
+            let mut new_args: List<CoreTerm> = List::new();
+            for a in args.iter() {
+                new_args.push(normalize_core(a, ctx));
+            }
+            CoreTerm::Inductive {
+                path: path.clone(),
+                args: new_args,
+            }
+        }
+
+        // Elim — HIT-elim β + path-constructor β when the
+        // inductive registry is supplied.
+        CoreTerm::Elim {
+            scrutinee,
+            motive,
+            cases,
+        } => {
+            let scrut_norm = normalize_core(scrutinee, ctx);
+            if let Some(inds) = ctx.inductives {
+                // HIT-elim β: applied-ctor-chain matches a
+                // registered point ctor — emit
+                //   case_C(a1, [rec(a1)], a2, [rec(a2)], …)
+                // with a recursor call inserted after every
+                // recursive argument.
+                if let Some((ctor_name, ctor_args)) = decompose_app_spine(&scrut_norm)
+                    && let Some((parent, ctor_idx)) = inds.lookup_point_ctor(ctor_name.as_str())
+                    && ctor_idx < cases.iter().count()
+                {
+                    let case_body = cases.iter().nth(ctor_idx).unwrap().clone();
+                    let ctor_sig = parent.constructors.iter().nth(ctor_idx).unwrap();
+                    let parent_name = parent.name.clone();
+                    let mut beta = case_body;
+                    for (arg_idx, arg_ty) in ctor_sig.arg_types.iter().enumerate() {
+                        let arg = ctor_args.get(arg_idx).cloned().unwrap_or_else(|| {
+                            CoreTerm::Var(Text::from(
+                                format!("<missing-arg-{}>", arg_idx).as_str(),
+                            ))
+                        });
+                        beta = CoreTerm::App(Heap::new(beta), Heap::new(arg.clone()));
+                        if matches!(
+                            arg_ty,
+                            CoreTerm::Inductive { path, .. } if path == &parent_name
+                        ) {
+                            let rec_call = CoreTerm::Elim {
+                                scrutinee: Heap::new(arg),
+                                motive: motive.clone(),
+                                cases: cases.clone(),
+                            };
+                            beta = CoreTerm::App(Heap::new(beta), Heap::new(rec_call));
+                        }
+                    }
+                    return normalize_core(&beta, ctx);
+                }
+                // Path-constructor β: bare Var matches a registered
+                // path ctor → return the corresponding case branch.
+                if let CoreTerm::Var(scrut_name) = &scrut_norm
+                    && let Some((parent, path_idx)) = inds.lookup_path_ctor(scrut_name.as_str())
+                {
+                    let point_count = parent.constructors.iter().count();
+                    let case_idx = point_count + path_idx;
+                    if case_idx < cases.iter().count() {
+                        let case_body = cases.iter().nth(case_idx).unwrap().clone();
+                        return normalize_core(&case_body, ctx);
+                    }
+                }
+            }
+            // No β fired — neutral form, descend into children.
+            let mut new_cases: List<CoreTerm> = List::new();
+            for c in cases.iter() {
+                new_cases.push(normalize_core(c, ctx));
+            }
+            CoreTerm::Elim {
+                scrutinee: Heap::new(scrut_norm),
+                motive: Heap::new(normalize_core(motive, ctx)),
+                cases: new_cases,
+            }
+        }
+
+        CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::AlphaOf(t) => CoreTerm::AlphaOf(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::ModalBox(t) => CoreTerm::ModalBox(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::ModalDiamond(t) => CoreTerm::ModalDiamond(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::ModalBigAnd(args) => {
+            let mut new_args: List<Heap<CoreTerm>> = List::new();
+            for a in args.iter() {
+                new_args.push(Heap::new(normalize_core(a, ctx)));
+            }
+            CoreTerm::ModalBigAnd(new_args)
+        }
+        // Cohesive modalities ∫ ⊣ ♭ ⊣ ♯ — triple-adjunction
+        // reductions are framework axioms (`schreiber_dcct`),
+        // discharged by the framework attestation layer rather
+        // than fired by the kernel normaliser.
+        CoreTerm::Shape(t) => CoreTerm::Shape(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::Flat(t) => CoreTerm::Flat(Heap::new(normalize_core(t, ctx))),
+        CoreTerm::Sharp(t) => CoreTerm::Sharp(Heap::new(normalize_core(t, ctx))),
+    }
+}
+
+/// β + cubical normaliser without δ or HIT-elim β.  Drives the
+/// PathTy formation rule and is the canonical normaliser for
+/// closed terms whose definitional equality doesn't depend on
+/// axiom unfolding or inductive eliminator firing.
+///
 /// What's normalised:
-///  • β-redexes: `App(Lam(x, _, body), arg) → body[x := arg]`,
-///  iterated to fixed point.
-///  • Recursive descent through every CoreTerm constructor —
-///  reducing inside Pi codomain / Lam body / Sigma snd_ty /
-///  PathTy carrier+endpoints / Refine predicate / etc.
 ///
-
-/// What's *not* yet normalised (deferred):
-///  • δ-reduction (axiom unfolding) — needs an axiom/inductive
-///  registry parameter; current shape is registry-free for
-///  drop-in PathTy use.
-///  • η-reduction.
-///  • ι-reduction (Elim / pattern-match β).
-///  • Cubical reductions (HComp / Transp / Glue evaluation).
+///   * β-redexes at App                — `(λx. body) arg → body[arg/x]`
+///   * Σ-projection β at Fst/Snd       — `Fst(a, _) → a` etc.
+///   * QuotElim β                      — `quot_elim([t]_~, _, c) → c(t)`
+///   * PathOver-degenerate              — closed-loop collapse to PathTy
+///   * Cubical reductions               — HComp / Transp / Glue face rules
 ///
-
 /// Used by [`definitional_eq`] (the main consumer) and by the
-/// PathTy formation rule per `verification-architecture.md`
-/// §4.4.
+/// PathTy formation rule per `verification-architecture.md` §4.4.
 pub fn normalize(term: &CoreTerm) -> CoreTerm {
-    let mut steps_remaining = NORMALIZE_STEP_LIMIT;
-    normalize_with_budget(term, &mut steps_remaining)
+    let mut ctx = NormaliseCtx::new(NORMALIZE_STEP_LIMIT);
+    normalize_core(term, &mut ctx)
+}
+
+/// Normalise with both axiom δ-reduction and HIT-elim β fired
+/// simultaneously.  Equivalent to running normalize, normalize
+/// _with_axioms, and normalize_with_inductives in sequence —
+/// but in a single pass that interleaves the rules so a
+/// δ-unfolded body's HIT-eliminator can fire immediately, and
+/// vice versa.
+pub fn normalize_full(
+    term: &CoreTerm,
+    axioms: &crate::AxiomRegistry,
+    inductives: &crate::InductiveRegistry,
+) -> CoreTerm {
+    let mut ctx = NormaliseCtx {
+        budget: NORMALIZE_STEP_LIMIT,
+        axioms: Some(axioms),
+        inductives: Some(inductives),
+    };
+    normalize_core(term, &mut ctx)
 }
 
 // =============================================================================
@@ -406,7 +834,7 @@ pub fn normalize(term: &CoreTerm) -> CoreTerm {
 
 // Hardening: recognise the canonical face / interval marker terms
 // at the kernel level and wire each catalogue rule into
-// `normalize_with_budget` below. The marker convention is the same
+// `normalize_core` below. The marker convention is the same
 // the cubical surface uses (`⊤` / `⊥` / `i0` / `i1` plus their
 // ASCII aliases) — this is the *kernel-level* implementation of the
 // face-formula convention.
@@ -465,323 +893,6 @@ fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
     var_occurs_free(body, binder)
 }
 
-fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
-    if *budget == 0 {
-        return term.clone();
-    }
-    *budget -= 1;
-    match term {
-        CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
-
-        // Head β-reduction: App(Lam, arg) reduces; otherwise
-        // recurse into both sides.
-        CoreTerm::App(f, arg) => {
-            let f_norm = normalize_with_budget(f, budget);
-            match f_norm {
-                CoreTerm::Lam { binder, body, .. } => {
-                    let arg_norm = normalize_with_budget(arg, budget);
-                    let beta = substitute(&body, binder.as_str(), &arg_norm);
-                    // Continue normalising the result — the
-                    // substitution may have exposed further
-                    // β-redexes deeper in the term.
-                    normalize_with_budget(&beta, budget)
-                }
-                neutral => {
-                    let arg_norm = normalize_with_budget(arg, budget);
-                    CoreTerm::App(Heap::new(neutral), Heap::new(arg_norm))
-                }
-            }
-        }
-
-        CoreTerm::Pi {
-            binder,
-            domain,
-            codomain,
-        } => CoreTerm::Pi {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_budget(domain, budget)),
-            codomain: Heap::new(normalize_with_budget(codomain, budget)),
-        },
-        CoreTerm::Lam {
-            binder,
-            domain,
-            body,
-        } => CoreTerm::Lam {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_budget(domain, budget)),
-            body: Heap::new(normalize_with_budget(body, budget)),
-        },
-        CoreTerm::Sigma {
-            binder,
-            fst_ty,
-            snd_ty,
-        } => CoreTerm::Sigma {
-            binder: binder.clone(),
-            fst_ty: Heap::new(normalize_with_budget(fst_ty, budget)),
-            snd_ty: Heap::new(normalize_with_budget(snd_ty, budget)),
-        },
-        CoreTerm::Pair(a, b) => CoreTerm::Pair(
-            Heap::new(normalize_with_budget(a, budget)),
-            Heap::new(normalize_with_budget(b, budget)),
-        ),
-        CoreTerm::Fst(p) => {
-            let p_norm = normalize_with_budget(p, budget);
-            // Σ-projection β-rule: Fst(Pair(a, _)) → a.
-            match p_norm {
-                CoreTerm::Pair(a, _) => normalize_with_budget(&a, budget),
-                neutral => CoreTerm::Fst(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::Snd(p) => {
-            let p_norm = normalize_with_budget(p, budget);
-            match p_norm {
-                CoreTerm::Pair(_, b) => normalize_with_budget(&b, budget),
-                neutral => CoreTerm::Snd(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
-            carrier: Heap::new(normalize_with_budget(carrier, budget)),
-            lhs: Heap::new(normalize_with_budget(lhs, budget)),
-            rhs: Heap::new(normalize_with_budget(rhs, budget)),
-        },
-        CoreTerm::PathOver {
-            motive,
-            path,
-            lhs,
-            rhs,
-        } => {
-            let lhs_n = normalize_with_budget(lhs, budget);
-            let rhs_n = normalize_with_budget(rhs, budget);
-            let path_n = normalize_with_budget(path, budget);
-            let motive_n = normalize_with_budget(motive, budget);
-            // degenerate-case rewrite:
-            // when the constructor-path's endpoints coincide
-            // structurally (closed loop), PathOver collapses to
-            // homogeneous PathTy(motive(b₀), lhs, rhs).
-            if let CoreTerm::PathTy {
-                lhs: pl, rhs: pr, ..
-            } = &path_n
-                && structural_eq(pl, pr)
-            {
-                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), pl.clone());
-                return CoreTerm::PathTy {
-                    carrier: Heap::new(normalize_with_budget(&carrier, budget)),
-                    lhs: Heap::new(lhs_n),
-                    rhs: Heap::new(rhs_n),
-                };
-            }
-            CoreTerm::PathOver {
-                motive: Heap::new(motive_n),
-                path: Heap::new(path_n),
-                lhs: Heap::new(lhs_n),
-                rhs: Heap::new(rhs_n),
-            }
-        }
-        CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(normalize_with_budget(x, budget))),
-        CoreTerm::HComp { phi, walls, base } => {
-            let phi_n = normalize_with_budget(phi, budget);
-            let walls_n = normalize_with_budget(walls, budget);
-            let base_n = normalize_with_budget(base, budget);
-            // cubical::hcomp-id-when-empty-system —
-            // `hcomp {φ = ⊥} u a ↪ a`. Empty face system carries no
-            // information; the composition collapses to the base.
-            if is_face_bot(&phi_n) {
-                return base_n;
-            }
-            // cubical::hcomp-id-when-φ-equals-1 —
-            // `hcomp {φ = ⊤} u a ↪ u i1 1=1`. When the entire face
-            // is constrained the composition evaluates to the wall
-            // family at the top of the cube. Best-effort: when
-            // `walls_n` is a lambda we apply it to `i1`; otherwise
-            // we leave the term residual (a downstream rewriter can
-            // pick it up).
-            if is_face_top(&phi_n) {
-                if let CoreTerm::Lam { binder, body, .. } = &walls_n {
-                    let i1_term = CoreTerm::Var(Text::from("i1"));
-                    let applied = substitute(body, binder.as_str(), &i1_term);
-                    return normalize_with_budget(&applied, budget);
-                }
-                // Wall family is neutral — produce `walls i1`.
-                return CoreTerm::App(
-                    Heap::new(walls_n),
-                    Heap::new(CoreTerm::Var(Text::from("i1"))),
-                );
-            }
-            CoreTerm::HComp {
-                phi: Heap::new(phi_n),
-                walls: Heap::new(walls_n),
-                base: Heap::new(base_n),
-            }
-        }
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => {
-            let path_n = normalize_with_budget(path, budget);
-            let regular_n = normalize_with_budget(regular, budget);
-            let value_n = normalize_with_budget(value, budget);
-            // cubical::transp-fill — `transp A 1 a ↪ a`. When the
-            // regularity endpoint is `i1` (everything is known) the
-            // transport returns the input unchanged.
-            if is_interval_one(&regular_n) {
-                return value_n;
-            }
-            // cubical::transp-on-refl — `transp A 0 a ↪ a` when the
-            // path is reflexive. Constant line of types ⇒ identity.
-            if let CoreTerm::Refl(_) = &path_n {
-                return value_n;
-            }
-            // cubical::transp-const — transport along a constant
-            // lambda is the identity. We detect `λ _ → A` shape
-            // (binder unused in body).
-            if let CoreTerm::Lam { binder, body, .. } = &path_n
-                && !body_uses_binder(body, binder.as_str())
-            {
-                return value_n;
-            }
-            CoreTerm::Transp {
-                path: Heap::new(path_n),
-                regular: Heap::new(regular_n),
-                value: Heap::new(value_n),
-            }
-        }
-        CoreTerm::Glue {
-            carrier,
-            phi,
-            fiber,
-            equiv,
-        } => {
-            let carrier_n = normalize_with_budget(carrier, budget);
-            let phi_n = normalize_with_budget(phi, budget);
-            let fiber_n = normalize_with_budget(fiber, budget);
-            let equiv_n = normalize_with_budget(equiv, budget);
-            // cubical::glue-on-false-face —
-            // `Glue A {⊥} T e ↪ A`. No face constrained ⇒ glue is
-            // the underlying carrier.
-            if is_face_bot(&phi_n) {
-                return carrier_n;
-            }
-            // cubical::glue-on-true-face —
-            // `Glue A {⊤} T e ↪ T 1=1`. Whole face constrained ⇒
-            // glue evaluates to the partial fibre.
-            if is_face_top(&phi_n) {
-                // Best-effort: when `fiber_n` is a lambda we apply it
-                // to a unit witness for `1=1`; otherwise return the
-                // fibre as-is so downstream consumers can specialise.
-                if let CoreTerm::Lam { binder, body, .. } = &fiber_n {
-                    let unit_witness = CoreTerm::Var(Text::from("1=1"));
-                    let applied = substitute(body, binder.as_str(), &unit_witness);
-                    return normalize_with_budget(&applied, budget);
-                }
-                return fiber_n;
-            }
-            CoreTerm::Glue {
-                carrier: Heap::new(carrier_n),
-                phi: Heap::new(phi_n),
-                fiber: Heap::new(fiber_n),
-                equiv: Heap::new(equiv_n),
-            }
-        }
-        CoreTerm::Refine {
-            base,
-            binder,
-            predicate,
-        } => CoreTerm::Refine {
-            base: Heap::new(normalize_with_budget(base, budget)),
-            binder: binder.clone(),
-            predicate: Heap::new(normalize_with_budget(predicate, budget)),
-        },
-        // quotient types: normalize all components.
-        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
-            base: Heap::new(normalize_with_budget(base, budget)),
-            equiv: Heap::new(normalize_with_budget(equiv, budget)),
-        },
-        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
-            value: Heap::new(normalize_with_budget(value, budget)),
-            base: Heap::new(normalize_with_budget(base, budget)),
-            equiv: Heap::new(normalize_with_budget(equiv, budget)),
-        },
-        // quotient β-rule: when scrutinee is QuotIntro,
-        // collapse to `case applied to value`.
-        CoreTerm::QuotElim {
-            scrutinee,
-            motive,
-            case,
-        } => {
-            let scrut_norm = normalize_with_budget(scrutinee, budget);
-            match &scrut_norm {
-                CoreTerm::QuotIntro { value, .. } => {
-                    // β-redex: quot_elim([t]_~, motive, case) → case(t)
-                    let case_norm = normalize_with_budget(case, budget);
-                    let v_norm = normalize_with_budget(value, budget);
-                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
-                    normalize_with_budget(&app, budget)
-                }
-                _ => CoreTerm::QuotElim {
-                    scrutinee: Heap::new(scrut_norm),
-                    motive: Heap::new(normalize_with_budget(motive, budget)),
-                    case: Heap::new(normalize_with_budget(case, budget)),
-                },
-            }
-        }
-        CoreTerm::Inductive { path, args } => {
-            let mut new_args: List<CoreTerm> = List::new();
-            for a in args.iter() {
-                new_args.push(normalize_with_budget(a, budget));
-            }
-            CoreTerm::Inductive {
-                path: path.clone(),
-                args: new_args,
-            }
-        }
-        CoreTerm::Elim {
-            scrutinee,
-            motive,
-            cases,
-        } => {
-            let mut new_cases: List<CoreTerm> = List::new();
-            for c in cases.iter() {
-                new_cases.push(normalize_with_budget(c, budget));
-            }
-            CoreTerm::Elim {
-                scrutinee: Heap::new(normalize_with_budget(scrutinee, budget)),
-                motive: Heap::new(normalize_with_budget(motive, budget)),
-                cases: new_cases,
-            }
-        }
-        CoreTerm::Axiom {
-            name,
-            ty,
-            framework,
-        } => CoreTerm::Axiom {
-            name: name.clone(),
-            ty: Heap::new(normalize_with_budget(ty, budget)),
-            framework: framework.clone(),
-        },
-        CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(normalize_with_budget(t, budget))),
-        CoreTerm::AlphaOf(t) => CoreTerm::AlphaOf(Heap::new(normalize_with_budget(t, budget))),
-        CoreTerm::ModalBox(t) => CoreTerm::ModalBox(Heap::new(normalize_with_budget(t, budget))),
-        CoreTerm::ModalDiamond(t) => {
-            CoreTerm::ModalDiamond(Heap::new(normalize_with_budget(t, budget)))
-        }
-        CoreTerm::ModalBigAnd(args) => {
-            let mut new_args: List<Heap<CoreTerm>> = List::new();
-            for a in args.iter() {
-                new_args.push(Heap::new(normalize_with_budget(a, budget)));
-            }
-            CoreTerm::ModalBigAnd(new_args)
-        }
-        // cohesive modalities normalise structurally.
-        // Triple-adjunction reductions ∫ ⊣ ♭ ⊣ ♯ are framework
-        // axioms (`schreiber_dcct`); the kernel does not β-reduce
-        // ♭∫A → A or similar — those laws live at the framework
-        // layer where the user attests them.
-        CoreTerm::Shape(t) => CoreTerm::Shape(Heap::new(normalize_with_budget(t, budget))),
-        CoreTerm::Flat(t) => CoreTerm::Flat(Heap::new(normalize_with_budget(t, budget))),
-        CoreTerm::Sharp(t) => CoreTerm::Sharp(Heap::new(normalize_with_budget(t, budget))),
-    }
-}
 
 /// ε-invariant token (Diakrisis Actic
 /// 12-actic/03-epsilon-invariant.md). The Actic-side dual of
@@ -907,283 +1018,34 @@ pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 ///  • Transparent definitions (`body = Some(_)`) are UNFOLDED —
 ///  `Axiom { name: "Id", ... }` where `Id := λx. x` becomes
 ///  `λx. x` and continues normalising.
-///  • Every other CoreTerm constructor delegates to the same
-///  β-rules as [`normalize`].
+///  • Every other CoreTerm constructor — including the cubical
+///  Kan-fibrancy reductions — delegates to [`normalize_core`],
+///  which guarantees identical behaviour to [`normalize`] for
+///  every variant other than `Axiom`.
 ///
 
 /// Step limit ([`NORMALIZE_STEP_LIMIT`]) shared with [`normalize`];
 /// δ-unfolds count against the same budget as β-reductions.
 pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> CoreTerm {
-    let mut budget = NORMALIZE_STEP_LIMIT;
-    normalize_with_axioms_budget(term, axioms, &mut budget)
+    let mut ctx = NormaliseCtx {
+        budget: NORMALIZE_STEP_LIMIT,
+        axioms: Some(axioms),
+        inductives: None,
+    };
+    normalize_core(term, &mut ctx)
 }
 
-fn normalize_with_axioms_budget(
-    term: &CoreTerm,
-    axioms: &crate::AxiomRegistry,
-    budget: &mut u32,
-) -> CoreTerm {
-    if *budget == 0 {
-        return term.clone();
-    }
-    *budget -= 1;
-    match term {
-        CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
-
-        // δ-reduction: unfold transparent
-        // definitions in place. Opaque postulates remain
-        // neutral.
-        CoreTerm::Axiom {
-            name,
-            ty,
-            framework,
-        } => match axioms.get(name.as_str()) {
-            verum_common::Maybe::Some(entry) => match &entry.body {
-                Some(body) => normalize_with_axioms_budget(body, axioms, budget),
-                None => CoreTerm::Axiom {
-                    name: name.clone(),
-                    ty: Heap::new(normalize_with_axioms_budget(ty, axioms, budget)),
-                    framework: framework.clone(),
-                },
-            },
-            verum_common::Maybe::None => CoreTerm::Axiom {
-                name: name.clone(),
-                ty: Heap::new(normalize_with_axioms_budget(ty, axioms, budget)),
-                framework: framework.clone(),
-            },
-        },
-
-        // β-redex at the head + recursive descent — same shape
-        // as `normalize_with_budget` but every recursive call
-        // threads the axiom registry.
-        CoreTerm::App(f, arg) => {
-            let f_norm = normalize_with_axioms_budget(f, axioms, budget);
-            match f_norm {
-                CoreTerm::Lam { binder, body, .. } => {
-                    let arg_norm = normalize_with_axioms_budget(arg, axioms, budget);
-                    let beta = substitute(&body, binder.as_str(), &arg_norm);
-                    normalize_with_axioms_budget(&beta, axioms, budget)
-                }
-                neutral => {
-                    let arg_norm = normalize_with_axioms_budget(arg, axioms, budget);
-                    CoreTerm::App(Heap::new(neutral), Heap::new(arg_norm))
-                }
-            }
-        }
-
-        CoreTerm::Pi {
-            binder,
-            domain,
-            codomain,
-        } => CoreTerm::Pi {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_axioms_budget(domain, axioms, budget)),
-            codomain: Heap::new(normalize_with_axioms_budget(codomain, axioms, budget)),
-        },
-        CoreTerm::Lam {
-            binder,
-            domain,
-            body,
-        } => CoreTerm::Lam {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_axioms_budget(domain, axioms, budget)),
-            body: Heap::new(normalize_with_axioms_budget(body, axioms, budget)),
-        },
-        CoreTerm::Sigma {
-            binder,
-            fst_ty,
-            snd_ty,
-        } => CoreTerm::Sigma {
-            binder: binder.clone(),
-            fst_ty: Heap::new(normalize_with_axioms_budget(fst_ty, axioms, budget)),
-            snd_ty: Heap::new(normalize_with_axioms_budget(snd_ty, axioms, budget)),
-        },
-        CoreTerm::Pair(a, b) => CoreTerm::Pair(
-            Heap::new(normalize_with_axioms_budget(a, axioms, budget)),
-            Heap::new(normalize_with_axioms_budget(b, axioms, budget)),
-        ),
-        CoreTerm::Fst(p) => {
-            let p_norm = normalize_with_axioms_budget(p, axioms, budget);
-            match p_norm {
-                CoreTerm::Pair(a, _) => normalize_with_axioms_budget(&a, axioms, budget),
-                neutral => CoreTerm::Fst(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::Snd(p) => {
-            let p_norm = normalize_with_axioms_budget(p, axioms, budget);
-            match p_norm {
-                CoreTerm::Pair(_, b) => normalize_with_axioms_budget(&b, axioms, budget),
-                neutral => CoreTerm::Snd(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
-            carrier: Heap::new(normalize_with_axioms_budget(carrier, axioms, budget)),
-            lhs: Heap::new(normalize_with_axioms_budget(lhs, axioms, budget)),
-            rhs: Heap::new(normalize_with_axioms_budget(rhs, axioms, budget)),
-        },
-        CoreTerm::PathOver {
-            motive,
-            path,
-            lhs,
-            rhs,
-        } => {
-            let lhs_n = normalize_with_axioms_budget(lhs, axioms, budget);
-            let rhs_n = normalize_with_axioms_budget(rhs, axioms, budget);
-            let path_n = normalize_with_axioms_budget(path, axioms, budget);
-            let motive_n = normalize_with_axioms_budget(motive, axioms, budget);
-            // Same degenerate-case rewrite as in `normalize_with_budget`.
-            if let CoreTerm::PathTy {
-                lhs: pl, rhs: pr, ..
-            } = &path_n
-                && structural_eq(pl, pr)
-            {
-                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), pl.clone());
-                return CoreTerm::PathTy {
-                    carrier: Heap::new(normalize_with_axioms_budget(&carrier, axioms, budget)),
-                    lhs: Heap::new(lhs_n),
-                    rhs: Heap::new(rhs_n),
-                };
-            }
-            CoreTerm::PathOver {
-                motive: Heap::new(motive_n),
-                path: Heap::new(path_n),
-                lhs: Heap::new(lhs_n),
-                rhs: Heap::new(rhs_n),
-            }
-        }
-        CoreTerm::Refl(x) => {
-            CoreTerm::Refl(Heap::new(normalize_with_axioms_budget(x, axioms, budget)))
-        }
-        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
-            phi: Heap::new(normalize_with_axioms_budget(phi, axioms, budget)),
-            walls: Heap::new(normalize_with_axioms_budget(walls, axioms, budget)),
-            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
-        },
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => CoreTerm::Transp {
-            path: Heap::new(normalize_with_axioms_budget(path, axioms, budget)),
-            regular: Heap::new(normalize_with_axioms_budget(regular, axioms, budget)),
-            value: Heap::new(normalize_with_axioms_budget(value, axioms, budget)),
-        },
-        CoreTerm::Glue {
-            carrier,
-            phi,
-            fiber,
-            equiv,
-        } => CoreTerm::Glue {
-            carrier: Heap::new(normalize_with_axioms_budget(carrier, axioms, budget)),
-            phi: Heap::new(normalize_with_axioms_budget(phi, axioms, budget)),
-            fiber: Heap::new(normalize_with_axioms_budget(fiber, axioms, budget)),
-            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
-        },
-        CoreTerm::Refine {
-            base,
-            binder,
-            predicate,
-        } => CoreTerm::Refine {
-            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
-            binder: binder.clone(),
-            predicate: Heap::new(normalize_with_axioms_budget(predicate, axioms, budget)),
-        },
-        // quotient types under δ-aware normaliser.
-        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
-            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
-            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
-        },
-        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
-            value: Heap::new(normalize_with_axioms_budget(value, axioms, budget)),
-            base: Heap::new(normalize_with_axioms_budget(base, axioms, budget)),
-            equiv: Heap::new(normalize_with_axioms_budget(equiv, axioms, budget)),
-        },
-        CoreTerm::QuotElim {
-            scrutinee,
-            motive,
-            case,
-        } => {
-            let scrut_norm = normalize_with_axioms_budget(scrutinee, axioms, budget);
-            match &scrut_norm {
-                CoreTerm::QuotIntro { value, .. } => {
-                    let case_norm = normalize_with_axioms_budget(case, axioms, budget);
-                    let v_norm = normalize_with_axioms_budget(value, axioms, budget);
-                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
-                    normalize_with_axioms_budget(&app, axioms, budget)
-                }
-                _ => CoreTerm::QuotElim {
-                    scrutinee: Heap::new(scrut_norm),
-                    motive: Heap::new(normalize_with_axioms_budget(motive, axioms, budget)),
-                    case: Heap::new(normalize_with_axioms_budget(case, axioms, budget)),
-                },
-            }
-        }
-        CoreTerm::Inductive { path, args } => {
-            let mut new_args: List<CoreTerm> = List::new();
-            for a in args.iter() {
-                new_args.push(normalize_with_axioms_budget(a, axioms, budget));
-            }
-            CoreTerm::Inductive {
-                path: path.clone(),
-                args: new_args,
-            }
-        }
-        CoreTerm::Elim {
-            scrutinee,
-            motive,
-            cases,
-        } => {
-            let mut new_cases: List<CoreTerm> = List::new();
-            for c in cases.iter() {
-                new_cases.push(normalize_with_axioms_budget(c, axioms, budget));
-            }
-            CoreTerm::Elim {
-                scrutinee: Heap::new(normalize_with_axioms_budget(scrutinee, axioms, budget)),
-                motive: Heap::new(normalize_with_axioms_budget(motive, axioms, budget)),
-                cases: new_cases,
-            }
-        }
-        CoreTerm::EpsilonOf(t) => {
-            CoreTerm::EpsilonOf(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::AlphaOf(t) => {
-            CoreTerm::AlphaOf(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::ModalBox(t) => {
-            CoreTerm::ModalBox(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::ModalDiamond(t) => {
-            CoreTerm::ModalDiamond(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::ModalBigAnd(args) => {
-            let mut new_args: List<Heap<CoreTerm>> = List::new();
-            for a in args.iter() {
-                new_args.push(Heap::new(normalize_with_axioms_budget(a, axioms, budget)));
-            }
-            CoreTerm::ModalBigAnd(new_args)
-        }
-        // cohesive modalities — see normalize_with_budget
-        // for the framework-axiom rationale.
-        CoreTerm::Shape(t) => {
-            CoreTerm::Shape(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::Flat(t) => {
-            CoreTerm::Flat(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-        CoreTerm::Sharp(t) => {
-            CoreTerm::Sharp(Heap::new(normalize_with_axioms_budget(t, axioms, budget)))
-        }
-    }
-}
 
 // =============================================================================
-// Inductive-aware normaliser with
-// HIT eliminator β-rule.
+// Inductive-aware normaliser (HIT eliminator β-rule).
 // =============================================================================
 
-/// V8.1 (§7.4 V3 β-rule) — normalise a term with both β-reduction
-/// and the **HIT eliminator β-rule** firing against a supplied
-/// inductive registry.
+/// V8.1 (§7.4 V3 β-rule) — normalise a term with β-reduction,
+/// the cubical Kan-fibrancy reductions, and the **HIT eliminator
+/// β-rule** firing against a supplied inductive registry. All
+/// reductions share the canonical [`normalize_core`] driver, so
+/// behaviour stays in lock-step with [`normalize`] and
+/// [`normalize_with_axioms`] for every CoreTerm variant.
 ///
 
 /// The eliminator β-rule fires when an `Elim { scrutinee, motive,
@@ -1210,8 +1072,12 @@ pub fn normalize_with_inductives(
     term: &CoreTerm,
     inductives: &crate::InductiveRegistry,
 ) -> CoreTerm {
-    let mut budget = NORMALIZE_STEP_LIMIT;
-    normalize_with_inductives_budget(term, inductives, &mut budget)
+    let mut ctx = NormaliseCtx {
+        budget: NORMALIZE_STEP_LIMIT,
+        axioms: None,
+        inductives: Some(inductives),
+    };
+    normalize_core(term, &mut ctx)
 }
 
 /// Walk an `App` spine, returning `(head_var_name, args_in_order)`
@@ -1235,336 +1101,6 @@ fn decompose_app_spine(term: &CoreTerm) -> Option<(Text, Vec<CoreTerm>)> {
     }
 }
 
-fn normalize_with_inductives_budget(
-    term: &CoreTerm,
-    inductives: &crate::InductiveRegistry,
-    budget: &mut u32,
-) -> CoreTerm {
-    if *budget == 0 {
-        return term.clone();
-    }
-    *budget -= 1;
-    match term {
-        CoreTerm::Elim {
-            scrutinee,
-            motive,
-            cases,
-        } => {
-            // Normalise scrutinee first so an applied ctor-chain
-            // reveals itself.
-            let scrut_norm = normalize_with_inductives_budget(scrutinee, inductives, budget);
-            // Try the HIT β-rule.
-            if let Some((ctor_name, ctor_args)) = decompose_app_spine(&scrut_norm)
-                && let Some((parent, ctor_idx)) = inductives.lookup_point_ctor(ctor_name.as_str())
-                && ctor_idx < cases.iter().count()
-            {
-                // Recover the matching case branch + its declared
-                // arg types so we can insert recursor calls for
-                // recursive args.
-                let case_body = cases.iter().nth(ctor_idx).unwrap().clone();
-                let ctor_sig = parent.constructors.iter().nth(ctor_idx).unwrap();
-                let parent_name = parent.name.clone();
-
-                // Apply each ctor argument to the case body in
-                // declaration order. For every argument whose type
-                // is the parent inductive (a recursive position),
-                // also insert the eliminator's recursive call as
-                // an additional argument right after the argument
-                // itself — matching Coq/Lean's dependent-elim shape:
-                //
-
-                //  case_C(a₁, rec(a₁) when a₁:T, a₂, rec(a₂) when a₂:T, …)
-                let mut beta = case_body;
-                for (arg_idx, arg_ty) in ctor_sig.arg_types.iter().enumerate() {
-                    let arg = ctor_args.get(arg_idx).cloned().unwrap_or_else(|| {
-                        CoreTerm::Var(Text::from(format!("<missing-arg-{}>", arg_idx).as_str()))
-                    });
-                    beta = CoreTerm::App(Heap::new(beta), Heap::new(arg.clone()));
-                    // Recursive argument? (declared ctor arg type is
-                    // the same parent inductive being eliminated.)
-                    if matches!(
-                        arg_ty,
-                        CoreTerm::Inductive { path, .. } if path == &parent_name
-                    ) {
-                        // Insert the recursor call: Elim(motive, cases)(arg).
-                        let rec_call = CoreTerm::Elim {
-                            scrutinee: Heap::new(arg),
-                            motive: motive.clone(),
-                            cases: cases.clone(),
-                        };
-                        beta = CoreTerm::App(Heap::new(beta), Heap::new(rec_call));
-                    }
-                }
-                return normalize_with_inductives_budget(&beta, inductives, budget);
-            }
-            // path-constructor β-rule.
-            //
-
-            // When the scrutinee normalises to a bare `Var(P)` whose
-            // name matches a registered path constructor `P_j` of
-            // inductive `T` (with `N` point ctors and `M` path ctors),
-            // the eliminator's case at index `N + j` is the user-
-            // supplied path-case branch — already shaped as a value
-            // of `PathOver(motive, p, lhs_image, rhs_image)` (or
-            // homogeneous `PathTy` for closed loops, per the
-            // eliminator-emit convention in `inductive::eliminator_type`).
-            //
-
-            // The β-rewrite returns that case directly. Per Coq/Lean
-            // dependent-elim convention path ctors are *0-arity*
-            // here — their kernel `lhs` / `rhs` shape is endpoint
-            // metadata, NOT runtime arguments. (The constructor-path
-            // itself is reified, not applied.) Path ctors with
-            // path-arguments (1-cells indexed over a parameter) are
-            // a V3.2 generalisation tracked alongside higher-cell
-            // grammar work.
-            if let CoreTerm::Var(scrut_name) = &scrut_norm
-                && let Some((parent, path_idx)) = inductives.lookup_path_ctor(scrut_name.as_str())
-            {
-                let point_count = parent.constructors.iter().count();
-                let case_idx = point_count + path_idx;
-                if case_idx < cases.iter().count() {
-                    let case_body = cases.iter().nth(case_idx).unwrap().clone();
-                    return normalize_with_inductives_budget(&case_body, inductives, budget);
-                }
-            }
-            // No β-rule fired — neutral form, normalise children.
-            let mut new_cases: List<CoreTerm> = List::new();
-            for c in cases.iter() {
-                new_cases.push(normalize_with_inductives_budget(c, inductives, budget));
-            }
-            CoreTerm::Elim {
-                scrutinee: Heap::new(scrut_norm),
-                motive: Heap::new(normalize_with_inductives_budget(motive, inductives, budget)),
-                cases: new_cases,
-            }
-        }
-        // Every other shape: same as plain `normalize`, but
-        // recursive calls thread the inductive registry so nested
-        // Elim terms also fire the β-rule.
-        CoreTerm::Var(_) | CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => term.clone(),
-        CoreTerm::App(f, arg) => {
-            let f_norm = normalize_with_inductives_budget(f, inductives, budget);
-            match f_norm {
-                CoreTerm::Lam { binder, body, .. } => {
-                    let arg_norm = normalize_with_inductives_budget(arg, inductives, budget);
-                    let beta = substitute(&body, binder.as_str(), &arg_norm);
-                    normalize_with_inductives_budget(&beta, inductives, budget)
-                }
-                neutral => {
-                    let arg_norm = normalize_with_inductives_budget(arg, inductives, budget);
-                    CoreTerm::App(Heap::new(neutral), Heap::new(arg_norm))
-                }
-            }
-        }
-        CoreTerm::Pi {
-            binder,
-            domain,
-            codomain,
-        } => CoreTerm::Pi {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_inductives_budget(domain, inductives, budget)),
-            codomain: Heap::new(normalize_with_inductives_budget(
-                codomain, inductives, budget,
-            )),
-        },
-        CoreTerm::Lam {
-            binder,
-            domain,
-            body,
-        } => CoreTerm::Lam {
-            binder: binder.clone(),
-            domain: Heap::new(normalize_with_inductives_budget(domain, inductives, budget)),
-            body: Heap::new(normalize_with_inductives_budget(body, inductives, budget)),
-        },
-        CoreTerm::Sigma {
-            binder,
-            fst_ty,
-            snd_ty,
-        } => CoreTerm::Sigma {
-            binder: binder.clone(),
-            fst_ty: Heap::new(normalize_with_inductives_budget(fst_ty, inductives, budget)),
-            snd_ty: Heap::new(normalize_with_inductives_budget(snd_ty, inductives, budget)),
-        },
-        CoreTerm::Pair(a, b) => CoreTerm::Pair(
-            Heap::new(normalize_with_inductives_budget(a, inductives, budget)),
-            Heap::new(normalize_with_inductives_budget(b, inductives, budget)),
-        ),
-        CoreTerm::Fst(p) => {
-            let p_norm = normalize_with_inductives_budget(p, inductives, budget);
-            match p_norm {
-                CoreTerm::Pair(a, _) => normalize_with_inductives_budget(&a, inductives, budget),
-                neutral => CoreTerm::Fst(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::Snd(p) => {
-            let p_norm = normalize_with_inductives_budget(p, inductives, budget);
-            match p_norm {
-                CoreTerm::Pair(_, b) => normalize_with_inductives_budget(&b, inductives, budget),
-                neutral => CoreTerm::Snd(Heap::new(neutral)),
-            }
-        }
-        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
-            carrier: Heap::new(normalize_with_inductives_budget(
-                carrier, inductives, budget,
-            )),
-            lhs: Heap::new(normalize_with_inductives_budget(lhs, inductives, budget)),
-            rhs: Heap::new(normalize_with_inductives_budget(rhs, inductives, budget)),
-        },
-        CoreTerm::PathOver {
-            motive,
-            path,
-            lhs,
-            rhs,
-        } => {
-            let lhs_n = normalize_with_inductives_budget(lhs, inductives, budget);
-            let rhs_n = normalize_with_inductives_budget(rhs, inductives, budget);
-            let path_n = normalize_with_inductives_budget(path, inductives, budget);
-            let motive_n = normalize_with_inductives_budget(motive, inductives, budget);
-            if let CoreTerm::PathTy {
-                lhs: pl, rhs: pr, ..
-            } = &path_n
-                && structural_eq(pl, pr)
-            {
-                let carrier = CoreTerm::App(Heap::new(motive_n.clone()), pl.clone());
-                return CoreTerm::PathTy {
-                    carrier: Heap::new(normalize_with_inductives_budget(
-                        &carrier, inductives, budget,
-                    )),
-                    lhs: Heap::new(lhs_n),
-                    rhs: Heap::new(rhs_n),
-                };
-            }
-            CoreTerm::PathOver {
-                motive: Heap::new(motive_n),
-                path: Heap::new(path_n),
-                lhs: Heap::new(lhs_n),
-                rhs: Heap::new(rhs_n),
-            }
-        }
-        CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(normalize_with_inductives_budget(
-            x, inductives, budget,
-        ))),
-        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
-            phi: Heap::new(normalize_with_inductives_budget(phi, inductives, budget)),
-            walls: Heap::new(normalize_with_inductives_budget(walls, inductives, budget)),
-            base: Heap::new(normalize_with_inductives_budget(base, inductives, budget)),
-        },
-        CoreTerm::Transp {
-            path,
-            regular,
-            value,
-        } => CoreTerm::Transp {
-            path: Heap::new(normalize_with_inductives_budget(path, inductives, budget)),
-            regular: Heap::new(normalize_with_inductives_budget(
-                regular, inductives, budget,
-            )),
-            value: Heap::new(normalize_with_inductives_budget(value, inductives, budget)),
-        },
-        CoreTerm::Glue {
-            carrier,
-            phi,
-            fiber,
-            equiv,
-        } => CoreTerm::Glue {
-            carrier: Heap::new(normalize_with_inductives_budget(
-                carrier, inductives, budget,
-            )),
-            phi: Heap::new(normalize_with_inductives_budget(phi, inductives, budget)),
-            fiber: Heap::new(normalize_with_inductives_budget(fiber, inductives, budget)),
-            equiv: Heap::new(normalize_with_inductives_budget(equiv, inductives, budget)),
-        },
-        CoreTerm::Refine {
-            base,
-            binder,
-            predicate,
-        } => CoreTerm::Refine {
-            base: Heap::new(normalize_with_inductives_budget(base, inductives, budget)),
-            binder: binder.clone(),
-            predicate: Heap::new(normalize_with_inductives_budget(
-                predicate, inductives, budget,
-            )),
-        },
-        CoreTerm::Quotient { base, equiv } => CoreTerm::Quotient {
-            base: Heap::new(normalize_with_inductives_budget(base, inductives, budget)),
-            equiv: Heap::new(normalize_with_inductives_budget(equiv, inductives, budget)),
-        },
-        CoreTerm::QuotIntro { value, base, equiv } => CoreTerm::QuotIntro {
-            value: Heap::new(normalize_with_inductives_budget(value, inductives, budget)),
-            base: Heap::new(normalize_with_inductives_budget(base, inductives, budget)),
-            equiv: Heap::new(normalize_with_inductives_budget(equiv, inductives, budget)),
-        },
-        CoreTerm::QuotElim {
-            scrutinee,
-            motive,
-            case,
-        } => {
-            let scrut_norm = normalize_with_inductives_budget(scrutinee, inductives, budget);
-            match &scrut_norm {
-                CoreTerm::QuotIntro { value, .. } => {
-                    let case_norm = normalize_with_inductives_budget(case, inductives, budget);
-                    let v_norm = normalize_with_inductives_budget(value, inductives, budget);
-                    let app = CoreTerm::App(Heap::new(case_norm), Heap::new(v_norm));
-                    normalize_with_inductives_budget(&app, inductives, budget)
-                }
-                _ => CoreTerm::QuotElim {
-                    scrutinee: Heap::new(scrut_norm),
-                    motive: Heap::new(normalize_with_inductives_budget(motive, inductives, budget)),
-                    case: Heap::new(normalize_with_inductives_budget(case, inductives, budget)),
-                },
-            }
-        }
-        CoreTerm::Inductive { path, args } => {
-            let mut new_args: List<CoreTerm> = List::new();
-            for a in args.iter() {
-                new_args.push(normalize_with_inductives_budget(a, inductives, budget));
-            }
-            CoreTerm::Inductive {
-                path: path.clone(),
-                args: new_args,
-            }
-        }
-        CoreTerm::Axiom {
-            name,
-            ty,
-            framework,
-        } => CoreTerm::Axiom {
-            name: name.clone(),
-            ty: Heap::new(normalize_with_inductives_budget(ty, inductives, budget)),
-            framework: framework.clone(),
-        },
-        CoreTerm::EpsilonOf(t) => CoreTerm::EpsilonOf(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-        CoreTerm::AlphaOf(t) => CoreTerm::AlphaOf(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-        CoreTerm::ModalBox(t) => CoreTerm::ModalBox(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-        CoreTerm::ModalDiamond(t) => CoreTerm::ModalDiamond(Heap::new(
-            normalize_with_inductives_budget(t, inductives, budget),
-        )),
-        CoreTerm::ModalBigAnd(args) => {
-            let mut new_args: List<Heap<CoreTerm>> = List::new();
-            for a in args.iter() {
-                new_args.push(Heap::new(normalize_with_inductives_budget(
-                    a, inductives, budget,
-                )));
-            }
-            CoreTerm::ModalBigAnd(new_args)
-        }
-        CoreTerm::Shape(t) => CoreTerm::Shape(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-        CoreTerm::Flat(t) => CoreTerm::Flat(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-        CoreTerm::Sharp(t) => CoreTerm::Sharp(Heap::new(normalize_with_inductives_budget(
-            t, inductives, budget,
-        ))),
-    }
-}
 
 /// δ-reduction-aware definitional equality.
 ///

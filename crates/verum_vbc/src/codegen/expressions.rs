@@ -335,16 +335,18 @@ fn is_unsigned_int_type_name(name: &str) -> bool {
 
 /// This is used to distinguish type names from variable names when compiling paths.
 fn is_type_name(name: &str) -> bool {
+    // Single source of truth: a name is a type name iff it's
+    //   * a primitive value type (Int / Float / Bool / ...),
+    //   * a sized numeric alias (Int32 / u64 / Float32 / Byte / ...),
+    //   * OR registered in the WellKnownType enum (every stdlib
+    //     well-known type — Text, Time, Concurrency, Collections,
+    //     Wrappers, Misc).
+    //
+    // Adding a new stdlib type means one entry in
+    // `verum_common::well_known_types::WellKnownType`; this function
+    // never grows new branches.
     type_names::is_primitive_value_type(name)
         || type_names::is_numeric_type(name)
-        || matches!(name, "Text" | "Never")
-        // Time types
-        || matches!(name, "Duration" | "Instant" | "Stopwatch" | "PerfCounter" | "DeadlineTimer")
-        // Concurrency primitives
-        || matches!(name, "Channel")
-        // VBC-internal: WKT registry lookup to classify stdlib type names (List, Map, etc.)
-        // for path disambiguation during codegen. This is opcode-level metadata — the
-        // interpreter dispatches differently on well-known types vs user-defined types.
         || WKT::from_name(name).is_some()
 }
 
