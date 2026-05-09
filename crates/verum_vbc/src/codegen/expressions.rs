@@ -6863,9 +6863,17 @@ impl VbcCodegen {
                                     // TASK #21 FIX: Resolve type alias for method dispatch.
                                     // If type_name is a type alias (e.g., Vec4f -> Vec), use the
                                     // base type for method lookup so Vec.to_array is found.
-                                    // Strip generic args from the type name for method lookup
-                                    // (e.g., "Maybe<Int>" → "Maybe" for "Maybe.is_some").
-                                    let resolved_type = self.resolve_type_alias(type_name);
+                                    //
+                                    // **ORDER MATTERS** — strip generic args BEFORE resolving
+                                    // the alias. `type_aliases` is keyed on the un-generic
+                                    // base name (`TextResult` → `Result`), so resolving
+                                    // `TextResult<Int>` directly returns identity and the
+                                    // post-strip name ends up being the alias rather than
+                                    // its target. The same strip-then-resolve discipline is
+                                    // applied at the inferred-type fallback path
+                                    // (`infer_expr_type_name(receiver)` site below).
+                                    let bare_name = VbcCodegen::strip_generic_args(type_name);
+                                    let resolved_type = self.resolve_type_alias(bare_name);
                                     let base_type = VbcCodegen::strip_generic_args(&resolved_type);
                                     format!("{}.{}", base_type, method.name)
                                 }
@@ -6876,11 +6884,12 @@ impl VbcCodegen {
                     }
                 }
                 verum_ast::ty::PathSegment::SelfValue => {
-                    // Case 1b: Receiver is `self` keyword - look up type from impl context
+                    // Case 1b: Receiver is `self` keyword - look up type from impl context.
+                    // Strip generic args BEFORE resolving the alias (see the bare-Path
+                    // case above for the strip-then-resolve discipline rationale).
                     if let Some(type_name) = self.ctx.variable_type_names.get("self") {
-                        // TASK #21 FIX: Resolve type alias for self method dispatch
-                        // Strip generic args for method lookup (e.g., "Maybe<T>" → "Maybe").
-                        let resolved_type = self.resolve_type_alias(type_name);
+                        let bare_name = VbcCodegen::strip_generic_args(type_name);
+                        let resolved_type = self.resolve_type_alias(bare_name);
                         let base_type = VbcCodegen::strip_generic_args(&resolved_type);
                         format!("{}.{}", base_type, method.name)
                     } else {
