@@ -469,6 +469,98 @@ fn inject_decl_spans(
                     });
             };
 
+            // Helper to register a method under both bare-name and
+            // `<Receiver>.<method>` qualified-name keys so the
+            // metadata's `<parent>.<simple>` lookup style hits.
+            let record_qualified = |receiver: &str,
+                                    ident: &verum_ast::Ident,
+                                    name_index: &mut HashMap<String, Vec<Candidate>>| {
+                record_decl(ident, name_index);
+                let qualified = format!("{}.{}", receiver, ident.name.as_str());
+                let span = ident.span;
+                name_index
+                    .entry(qualified)
+                    .or_default()
+                    .push(Candidate {
+                        source_module: source_module.clone(),
+                        decl_span: DeclSpan {
+                            file: Text::from(rel_str.as_str()),
+                            start: span.start,
+                            end: span.end,
+                        },
+                    });
+            };
+
+            // Recursively walk a function body's statements looking
+            // for nested `Item` declarations — function-local
+            // `const X = ...;` (and nested fn defs / type aliases)
+            // get hoisted by codegen as zero-arg functions whose
+            // FunctionDescriptor lands in `metadata.functions`
+            // alongside the parent.  Without this walk those
+            // descriptors get no source-side match.
+            fn walk_block_items(
+                block: &verum_ast::Block,
+                f: &mut dyn FnMut(&verum_ast::Item),
+            ) {
+                for stmt in block.stmts.iter() {
+                    if let verum_ast::stmt::StmtKind::Item(item) = &stmt.kind {
+                        f(item);
+                        // Recurse into nested function bodies for
+                        // doubly-nested locals.
+                        if let ItemKind::Function(fd) = &item.kind
+                            && let verum_common::Maybe::Some(body) = &fd.body
+                            && let verum_ast::decl::FunctionBody::Block(b) = body
+                        {
+                            walk_block_items(b, f);
+                        }
+                    }
+                }
+            }
+
+            // Walk every function body — both top-level and impl-
+            // block methods — to pick up function-local
+            // declarations.  Codegen hoists `const X = ...;` and
+            // nested fn defs as zero-arg FunctionDescriptors that
+            // land in metadata.functions; the source-side index
+            // must register them too.
+            let mut on_item = |item: &verum_ast::Item| {
+                match &item.kind {
+                    ItemKind::Function(d) => record_decl(&d.name, name_index),
+                    ItemKind::Type(d) => record_decl(&d.name, name_index),
+                    ItemKind::Protocol(d) => record_decl(&d.name, name_index),
+                    ItemKind::Const(d) => record_decl(&d.name, name_index),
+                    ItemKind::Static(d) => record_decl(&d.name, name_index),
+                    _ => {}
+                }
+            };
+            let walk_fn_body = |fd: &verum_ast::decl::FunctionDecl,
+                                on_item: &mut dyn FnMut(&verum_ast::Item)| {
+                if let verum_common::Maybe::Some(body) = &fd.body
+                    && let verum_ast::decl::FunctionBody::Block(b) = body
+                {
+                    walk_block_items(b, on_item);
+                }
+            };
+            for item in &module.items {
+                match &item.kind {
+                    ItemKind::Function(fd) => walk_fn_body(fd, &mut on_item),
+                    ItemKind::Impl(d) => {
+                        for impl_item in d.items.iter() {
+                            if let verum_ast::decl::ImplItemKind::Function(fd) = &impl_item.kind {
+                                walk_fn_body(fd, &mut on_item);
+                            }
+                        }
+                    }
+                    ItemKind::Context(d) => {
+                        for m in d.methods.iter() {
+                            walk_fn_body(m, &mut on_item);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            drop(on_item);
+
             for item in &module.items {
                 match &item.kind {
                     ItemKind::Function(d) => record_decl(&d.name, name_index),
@@ -476,21 +568,96 @@ fn inject_decl_spans(
                     ItemKind::Protocol(d) => record_decl(&d.name, name_index),
                     ItemKind::Const(d) => record_decl(&d.name, name_index),
                     ItemKind::Static(d) => record_decl(&d.name, name_index),
+                    // Contexts register BOTH a TypeDescriptor and a
+                    // ProtocolDescriptor on the metadata side (the
+                    // context itself is a type; its method surface is
+                    // a protocol).  Both descriptors carry the same
+                    // simple name and module_path, so a single index
+                    // entry covers both.
+                    ItemKind::Context(d) => {
+                        record_decl(&d.name, name_index);
+                        // Register every method as
+                        // `<ContextName>.<method>` — context-impl
+                        // methods land in metadata.functions with
+                        // parent_type set to the context name.
+                        for m in d.methods.iter() {
+                            record_qualified(d.name.as_str(), &m.name, name_index);
+                        }
+                    }
                     // Impl blocks carry inherent / protocol-impl
                     // methods + associated types + consts whose
                     // FunctionDescriptor.parent_type points at the
-                    // impl receiver — so the metadata side has them
-                    // and our diagnostic emitter wants their decl
-                    // sites too.
+                    // impl receiver — so the metadata side names them
+                    // `<Receiver>.<method>` and our index must
+                    // register both forms.
                     ItemKind::Impl(d) => {
+                        // Resolve the receiver's last-segment name
+                        // for the qualified-name shape used by
+                        // metadata.  Handles both bare `Type` and
+                        // `Generic { base, args }` carriers (e.g.
+                        // `implement<A> ActorMesh<A> { … }`); peels
+                        // the `Generic` wrapper to reach the
+                        // underlying `Path` segment.
+                        fn extract_receiver_name(ty: &verum_ast::Type) -> Option<String> {
+                            use verum_ast::ty::TypeKind;
+                            match &ty.kind {
+                                TypeKind::Path(p) => {
+                                    Some(p.last_segment_name().to_string())
+                                }
+                                TypeKind::Generic { base, .. } => {
+                                    extract_receiver_name(base)
+                                }
+                                // Primitive types — `implement Display
+                                // for Bool {...}` / `implement Bool
+                                // {...}` use these dedicated variants
+                                // rather than `Path("Bool")`.  Method
+                                // descriptors land in metadata as
+                                // `Bool.fmt`, `Int.from_bits`, etc.
+                                TypeKind::Bool => Some("Bool".to_string()),
+                                TypeKind::Int => Some("Int".to_string()),
+                                TypeKind::Float => Some("Float".to_string()),
+                                TypeKind::Char => Some("Char".to_string()),
+                                TypeKind::Text => Some("Text".to_string()),
+                                TypeKind::Unit => Some("Unit".to_string()),
+                                // Built-in container shapes — `[T]`
+                                // is `TypeKind::Slice(_)` in the AST,
+                                // metadata names methods on it as
+                                // `Slice.<method>`.  Tuples / arrays
+                                // get similar treatment if they ship
+                                // protocol impls.
+                                TypeKind::Slice(_) => Some("Slice".to_string()),
+                                TypeKind::Array { .. } => Some("Array".to_string()),
+                                TypeKind::Tuple(_) => Some("Tuple".to_string()),
+                                // Reference receivers — `implement
+                                // <T> BitAnd<&Set<T>> for &Set<T>`
+                                // wraps the actual receiver; the
+                                // metadata uses the unwrapped name.
+                                TypeKind::Reference { inner, .. } => extract_receiver_name(inner),
+                                _ => None,
+                            }
+                        }
+                        let receiver_name: Option<String> = match &d.kind {
+                            verum_ast::decl::ImplKind::Inherent(ty)
+                            | verum_ast::decl::ImplKind::Protocol { for_type: ty, .. } => {
+                                extract_receiver_name(ty)
+                            }
+                        };
                         for impl_item in d.items.iter() {
                             match &impl_item.kind {
                                 verum_ast::decl::ImplItemKind::Function(fd) => {
-                                    record_decl(&fd.name, name_index);
+                                    if let Some(ref recv) = receiver_name {
+                                        record_qualified(recv, &fd.name, name_index);
+                                    } else {
+                                        record_decl(&fd.name, name_index);
+                                    }
                                 }
                                 verum_ast::decl::ImplItemKind::Type { name, .. }
                                 | verum_ast::decl::ImplItemKind::Const { name, .. } => {
-                                    record_decl(name, name_index);
+                                    if let Some(ref recv) = receiver_name {
+                                        record_qualified(recv, name, name_index);
+                                    } else {
+                                        record_decl(name, name_index);
+                                    }
                                 }
                                 _ => {}
                             }
@@ -550,11 +717,50 @@ fn inject_decl_spans(
         None
     }
 
+    /// Strip codegen synthesis decoration off a function name to
+    /// recover its source-side parent.  Three forms are recognised
+    /// — every other unmatched function is a true codegen
+    /// synthetic with no source counterpart.
+    ///
+    /// 1. **Trailing `$<tag>$<digits>`**: closure / spawn-block
+    ///    lowering. Stack-peeled iteratively
+    ///    (`fn$closure$8$spawn$9` → `fn`).
+    ///
+    /// 2. **Leading `__tls_init_<NAME>`**: the codegen emits one
+    ///    `__tls_init_<NAME>` zero-arg fn per `static <NAME>` decl
+    ///    to lazily initialise the thread-local on first read.
+    ///    The synthetic inherits the static's source location.
+    fn strip_synthesis_suffix(name: &str) -> Option<&str> {
+        if let Some(stripped) = name.strip_prefix("__tls_init_") {
+            return Some(stripped);
+        }
+        const MARKERS: &[&str] = &["$closure$", "$spawn$"];
+        let mut current = name;
+        let mut peeled_any = false;
+        loop {
+            let cut = MARKERS
+                .iter()
+                .filter_map(|m| current.rfind(m).map(|i| (i, *m)))
+                .max_by_key(|(i, _)| *i);
+            let Some((idx, marker)) = cut else {
+                break;
+            };
+            let tail = &current[idx + marker.len()..];
+            if tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) {
+                break;
+            }
+            current = &current[..idx];
+            peeled_any = true;
+        }
+        if peeled_any { Some(current) } else { None }
+    }
+
     fn populate<V, F>(
         map: &mut verum_common::OrderedMap<Text, V>,
         name_index: &HashMap<String, Vec<Candidate>>,
         get_module_and_name: F,
         get_decl_span: impl Fn(&mut V) -> &mut Maybe<DeclSpan>,
+        unmatched_log: &mut Vec<String>,
     ) -> usize
     where
         F: Fn(&V) -> (&str, &str),
@@ -565,38 +771,59 @@ fn inject_decl_spans(
                 continue;
             }
             let (module_path, name) = get_module_and_name(val);
-            if let Some(cands) = name_index.get(name)
-                && let Some(found) = resolve(cands, module_path)
-            {
+            // Primary: exact name match.
+            let primary = name_index
+                .get(name)
+                .and_then(|cands| resolve(cands, module_path));
+            // Fallback: strip `$closure$<N>` suffix and look up the
+            // parent function — the closure inherits the parent's
+            // span (every anonymous closure under `f` points back
+            // at the source file site of `f`).
+            let found = primary.or_else(|| {
+                strip_synthesis_suffix(name).and_then(|parent| {
+                    name_index
+                        .get(parent)
+                        .and_then(|cands| resolve(cands, module_path))
+                })
+            });
+            if let Some(found) = found {
                 *get_decl_span(val) = Maybe::Some(found.decl_span.clone());
                 populated += 1;
+            } else if unmatched_log.len() < 30 {
+                unmatched_log.push(format!("{}::{}", module_path, name));
             }
         }
         populated
     }
 
     let total_types = metadata.types.len();
+    let mut unmatched_types: Vec<String> = Vec::new();
     let populated_types = populate(
         &mut metadata.types,
         &name_index,
         |t| (t.module_path.as_str(), t.name.as_str()),
         |t| &mut t.decl_span,
+        &mut unmatched_types,
     );
 
     let total_fns = metadata.functions.len();
+    let mut unmatched_fns: Vec<String> = Vec::new();
     let populated_fns = populate(
         &mut metadata.functions,
         &name_index,
         |f| (f.module_path.as_str(), f.name.as_str()),
         |f| &mut f.decl_span,
+        &mut unmatched_fns,
     );
 
     let total_protos = metadata.protocols.len();
+    let mut unmatched_protos: Vec<String> = Vec::new();
     let populated_protos = populate(
         &mut metadata.protocols,
         &name_index,
         |p| (p.module_path.as_str(), p.name.as_str()),
         |p| &mut p.decl_span,
+        &mut unmatched_protos,
     );
 
     if verbose {
@@ -611,6 +838,15 @@ fn inject_decl_spans(
             name_index.len(),
             total_candidates,
         );
+        if !unmatched_types.is_empty() {
+            eprintln!("  unmatched types (sample): {:?}", unmatched_types);
+        }
+        if !unmatched_protos.is_empty() {
+            eprintln!("  unmatched protocols (sample): {:?}", unmatched_protos);
+        }
+        if !unmatched_fns.is_empty() {
+            eprintln!("  unmatched functions (sample): {:?}", unmatched_fns);
+        }
     }
 }
 
