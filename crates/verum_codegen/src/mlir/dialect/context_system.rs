@@ -37,7 +37,7 @@
 //! - `context_with`: Transform context value
 
 use crate::mlir::dialect::{attr_names, op_names};
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::{MlirError, OptionExt, Result};
 use verum_common::Text;
 use verum_mlir::{
     Context,

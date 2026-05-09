@@ -38,7 +38,7 @@
 //! | ByMove | `move` | Move value into closure |
 
 use crate::mlir::dialect::types::VerumType;
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::{MlirError, OptionExt, Result};
 use verum_common::{List, Text};
 use verum_mlir::{
     Context,

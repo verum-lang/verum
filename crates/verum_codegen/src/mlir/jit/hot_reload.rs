@@ -67,7 +67,7 @@
 //! }
 //! ```
 
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::{MlirError, OptionExt, Result};
 use crate::mlir::jit::{CompiledFunction, JitConfig, JitEngine};
 use dashmap::DashMap;
 use parking_lot::RwLock;

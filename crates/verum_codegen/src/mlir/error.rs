@@ -297,6 +297,32 @@ impl MlirError {
     }
 }
 
+/// Extension trait for converting `Option<T>` into `Result<T, MlirError>`
+/// via [`OptionExt::or_internal`].
+///
+/// Mirrors the same pattern as `verum_codegen::llvm::error::OptionExt`
+/// and `verum_vbc::codegen::error::CodegenOptionExt` — the MLIR
+/// lowering path has its own `MlirError` enum, so it gets its own
+/// helper trait.  Replaces the verbose
+///
+///     .ok_or_else(|| MlirError::internal("<msg>"))
+///
+/// pattern repeated 32+ times across `crates/verum_codegen/src/mlir/`
+/// with the much shorter
+///
+///     .or_internal("<msg>")?
+pub trait OptionExt<T> {
+    /// Convert `None` into `MlirError::InternalError { message: <msg> }`.
+    fn or_internal(self, msg: &str) -> Result<T>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    #[inline]
+    fn or_internal(self, msg: &str) -> Result<T> {
+        self.ok_or_else(|| MlirError::internal(msg))
+    }
+}
+
 /// Extension trait for converting melior errors.
 impl From<verum_mlir::Error> for MlirError {
     fn from(err: verum_mlir::Error) -> Self {

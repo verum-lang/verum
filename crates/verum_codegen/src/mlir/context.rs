@@ -7,7 +7,7 @@
 //! - `MlirConfig`: Configuration options
 
 use crate::mlir::dialect::VerumDialect;
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::{MlirError, OptionExt, Result};
 use crate::mlir::passes::{
     GpuPassConfig, GpuPassPipeline, GpuPipelineResult, PassConfig, PassPipeline,
 };
@@ -417,7 +417,7 @@ impl<'ctx> MlirCodegen<'ctx> {
         let _module = self
             .module
             .as_ref()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))?;
+            .or_internal("Module not initialized")?;
 
         let mut lowering = VbcToMlirGpuLowering::new(self.mlir_ctx.context(), gpu_config);
 
@@ -444,7 +444,7 @@ impl<'ctx> MlirCodegen<'ctx> {
         let module = self
             .module
             .as_mut()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))?;
+            .or_internal("Module not initialized")?;
 
         let pass_config = PassConfig {
             enable_cbgr_elimination: self.config.enable_cbgr_optimization,
@@ -474,7 +474,7 @@ impl<'ctx> MlirCodegen<'ctx> {
         let module = self
             .module
             .as_mut()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))?;
+            .or_internal("Module not initialized")?;
 
         let gpu_config = GpuPassConfig {
             target: gpu_target,
@@ -495,7 +495,7 @@ impl<'ctx> MlirCodegen<'ctx> {
         let module = self
             .module
             .as_ref()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))?;
+            .or_internal("Module not initialized")?;
 
         if !module.as_operation().verify() {
             return Err(MlirError::verification("Module verification failed"));
@@ -509,7 +509,7 @@ impl<'ctx> MlirCodegen<'ctx> {
         let module = self
             .module
             .as_ref()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))?;
+            .or_internal("Module not initialized")?;
 
         Ok(Text::from(format!("{}", module.as_operation())))
     }
@@ -523,14 +523,14 @@ impl<'ctx> MlirCodegen<'ctx> {
     pub fn module(&self) -> Result<&Module<'ctx>> {
         self.module
             .as_ref()
-            .ok_or_else(|| MlirError::internal("Module not initialized"))
+            .or_internal("Module not initialized")
     }
 
     /// Take ownership of the module (consumes the codegen).
     pub fn into_module(mut self) -> Result<Module<'ctx>> {
         self.module
             .take()
-            .ok_or_else(|| MlirError::internal("Module already taken"))
+            .or_internal("Module already taken")
     }
 
     /// Get configuration.
