@@ -597,7 +597,13 @@ impl ArchiveCtxCache {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            register_module_filtered(&module, &entry.name, ctx, &wanted, next_id);
+            // Legacy `apply_lazy` path — only registers metadata, no
+            // body merge (the body-merge surface needs `&mut VbcCodegen`,
+            // not just `&mut CodegenContext`). Production callers go
+            // through `apply_lazy_with_types` which performs the
+            // merge; this path is kept for the transitional
+            // metadata-only consumers and discards the remap.
+            let _ = register_module_filtered(&module, &entry.name, ctx, &wanted, next_id);
         }
         // For wanted names that have NO qualified form (e.g. user
         // code calls `Maybe.Some(x)` without a `mount Maybe`
@@ -635,7 +641,7 @@ impl ArchiveCtxCache {
                 if !any_match {
                     continue;
                 }
-                register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted, next_id);
+                let _ = register_module_filtered(&module, &entry.name, ctx, &unqualified_wanted, next_id);
             }
         }
     }
@@ -858,7 +864,7 @@ impl ArchiveCtxCache {
             // the borrow checker out of the way without breaking
             // aliasing rules.
             let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
-            register_module_filtered(
+            let func_id_remap = register_module_filtered(
                 module,
                 entry_name,
                 codegen.ctx_mut(),
@@ -866,11 +872,21 @@ impl ArchiveCtxCache {
                 next_id_ref,
             );
             fn_modules += 1;
-            // Type side — push every non-protocol descriptor.
+            // Type side — push every non-protocol descriptor.  MUST
+            // happen before body merge so the body's TypeId remap
+            // (consults `codegen.type_name_to_id`) sees the imported
+            // descriptors.
             if !module.types.is_empty() {
                 codegen.import_archive_module_types(module);
                 type_modules += 1;
             }
+            // Body merge — Phase 2 of the precompiled-stdlib epic.
+            // For every metadata-registered function, copy its archive
+            // bytecode body (with id remap) into `codegen.functions`.
+            // Without this, the finalize-time stub-emitter synthesises
+            // a `RetV` placeholder and every stdlib method call returns
+            // Unit at runtime.
+            codegen.merge_archive_function_bodies(module, &func_id_remap);
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's
         // tail block.  Module-prefix gate already filtered the
@@ -949,7 +965,7 @@ impl ArchiveCtxCache {
             };
             for (entry_name, module) in &matched_modules {
                 let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
-                register_module_filtered(
+                let func_id_remap = register_module_filtered(
                     module,
                     entry_name,
                     codegen.ctx_mut(),
@@ -988,6 +1004,10 @@ impl ArchiveCtxCache {
                     codegen.import_archive_module_types(module);
                     type_modules += 1;
                 }
+                // Body merge for the unqualified-wanted second pass —
+                // same Phase 2 path as the primary pass above. See
+                // that site for rationale.
+                codegen.merge_archive_function_bodies(module, &func_id_remap);
             }
         }
         (fn_modules, type_modules)
@@ -1597,7 +1617,7 @@ fn register_module_filtered(
     ctx: &mut CodegenContext,
     wanted: &std::collections::HashSet<String>,
     next_id: &mut u32,
-) {
+) -> std::collections::HashMap<u32, verum_vbc::module::FunctionId> {
     // **Cold-start optimisation**: build a `StringId → &str` reverse
     // index once per module call.  The default `module.strings.get(id)`
     // is an O(N) linear scan of the IndexMap (it's keyed by string,
@@ -1652,6 +1672,17 @@ fn register_module_filtered(
     // modules with overlapping local ids don't collapse onto a
     // single ctx.functions slot at codegen finalisation time.  See
     // the long-form rationale in `apply_lazy`'s caller comment.
+    //
+    // **Phase 2 of the body-merge epic** — accumulate the
+    // archive-function-id → user-codegen-function-id mapping in
+    // `func_id_remap` so the caller can pass it to
+    // `VbcCodegen::merge_archive_function_bodies` immediately after
+    // this function returns. Without that, the metadata pass would
+    // register `Maybe.is_some` (etc.) but never emit a real body,
+    // and the finalize-time stub-emitter would synthesise a `RetV`
+    // placeholder that returns Unit at every call site.
+    let mut func_id_remap: std::collections::HashMap<u32, verum_vbc::module::FunctionId> =
+        std::collections::HashMap::new();
     for fn_desc in &module.functions {
         // **Cold-start optimisation**: gate-then-resolve order.  The
         // simple_name lookup is O(1) via the reverse-index helper but
@@ -1701,6 +1732,7 @@ fn register_module_filtered(
         // wrong intercept (or fall through to a Unit-returning stub).
         let new_id = verum_vbc::module::FunctionId(*next_id);
         *next_id = next_id.saturating_add(1);
+        func_id_remap.insert(fn_desc.id.0, new_id);
         let variant_hit = variant_index
             .get(&simple_name)
             .filter(|hit| hit.arity == fn_desc.params.len());
@@ -1926,4 +1958,5 @@ fn register_module_filtered(
             // would otherwise be silently de-aliased).
         }
     }
+    func_id_remap
 }
