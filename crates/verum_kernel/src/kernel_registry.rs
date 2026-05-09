@@ -66,8 +66,8 @@ pub trait KernelChecker: Send + Sync {
 // =============================================================================
 
 /// Algorithm A — the trusted base.  Bidirectional type-checking
-/// with explicit substitution + WHNF normalisation. The 633-LOC
-/// `proof_checker.rs` minimal kernel.
+/// with explicit substitution + WHNF normalisation
+/// (`crates/verum_kernel/src/proof_checker.rs`).
 pub struct ProofCheckerKernel;
 
 impl KernelChecker for ProofCheckerKernel {
@@ -77,7 +77,7 @@ impl KernelChecker for ProofCheckerKernel {
 
     fn description(&self) -> &'static str {
         "Algorithm A — Bidirectional type-checking with explicit substitution + WHNF \
-         (the 633-LOC trusted base, `proof_checker.rs`)"
+         (the trusted base, `crates/verum_kernel/src/proof_checker.rs`)"
     }
 
     fn verify(&self, cert: &Certificate) -> Result<(), CheckError> {
@@ -86,7 +86,8 @@ impl KernelChecker for ProofCheckerKernel {
 }
 
 /// Algorithm B — Normalisation by Evaluation.  Closure-based
-/// semantic evaluation + level-indexed quote.  Structurally
+/// semantic evaluation + level-indexed quote
+/// (`crates/verum_kernel/src/proof_checker_nbe.rs`).  Structurally
 /// distinct from Algorithm A; differential-tested against it.
 pub struct ProofCheckerNbeKernel;
 
@@ -97,7 +98,7 @@ impl KernelChecker for ProofCheckerNbeKernel {
 
     fn description(&self) -> &'static str {
         "Algorithm B — Normalisation by Evaluation with closures + level-indexed quote \
-         (the 756-LOC second kernel, `proof_checker_nbe.rs`)"
+         (`crates/verum_kernel/src/proof_checker_nbe.rs`)"
     }
 
     fn verify(&self, cert: &Certificate) -> Result<(), CheckError> {
@@ -190,8 +191,12 @@ impl KernelChecker for KernelV0Kernel {
         // kernel infrastructure consumes; a per-rule disagreement
         // surfaces drift between the bootstrap rule's soundness
         // lemma and the registered intrinsic.
+        //
+        // The rule ↔ intrinsic-suffix mapping lives on the enum
+        // itself (`KernelRuleId::strict_intrinsic_suffix`) so
+        // adding or renaming a rule is a single-place change.
         for rule in KernelRuleId::full_list() {
-            let intrinsic = format!("kernel_{}_strict", strict_tag_of(rule));
+            let intrinsic = format!("kernel_{}_strict", rule.strict_intrinsic_suffix());
             match dispatch_intrinsic(&intrinsic, &[]) {
                 Some(IntrinsicValue::Decision { holds, .. }) if holds => continue,
                 _ => {
@@ -203,22 +208,6 @@ impl KernelChecker for KernelV0Kernel {
         }
 
         Ok(())
-    }
-}
-
-/// Map `KernelRuleId` to the canonical strict-intrinsic suffix
-/// used in `dispatch_intrinsic` (`kernel_<suffix>_strict`).
-/// Stable: drift here is a kernel/intrinsic registry mismatch.
-fn strict_tag_of(rule: crate::zfc_self_recognition::KernelRuleId) -> &'static str {
-    use crate::zfc_self_recognition::KernelRuleId;
-    match rule {
-        KernelRuleId::Refine => "var",        // K-Refine ↔ kernel_var_strict
-        KernelRuleId::Univ => "universe_intro",
-        KernelRuleId::Pos => "positivity",
-        KernelRuleId::Norm => "beta",          // K-Norm uses β-confluence
-        KernelRuleId::FwAx => "forward_axiom",
-        KernelRuleId::AdjUnit => "pi_form",    // adjunction unit ↔ pi-form-strict
-        KernelRuleId::AdjCounit => "app_elim", // adjunction counit ↔ app-elim-strict
     }
 }
 

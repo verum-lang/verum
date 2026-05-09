@@ -35,18 +35,25 @@
 //! ## Adding a cert
 //!
 //! Append to [`canonical_battery()`] with a fresh `id` (kebab-case,
-//! short, references the kernel rule or defect under test) and
-//! extend [`expected_verdict()`] with its trusted-base outcome.
-//! The cert flows through every consumer automatically; the first
-//! run after adding it MUST reach unanimous agreement across every
-//! registered checker.  If it doesn't, fix the kernel(s) before
-//! merging — that's the load-bearing value of the gates.
+//! short, references the kernel rule or defect under test) AND
+//! the cert's expected trusted-base outcome (`true` = accept,
+//! `false` = reject) baked in via [`CanonicalCert::accept`] /
+//! [`CanonicalCert::reject`].  The expected verdict is part of the
+//! cert itself — there is no parallel lookup table to keep in sync,
+//! so adding a cert is a single-place change.
+//!
+//! The first run after adding the cert MUST reach unanimous
+//! agreement across every registered checker AND match the cert's
+//! declared `expected_outcome`.  If either invariant fails, fix
+//! the kernel(s) before merging — that's the load-bearing value of
+//! the gates.
 
 use crate::proof_checker::{Certificate, Term};
 
 /// One certificate in the canonical battery.  Pairs the certificate
 /// with a stable identifier used for cross-prover verdict comparison
-/// + regression-bibliography reference.
+/// + regression-bibliography reference + the trusted-base verdict
+/// it pins.
 #[derive(Debug, Clone)]
 pub struct CanonicalCert {
     /// Stable kebab-case identifier — survives JSON round-trips and
@@ -56,12 +63,34 @@ pub struct CanonicalCert {
     /// directly (no metadata — the canonical battery exercises the
     /// trusted-base structural fragment, not framework axioms).
     pub certificate: Certificate,
+    /// The trusted-base verdict this cert pins.  `true` = the cert
+    /// MUST verify; `false` = the cert MUST reject.  Single source of
+    /// truth: per-kernel sanity tests AND
+    /// [`expected_verdict`] both consult this field.
+    pub expected_outcome: bool,
 }
 
 impl CanonicalCert {
-    /// Construct from primitive parts.  Convenience for the literal
-    /// battery below.
-    fn build(id: &'static str, term: Term, claimed_type: Term) -> Self {
+    /// Construct an accept-cert: `id` should verify under every
+    /// kernel in the registry.  Convenience wrapper over
+    /// [`CanonicalCert::build`].
+    fn accept(id: &'static str, term: Term, claimed_type: Term) -> Self {
+        Self::build(id, term, claimed_type, true)
+    }
+
+    /// Construct a reject-cert: `id` should be refused by every
+    /// kernel in the registry.  Convenience wrapper over
+    /// [`CanonicalCert::build`].
+    fn reject(id: &'static str, term: Term, claimed_type: Term) -> Self {
+        Self::build(id, term, claimed_type, false)
+    }
+
+    /// Construct from primitive parts with an explicit expected
+    /// verdict.  Prefer [`CanonicalCert::accept`] /
+    /// [`CanonicalCert::reject`] at the call site for readability;
+    /// this function is the underlying constructor both helpers
+    /// route through.
+    fn build(id: &'static str, term: Term, claimed_type: Term, expected_outcome: bool) -> Self {
         Self {
             id,
             certificate: Certificate {
@@ -69,6 +98,7 @@ impl CanonicalCert {
                 claimed_type,
                 metadata: std::collections::BTreeMap::new(),
             },
+            expected_outcome,
         }
     }
 }
@@ -110,52 +140,52 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
 
     vec![
         // ---- 1. Universe formation (T-Univ) -------------------------------
-        CanonicalCert::build("univ-0-in-1", univ(0), univ(1)),
-        CanonicalCert::build("univ-5-in-6", univ(5), univ(6)),
-        CanonicalCert::build("univ-mismatch", univ(0), univ(2)),
+        CanonicalCert::accept("univ-0-in-1", univ(0), univ(1)),
+        CanonicalCert::accept("univ-5-in-6", univ(5), univ(6)),
+        CanonicalCert::reject("univ-mismatch", univ(0), univ(2)),
         // ---- 2. Var (T-Var) — empty ctx → unbound -------------------------
-        CanonicalCert::build("var0-empty-ctx-fails", var(0), univ(0)),
+        CanonicalCert::reject("var0-empty-ctx-fails", var(0), univ(0)),
         // ---- 3. Identity at Universe(0) (T-Lam-Intro + T-Var) -------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "id-at-univ0",
             lam(univ(0), var(0)),
             pi(univ(0), univ(0)),
         ),
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "id-at-univ0-wrong-claim",
             lam(univ(0), var(0)),
             univ(0),
         ),
         // ---- 4. Identity at Universe(3) -----------------------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "id-at-univ3",
             lam(univ(3), var(0)),
             pi(univ(3), univ(3)),
         ),
         // ---- 5. Polymorphic identity (Π A. Π _:A. A) ----------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "poly-id-shape",
             lam(univ(0), lam(var(0), var(0))),
             pi(univ(0), pi(var(0), var(1))),
         ),
         // ---- 6. Pi formation (T-Pi-Form) ----------------------------------
-        CanonicalCert::build("pi-univ-univ", pi(univ(0), univ(0)), univ(1)),
-        CanonicalCert::build("pi-takes-max", pi(univ(2), univ(5)), univ(6)),
+        CanonicalCert::accept("pi-univ-univ", pi(univ(0), univ(0)), univ(1)),
+        CanonicalCert::accept("pi-takes-max", pi(univ(2), univ(5)), univ(6)),
         // ---- 7. App-Elim (β-reduction) ------------------------------------
         // ((λ_:U(0). Var(0)) U(5))    — Pi expects U(0), got U(5).
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "app-domain-mismatch",
             app(lam(univ(0), var(0)), univ(5)),
             univ(0),
         ),
         // ---- 8. App on non-function ---------------------------------------
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "app-non-function",
             app(univ(0), univ(0)),
             univ(0),
         ),
         // ---- 9. DEFECT-2: universe overflow rejection ---------------------
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "defect-2-univ-max-overflows",
             univ(u32::MAX),
             univ(0),
@@ -164,19 +194,19 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
         // kernels must accept since the claimed_type lives at the top
         // and `verify`'s DEFECT-4 step swallows the inferred-kind
         // overflow.
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "defect-2-univ-max-minus-one-ok",
             univ(u32::MAX - 1),
             univ(u32::MAX),
         ),
         // ---- 10. DEFECT-4: claimed_type must be a type --------------------
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "defect-4-claimed-is-value",
             lam(univ(0), var(0)),
             lam(univ(0), var(0)),
         ),
         // ---- 11. Nested application — outer λ takes U(0), inner reduces to U(0) ---
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "nested-app-domain-mismatch",
             app(
                 lam(univ(0), var(0)),
@@ -185,45 +215,45 @@ pub fn canonical_battery() -> Vec<CanonicalCert> {
             univ(0),
         ),
         // ---- 12. Const function (λ_:A. λ_:B. Var(1)) ----------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "const-fn",
             lam(univ(0), lam(univ(0), var(1))),
             pi(univ(0), pi(univ(0), univ(0))),
         ),
         // ---- 13. Higher universe Pi (Type 2 → Type 7 lives in Type 8) ----
-        CanonicalCert::build("high-pi", pi(univ(2), univ(7)), univ(8)),
+        CanonicalCert::accept("high-pi", pi(univ(2), univ(7)), univ(8)),
         // ---- 14. Identity-arrow at Universe(0) ---------------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "id-arrow",
             lam(univ(0), var(0)),
             pi(univ(0), univ(0)),
         ),
         // ---- 15. Free var inside nested Pi (deep T-Var) ------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "deep-var",
             lam(univ(0), lam(var(0), lam(var(1), var(0)))),
             pi(univ(0), pi(var(0), pi(var(1), var(2)))),
         ),
         // ---- 16. η-redex via identity application -------------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "eta-via-id-application",
             lam(univ(0), app(lam(univ(0), var(0)), var(0))),
             pi(univ(0), univ(0)),
         ),
         // ---- 17. Type-mismatch: identity claimed as Universe(1) ----------
-        CanonicalCert::build(
+        CanonicalCert::reject(
             "id-claimed-as-universe",
             lam(univ(0), var(0)),
             univ(1),
         ),
         // ---- 18. Nested Pi — Π(_:U(0)). Π(_:U(0)). U(0) -------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "nested-pi",
             pi(univ(0), pi(univ(0), univ(0))),
             univ(1),
         ),
         // ---- 19. Nested Lam — λ(A:U(0)). λ(x:A). x -----------------------
-        CanonicalCert::build(
+        CanonicalCert::accept(
             "nested-lam-correct",
             lam(univ(0), lam(var(0), var(0))),
             pi(univ(0), pi(var(0), var(1))),
@@ -239,45 +269,24 @@ pub fn canonical_battery_size() -> usize {
 }
 
 /// Whether a given canonical cert is *expected* to verify under
-/// the trusted base.  Mirrors the prose lineage above; flipping this
-/// is a load-bearing change to the battery's intent.
+/// the trusted base.  Returns `None` when no cert with `id` exists
+/// in the battery.
+///
+/// Thin lookup over [`canonical_battery()`] — the per-cert verdict
+/// has lived on [`CanonicalCert::expected_outcome`] since the
+/// single-source-of-truth refactor (#88), so this function is just
+/// the by-id projection over that field.  Kept as a free function
+/// so existing callers (audit-side fuzz harnesses, CLI report
+/// emitters) need no migration.
 ///
 /// This is consulted by per-kernel sanity tests but **not** by the
 /// audit gate itself — the audit gate's verdict is purely "do all
 /// registered kernels agree?", agnostic to the expected outcome.
-/// The expected-outcome map is here so test code can pin the trusted
-/// base's verdict against a checked-in source of truth without
-/// re-deriving it from the algorithm.
 pub fn expected_verdict(id: &str) -> Option<bool> {
-    Some(match id {
-        // ---- accepts ----
-        "univ-0-in-1"
-        | "univ-5-in-6"
-        | "id-at-univ0"
-        | "id-at-univ3"
-        | "poly-id-shape"
-        | "pi-univ-univ"
-        | "pi-takes-max"
-        | "defect-2-univ-max-minus-one-ok"
-        | "const-fn"
-        | "high-pi"
-        | "id-arrow"
-        | "deep-var"
-        | "eta-via-id-application"
-        | "nested-pi"
-        | "nested-lam-correct" => true,
-        // ---- rejects ----
-        "univ-mismatch"
-        | "var0-empty-ctx-fails"
-        | "id-at-univ0-wrong-claim"
-        | "app-domain-mismatch"
-        | "app-non-function"
-        | "defect-2-univ-max-overflows"
-        | "defect-4-claimed-is-value"
-        | "nested-app-domain-mismatch"
-        | "id-claimed-as-universe" => false,
-        _ => return None,
-    })
+    canonical_battery()
+        .into_iter()
+        .find(|cert| cert.id == id)
+        .map(|cert| cert.expected_outcome)
 }
 
 // =============================================================================
@@ -315,51 +324,51 @@ mod tests {
     }
 
     #[test]
-    fn every_id_has_an_expected_verdict() {
-        // Pin: every cert in the battery must have an explicit
-        // expected outcome — otherwise per-kernel sanity tests would
-        // silently skip it.  Adding a cert without updating
-        // `expected_verdict` is a load-bearing omission.
-        let battery = canonical_battery();
-        for cert in &battery {
-            assert!(
-                expected_verdict(cert.id).is_some(),
-                "canonical cert {} has no expected verdict — update expected_verdict()",
-                cert.id
+    fn expected_verdict_lookup_matches_field() {
+        // Pin: the free `expected_verdict(id)` shim returns the
+        // same answer as the cert's own `expected_outcome` field
+        // for every id in the battery, and `None` for unknown ids.
+        // This is the structural invariant that makes the field +
+        // the lookup function a single source of truth.
+        for cert in canonical_battery() {
+            assert_eq!(
+                expected_verdict(cert.id),
+                Some(cert.expected_outcome),
+                "expected_verdict({}) drift vs cert.expected_outcome",
+                cert.id,
             );
         }
+        assert_eq!(expected_verdict("no-such-cert"), None);
     }
 
     #[test]
-    fn trusted_base_matches_expected_verdicts() {
+    fn trusted_base_matches_expected_outcomes() {
         // Pin: Algorithm A (proof_checker.rs) verdicts agree with
-        // the checked-in expected-outcome map.  If this test fails,
-        // either the kernel changed (intended → update the map) or
-        // the kernel regressed (unintended → fix the kernel).
+        // the cert's `expected_outcome`.  If this test fails, either
+        // the kernel changed (intended → update the cert's outcome)
+        // or the kernel regressed (unintended → fix the kernel).
         for cert in canonical_battery() {
             let actual = cert.certificate.verify().is_ok();
-            let expected = expected_verdict(cert.id).unwrap();
             assert_eq!(
-                actual, expected,
+                actual, cert.expected_outcome,
                 "canonical cert {}: trusted base produced {}, expected {}",
-                cert.id, actual, expected
+                cert.id, actual, cert.expected_outcome,
             );
         }
     }
 
     #[test]
-    fn nbe_kernel_matches_expected_verdicts() {
+    fn nbe_kernel_matches_expected_outcomes() {
         // Pin: Algorithm B (proof_checker_nbe.rs) verdicts agree
-        // with the checked-in expected-outcome map.  Failure here
-        // is a structural NbE bug.
+        // with the cert's `expected_outcome`.  Failure here is a
+        // structural NbE bug.
         use crate::proof_checker_nbe::verify_certificate;
         for cert in canonical_battery() {
             let actual = verify_certificate(&cert.certificate).is_ok();
-            let expected = expected_verdict(cert.id).unwrap();
             assert_eq!(
-                actual, expected,
+                actual, cert.expected_outcome,
                 "canonical cert {}: NbE produced {}, expected {}",
-                cert.id, actual, expected
+                cert.id, actual, cert.expected_outcome,
             );
         }
     }
