@@ -50641,6 +50641,188 @@ impl TypeChecker {
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
+        if let Some(r) = self.try_resolve_super_path_call(
+            receiver, method, args, span, skip_static_lookup,
+        )? { return Ok(Some(r)); }
+
+        if let Some(r) = self.try_resolve_module_call(receiver, method, args, span)? {
+            return Ok(Some(r));
+        }
+
+        // GENERIC TYPE STATIC METHOD CALL: Handle Wrapper<Person>.default() syntax
+        // When receiver is a TypeExpr, extract the type and use it for method lookup.
+        // The type arguments (like Person) are used to instantiate generic implementations.
+        // Generic type instantiation: substituting concrete types for type parameters, checking bounds
+        if let ExprKind::TypeExpr(ty) = &receiver.kind {
+            // Convert AST type to internal Type representation
+            let receiver_ty = self.ast_to_type(ty)?;
+            let method_name = method.name.as_str();
+
+            // Extract base type name for method lookup
+            let type_name = self.type_to_name(&receiver_ty).to_string();
+
+            // Try to look up the method via protocol_checker.
+            // Use lookup_all_protocol_methods to handle multiple parameterized protocol impls
+            // (e.g., TryFrom<Int>, TryFrom<Int32>, TryFrom<UInt32> all providing try_from).
+            let method_name_text = verum_common::Text::from(method_name);
+            let all_methods_result = self
+                .protocol_checker
+                .read()
+                .lookup_all_protocol_methods(&receiver_ty, &method_name_text);
+            if let Ok(candidates) = all_methods_result {
+                if candidates.len() == 1 {
+                    // Single candidate - use directly (common fast path)
+                    let method_ty = &candidates[0];
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = method_ty
+                    {
+                        // Allow ±1 tolerance for self-param counting
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::WrongArgCount {
+                                method: method_name.to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                } else if candidates.len() > 1 {
+                    // Multiple candidates - disambiguate by argument types.
+                    // Pre-infer argument types, then find the candidate whose params match.
+                    let mut arg_types = List::new();
+                    for arg in args.iter() {
+                        if let Ok(r) = self.infer_expr(arg, InferMode::Synth) {
+                            arg_types.push(r.ty);
+                        }
+                    }
+
+                    for candidate in candidates.iter() {
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = candidate
+                        {
+                            if params.len().abs_diff(args.len()) > 1 {
+                                continue;
+                            }
+                            // Check if all arg types are compatible with params
+                            let mut compatible = true;
+                            if arg_types.len() == params.len() {
+                                for (arg_ty, param_ty) in arg_types.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    if !self.types_compatible(arg_ty, &resolved_param) {
+                                        compatible = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if compatible {
+                                // Found matching candidate - type check args properly
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+                                let resolved_return = self.unifier.apply(return_type);
+                                return Ok(Some(InferResult::new(resolved_return)));
+                            }
+                        }
+                    }
+                    // If no candidate matched, fall through to env lookup
+                }
+            }
+
+            // Also check for variant constructors like Maybe<Int>.Some(42)
+            let qualified_name = format!("{}.{}", type_name, method_name);
+            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+                let constructor_ty = scheme.instantiate();
+
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &constructor_ty
+                {
+                    // Pre-check argument compatibility (same as Path block below)
+                    let mut args_pre_compatible = true;
+                    if args.len() == params.len() {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
+                                if !self.types_compatible(&arg_result.ty, &resolved_param) {
+                                    args_pre_compatible = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if args_pre_compatible {
+                        // Allow ±1 tolerance for self-param counting
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::WrongArgCount {
+                                method: method_name.to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                }
+            }
+        }
+
+        if let Some(r) = self.try_resolve_path_static_call(
+            receiver, method, type_args, args, span, skip_static_lookup,
+        )? { return Ok(Some(r)); }
+        Ok(None)
+    }
+
+
+    /// Auto-dereference for method calls on references and Heap<T>
+    ///
+
+    /// This enables method calls like `ref.len()` where `ref: &List<Int>` to work
+    /// by automatically dereferencing to the underlying type for method resolution.
+    ///
+
+    /// Handles:
+    /// - &T -> T (all reference kinds: &T, &checked T, &unsafe T)
+    /// - Heap<T> -> T
+    /// - &Heap<T> -> T (double dereference)
+    /// - Ownership<T> -> T
+    ///
+
+    /// CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
+    /// Resolve `super.method(args)` calls, module-alias calls
+    /// (`mount X as A` then `A.method()`), and DI context method dispatch.
+    fn try_resolve_super_path_call(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+    ) -> Result<Option<InferResult>> {
         // Handle super path function calls
         // When we have `super.func(args)`, this is parsed as a method call
         // but should be resolved as a parent module function call.
@@ -50909,7 +51091,18 @@ impl TypeChecker {
                 }
             }
         }
+        Ok(None)
+    }
 
+    /// Resolve module-qualified function calls: `module.func(args)` or
+    /// `outer.inner.func(args)`. Returns `Ok(None)` when not a module path.
+    fn try_resolve_module_call(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
         // Handle inline module function calls
         // When we have `module.func(args)`, this is parsed as a method call
         // but should be resolved as a module-qualified function call.
@@ -51089,149 +51282,22 @@ impl TypeChecker {
                 }
             }
         }
+        Ok(None)
+    }
 
-        // GENERIC TYPE STATIC METHOD CALL: Handle Wrapper<Person>.default() syntax
-        // When receiver is a TypeExpr, extract the type and use it for method lookup.
-        // The type arguments (like Person) are used to instantiate generic implementations.
-        // Generic type instantiation: substituting concrete types for type parameters, checking bounds
-        if let ExprKind::TypeExpr(ty) = &receiver.kind {
-            // Convert AST type to internal Type representation
-            let receiver_ty = self.ast_to_type(ty)?;
-            let method_name = method.name.as_str();
-
-            // Extract base type name for method lookup
-            let type_name = self.type_to_name(&receiver_ty).to_string();
-
-            // Try to look up the method via protocol_checker.
-            // Use lookup_all_protocol_methods to handle multiple parameterized protocol impls
-            // (e.g., TryFrom<Int>, TryFrom<Int32>, TryFrom<UInt32> all providing try_from).
-            let method_name_text = verum_common::Text::from(method_name);
-            let all_methods_result = self
-                .protocol_checker
-                .read()
-                .lookup_all_protocol_methods(&receiver_ty, &method_name_text);
-            if let Ok(candidates) = all_methods_result {
-                if candidates.len() == 1 {
-                    // Single candidate - use directly (common fast path)
-                    let method_ty = &candidates[0];
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = method_ty
-                    {
-                        // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
-                    }
-                } else if candidates.len() > 1 {
-                    // Multiple candidates - disambiguate by argument types.
-                    // Pre-infer argument types, then find the candidate whose params match.
-                    let mut arg_types = List::new();
-                    for arg in args.iter() {
-                        if let Ok(r) = self.infer_expr(arg, InferMode::Synth) {
-                            arg_types.push(r.ty);
-                        }
-                    }
-
-                    for candidate in candidates.iter() {
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = candidate
-                        {
-                            if params.len().abs_diff(args.len()) > 1 {
-                                continue;
-                            }
-                            // Check if all arg types are compatible with params
-                            let mut compatible = true;
-                            if arg_types.len() == params.len() {
-                                for (arg_ty, param_ty) in arg_types.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    if !self.types_compatible(arg_ty, &resolved_param) {
-                                        compatible = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            if compatible {
-                                // Found matching candidate - type check args properly
-                                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    self.check_expr(arg, &resolved_param)?;
-                                }
-                                let resolved_return = self.unifier.apply(return_type);
-                                return Ok(Some(InferResult::new(resolved_return)));
-                            }
-                        }
-                    }
-                    // If no candidate matched, fall through to env lookup
-                }
-            }
-
-            // Also check for variant constructors like Maybe<Int>.Some(42)
-            let qualified_name = format!("{}.{}", type_name, method_name);
-            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
-                let constructor_ty = scheme.instantiate();
-
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &constructor_ty
-                {
-                    // Pre-check argument compatibility (same as Path block below)
-                    let mut args_pre_compatible = true;
-                    if args.len() == params.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
-                                if !self.types_compatible(&arg_result.ty, &resolved_param) {
-                                    args_pre_compatible = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if args_pre_compatible {
-                        // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
-                    }
-                }
-            }
-        }
-
+    /// Resolve static method calls on single-segment Path receivers:
+    /// variant constructors (`Maybe.Some(x)`), type-param bound dispatch
+    /// (`U.from(self)` where `U: From<T>`), inherent static methods, and
+    /// protocol fallback with shadow-guard.
+    fn try_resolve_path_static_call(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+    ) -> Result<Option<InferResult>> {
         // CRITICAL FIX: Handle Type.Variant(args) syntax for variant constructors
         // When we have Maybe.Some(42), the parser treats it as a method call on Maybe.
         // But this should actually be interpreted as calling the variant constructor Maybe.Some.
@@ -51689,22 +51755,6 @@ impl TypeChecker {
         Ok(None)
     }
 
-
-    /// Auto-dereference for method calls on references and Heap<T>
-    ///
-
-    /// This enables method calls like `ref.len()` where `ref: &List<Int>` to work
-    /// by automatically dereferencing to the underlying type for method resolution.
-    ///
-
-    /// Handles:
-    /// - &T -> T (all reference kinds: &T, &checked T, &unsafe T)
-    /// - Heap<T> -> T
-    /// - &Heap<T> -> T (double dereference)
-    /// - Ownership<T> -> T
-    ///
-
-    /// CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
     fn auto_deref_for_method_call(ty: &Type) -> Type {
         match ty {
             // Strip refinement types: methods on T{predicate} resolve as T methods
