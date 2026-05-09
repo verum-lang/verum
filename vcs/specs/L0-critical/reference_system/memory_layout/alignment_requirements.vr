@@ -6,7 +6,7 @@
 /// Test alignment requirements for reference types.
 /// All reference types must be properly aligned for atomic access.
 /// CBGR metadata requires specific alignment for thread-safe checks.
-/// Spec: 26-cbgr-implementation.md#memory-layout
+/// Spec: cbgr-implementation.md#memory-layout
 
 fn main() {
     verify_thin_ref_alignment();

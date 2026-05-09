@@ -18,7 +18,7 @@
 ///
 /// Target: < 20ns per CBGR check (includes bounds checking)
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 module vcs.specs.l4.cbgr_latency.fat_ref_check;
 

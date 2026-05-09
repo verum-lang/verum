@@ -12,7 +12,7 @@
 /// 2. No mutable reference while immutable references exist
 /// 3. References don't outlive their referent
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#borrow-checking
+/// Spec: docs/detailed/cbgr-implementation.md#borrow-checking
 
 // ============================================================================
 // TEST 1: Single mutable reference

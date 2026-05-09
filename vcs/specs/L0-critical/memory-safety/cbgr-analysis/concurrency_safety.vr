@@ -13,7 +13,7 @@
 /// - Send: Type can be transferred to another thread
 /// - Sync: Type can be shared between threads via reference
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#concurrency-analysis
+/// Spec: docs/detailed/cbgr-implementation.md#concurrency-analysis
 
 // ============================================================================
 // TEST 1: Send type transfer

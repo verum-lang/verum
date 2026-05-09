@@ -11,7 +11,7 @@
 /// rejects code that creates a mutable reference while immutable
 /// references are still in use.
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#borrow-checking
+/// Spec: docs/detailed/cbgr-implementation.md#borrow-checking
 
 fn main() {
     let mut data = [1, 2, 3];

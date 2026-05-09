@@ -17,7 +17,7 @@
 ///
 /// Target: < 15ns per CBGR check (Tier 0 managed references)
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 module vcs.specs.l4.cbgr_latency.thin_ref_check;
 

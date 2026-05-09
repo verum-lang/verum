@@ -6,7 +6,7 @@
 /// Comprehensive memory leak detection tests.
 /// Verum's ownership system prevents most leaks statically.
 /// CBGR runtime provides additional leak detection.
-/// Spec: 26-cbgr-implementation.md#leak-detection
+/// Spec: cbgr-implementation.md#leak-detection
 
 mount core.panic;
 

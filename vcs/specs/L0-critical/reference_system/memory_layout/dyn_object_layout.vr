@@ -5,7 +5,7 @@
 
 /// Test dynamic dispatch concepts with CBGR protection.
 /// Protocol objects enable polymorphic behavior while CBGR ensures memory safety.
-/// Spec: 26-cbgr-implementation.md#trait-object-layout
+/// Spec: cbgr-implementation.md#trait-object-layout
 
 fn main() {
     test_cbgr_tracking();

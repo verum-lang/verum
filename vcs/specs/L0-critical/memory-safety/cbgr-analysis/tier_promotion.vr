@@ -13,7 +13,7 @@
 /// - Tier 1: Compiler-proven safe (0ns overhead)
 /// - Tier 2: Manual safety proof (0ns overhead)
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#tier-promotion
+/// Spec: docs/detailed/cbgr-implementation.md#tier-promotion
 
 // ============================================================================
 // TEST 1: Local stack reference (Tier 1 candidate)

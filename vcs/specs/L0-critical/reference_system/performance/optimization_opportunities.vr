@@ -8,7 +8,7 @@
 /// - Check elimination for repeated accesses
 /// - Loop hoisting for invariant checks
 /// - Tier promotion via escape analysis
-/// Spec: 26-cbgr-implementation.md#optimizations
+/// Spec: cbgr-implementation.md#optimizations
 
 fn main() {
     test_repeated_access_optimization();

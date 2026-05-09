@@ -7,7 +7,7 @@
 /// Each allocation gets a unique generation number.
 /// References store the generation to detect use-after-free.
 /// Generation checking adds ~15ns overhead per access.
-/// Spec: 26-cbgr-implementation.md#generation-tracking
+/// Spec: cbgr-implementation.md#generation-tracking
 ///
 /// Key properties:
 /// - Generations are monotonically increasing

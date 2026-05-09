@@ -1763,7 +1763,7 @@ struct CbgrModuleBudget {
 }
 
 /// Cost of one managed-tier CBGR reference deref, per the CBGR spec
-/// (`docs/detailed/26-cbgr-implementation.md`). The static fallback
+/// (`docs/detailed/cbgr-implementation.md`). The static fallback
 /// — used when no profile-measurement file is available.
 const CBGR_MANAGED_DEREF_NS: u64 = 15;
 

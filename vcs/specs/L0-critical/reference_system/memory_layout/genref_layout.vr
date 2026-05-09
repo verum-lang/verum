@@ -6,7 +6,7 @@
 /// Test generation-tracked reference layout and behavior.
 /// References carry generation information that enables use-after-free detection.
 /// The ThinRef layout is: ptr (8) + generation (4) + epoch_caps (4) = 16 bytes
-/// Spec: 26-cbgr-implementation.md#thin-ref-layout
+/// Spec: cbgr-implementation.md#thin-ref-layout
 
 fn main() {
     test_ref_generation_tracking();

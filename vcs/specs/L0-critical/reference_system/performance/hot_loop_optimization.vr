@@ -5,7 +5,7 @@
 
 /// Test CBGR check hoisting in hot loops.
 /// Compiler should hoist checks out of tight loops.
-/// Spec: 26-cbgr-implementation.md#check-optimization
+/// Spec: cbgr-implementation.md#check-optimization
 
 fn main() {
     test_loop_check_hoisting();

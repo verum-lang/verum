@@ -6,7 +6,7 @@
 
 /// Test CBGR generation counter overflow handling.
 /// Generation counters are 32-bit; test behavior at boundaries.
-/// Spec: 26-cbgr-implementation.md#generation-tracking
+/// Spec: cbgr-implementation.md#generation-tracking
 
 fn main() {
     test_generation_monotonicity();

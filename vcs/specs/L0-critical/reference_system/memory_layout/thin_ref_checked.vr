@@ -6,7 +6,7 @@
 /// Test memory layout of checked ThinRef: 8 bytes.
 /// Checked references (&checked T) are just pointers without CBGR metadata.
 /// They provide zero-overhead access when compiler can prove safety.
-/// Spec: 26-cbgr-implementation.md#reference-tiers
+/// Spec: cbgr-implementation.md#reference-tiers
 
 fn main() {
     verify_checked_sizes();

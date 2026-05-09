@@ -371,7 +371,7 @@ crates/verum_compiler/benches/
 - ✅ Zero false negatives in safety checks
 - ✅ Complete marshalling system
 
-### docs/detailed/24-cbgr-implementation.md
+### docs/detailed/cbgr-implementation.md
 
 **CBGR Boundary Protection:**
 - ✅ CBGR references cannot cross FFI boundaries
@@ -452,7 +452,7 @@ When contributing to this system:
 ## References
 
 - **Specification**: `docs/detailed/21-interop.md`
-- **CBGR System**: `docs/detailed/24-cbgr-implementation.md`
+- **CBGR System**: `docs/detailed/cbgr-implementation.md`
 - **Compilation Pipeline**: `docs/detailed/06-compilation-pipeline.md`
 - **Type System**: `docs/detailed/03-type-system.md`
 

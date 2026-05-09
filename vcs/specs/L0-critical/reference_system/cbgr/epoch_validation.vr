@@ -7,7 +7,7 @@
 
 /// Test CBGR epoch-based validation.
 /// Epochs provide temporal tracking beyond generations.
-/// Spec: 26-cbgr-implementation.md#epoch-management
+/// Spec: cbgr-implementation.md#epoch-management
 
 fn main() {
     test_epoch_tracking();

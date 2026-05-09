@@ -114,7 +114,7 @@ cargo test --package verum_compiler -- --nocapture
 
 - Specification: `docs/detailed/28-implementation-roadmap.md`
 - Type System: `docs/detailed/03-type-system.md`
-- CBGR System: `docs/detailed/24-cbgr-implementation.md`
+- CBGR System: `docs/detailed/cbgr-implementation.md`
 
 ## Development
 

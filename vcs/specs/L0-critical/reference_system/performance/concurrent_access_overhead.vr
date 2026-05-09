@@ -5,7 +5,7 @@
 
 /// Test CBGR overhead in concurrent access scenarios.
 /// Multi-threaded access should not cause excessive contention.
-/// Spec: 26-cbgr-implementation.md#concurrency-overhead
+/// Spec: cbgr-implementation.md#concurrency-overhead
 
 mount core.time.{Time};
 

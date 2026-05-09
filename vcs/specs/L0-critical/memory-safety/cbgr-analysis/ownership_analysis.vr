@@ -11,7 +11,7 @@
 /// 2. Prevents use-after-move at compile time
 /// 3. Tracks allocation/deallocation pairs
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#ownership-analysis
+/// Spec: docs/detailed/cbgr-implementation.md#ownership-analysis
 
 // ============================================================================
 // TEST 1: Valid ownership transfer

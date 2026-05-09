@@ -9,7 +9,7 @@
 /// CBGR (Capability-Based Generational References) catches this at runtime.
 /// When 'local' goes out of scope, its generation is bumped.
 /// Dereferencing 'dangling' checks generation and panics on mismatch.
-/// Spec: 26-cbgr-implementation.md#dangling-prevention
+/// Spec: cbgr-implementation.md#dangling-prevention
 
 fn main() {
     let dangling: &Int;

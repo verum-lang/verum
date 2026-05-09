@@ -6,7 +6,7 @@
 
 /// Test mixing different reference tiers in the same code.
 /// Different tiers can coexist with proper conversions.
-/// Spec: 26-cbgr-implementation.md#tier-interoperability
+/// Spec: cbgr-implementation.md#tier-interoperability
 
 fn main() {
     test_tier_coexistence();

@@ -312,7 +312,7 @@ perf(crate): Optimize by X%
 | Type System | `docs/detailed/03-type-system.md` |
 | Syntax | `docs/detailed/05-syntax-grammar.md` |
 | Context System | `docs/detailed/16-context-system.md` |
-| CBGR | `docs/detailed/26-cbgr-implementation.md` |
+| CBGR | `docs/detailed/cbgr-implementation.md` |
 | Cog Distribution | `docs/detailed/15-cog-distribution-architecture.md` |
 | Cog Management | `docs/detailed/15-cog-management.md` |
 | Roadmap | `docs/detailed/28-implementation-roadmap.md` |

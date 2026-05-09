@@ -8,7 +8,7 @@
 /// Tier 2 (unsafe) references bypass all CBGR runtime safety checks.
 /// Programmer must explicitly opt into unsafety with an unsafe block.
 /// This is a COMPILE-TIME check - not a borrow checker, but a safety gate.
-/// Spec: 26-cbgr-implementation.md#unsafe-references
+/// Spec: cbgr-implementation.md#unsafe-references
 ///
 /// Note: E312 is a CBGR tier system error, not a borrow checker error.
 /// Verum has no compile-time borrow checker, but DOES require explicit

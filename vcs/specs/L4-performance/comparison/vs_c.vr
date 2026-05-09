@@ -21,7 +21,7 @@
 /// This represents the "cost of safety" - Verum aims to minimize
 /// this cost while providing memory safety guarantees.
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const ITERATIONS: Int = 100_000_000;
 const DATA_SIZE: Int = 10_000_000;

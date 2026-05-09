@@ -7,7 +7,7 @@
 /// Managed: ~15ns (full CBGR checks)
 /// Checked: ~0ns (compile-time verified)
 /// Unsafe: ~0ns (no checks)
-/// Spec: 26-cbgr-implementation.md#performance
+/// Spec: cbgr-implementation.md#performance
 
 fn main() {
     let bench = Benchmark.new("Reference Tier Comparison");

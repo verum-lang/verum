@@ -5,7 +5,7 @@
 
 /// Verify that Tier 1 (checked) references have zero runtime cost.
 /// Escape analysis enables compile-time verification.
-/// Spec: 26-cbgr-implementation.md#zero-cost-tier
+/// Spec: cbgr-implementation.md#zero-cost-tier
 
 fn main() {
     test_checked_vs_raw();

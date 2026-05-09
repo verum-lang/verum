@@ -7,7 +7,7 @@
 /// Test that checked tier promotion fails when value may escape.
 /// Escape analysis must prove safety for Tier 1 (checked) references.
 /// This is a COMPILE-TIME optimization decision, not a borrow checker.
-/// Spec: 26-cbgr-implementation.md#escape-analysis
+/// Spec: cbgr-implementation.md#escape-analysis
 ///
 /// Note: E310 is a CBGR tier promotion error.
 /// When escape analysis cannot prove a checked reference stays local,

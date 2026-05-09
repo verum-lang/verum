@@ -9,7 +9,7 @@
 ///   - size (4 bytes): data size in bytes
 ///   - flags (4 bytes): allocation state flags
 ///   - epoch (4 bytes): allocation epoch timestamp
-/// Spec: 26-cbgr-implementation.md#heap-layout
+/// Spec: cbgr-implementation.md#heap-layout
 
 fn main() {
     test_heap_basic_layout();
