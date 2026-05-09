@@ -12800,6 +12800,41 @@ impl VbcCodegen {
                     Err(_) => continue,
                 }
             };
+            // PRE-PASS — convert jump offsets from BYTE form (the
+            // archive's serialised representation, what
+            // `decode_instructions` produces) to INSTRUCTION-INDEX
+            // form (what `fixup_jump_offsets` expects on input).
+            // Codegen's `encode_instructions_with_fixup` runs at
+            // finalize and assumes its input has instruction-index
+            // offsets — feeding it byte-offset values double-applies
+            // the fixup (treating archive byte offset 7 as
+            // instr-index 7, then converting THAT to a byte offset
+            // → infinite loop or out-of-bounds branch). Without
+            // this normalisation, `Maybe.is_some()` on `None` jumps
+            // to byte offset 0 of the function (instead of byte
+            // offset of the post-Ret point), spinning forever.
+            byte_offsets_to_instr_indices(&mut instructions);
+
+            // FIRST PASS — string-id remap. Several instruction
+            // variants carry an interned-name index that the
+            // codegen's finalize-time `string_id_map` will look up
+            // (CallM.method_id, Panic.message_id, Assert.message_id,
+            // CtxGet/CtxProvide/CtxCheckNegative.ctx_type, …). These
+            // are STRING ids in the codegen-internal namespace, NOT
+            // function ids — the shared `rewrite_instruction_ids`
+            // helper (next pass) deliberately treats CallM.method_id
+            // as a function id (matching the linker's convention),
+            // so we MUST do the string-id remap first to convert the
+            // archive's byte-offset StringId to a codegen-local
+            // index BEFORE the function-id pass — otherwise the
+            // function-id pass would (correctly per its semantics
+            // but wrong for our use case) try to map the archive
+            // byte offset as a function id and produce garbage.
+            for instr in instructions.iter_mut() {
+                self.remap_archive_string_operands(instr, archive_module);
+            }
+            // SECOND PASS — function/type/const id remap via the
+            // shared per-instruction helper.
             for instr in instructions.iter_mut() {
                 crate::bytecode_remap::rewrite_instruction_ids(instr, &remap);
             }
@@ -12847,6 +12882,73 @@ impl VbcCodegen {
     }
 }
 
+impl VbcCodegen {
+    /// Per-instruction string-id remap from archive's byte-offset
+    /// StringId space to the codegen-internal sequential string
+    /// index. Called as a SECOND pass after
+    /// [`crate::bytecode_remap::rewrite_instruction_ids`] which
+    /// (deliberately, for linker compatibility) leaves these fields
+    /// untouched.
+    ///
+    /// `archive_module` provides the source string table — every
+    /// archive StringId resolves to a UTF-8 text via
+    /// `archive_module.strings.get(StringId)` and we re-intern that
+    /// text into `ctx.strings` to obtain the codegen-internal index
+    /// the finalize-time `string_id_map` will resolve to a final
+    /// module-level StringId.
+    fn remap_archive_string_operands(
+        &mut self,
+        instr: &mut crate::instruction::Instruction,
+        archive_module: &crate::module::VbcModule,
+    ) {
+        use crate::instruction::Instruction;
+        let intern_archive = |this: &mut Self, archive_sid: u32| -> u32 {
+            let text = match archive_module.strings.get(crate::types::StringId(archive_sid))
+            {
+                Some(s) => s.to_string(),
+                None => return archive_sid,
+            };
+            this.ctx.intern_string_raw(&text)
+        };
+        match instr {
+            Instruction::CallM { method_id, .. } => {
+                let new_id = intern_archive(self, *method_id);
+                *method_id = new_id;
+            }
+            Instruction::Panic { message_id } => {
+                let new_id = intern_archive(self, *message_id);
+                *message_id = new_id;
+            }
+            Instruction::Assert { message_id, .. } => {
+                let new_id = intern_archive(self, *message_id);
+                *message_id = new_id;
+            }
+            Instruction::CtxGet { ctx_type, .. } => {
+                let new_id = intern_archive(self, *ctx_type);
+                *ctx_type = new_id;
+            }
+            Instruction::CtxProvide { ctx_type, .. } => {
+                let new_id = intern_archive(self, *ctx_type);
+                *ctx_type = new_id;
+            }
+            Instruction::CtxCheckNegative { ctx_type, func_name } => {
+                let new_ctx = intern_archive(self, *ctx_type);
+                *ctx_type = new_ctx;
+                let new_fn = intern_archive(self, *func_name);
+                *func_name = new_fn;
+            }
+            // CmpG.protocol_id uses (string_idx + 1) encoding when
+            // > 0 — pass through the +1 offset.
+            Instruction::CmpG { protocol_id, .. } if *protocol_id > 0 => {
+                let archive_sid = *protocol_id - 1;
+                let new_id = intern_archive(self, archive_sid);
+                *protocol_id = new_id + 1;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Helper IdRemap implementation used by [`VbcCodegen::merge_archive_function_bodies`]
 /// during the per-instruction id rewrite. The lookup tables are
 /// borrowed from the calling scope so we don't pay the
@@ -12879,6 +12981,86 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
     // don't appear as instruction operands, and protocol ids in the
     // user codegen's namespace match the archive's namespace for
     // built-in protocols (Eq/Ord/Hash/...).
+}
+
+/// Convert jump offsets in `instructions` from BYTE form to
+/// INSTRUCTION-INDEX form, in place. Mirrors the inverse of
+/// `crate::bytecode::fixup_jump_offsets` (which converts
+/// instr-index → byte form), so that an archive function
+/// freshly decoded with `decode_instructions` (byte form, since
+/// that's what was serialised) can be re-fed into the codegen's
+/// `encode_instructions_with_fixup` pipeline cleanly without
+/// double-applying the fixup.
+///
+/// Algorithm: walk once to compute byte offset of each instruction
+/// (sum of `instruction_size` for preceding instructions). For
+/// every jump-bearing instruction, the byte target is
+/// `(idx_byte_offset + instr_size + offset)`; the corresponding
+/// instr-index target is the index whose byte-offset equals that
+/// target. Store `target_idx - current_idx` as the new offset.
+///
+/// **Performance**: O(N + N×log N) — the byte-offset table is
+/// built linearly; per-jump lookup is a binary search. For typical
+/// stdlib bodies (10-50 instructions) this is microseconds.
+fn byte_offsets_to_instr_indices(instructions: &mut [crate::instruction::Instruction]) {
+    use crate::instruction::Instruction;
+    if instructions.is_empty() {
+        return;
+    }
+    // Byte offset of each instruction (cumulative size of preceding
+    // instructions). Includes a sentinel at the end equal to total
+    // bytecode length, so a jump to "past last instruction" maps to
+    // index `instructions.len()` (Ret-fall-through pattern).
+    let mut byte_offsets: Vec<usize> = Vec::with_capacity(instructions.len() + 1);
+    let mut instr_sizes: Vec<usize> = Vec::with_capacity(instructions.len());
+    let mut cur = 0usize;
+    for instr in instructions.iter() {
+        byte_offsets.push(cur);
+        let sz = crate::bytecode::instruction_size(instr);
+        instr_sizes.push(sz);
+        cur += sz;
+    }
+    byte_offsets.push(cur); // sentinel for end-of-function
+    let byte_to_idx = |byte: usize| -> Option<i32> {
+        // Binary search; the table is monotone-strictly-increasing
+        // because every instruction has size >= 1.
+        match byte_offsets.binary_search(&byte) {
+            Ok(idx) => Some(idx as i32),
+            Err(_) => None,
+        }
+    };
+    for (idx, instr) in instructions.iter_mut().enumerate() {
+        let instr_end_byte = byte_offsets[idx] + instr_sizes[idx];
+        let convert = |old_byte_offset: i32| -> i32 {
+            let target_byte = (instr_end_byte as i32) + old_byte_offset;
+            if target_byte < 0 {
+                return old_byte_offset; // out-of-range; preserve
+            }
+            match byte_to_idx(target_byte as usize) {
+                Some(target_idx) => target_idx - (idx as i32),
+                None => old_byte_offset, // doesn't land on an instruction boundary
+            }
+        };
+        match instr {
+            Instruction::Jmp { offset } => {
+                *offset = convert(*offset);
+            }
+            Instruction::JmpIf { offset, .. }
+            | Instruction::JmpNot { offset, .. } => {
+                *offset = convert(*offset);
+            }
+            Instruction::JmpCmp { offset, .. } => {
+                *offset = convert(*offset);
+            }
+            Instruction::CtxProvide { body_offset, .. } => {
+                *body_offset = convert(*body_offset);
+            }
+            Instruction::TryBegin { handler_offset } => {
+                *handler_offset = convert(*handler_offset);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Recursive [`TypeRef`] remap shared by
