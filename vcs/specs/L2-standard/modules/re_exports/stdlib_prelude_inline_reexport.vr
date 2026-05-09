@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, re-exports, prelude, inline-module, regression, core.prelude
+// @timeout: 10000
+// @description: Regression guard for inline-module Mount re-export propagation
+//               (commit 67694183, #81).
+//
+// `core.prelude` is an inline module in core/base/mod.vr:
+//
+//   public module prelude {
+//       public mount super.base.*;   // ← a Mount item inside an inline module
+//       public mount super.collections.*;
+//       ...
+//   }
+//
+// Before fix, `import_all_from_inline_module_impl` only handled
+// Function/Type/Const items, silently dropping `Mount` items.
+// Result: auto-injected `mount core.prelude.*` resolved to nothing — every
+// subsequent use of Maybe/Result/List etc. appeared as unknown type.
+//
+// This spec does NOT explicitly import Maybe/Result/List.  It relies on the
+// auto-injected prelude (every Verum file gets `mount core.prelude.*`) to
+// supply them.  If the inline-module re-export is broken, the typechecker
+// cannot see these types and will emit E100 / E400 errors.
+
+fn prelude_maybe_available_without_explicit_mount() {
+    // Maybe must come from the auto-injected prelude, not an explicit mount.
+    let x: Maybe<Int> = Some(42);
+    assert(x.is_some());
+}
+
+fn prelude_result_available_without_explicit_mount() {
+    let r: Result<Text, Int> = Ok(Text.from("ok"));
+    assert(r.is_ok());
+}
+
+fn prelude_list_available_without_explicit_mount() {
+    let xs: List<Int> = [10, 20, 30];
+    assert(xs.len() == 3);
+}
+
+fn prelude_text_available_without_explicit_mount() {
+    let t: Text = Text.from("verum");
+    assert(t.len() == 5);
+}
+
+fn prelude_map_available_without_explicit_mount() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert(Text.from("a"), 1);
+    assert(m.len() == 1);
+}
+
+fn prelude_int_methods_accessible() {
+    // Int.MAX / Int.MIN are methods on the built-in Int type exposed via prelude.
+    assert(Int.MAX > 0);
+    assert(Int.MIN < 0);
+}
+
+fn main() {
+    prelude_maybe_available_without_explicit_mount();
+    prelude_result_available_without_explicit_mount();
+    prelude_list_available_without_explicit_mount();
+    prelude_text_available_without_explicit_mount();
+    prelude_map_available_without_explicit_mount();
+    prelude_int_methods_accessible();
+    print("inline prelude re-export regression ok");
+}
