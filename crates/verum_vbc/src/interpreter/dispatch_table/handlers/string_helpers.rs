@@ -223,13 +223,50 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 
 /// NOTE: This function calls `get_array_length` and `get_array_element` which remain
 /// in dispatch_table.rs. When those are extracted, the imports here will need updating.
-pub(super) fn deep_value_eq(va: &Value, vb: &Value, state: &InterpreterState) -> bool {
+/// **Visibility**: `pub(in crate::interpreter::dispatch_table)` so the
+/// dispatch table's `method_dispatch` handler (and any future
+/// dispatch-table-internal consumer) can route through this single
+/// canonical implementation. Pre-this-bump, `dispatch_table/mod.rs`
+/// carried a parallel `deep_value_eq` whose CBGR-ref decode was
+/// INCOMPATIBLE with the canonical encoder
+/// (`cbgr_helpers::encode_cbgr_ref_mut` produces
+/// `-1 - (idx | mut_bit) - (gen << 32)`; the duplicate decoder
+/// did `(encoded & 0xFFFF, (encoded >> 16) & 0xFFFF)` — same input
+/// bits, completely different output). `.eq()` method dispatch
+/// silently produced garbage results on CBGR-ref values while the
+/// `==` operator (which routed through this implementation) was
+/// correct. The duplicate is now deleted.
+pub(crate) fn deep_value_eq(
+    va: &Value,
+    vb: &Value,
+    state: &InterpreterState,
+) -> bool {
     deep_value_eq_depth(va, vb, state, 0)
 }
 
 /// Maximum recursion depth for deep equality comparison.
 /// Prevents infinite loops on recursive Heap<T> variant structures.
 const MAX_EQ_DEPTH: usize = 64;
+
+/// `true` when `type_id` refers to a sum-kind type descriptor in the
+/// loaded module — i.e. a real (typed) variant carrier such as
+/// `Maybe` (`TypeId::MAYBE = 515`) or `Result` (`TypeId::RESULT = 516`).
+/// Companion to `verum_common::layout::is_synthetic_variant_type_id`
+/// which only recognises the `MakeVariant` (untyped) sentinel ids
+/// (`>= 0x8000`).  Without this typed-variant path, `deep_value_eq`
+/// would treat `Some(5)` (TypeId 515) and `Some(5)` (TypeId 515) as
+/// "same non-variant type — likely strings" and call
+/// `extract_string` on heap variants → panic at `as_i64`.
+fn is_typed_sum_variant(state: &InterpreterState, type_id: u32) -> bool {
+    use crate::types::TypeKind;
+    state
+        .module
+        .types
+        .iter()
+        .find(|td| td.id.0 == type_id)
+        .map(|td| matches!(td.kind, TypeKind::Sum))
+        .unwrap_or(false)
+}
 
 fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> bool {
     if depth >= MAX_EQ_DEPTH {
@@ -446,9 +483,19 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         // composed via `verum_common::layout::synthetic_variant_type_id`;
         // the predicate below is the canonical sibling that recognises
         // them — see `is_synthetic_variant_type_id` for the contract.
-        if verum_common::layout::is_synthetic_variant_type_id(type_id_a)
-            && verum_common::layout::is_synthetic_variant_type_id(type_id_b)
-        {
+        // ALSO recognises *typed* variants (`MakeVariantTyped` with a
+        // real `TypeDescriptor` id like `TypeId::MAYBE = 515`) by
+        // consulting the module's type table for `kind == Sum`.
+        // Without this, deep equality of two typed-variant values
+        // (e.g. `Some(5)` carrying `TypeId(515)` after the
+        // archive-driven typed-variant fix) falls through to the
+        // `type_id_a == type_id_b` branch below which calls
+        // `extract_string` on a non-string and panics in `as_i64`.
+        let is_variant_a = verum_common::layout::is_synthetic_variant_type_id(type_id_a)
+            || is_typed_sum_variant(state, type_id_a);
+        let is_variant_b = verum_common::layout::is_synthetic_variant_type_id(type_id_b)
+            || is_typed_sum_variant(state, type_id_b);
+        if is_variant_a && is_variant_b {
             // Both are variants - compare tags first
             let tag_a = unsafe { *(ptr_a.add(OBJECT_HEADER_SIZE) as *const u32) };
             let tag_b = unsafe { *(ptr_b.add(OBJECT_HEADER_SIZE) as *const u32) };
