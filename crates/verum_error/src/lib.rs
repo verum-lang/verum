@@ -140,6 +140,9 @@ pub mod crash;
 
 // Result extension trait for structured contexts
 pub mod result_ext;
+
+// Structured error-code registry (E0xx–E9xx) — single source of truth (#63)
+pub mod registry;
 pub use result_ext::{
     ContextErrorStructuredExt, ResultStructuredContext, ResultStructuredContextFn,
 };
