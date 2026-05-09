@@ -3302,9 +3302,28 @@ impl CrossFilePass for DeadModulePass {
                 None => continue,
             };
             for m in collect_mount_paths(&f.module) {
-                if name_of.contains_key(&m) && !reachable.contains(&m) {
-                    reachable.insert(m.clone());
-                    frontier.push(m);
+                // `mount A.B.C` may name (a) a module file at exactly
+                // A.B.C (folder/A/B/C.vr), or (b) a name C exported
+                // from module A.B (folder/A/B.vr or folder/A/B/mod.vr
+                // re-exporting it).  The reachability walk mark must
+                // honour both: walk the prefix tree of `m` and treat
+                // every existing file along the chain as reached.
+                // Without this, `mount foo.bar.SomeFn` where SomeFn
+                // is a re-export from foo.bar fails to mark foo.bar
+                // reachable, and DeadModulePass falsely flags it.
+                let mut prefix = m.as_str();
+                loop {
+                    if let Some(_f2) = name_of.get(prefix) {
+                        let owned = prefix.to_string();
+                        if !reachable.contains(&owned) {
+                            reachable.insert(owned.clone());
+                            frontier.push(owned);
+                        }
+                    }
+                    match prefix.rfind('.') {
+                        Some(idx) => prefix = &prefix[..idx],
+                        None => break,
+                    }
                 }
             }
         }
