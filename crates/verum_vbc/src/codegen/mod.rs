@@ -2028,6 +2028,7 @@ impl VbcCodegen {
                 takes_self_mut_ref: false,
                 return_type_name: None,
                 return_type_inner: None,
+                is_const: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -2570,6 +2571,7 @@ impl VbcCodegen {
                 takes_self_mut_ref: false,
                 return_type_name: None,
                 return_type_inner: None,
+                is_const: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -5003,6 +5005,7 @@ impl VbcCodegen {
                 takes_self_mut_ref: false,
                 return_type_name: Some((*type_name).to_string()),
                 return_type_inner: None,
+                is_const: false,
             };
             // Always register qualified name.
             self.ctx.register_function(qualified, info.clone());
@@ -5082,6 +5085,7 @@ impl VbcCodegen {
                 takes_self_mut_ref: false,
                 return_type_name: None,
                 return_type_inner: None,
+                is_const: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -5626,6 +5630,7 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
+            is_const: false,
         };
 
         // #201 diagnostic — env-var-gated trace of every register_function
@@ -5773,6 +5778,7 @@ impl VbcCodegen {
                 None
             },
             return_type_inner: None,
+            is_const: false,
         };
 
         self.ctx.register_function(name, info);
@@ -5890,6 +5896,24 @@ impl VbcCodegen {
         if let Some(ref rt) = ret_type {
             descriptor.return_type = rt.clone();
         }
+        // #87 — propagate the intrinsic-name marker into the
+        // archive-side descriptor.  Carries `__const_val_<N>` and
+        // similar inline-constant markers across the precompile →
+        // archive → load round-trip so cross-module references to
+        // stdlib `public const FOO: Int = 256;` resolve correctly
+        // at user-side codegen time.  Without this propagation, the
+        // marker survived inside the same compilation unit but was
+        // dropped at the archive boundary, surfacing as
+        // `UndefinedVariable` at every cross-module reference.
+        if let Some(ref iname) = func_info.intrinsic_name {
+            descriptor.intrinsic_name = Some(StringId(self.intern_string(iname)));
+        }
+        // #97 — propagate the const marker so the archive-driven
+        // typechecker can distinguish const-as-zero-arg-function from
+        // a genuine zero-arg function. Set by
+        // `register_constant_with_value`; round-trips via
+        // `vbc::FunctionDescriptor::is_const`.
+        descriptor.is_const = func_info.is_const;
 
         // Populate debug variables for DWARF emission
         if !debug_vars.is_empty() {
@@ -6005,6 +6029,7 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
+            is_const: false,
         };
 
         self.ctx.register_function(name, info);
@@ -6616,6 +6641,7 @@ impl VbcCodegen {
             takes_self_mut_ref,
             return_type_name,
             return_type_inner: None,
+            is_const: false,
         };
 
         self.ctx.register_function(qualified_name, info);
@@ -6719,6 +6745,7 @@ impl VbcCodegen {
                 takes_self_mut_ref: false,
                 return_type_name,
                 return_type_inner: None,
+                is_const: false,
             };
 
             self.ctx.register_function(name.clone(), info);
@@ -7209,6 +7236,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: None, // Bitfield getters return primitive types
                     return_type_inner: None,
+                    is_const: false,
                 };
                 self.ctx.register_function(getter_name, getter_info);
 
@@ -7238,6 +7266,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: None, // Setters return unit
                     return_type_inner: None,
+                    is_const: false,
                 };
                 self.ctx.register_function(setter_name, setter_info);
             }
@@ -7976,6 +8005,7 @@ impl VbcCodegen {
                         // Variant constructors return the parent type
                         return_type_name: Some(type_name.clone()),
                         return_type_inner: None,
+                        is_const: false,
                     };
 
                     // 1. Always register with qualified name (TypeName::VariantName)
@@ -8391,6 +8421,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -8744,6 +8775,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
 
                 self.ctx.register_function(type_name.clone(), info);
@@ -8806,6 +8838,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -8833,6 +8866,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -8863,6 +8897,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -8914,6 +8949,7 @@ impl VbcCodegen {
                     takes_self_mut_ref: false,
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
+                    is_const: false,
                 };
                 let of_qualified = format!("{}.of", type_name);
                 self.ctx.register_function(of_qualified, of_info);
@@ -8941,6 +8977,7 @@ impl VbcCodegen {
                         Some(base_type_name)
                     },
                     return_type_inner: None,
+                    is_const: false,
                 };
                 let rep_qualified = format!("{}.rep", type_name);
                 self.ctx.register_function(rep_qualified, rep_info);
@@ -9043,6 +9080,11 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner: None,
+            // #97 — const storage strategy.  Both inlinable and
+            // non-inlinable consts (those queued in
+            // `pending_constants` for body compilation) carry this
+            // marker so the typechecker treats them as values.
+            is_const: true,
         };
 
         // Register with simple name for local access
@@ -9053,7 +9095,7 @@ impl VbcCodegen {
         let module_name = &self.config.module_name;
         if !module_name.is_empty() && module_name != "main" {
             let qualified_name = format!("{}.{}", module_name, name);
-            self.ctx.register_function(qualified_name, info);
+            self.ctx.register_function(qualified_name, info.clone());
         }
 
         // Register the constant's type for correct instruction selection.
@@ -9063,6 +9105,46 @@ impl VbcCodegen {
         if let Some(ty) = const_type {
             let var_type = self.type_kind_to_var_type(&ty.kind);
             self.ctx.register_constant_type(name, var_type);
+        }
+
+        // #97 — Push an unconditional stub VbcFunction for inlinable
+        // consts (those with `intrinsic_name = Some("__const_val_<N>")`)
+        // so the precompile path emits them into the archive even
+        // when no internal stdlib bytecode references the const.
+        // Without this, `public const SSO_CAPACITY: Int = 23;` is
+        // registered in `ctx.functions` but never lands in
+        // `module.functions`; downstream user-side codegen then can't
+        // find SSO_CAPACITY in the archive and the typechecker
+        // surfaces `unbound variable: SSO_CAPACITY`.
+        //
+        // Non-inlinable consts go through `compile_pending_constants`
+        // which already pushes a real body to `self.functions`, so
+        // the stub is gated on `intrinsic_name.is_some()`.
+        if info.intrinsic_name.is_some() {
+            let name_id = StringId(self.intern_string(name));
+            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+            descriptor.id = info.id;
+            descriptor.is_const = true;
+            if let Some(ref iname) = info.intrinsic_name {
+                descriptor.intrinsic_name = Some(StringId(self.intern_string(iname)));
+            }
+            // Set the const's actual return type (Int / Text / Char /
+            // …) — derived from the AST `const_type` when present.
+            // The codegen-side `type_kind_to_type_ref` mirror of the
+            // typechecker's known-type mapping is the right helper
+            // here; use a conservative `Int` fallback when the type
+            // can't be inferred.
+            if let Some(ty) = const_type {
+                descriptor.return_type =
+                    self.ast_type_to_type_ref(ty);
+            }
+            descriptor.register_count = 1;
+            descriptor.locals_count = 0;
+            let vbc_func = crate::module::VbcFunction::new(
+                descriptor,
+                vec![Instruction::RetV],
+            );
+            self.functions.push(vbc_func);
         }
 
         Ok(())
@@ -11437,6 +11519,29 @@ impl VbcCodegen {
         // function id.
         let mut stub_synthesised: std::collections::HashSet<u32> =
             std::collections::HashSet::new();
+        // #97 — Const-declaration unconditional emission.  `public const`
+        // declarations are registered as zero-arg FunctionInfo entries
+        // (`is_const = true`); when no internal stdlib bytecode
+        // references them, the `referenced` set above never contains
+        // their ids and `emit_missing_stub_descriptors` skips them.
+        // The result is a precompiled archive where stdlib consts are
+        // missing from `module.functions` entirely — every user-side
+        // `mount core.text.{SSO_CAPACITY}` then surfaces as `unbound
+        // variable: SSO_CAPACITY` because the archive-driven
+        // typechecker has nothing to register.  Force-emit every const
+        // by injecting its id into the `referenced` set up-front; the
+        // existing stub loop then handles them uniformly.  The is_const
+        // marker is propagated below in the descriptor build.
+        let mut referenced = referenced;
+        for (name, info) in self.ctx.functions.iter() {
+            if !info.is_const || info.id.0 >= SENTINEL_THRESHOLD {
+                continue;
+            }
+            referenced.insert(info.id.0);
+            id_to_name
+                .entry(info.id.0)
+                .or_insert_with(|| name.clone());
+        }
         for id in referenced {
             if id >= SENTINEL_THRESHOLD {
                 continue;
@@ -11515,6 +11620,31 @@ impl VbcCodegen {
             if let Some(parent_name) = info.parent_type_name.as_deref() {
                 if let Some(&parent_tid) = self.type_name_to_id.get(parent_name) {
                     descriptor.parent_type = Some(parent_tid);
+                }
+            }
+            // #87/#97 — propagate const-storage marker and inline-
+            // constant marker.  Stubs emitted from a `public const X`
+            // declaration must carry both: `is_const` so the archive-
+            // driven typechecker treats the archive entry as a value,
+            // and `intrinsic_name = Some("__const_val_<N>")` so user-
+            // side codegen inlines the literal at every reference
+            // site instead of emitting a Call to the empty `RetV`
+            // body.  Without these the stub is indistinguishable
+            // from a zero-arg fn whose body trivially returns Unit.
+            descriptor.is_const = info.is_const;
+            if let Some(ref iname) = info.intrinsic_name {
+                descriptor.intrinsic_name =
+                    Some(StringId(self.ctx.intern_string_raw(iname)));
+            }
+            // Stubs synthesised from a const get the const's actual
+            // return type (typically `Int` / `Text`) so the typechecker's
+            // archive-side metadata extraction sees a meaningful type
+            // rather than `Unit` (the declared return for a body-less
+            // RetV stub).  Without this, every cross-module `let x =
+            // SSO_CAPACITY` would type x as Unit.
+            if info.is_const {
+                if let Some(ref rt) = info.return_type {
+                    descriptor.return_type = rt.clone();
                 }
             }
             let vbc_func = crate::module::VbcFunction::new(
@@ -11976,6 +12106,24 @@ impl VbcCodegen {
                     .get(codegen_idx)
                     .copied()
                     .unwrap_or(StringId::EMPTY);
+            }
+
+            // #87/#97 — remap `descriptor.intrinsic_name` (the
+            // `__const_val_<N>` marker for inlinable consts and the
+            // `@intrinsic("name")` carrier) through the same
+            // `string_id_map`.  Pre-fix this remap was missing — codegen
+            // pushed `intrinsic_name = Some(StringId(codegen_index))`
+            // but `build_module` left it untranslated, so the
+            // serialised descriptor pointed at a codegen-local index
+            // that the runtime's byte-offset `module.strings.get()`
+            // interpreted as garbage (or returned `None`).  Result:
+            // every inlinable stdlib const lost its inline marker at
+            // the archive boundary, surfaced as a body-less zero-arg
+            // function whose `RetV` body returned Unit instead of the
+            // const's literal value.
+            if let Some(codegen_iname) = descriptor.intrinsic_name {
+                let codegen_idx = codegen_iname.0 as usize;
+                descriptor.intrinsic_name = string_id_map.get(codegen_idx).copied();
             }
 
             // Store decoded instructions for LLVM lowering (AOT path).

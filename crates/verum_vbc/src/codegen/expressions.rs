@@ -15756,6 +15756,7 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name: closure_return_type_name,
             return_type_inner: None,
+            is_const: false,
         };
         self.ctx.register_function(closure_name.clone(), info);
 
@@ -16883,6 +16884,7 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name: None,
             return_type_inner: None,
+            is_const: false,
         };
         self.ctx.register_function(spawn_func_name.clone(), info);
 
@@ -24681,6 +24683,7 @@ impl VbcCodegen {
             takes_self_mut_ref: false,
             return_type_name: None, // Generator return types are inferred
             return_type_inner: None,
+            is_const: false,
         };
         self.ctx.register_function(gen_name.clone(), info);
 

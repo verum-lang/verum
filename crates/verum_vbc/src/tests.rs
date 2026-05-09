@@ -154,6 +154,7 @@ fn test_roundtrip_type_descriptor() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        is_transparent_wrapper: false,
     };
 
     module.types.push(desc);
@@ -214,6 +215,7 @@ fn test_roundtrip_sum_type() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        is_transparent_wrapper: false,
     };
 
     module.types.push(desc);
@@ -275,6 +277,8 @@ fn test_roundtrip_function_descriptor() {
         debug_variables: Vec::new(),
         is_test: false,
         is_gpu_only: false,
+        intrinsic_name: None,
+        is_const: false,
     };
 
     // Add some dummy bytecode
@@ -290,6 +294,69 @@ fn test_roundtrip_function_descriptor() {
     assert_eq!(loaded.functions[0].params.len(), 2);
     assert!(loaded.functions[0].properties.contains(PropertySet::PURE));
     assert!(loaded.functions[0].is_inline_candidate);
+}
+
+/// #87 — `intrinsic_name` survives the archive round-trip.
+///
+/// Stdlib `public const X: T = N;` declarations are registered as
+/// zero-arg functions with `intrinsic_name = "__const_val_<N>"`.
+/// Codegen reads that marker to inline the constant at every use
+/// site.  If the archive boundary drops the marker, every cross-
+/// module reference surfaces as `UndefinedVariable` because the
+/// imported function has no body.
+#[test]
+fn intrinsic_name_marker_survives_round_trip() {
+    let mut module = VbcModule::new("consts".to_string());
+    let name = module.intern_string("MAX_FOO");
+    let iname = module.intern_string("__const_val_256");
+    module.functions.push(FunctionDescriptor {
+        id: FunctionId(0),
+        name,
+        parent_type: None,
+        type_params: smallvec::smallvec![],
+        params: smallvec::smallvec![],
+        return_type: TypeRef::Concrete(TypeId::INT),
+        contexts: smallvec::smallvec![],
+        properties: PropertySet::PURE,
+        bytecode_offset: 0,
+        bytecode_length: 0,
+        locals_count: 0,
+        register_count: 1,
+        max_stack: 0,
+        is_inline_candidate: true,
+        is_generic: false,
+        visibility: Visibility::Public,
+        is_generator: false,
+        yield_type: None,
+        suspend_point_count: 0,
+        calling_convention: CallingConvention::C,
+        optimization_hints: OptimizationHints::default(),
+        instructions: None,
+        func_id_base: 0,
+        debug_variables: Vec::new(),
+        is_test: false,
+        is_gpu_only: false,
+        intrinsic_name: Some(iname),
+        is_const: true,
+    });
+    module.header.function_table_count = 1;
+
+    let bytes = serialize_module(&module).unwrap();
+    let loaded = deserialize_module(&bytes).unwrap();
+
+    let restored = loaded.functions[0]
+        .intrinsic_name
+        .and_then(|sid| loaded.strings.get(sid));
+    assert_eq!(
+        restored,
+        Some("__const_val_256"),
+        "intrinsic_name must survive the archive round-trip"
+    );
+    assert!(
+        loaded.functions[0].is_const,
+        "is_const must survive the archive round-trip — without it the typechecker \
+         can't tell `mount X.CONST` from `mount X.zero_arg_fn`"
+    );
 }
 
 #[test]
@@ -641,6 +708,7 @@ fn test_roundtrip_all_type_kinds() {
             protocols: smallvec::smallvec![],
             visibility: Visibility::Public,
             alias_target: None,
+            is_transparent_wrapper: false,
         });
     }
     module.header.type_table_count = kinds.len() as u32;
@@ -676,6 +744,7 @@ fn test_roundtrip_all_visibility_levels() {
             protocols: smallvec::smallvec![],
             visibility: *vis,
             alias_target: None,
+            is_transparent_wrapper: false,
         });
     }
     module.header.type_table_count = visibilities.len() as u32;
@@ -845,6 +914,7 @@ fn test_roundtrip_empty_and_full_variants() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        is_transparent_wrapper: false,
     });
     module.header.type_table_count = 1;
 
