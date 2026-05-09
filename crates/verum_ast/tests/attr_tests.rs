@@ -1595,3 +1595,266 @@ mod accessibility_tests {
         assert_eq!(Spanned::span(&attr), span);
     }
 }
+
+/// Drift-pin tests for the small attribute enums consolidated under the
+/// shared `meta() -> XMeta` pattern. Each pin closes one of these
+/// failure modes:
+///
+///   * Round-trip drift: `from_str(x.as_str()) != Some(x)` — exposed
+///     by the `InlineMode::from_str("suggest")` defect (returned `None`
+///     even though `as_str(Suggest) == "suggest"`).
+///   * Variant coverage drift: a new variant is added without the
+///     parallel `from_str` / `as_str` arm — caught by `ALL` having to
+///     stay consistent with the `meta()` match.
+///   * Name uniqueness drift: two variants picking up the same canonical
+///     string would silently make the parser non-injective.
+///
+/// All pins are pure `const fn` projections plus byte-equality checks,
+/// so they cost nothing at runtime and protect the surface from
+/// hand-edit drift between sibling match arms.
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use verum_ast::attr::*;
+    use verum_common::{List, Maybe};
+
+    /// Generic round-trip + uniqueness pin used by every consolidated
+    /// enum. We keep the helper inline (rather than a macro) so each
+    /// pin is greppable by enum name.
+    fn assert_round_trip_unique<const N: usize>(
+        name: &'static str,
+        all: [&'static str; N],
+        parse: impl Fn(&str) -> Maybe<&'static str>,
+    ) {
+        // Round trip: every canonical name parses back to itself.
+        for s in all.iter() {
+            match parse(s) {
+                Maybe::Some(round) => assert_eq!(
+                    round, *s,
+                    "{}: round-trip drift on '{}'",
+                    name, s
+                ),
+                Maybe::None => panic!("{}: from_str dropped canonical '{}'", name, s),
+            }
+        }
+        // Uniqueness: the canonical-name list has no duplicates.
+        let mut seen: List<&'static str> = List::new();
+        for s in all.iter() {
+            assert!(
+                !seen.iter().any(|prev| prev == s),
+                "{}: duplicate canonical name '{}'",
+                name,
+                s
+            );
+            seen.push(*s);
+        }
+        // Negative: an obviously-not-a-variant string returns None.
+        assert!(
+            matches!(parse("__not_a_variant_string__"), Maybe::None),
+            "{}: from_str accepted a bogus name",
+            name
+        );
+    }
+
+    #[test]
+    fn optimization_level_round_trip_unique() {
+        let all = [
+            OptimizationLevel::None.as_str(),
+            OptimizationLevel::Size.as_str(),
+            OptimizationLevel::Speed.as_str(),
+            OptimizationLevel::Balanced.as_str(),
+        ];
+        assert_eq!(OptimizationLevel::ALL.len(), all.len());
+        assert_round_trip_unique("OptimizationLevel", all, |s| {
+            match OptimizationLevel::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+    }
+
+    #[test]
+    fn vectorize_mode_round_trip_unique_and_empty_alias_preserved() {
+        let all = [
+            VectorizeMode::Auto.as_str(),
+            VectorizeMode::Force.as_str(),
+            VectorizeMode::Prefer.as_str(),
+            VectorizeMode::Never.as_str(),
+        ];
+        assert_eq!(VectorizeMode::ALL.len(), all.len());
+        assert_round_trip_unique("VectorizeMode", all, |s| {
+            match VectorizeMode::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+        // `""` is a legacy bare-attribute alias for Auto. Pin it so the
+        // consolidation doesn't silently drop it.
+        assert_eq!(VectorizeMode::from_str(""), Maybe::Some(VectorizeMode::Auto));
+    }
+
+    #[test]
+    fn prefetch_access_round_trip_unique() {
+        let all = [
+            PrefetchAccess::Read.as_str(),
+            PrefetchAccess::Write.as_str(),
+        ];
+        assert_eq!(PrefetchAccess::ALL.len(), all.len());
+        assert_round_trip_unique("PrefetchAccess", all, |s| {
+            match PrefetchAccess::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+    }
+
+    #[test]
+    fn deterministic_fp_strictness_round_trip_unique_and_is_strict() {
+        let all = [
+            DeterministicFpStrictness::Warn.as_str(),
+            DeterministicFpStrictness::Strict.as_str(),
+        ];
+        assert_eq!(DeterministicFpStrictness::ALL.len(), all.len());
+        assert_round_trip_unique("DeterministicFpStrictness", all, |s| {
+            match DeterministicFpStrictness::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+        // is_strict agrees with the dedicated variant.
+        for v in DeterministicFpStrictness::ALL {
+            assert_eq!(v.is_strict(), *v == DeterministicFpStrictness::Strict);
+        }
+    }
+
+    #[test]
+    fn const_eval_mode_round_trip_unique() {
+        let all = [
+            ConstEvalMode::Eval.as_str(),
+            ConstEvalMode::Fold.as_str(),
+            ConstEvalMode::Propagate.as_str(),
+        ];
+        assert_eq!(ConstEvalMode::ALL.len(), all.len());
+        assert_round_trip_unique("ConstEvalMode", all, |s| {
+            match ConstEvalMode::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+    }
+
+    #[test]
+    fn lto_mode_round_trip_unique() {
+        let all = [
+            LtoMode::None.as_str(),
+            LtoMode::Always.as_str(),
+            LtoMode::Thin.as_str(),
+        ];
+        assert_eq!(LtoMode::ALL.len(), all.len());
+        assert_round_trip_unique("LtoMode", all, |s| match LtoMode::from_str(s) {
+            Maybe::Some(v) => Maybe::Some(v.as_str()),
+            Maybe::None => Maybe::None,
+        });
+    }
+
+    #[test]
+    fn symbol_visibility_round_trip_unique() {
+        let all = [
+            SymbolVisibility::Hidden.as_str(),
+            SymbolVisibility::Default.as_str(),
+            SymbolVisibility::Protected.as_str(),
+        ];
+        assert_eq!(SymbolVisibility::ALL.len(), all.len());
+        assert_round_trip_unique("SymbolVisibility", all, |s| {
+            match SymbolVisibility::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+    }
+
+    #[test]
+    fn linkage_kind_round_trip_unique_and_multidef_classification() {
+        let all = [
+            LinkageKind::External.as_str(),
+            LinkageKind::Internal.as_str(),
+            LinkageKind::Private.as_str(),
+            LinkageKind::Weak.as_str(),
+            LinkageKind::Linkonce.as_str(),
+            LinkageKind::LinkonceOdr.as_str(),
+            LinkageKind::Common.as_str(),
+            LinkageKind::AvailableExternally.as_str(),
+        ];
+        assert_eq!(LinkageKind::ALL.len(), all.len());
+        assert_round_trip_unique("LinkageKind", all, |s| {
+            match LinkageKind::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+        // Multi-definition classification — pinned so adding a new
+        // linkage kind forces a deliberate decision in `meta()`.
+        for v in LinkageKind::ALL {
+            let expected = matches!(
+                v,
+                LinkageKind::Weak
+                    | LinkageKind::Linkonce
+                    | LinkageKind::LinkonceOdr
+                    | LinkageKind::Common
+            );
+            assert_eq!(
+                v.allows_multiple_definitions(),
+                expected,
+                "LinkageKind::{:?}: meta-derived allows_multiple_definitions disagrees with reference matches!",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn access_pattern_round_trip_unique() {
+        let all = [
+            AccessPattern::Sequential.as_str(),
+            AccessPattern::Random.as_str(),
+            AccessPattern::Streaming.as_str(),
+        ];
+        assert_eq!(AccessPattern::ALL.len(), all.len());
+        assert_round_trip_unique("AccessPattern", all, |s| {
+            match AccessPattern::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+    }
+
+    #[test]
+    fn repr_round_trip_unique_and_simd_classification_and_c_alias() {
+        let all = [
+            Repr::Packed.as_str(),
+            Repr::C.as_str(),
+            Repr::CacheOptimal.as_str(),
+            Repr::Transparent.as_str(),
+            Repr::Simd.as_str(),
+            Repr::SimdMask.as_str(),
+        ];
+        assert_eq!(Repr::ALL.len(), all.len());
+        assert_round_trip_unique("Repr", all, |s| match Repr::from_str(s) {
+            Maybe::Some(v) => Maybe::Some(v.as_str()),
+            Maybe::None => Maybe::None,
+        });
+        // Tolerant `"c"` alias is preserved (canonical is `"C"`).
+        assert_eq!(Repr::from_str("c"), Maybe::Some(Repr::C));
+        // SIMD classification — meta-derived projections agree with
+        // hand-written reference matches!.
+        for v in Repr::ALL {
+            let expected_simd = matches!(v, Repr::Simd | Repr::SimdMask);
+            let expected_simd_mask = matches!(v, Repr::SimdMask);
+            assert_eq!(v.is_simd(), expected_simd, "Repr::{:?}: is_simd drift", v);
+            assert_eq!(
+                v.is_simd_mask(),
+                expected_simd_mask,
+                "Repr::{:?}: is_simd_mask drift",
+                v
+            );
+        }
+    }
+}
