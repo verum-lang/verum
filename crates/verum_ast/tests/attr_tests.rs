@@ -1827,6 +1827,153 @@ mod meta_consolidation_pins {
     }
 
     #[test]
+    fn verification_mode_round_trip_unique_and_rank_strict_monotone() {
+        let all = [
+            VerificationMode::Runtime.as_str(),
+            VerificationMode::Static.as_str(),
+            VerificationMode::Fast.as_str(),
+            VerificationMode::ComplexityTyped.as_str(),
+            VerificationMode::Formal.as_str(),
+            VerificationMode::Proof.as_str(),
+            VerificationMode::Thorough.as_str(),
+            VerificationMode::Reliable.as_str(),
+            VerificationMode::Certified.as_str(),
+            VerificationMode::CoherentStatic.as_str(),
+            VerificationMode::CoherentRuntime.as_str(),
+            VerificationMode::Coherent.as_str(),
+            VerificationMode::Synthesize.as_str(),
+            VerificationMode::Assume.as_str(),
+        ];
+        assert_eq!(VerificationMode::ALL.len(), 14);
+        assert_eq!(VerificationMode::ALL.len(), all.len());
+        assert_round_trip_unique("VerificationMode", all, |s| {
+            match VerificationMode::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+
+        // ν-ladder: ranks are exactly 0..=13 and strictly monotone in
+        // declaration order. Adding a new variant without picking a
+        // rank slot fails this pin.
+        for (i, v) in VerificationMode::ALL.iter().enumerate() {
+            assert_eq!(
+                v.rank() as usize,
+                i,
+                "VerificationMode::{:?}: rank drift at position {}",
+                v,
+                i
+            );
+        }
+        // Strict monotonicity (redundant with the dense check above
+        // but pins the ordering contract on its own).
+        for w in VerificationMode::ALL.windows(2) {
+            assert!(
+                w[0].rank() < w[1].rank(),
+                "VerificationMode rank not strictly monotone at {:?} -> {:?}",
+                w[0],
+                w[1]
+            );
+        }
+
+        // Classification pins — every variant's meta-derived
+        // projection must agree with its hand-written reference set.
+        // Adding a new variant forces deliberate classification in
+        // `meta()` instead of silent drift.
+        for v in VerificationMode::ALL {
+            let expected_coherent = matches!(
+                v,
+                VerificationMode::CoherentStatic
+                    | VerificationMode::CoherentRuntime
+                    | VerificationMode::Coherent
+            );
+            assert_eq!(
+                v.is_coherent(),
+                expected_coherent,
+                "VerificationMode::{:?}: is_coherent drift",
+                v
+            );
+
+            let expected_smt = matches!(
+                v,
+                VerificationMode::Fast
+                    | VerificationMode::Formal
+                    | VerificationMode::Thorough
+                    | VerificationMode::Reliable
+                    | VerificationMode::Certified
+                    | VerificationMode::CoherentStatic
+                    | VerificationMode::CoherentRuntime
+                    | VerificationMode::Coherent
+                    | VerificationMode::Synthesize
+            );
+            assert_eq!(
+                v.requires_smt(),
+                expected_smt,
+                "VerificationMode::{:?}: requires_smt drift",
+                v
+            );
+
+            let expected_runtime = matches!(
+                v,
+                VerificationMode::Runtime | VerificationMode::CoherentRuntime
+            );
+            assert_eq!(
+                v.has_runtime_component(),
+                expected_runtime,
+                "VerificationMode::{:?}: has_runtime_component drift",
+                v
+            );
+
+            assert_eq!(
+                v.is_assume(),
+                *v == VerificationMode::Assume,
+                "VerificationMode::{:?}: is_assume drift",
+                v
+            );
+        }
+
+        // Cross-cutting invariants:
+        //
+        //   1. Coherent ⇒ requires_smt (every Coherent* mode runs an
+        //      SMT-backed α-check, even the runtime-monitor variant).
+        //   2. Assume ⇒ ¬requires_smt ∧ ¬is_coherent (the escape
+        //      hatch can never imply verification work).
+        //   3. Synthesize is the highest non-Assume rank — pin so
+        //      future ladder additions either bump Assume's sentinel
+        //      slot or land below Synthesize, never silently above.
+        for v in VerificationMode::ALL {
+            if v.is_coherent() {
+                assert!(
+                    v.requires_smt(),
+                    "VerificationMode::{:?}: is_coherent ⇒ requires_smt invariant violated",
+                    v
+                );
+            }
+            if v.is_assume() {
+                assert!(
+                    !v.requires_smt() && !v.is_coherent(),
+                    "VerificationMode::Assume must not require SMT or be coherent"
+                );
+            }
+        }
+        assert_eq!(
+            VerificationMode::Synthesize.rank() + 1,
+            VerificationMode::Assume.rank(),
+            "Assume must immediately follow Synthesize in the ladder; \
+             new ladder variants must land before Synthesize"
+        );
+
+        // Spot-pin the canonical wire form on a tricky multi-word
+        // variant — exposes any underscore drift early.
+        assert_eq!(VerificationMode::ComplexityTyped.as_str(), "complexity_typed");
+        assert_eq!(VerificationMode::CoherentStatic.as_str(), "coherent_static");
+        assert_eq!(
+            VerificationMode::CoherentRuntime.as_str(),
+            "coherent_runtime"
+        );
+    }
+
+    #[test]
     fn repr_round_trip_unique_and_simd_classification_and_c_alias() {
         let all = [
             Repr::Packed.as_str(),
