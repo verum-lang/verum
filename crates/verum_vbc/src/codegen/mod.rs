@@ -1017,8 +1017,15 @@ impl VbcCodegen {
             );
         }
 
+        // Cross-compilation: codegen MUST emit constants for the
+        // build target, never the host. Sync target_os from
+        // CodegenConfig.target_config into the context so downstream
+        // emitters (resolve_stdlib_constant_value, errno / socket /
+        // file flag dispatch) see the correct target.
+        let mut ctx = CodegenContext::new();
+        ctx.target_os = config.target_config.target_os.to_string();
         Self {
-            ctx: CodegenContext::new(),
+            ctx,
             config,
             functions: Vec::new(),
             types: Vec::new(),

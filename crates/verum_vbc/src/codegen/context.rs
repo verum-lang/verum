@@ -54,6 +54,22 @@ pub struct CodegenContext {
     /// Stack of defer expressions per scope.
     defer_stack: Vec<Vec<DeferInfo>>,
 
+    /// Build target operating system (`"linux"` / `"macos"` / `"darwin"` /
+    /// `"ios"` / `"windows"` / `"freebsd"` / `"none"` for embedded /
+    /// cross-compilation targets).
+    ///
+    /// Mirrors `CodegenConfig::target_config::target_os` and is the
+    /// canonical input for **cross-compilation-correct** code emission
+    /// — every codegen path that materialises a platform-divergent
+    /// constant (POSIX errno / socket / file flag, syscall number, etc.)
+    /// MUST consult this field rather than the host platform.
+    ///
+    /// Defaults to the host target via `TargetConfig::host()` when
+    /// constructed via `CodegenContext::new()`; cross-compilation
+    /// callers (CLI `--target` flag, build scripts) overwrite this
+    /// before any codegen begins.
+    pub target_os: String,
+
     /// Current function name (for error messages).
     pub current_function: Option<String>,
 
@@ -927,6 +943,7 @@ impl CodegenContext {
             forward_jumps: HashMap::new(),
             loop_stack: Vec::new(),
             defer_stack: vec![Vec::new()], // Root scope
+            target_os: verum_ast::cfg::TargetConfig::host().target_os.to_string(),
             current_function: None,
             in_function: false,
             return_type: None,

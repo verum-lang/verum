@@ -239,65 +239,43 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
     }
 }
 
-/// Resolves a well-known stdlib constant name to its integer value.
+/// Resolves a well-known stdlib constant name to its integer value
+/// for the given build target.
 ///
-
-/// These values match the definitions in core/ .vr files.
-fn resolve_stdlib_constant_value(name: &str) -> i64 {
+/// **Cross-compilation-correct**: when a constant differs between
+/// platforms (POSIX errno EAGAIN, socket SOL_SOCKET, file flag O_CREAT,
+/// etc.), the value is dispatched against `target_os` ("linux" /
+/// "macos" / "darwin" / "ios" / "windows" / "freebsd"). A Verum
+/// program targeting Linux compiled on macOS receives the correct
+/// Linux value, not the host platform's.
+///
+/// Sources:
+/// * Atomic-ordering / well-known-type constants — fixed values
+///   independent of target.
+/// * POSIX errno / socket / file-flag constants — delegated to
+///   `verum_common::{errno, posix_sockets, posix_files}`.
+/// * Tier-specific runtime constants (kqueue / mmap / etc.) —
+///   currently fall through to the bottom hand-table; future work
+///   moves them into `verum_common::posix_*` submodules.
+fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
+    // Try platform-conditional dispatch first — covers the bulk of
+    // cross-platform-divergent values via canonical lookups.
+    if let Some(v) = verum_common::errno::errno_value(name, target_os) {
+        return v;
+    }
+    if let Some(v) = verum_common::posix_sockets::socket_const_value(name, target_os) {
+        return v;
+    }
+    if let Some(v) = verum_common::posix_files::file_flag_value(name, target_os) {
+        return v;
+    }
     match name {
-        // Atomic ordering (core/intrinsics/atomic.vr)
+        // Atomic ordering (core/intrinsics/atomic.vr) — target-independent.
         "ORDERING_RELAXED" => 0,
         "ORDERING_ACQUIRE" => 1,
         "ORDERING_RELEASE" => 2,
         "ORDERING_ACQ_REL" => 3,
         "ORDERING_SEQ_CST" => 4,
-        // Cross-platform POSIX errno values (Linux + Darwin agree
-        // bit-for-bit). Sourced from `verum_common::errno` — single
-        // source of truth shared with the runtime handlers and stdlib.
-        "EPERM" => verum_common::errno::EPERM,
-        "ENOENT" => verum_common::errno::ENOENT,
-        "ESRCH" => verum_common::errno::ESRCH,
-        "EINTR" => verum_common::errno::EINTR,
-        "EIO" => verum_common::errno::EIO,
-        "ENXIO" => verum_common::errno::ENXIO,
-        "E2BIG" => verum_common::errno::E2BIG,
-        "ENOEXEC" => verum_common::errno::ENOEXEC,
-        "EBADF" => verum_common::errno::EBADF,
-        "ECHILD" => verum_common::errno::ECHILD,
-        "ENOMEM" => verum_common::errno::ENOMEM,
-        "EACCES" => verum_common::errno::EACCES,
-        "EFAULT" => verum_common::errno::EFAULT,
-        "EBUSY" => verum_common::errno::EBUSY,
-        "EEXIST" => verum_common::errno::EEXIST,
-        "ENODEV" => verum_common::errno::ENODEV,
-        "ENOTDIR" => verum_common::errno::ENOTDIR,
-        "EISDIR" => verum_common::errno::EISDIR,
-        "EINVAL" => verum_common::errno::EINVAL,
-        "EMFILE" => verum_common::errno::EMFILE,
-        "ENOSPC" => verum_common::errno::ENOSPC,
-        "EPIPE" => verum_common::errno::EPIPE,
-        "ERANGE" => verum_common::errno::ERANGE,
-        // Platform-divergent errno values — Linux and Darwin disagree
-        // (see `verum_common::errno::{linux, darwin}` modules for the
-        // canonical per-platform values). The values below are a mix
-        // of Linux and Darwin assignments preserved for ABI continuity
-        // with code compiled before this lookup table was introduced;
-        // future work (TODO #51-phase-2) makes resolve_stdlib_constant_value
-        // target-conditional via `errno_for_target(name, target_os)`.
-        "EAGAIN" => verum_common::errno::linux::EAGAIN,        // 11 (Linux)
-        "EWOULDBLOCK" => verum_common::errno::darwin::EWOULDBLOCK, // 35 (Darwin)
-        "ENOSYS" => verum_common::errno::darwin::ENOSYS,        // 78 (Darwin)
-        "ENOTEMPTY" => verum_common::errno::darwin::ENOTEMPTY,  // 66 (Darwin)
-        "ECONNREFUSED" => verum_common::errno::darwin::ECONNREFUSED, // 61 (Darwin)
-        "ECONNRESET" => verum_common::errno::darwin::ECONNRESET,     // 54 (Darwin)
-        "ECONNABORTED" => verum_common::errno::darwin::ECONNABORTED, // 53 (Darwin)
-        "ETIMEDOUT" => verum_common::errno::darwin::ETIMEDOUT,       // 60 (Darwin)
-        "EADDRINUSE" => verum_common::errno::darwin::EADDRINUSE,     // 48 (Darwin)
-        "EADDRNOTAVAIL" => verum_common::errno::darwin::EADDRNOTAVAIL, // 49 (Darwin)
-        "ENETUNREACH" => verum_common::errno::darwin::ENETUNREACH,   // 51 (Darwin)
-        "EALREADY" => verum_common::errno::darwin::EALREADY,         // 37 (Darwin)
-        "EINPROGRESS" => verum_common::errno::darwin::EINPROGRESS,   // 36 (Darwin)
-        "ENOTCONN" => verum_common::errno::darwin::ENOTCONN,         // 57 (Darwin)
         // kqueue filters (core/sys/darwin/libsystem.vr)
         "EVFILT_READ" => -1,
         "EVFILT_WRITE" => -2,
@@ -1479,7 +1457,13 @@ impl VbcCodegen {
                             }
                             if let Some(const_name) = iname.strip_prefix("__const_") {
                                 let dest = self.ctx.alloc_temp();
-                                let value = resolve_stdlib_constant_value(const_name);
+                                // Cross-compilation: build target dictates
+                                // platform-divergent constant values
+                                // (POSIX errno, socket, file flag).
+                                let value = resolve_stdlib_constant_value(
+                                    const_name,
+                                    self.ctx.target_os.as_str(),
+                                );
                                 self.ctx.emit(Instruction::LoadI { dst: dest, value });
                                 return Ok(Some(dest));
                             }
@@ -26593,9 +26577,101 @@ fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::SystemS
 
 #[cfg(test)]
 mod tests {
+    use super::resolve_stdlib_constant_value;
+
     #[test]
     fn test_expressions_module_exists() {
         // Canary: module compiles and links. An empty body is enough —
         // if this file failed to compile, the test binary wouldn't link.
+    }
+
+    /// Cross-compilation-correctness: when the build target is Linux,
+    /// codegen MUST emit Linux-canonical values for platform-divergent
+    /// POSIX constants — never the host platform's values, never the
+    /// historical Darwin-default. Mirror test below for macOS target.
+    /// Closes the platform-misclassification bug class flagged in
+    /// commits 3ce48ddd8 / 40fcf74f2 / 4ab36de73 phase-2 TODOs.
+    #[test]
+    fn target_conditional_constants_linux() {
+        // POSIX errno (Linux divergent values per
+        // verum_common::errno::linux::*).
+        assert_eq!(resolve_stdlib_constant_value("EAGAIN", "linux"), 11);
+        assert_eq!(resolve_stdlib_constant_value("EWOULDBLOCK", "linux"), 11);
+        assert_eq!(resolve_stdlib_constant_value("ETIMEDOUT", "linux"), 110);
+        assert_eq!(resolve_stdlib_constant_value("ECONNREFUSED", "linux"), 111);
+        assert_eq!(resolve_stdlib_constant_value("EINPROGRESS", "linux"), 115);
+
+        // POSIX socket constants (Linux divergent values).
+        assert_eq!(resolve_stdlib_constant_value("AF_INET6", "linux"), 10);
+        assert_eq!(resolve_stdlib_constant_value("SOL_SOCKET", "linux"), 1);
+        assert_eq!(resolve_stdlib_constant_value("SO_REUSEADDR", "linux"), 2);
+        assert_eq!(resolve_stdlib_constant_value("SO_KEEPALIVE", "linux"), 9);
+
+        // POSIX file flags (Linux divergent values).
+        assert_eq!(resolve_stdlib_constant_value("O_CREAT", "linux"), 64);
+        assert_eq!(resolve_stdlib_constant_value("O_TRUNC", "linux"), 512);
+        assert_eq!(resolve_stdlib_constant_value("O_APPEND", "linux"), 1024);
+        assert_eq!(resolve_stdlib_constant_value("O_NONBLOCK", "linux"), 2048);
+    }
+
+    #[test]
+    fn target_conditional_constants_darwin() {
+        // POSIX errno (Darwin divergent values per
+        // verum_common::errno::darwin::*).
+        assert_eq!(resolve_stdlib_constant_value("EAGAIN", "macos"), 35);
+        assert_eq!(resolve_stdlib_constant_value("EWOULDBLOCK", "darwin"), 35);
+        assert_eq!(resolve_stdlib_constant_value("ETIMEDOUT", "macos"), 60);
+        assert_eq!(resolve_stdlib_constant_value("ECONNREFUSED", "ios"), 61);
+        assert_eq!(resolve_stdlib_constant_value("EINPROGRESS", "macos"), 36);
+
+        // POSIX socket constants (Darwin divergent values).
+        assert_eq!(resolve_stdlib_constant_value("AF_INET6", "macos"), 30);
+        assert_eq!(
+            resolve_stdlib_constant_value("SOL_SOCKET", "darwin"),
+            0xFFFF,
+        );
+        assert_eq!(
+            resolve_stdlib_constant_value("SO_REUSEADDR", "macos"),
+            0x0004,
+        );
+        assert_eq!(
+            resolve_stdlib_constant_value("SO_KEEPALIVE", "darwin"),
+            0x0008,
+        );
+
+        // POSIX file flags (Darwin divergent values).
+        assert_eq!(resolve_stdlib_constant_value("O_CREAT", "macos"), 0x200);
+        assert_eq!(resolve_stdlib_constant_value("O_TRUNC", "darwin"), 0x400);
+        assert_eq!(resolve_stdlib_constant_value("O_APPEND", "macos"), 8);
+        assert_eq!(resolve_stdlib_constant_value("O_NONBLOCK", "darwin"), 4);
+    }
+
+    /// Cross-platform constants (atomic ordering, EPERM/ENOENT/...,
+    /// AF_INET, SOCK_STREAM, O_RDONLY, etc.) are target-independent —
+    /// they MUST return the same value regardless of which target_os
+    /// is requested.
+    #[test]
+    fn cross_platform_constants_target_independent() {
+        for target in ["linux", "macos", "darwin", "ios", "windows", "freebsd"] {
+            // Atomic ordering.
+            assert_eq!(resolve_stdlib_constant_value("ORDERING_RELAXED", target), 0);
+            assert_eq!(resolve_stdlib_constant_value("ORDERING_SEQ_CST", target), 4);
+
+            // POSIX errno cross-platform.
+            assert_eq!(resolve_stdlib_constant_value("EPERM", target), 1);
+            assert_eq!(resolve_stdlib_constant_value("ENOENT", target), 2);
+            assert_eq!(resolve_stdlib_constant_value("EBADF", target), 9);
+            assert_eq!(resolve_stdlib_constant_value("EINVAL", target), 22);
+
+            // POSIX socket constants cross-platform.
+            assert_eq!(resolve_stdlib_constant_value("AF_INET", target), 2);
+            assert_eq!(resolve_stdlib_constant_value("SOCK_STREAM", target), 1);
+            assert_eq!(resolve_stdlib_constant_value("IPPROTO_TCP", target), 6);
+
+            // POSIX file flags cross-platform.
+            assert_eq!(resolve_stdlib_constant_value("O_RDONLY", target), 0);
+            assert_eq!(resolve_stdlib_constant_value("O_WRONLY", target), 1);
+            assert_eq!(resolve_stdlib_constant_value("SEEK_END", target), 2);
+        }
     }
 }
