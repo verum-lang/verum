@@ -1782,6 +1782,100 @@ pub enum GpuSubOpcode {
     SharedMemStoreU32 = 0xBB,
 }
 
+// =========================================================================
+// GpuSubOpcode metadata — single source of truth for the 97 variants.
+//
+// The legacy implementation maintained six parallel match-arm
+// methods (`mnemonic`, `category`, `requires_stream`, `is_sync`,
+// `allocates`, `deallocates`).  `category()` was driven by a `match
+// self as u8` over 16-byte windows so renumbering a variant could
+// silently move it between bands.  `requires_stream()` had a
+// latent undercount: the explicitly-named `MemcpyAsyncH2D` /
+// `MemcpyAsyncD2H` variants take a `stream:reg` argument but were
+// not flagged.
+//
+// Same drift-collapse pattern as SystemSubOpcode.meta() (60b4cc3b9),
+// MathSubOpcode.meta() (4b2792881), KernelRule.meta() (ec9cfc411).
+// =========================================================================
+
+/// Functional band a `GpuSubOpcode` belongs to.  Each band aligns
+/// with a 16-byte window in the discriminant encoding, but the band
+/// a variant belongs to is now stamped per-variant in `meta()`
+/// rather than inferred from byte-range arithmetic — renumbering a
+/// variant can no longer silently move it between bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GpuCategory {
+    /// `Launch` / `LaunchCooperative` / `LaunchMultiDevice`.
+    KernelExecution,
+    /// `SyncStream` / `SyncDevice` / `SyncEvent` / `QueryStream`.
+    Synchronization,
+    /// `Memcpy` / `Alloc` / `Free` / `Memset` / pinned memory ops.
+    MemoryOperations,
+    /// Stream lifecycle + priority + callback ops.
+    StreamManagement,
+    /// CUDA/Metal event lifecycle + record + query.
+    EventManagement,
+    /// Device id / property / peer-access / reset.
+    DeviceManagement,
+    /// Managed (unified) memory ops.
+    UnifiedMemory,
+    /// CUDA Graph / Metal ICB lifecycle.
+    GraphApi,
+    /// Profiling range / marker push/pop.
+    Profiling,
+    /// Per-backend device enumeration.
+    DeviceEnumeration,
+    /// CPU-fallback GPU thread model intrinsics.
+    ThreadIntrinsics,
+    /// `__shared__` memory load/store/atomic ops.
+    SharedMemory,
+}
+
+impl GpuCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::KernelExecution    => "Kernel Execution",
+            Self::Synchronization    => "Synchronization",
+            Self::MemoryOperations   => "Memory Operations",
+            Self::StreamManagement   => "Stream Management",
+            Self::EventManagement    => "Event Management",
+            Self::DeviceManagement   => "Device Management",
+            Self::UnifiedMemory      => "Unified Memory",
+            Self::GraphApi           => "Graph API",
+            Self::Profiling          => "Profiling",
+            Self::DeviceEnumeration  => "Device Enumeration",
+            Self::ThreadIntrinsics   => "Thread Intrinsics",
+            Self::SharedMemory       => "Shared Memory",
+        }
+    }
+}
+
+/// Co-located metadata for one `GpuSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; `GpuSubOpcode::meta()` is the only site that constructs
+/// values of this type, so a single match keeps every accessor
+/// consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct GpuOpMeta {
+    /// All-caps mnemonic (`"GPU_LAUNCH"`).
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: GpuCategory,
+    /// The dispatch path takes a stream argument and must be
+    /// scheduled on a queue (vs synchronous ops which block).
+    pub requires_stream: bool,
+    /// The op blocks until prior work on its target completes.
+    pub is_sync: bool,
+    /// The op allocates a runtime-tracked GPU resource (memory,
+    /// stream, event, graph) that must later be released by a
+    /// matching deallocator.
+    pub allocates: bool,
+    /// The op releases a previously-allocated GPU resource.
+    pub deallocates: bool,
+}
+
 impl GpuSubOpcode {
     /// Creates a GPU sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -1904,195 +1998,207 @@ impl GpuSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this GPU sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            // Kernel Execution
-            Self::Launch => "GPU_LAUNCH",
-            Self::LaunchCooperative => "GPU_LAUNCH_COOP",
-            Self::LaunchMultiDevice => "GPU_LAUNCH_MULTI",
-            // Synchronization
-            Self::SyncStream => "GPU_SYNC_STREAM",
-            Self::SyncDevice => "GPU_SYNC_DEVICE",
-            Self::SyncEvent => "GPU_SYNC_EVENT",
-            Self::QueryStream => "GPU_QUERY_STREAM",
-            // Memory Operations
-            Self::Memcpy => "GPU_MEMCPY",
-            Self::MemcpyAsync => "GPU_MEMCPY_ASYNC",
-            Self::Alloc => "GPU_ALLOC",
-            Self::Free => "GPU_FREE",
-            Self::PinMemory => "GPU_PIN",
-            Self::UnpinMemory => "GPU_UNPIN",
-            Self::Prefetch => "GPU_PREFETCH",
-            Self::Memset => "GPU_MEMSET",
-            Self::MemsetAsync => "GPU_MEMSET_ASYNC",
-            Self::Memcpy2D => "GPU_MEMCPY_2D",
-            Self::Memcpy2DAsync => "GPU_MEMCPY_2D_ASYNC",
-            Self::MemcpyH2D => "GPU_MEMCPY_H2D",
-            Self::MemcpyD2H => "GPU_MEMCPY_D2H",
-            Self::MemcpyD2D => "GPU_MEMCPY_D2D",
-            Self::MemcpyAsyncH2D => "GPU_MEMCPY_ASYNC_H2D",
-            Self::MemcpyAsyncD2H => "GPU_MEMCPY_ASYNC_D2H",
-            // Stream Management
-            Self::StreamCreate => "GPU_STREAM_CREATE",
-            Self::StreamDestroy => "GPU_STREAM_DESTROY",
-            Self::StreamQuery => "GPU_STREAM_QUERY",
-            Self::StreamWaitEvent => "GPU_STREAM_WAIT_EVENT",
-            Self::StreamCreateWithPriority => "GPU_STREAM_CREATE_PRIO",
-            Self::StreamGetPriority => "GPU_STREAM_GET_PRIO",
-            Self::StreamCreateNonBlocking => "GPU_STREAM_CREATE_NB",
-            Self::StreamAddCallback => "GPU_STREAM_CALLBACK",
-            // Event Management
-            Self::EventCreate => "GPU_EVENT_CREATE",
-            Self::EventDestroy => "GPU_EVENT_DESTROY",
-            Self::EventRecord => "GPU_EVENT_RECORD",
-            Self::EventSynchronize => "GPU_EVENT_SYNC",
-            Self::EventQuery => "GPU_EVENT_QUERY",
-            Self::EventElapsed => "GPU_EVENT_ELAPSED",
-            Self::EventCreateWithFlags => "GPU_EVENT_CREATE_F",
-            Self::EventRecordWithFlags => "GPU_EVENT_RECORD_F",
-            // Device Management
-            Self::GetDevice => "GPU_GET_DEVICE",
-            Self::SetDevice => "GPU_SET_DEVICE",
-            Self::GetDeviceCount => "GPU_DEVICE_COUNT",
-            Self::GetDeviceProperty => "GPU_DEVICE_PROP",
-            Self::GetMemoryInfo => "GPU_MEM_INFO",
-            Self::CanAccessPeer => "GPU_CAN_PEER",
-            Self::EnablePeerAccess => "GPU_ENABLE_PEER",
-            Self::DisablePeerAccess => "GPU_DISABLE_PEER",
-            Self::DeviceReset => "GPU_DEVICE_RESET",
-            Self::SetDeviceFlags => "GPU_SET_FLAGS",
-            // Unified/Managed Memory
-            Self::MallocManaged => "GPU_MALLOC_MANAGED",
-            Self::MemAdvise => "GPU_MEM_ADVISE",
-            Self::PrefetchAsync => "GPU_PREFETCH_ASYNC",
-            Self::MemGetAttribute => "GPU_MEM_ATTR",
-            // Graph API
-            Self::GraphCreate => "GPU_GRAPH_CREATE",
-            Self::GraphBeginCapture => "GPU_GRAPH_BEGIN",
-            Self::GraphEndCapture => "GPU_GRAPH_END",
-            Self::GraphInstantiate => "GPU_GRAPH_INST",
-            Self::GraphLaunch => "GPU_GRAPH_LAUNCH",
-            Self::GraphDestroy => "GPU_GRAPH_DESTROY",
-            Self::GraphExecDestroy => "GPU_GRAPH_EXEC_DESTROY",
-            Self::GraphExecUpdate => "GPU_GRAPH_EXEC_UPDATE",
-            // Profiling
-            Self::ProfileRangeStart => "GPU_PROF_START",
-            Self::ProfileRangeEnd => "GPU_PROF_END",
-            Self::ProfileMarkerPush => "GPU_MARKER_PUSH",
-            Self::ProfileMarkerPop => "GPU_MARKER_POP",
-            // Device Enumeration
-            Self::EnumerateCuda => "GPU_ENUM_CUDA",
-            Self::EnumerateMetal => "GPU_ENUM_METAL",
-            Self::EnumerateRocm => "GPU_ENUM_ROCM",
-            Self::EnumerateVulkan => "GPU_ENUM_VULKAN",
-            // Thread Intrinsics
-            Self::ThreadIdX => "GPU_THREAD_ID_X",
-            Self::ThreadIdY => "GPU_THREAD_ID_Y",
-            Self::ThreadIdZ => "GPU_THREAD_ID_Z",
-            Self::BlockIdX => "GPU_BLOCK_ID_X",
-            Self::BlockIdY => "GPU_BLOCK_ID_Y",
-            Self::BlockIdZ => "GPU_BLOCK_ID_Z",
-            Self::BlockDimX => "GPU_BLOCK_DIM_X",
-            Self::BlockDimY => "GPU_BLOCK_DIM_Y",
-            Self::BlockDimZ => "GPU_BLOCK_DIM_Z",
-            Self::GridDimX => "GPU_GRID_DIM_X",
-            Self::GridDimY => "GPU_GRID_DIM_Y",
-            Self::GridDimZ => "GPU_GRID_DIM_Z",
-            Self::SyncThreads => "GPU_SYNC_THREADS",
-            Self::SyncWarp => "GPU_SYNC_WARP",
-            Self::WarpSize => "GPU_WARP_SIZE",
-            Self::LinearThreadId => "GPU_LINEAR_THREAD_ID",
-            // Shared Memory Operations
-            Self::SharedMemAlloc => "GPU_SMEM_ALLOC",
-            Self::SharedMemLoadI64 => "GPU_SMEM_LOAD_I64",
-            Self::SharedMemStoreI64 => "GPU_SMEM_STORE_I64",
-            Self::SharedMemLoadF64 => "GPU_SMEM_LOAD_F64",
-            Self::SharedMemStoreF64 => "GPU_SMEM_STORE_F64",
-            Self::SharedMemAtomicAddI64 => "GPU_SMEM_ATOMIC_ADD_I64",
-            Self::SharedMemAtomicAddF64 => "GPU_SMEM_ATOMIC_ADD_F64",
-            Self::SharedMemAtomicCasI64 => "GPU_SMEM_ATOMIC_CAS_I64",
-            Self::SharedMemAtomicMaxI64 => "GPU_SMEM_ATOMIC_MAX_I64",
-            Self::SharedMemAtomicMinI64 => "GPU_SMEM_ATOMIC_MIN_I64",
-            Self::SharedMemLoadU32 => "GPU_SMEM_LOAD_U32",
-            Self::SharedMemStoreU32 => "GPU_SMEM_STORE_U32",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `requires_stream` / `is_sync` / `allocates` / `deallocates`.
+    /// Adding a new variant requires exactly one entry here;
+    /// sibling accessors are `#[inline]` projections through this
+    /// method's return value.
+    pub const fn meta(self) -> GpuOpMeta {
+        use GpuCategory::{
+            DeviceEnumeration, DeviceManagement, EventManagement, GraphApi, KernelExecution,
+            MemoryOperations, Profiling, SharedMemory, StreamManagement, Synchronization,
+            ThreadIntrinsics, UnifiedMemory,
+        };
+
+        // Field order: mnemonic, category, requires_stream, is_sync,
+        // allocates, deallocates.  Single-line entries keep drift
+        // between sibling rows obvious.
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             stream=$stream:literal, sync=$sync:literal,
+             alloc=$alloc:literal, dealloc=$dealloc:literal $(,)?) => {
+                GpuOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    requires_stream: $stream,
+                    is_sync: $sync,
+                    allocates: $alloc,
+                    deallocates: $dealloc,
+                }
+            };
         }
+
+        match self {
+            // ===== Kernel Execution (0x00-0x0F) =====
+            Self::Launch                  => m!("GPU_LAUNCH",              KernelExecution,  stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::LaunchCooperative       => m!("GPU_LAUNCH_COOP",         KernelExecution,  stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::LaunchMultiDevice       => m!("GPU_LAUNCH_MULTI",        KernelExecution,  stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Synchronization (0x10-0x1F) =====
+            // QueryStream is a *non-blocking* status read — it sits
+            // in the synchronization band but is not itself a sync.
+            Self::SyncStream              => m!("GPU_SYNC_STREAM",         Synchronization,  stream=false, sync=true,  alloc=false, dealloc=false),
+            Self::SyncDevice              => m!("GPU_SYNC_DEVICE",         Synchronization,  stream=false, sync=true,  alloc=false, dealloc=false),
+            Self::SyncEvent               => m!("GPU_SYNC_EVENT",          Synchronization,  stream=false, sync=true,  alloc=false, dealloc=false),
+            Self::QueryStream             => m!("GPU_QUERY_STREAM",        Synchronization,  stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Memory Operations (0x20-0x2F) =====
+            // Closes the legacy requires_stream undercount on the
+            // explicitly-named `*Async*` H2D/D2H variants.
+            Self::Memcpy                  => m!("GPU_MEMCPY",              MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::MemcpyAsync             => m!("GPU_MEMCPY_ASYNC",        MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::Alloc                   => m!("GPU_ALLOC",               MemoryOperations, stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::Free                    => m!("GPU_FREE",                MemoryOperations, stream=false, sync=false, alloc=false, dealloc=true),
+            Self::PinMemory               => m!("GPU_PIN",                 MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::UnpinMemory             => m!("GPU_UNPIN",               MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::Prefetch                => m!("GPU_PREFETCH",            MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::Memset                  => m!("GPU_MEMSET",              MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::MemsetAsync             => m!("GPU_MEMSET_ASYNC",        MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::Memcpy2D                => m!("GPU_MEMCPY_2D",           MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::Memcpy2DAsync           => m!("GPU_MEMCPY_2D_ASYNC",     MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::MemcpyH2D               => m!("GPU_MEMCPY_H2D",          MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::MemcpyD2H               => m!("GPU_MEMCPY_D2H",          MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::MemcpyD2D               => m!("GPU_MEMCPY_D2D",          MemoryOperations, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::MemcpyAsyncH2D          => m!("GPU_MEMCPY_ASYNC_H2D",    MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::MemcpyAsyncD2H          => m!("GPU_MEMCPY_ASYNC_D2H",    MemoryOperations, stream=true,  sync=false, alloc=false, dealloc=false),
+
+            // ===== Stream Management (0x30-0x3F) =====
+            Self::StreamCreate            => m!("GPU_STREAM_CREATE",       StreamManagement, stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::StreamDestroy           => m!("GPU_STREAM_DESTROY",      StreamManagement, stream=false, sync=false, alloc=false, dealloc=true),
+            Self::StreamQuery             => m!("GPU_STREAM_QUERY",        StreamManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::StreamWaitEvent         => m!("GPU_STREAM_WAIT_EVENT",   StreamManagement, stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::StreamCreateWithPriority=> m!("GPU_STREAM_CREATE_PRIO",  StreamManagement, stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::StreamGetPriority       => m!("GPU_STREAM_GET_PRIO",     StreamManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::StreamCreateNonBlocking => m!("GPU_STREAM_CREATE_NB",    StreamManagement, stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::StreamAddCallback       => m!("GPU_STREAM_CALLBACK",     StreamManagement, stream=true,  sync=false, alloc=false, dealloc=false),
+
+            // ===== Event Management (0x40-0x4F) =====
+            Self::EventCreate             => m!("GPU_EVENT_CREATE",        EventManagement,  stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::EventDestroy            => m!("GPU_EVENT_DESTROY",       EventManagement,  stream=false, sync=false, alloc=false, dealloc=true),
+            Self::EventRecord             => m!("GPU_EVENT_RECORD",        EventManagement,  stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::EventSynchronize        => m!("GPU_EVENT_SYNC",          EventManagement,  stream=false, sync=true,  alloc=false, dealloc=false),
+            Self::EventQuery              => m!("GPU_EVENT_QUERY",         EventManagement,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EventElapsed            => m!("GPU_EVENT_ELAPSED",       EventManagement,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EventCreateWithFlags    => m!("GPU_EVENT_CREATE_F",      EventManagement,  stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::EventRecordWithFlags    => m!("GPU_EVENT_RECORD_F",      EventManagement,  stream=true,  sync=false, alloc=false, dealloc=false),
+
+            // ===== Device Management (0x50-0x5F) =====
+            Self::GetDevice               => m!("GPU_GET_DEVICE",          DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SetDevice               => m!("GPU_SET_DEVICE",          DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GetDeviceCount          => m!("GPU_DEVICE_COUNT",        DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GetDeviceProperty       => m!("GPU_DEVICE_PROP",         DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GetMemoryInfo           => m!("GPU_MEM_INFO",            DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::CanAccessPeer           => m!("GPU_CAN_PEER",            DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EnablePeerAccess        => m!("GPU_ENABLE_PEER",         DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::DisablePeerAccess       => m!("GPU_DISABLE_PEER",        DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::DeviceReset             => m!("GPU_DEVICE_RESET",        DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SetDeviceFlags          => m!("GPU_SET_FLAGS",           DeviceManagement, stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Unified/Managed Memory (0x60-0x6F) =====
+            Self::MallocManaged           => m!("GPU_MALLOC_MANAGED",      UnifiedMemory,    stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::MemAdvise               => m!("GPU_MEM_ADVISE",          UnifiedMemory,    stream=false, sync=false, alloc=false, dealloc=false),
+            Self::PrefetchAsync           => m!("GPU_PREFETCH_ASYNC",      UnifiedMemory,    stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::MemGetAttribute         => m!("GPU_MEM_ATTR",            UnifiedMemory,    stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Graph API (0x70-0x7F) =====
+            Self::GraphCreate             => m!("GPU_GRAPH_CREATE",        GraphApi,         stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::GraphBeginCapture       => m!("GPU_GRAPH_BEGIN",         GraphApi,         stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::GraphEndCapture         => m!("GPU_GRAPH_END",           GraphApi,         stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::GraphInstantiate        => m!("GPU_GRAPH_INST",          GraphApi,         stream=false, sync=false, alloc=true,  dealloc=false),
+            Self::GraphLaunch             => m!("GPU_GRAPH_LAUNCH",        GraphApi,         stream=true,  sync=false, alloc=false, dealloc=false),
+            Self::GraphDestroy            => m!("GPU_GRAPH_DESTROY",       GraphApi,         stream=false, sync=false, alloc=false, dealloc=true),
+            Self::GraphExecDestroy        => m!("GPU_GRAPH_EXEC_DESTROY",  GraphApi,         stream=false, sync=false, alloc=false, dealloc=true),
+            Self::GraphExecUpdate         => m!("GPU_GRAPH_EXEC_UPDATE",   GraphApi,         stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Profiling (0x80-0x8F) =====
+            Self::ProfileRangeStart       => m!("GPU_PROF_START",          Profiling,        stream=false, sync=false, alloc=false, dealloc=false),
+            Self::ProfileRangeEnd         => m!("GPU_PROF_END",            Profiling,        stream=false, sync=false, alloc=false, dealloc=false),
+            Self::ProfileMarkerPush       => m!("GPU_MARKER_PUSH",         Profiling,        stream=false, sync=false, alloc=false, dealloc=false),
+            Self::ProfileMarkerPop        => m!("GPU_MARKER_POP",          Profiling,        stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Device Enumeration (0x90-0x9F) =====
+            Self::EnumerateCuda           => m!("GPU_ENUM_CUDA",           DeviceEnumeration, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EnumerateMetal          => m!("GPU_ENUM_METAL",          DeviceEnumeration, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EnumerateRocm           => m!("GPU_ENUM_ROCM",           DeviceEnumeration, stream=false, sync=false, alloc=false, dealloc=false),
+            Self::EnumerateVulkan         => m!("GPU_ENUM_VULKAN",         DeviceEnumeration, stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Thread Intrinsics (0xA0-0xAF) =====
+            Self::ThreadIdX               => m!("GPU_THREAD_ID_X",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::ThreadIdY               => m!("GPU_THREAD_ID_Y",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::ThreadIdZ               => m!("GPU_THREAD_ID_Z",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockIdX                => m!("GPU_BLOCK_ID_X",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockIdY                => m!("GPU_BLOCK_ID_Y",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockIdZ                => m!("GPU_BLOCK_ID_Z",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockDimX               => m!("GPU_BLOCK_DIM_X",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockDimY               => m!("GPU_BLOCK_DIM_Y",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::BlockDimZ               => m!("GPU_BLOCK_DIM_Z",         ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GridDimX                => m!("GPU_GRID_DIM_X",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GridDimY                => m!("GPU_GRID_DIM_Y",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::GridDimZ                => m!("GPU_GRID_DIM_Z",          ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            // SyncThreads / SyncWarp are block / warp-level barriers
+            // — `is_sync=true` matches the legacy intent (thread
+            // group blocks), even though `is_sync` historically only
+            // covered the host-side `SyncStream/Device/Event` set.
+            // Keep the legacy interpretation: only host-side syncs
+            // are flagged; thread-level barriers carry their own
+            // semantics (no-op on CPU fallback).
+            Self::SyncThreads             => m!("GPU_SYNC_THREADS",        ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SyncWarp                => m!("GPU_SYNC_WARP",           ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::WarpSize                => m!("GPU_WARP_SIZE",           ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+            Self::LinearThreadId          => m!("GPU_LINEAR_THREAD_ID",    ThreadIntrinsics,  stream=false, sync=false, alloc=false, dealloc=false),
+
+            // ===== Shared Memory Operations (0xB0-0xBF) =====
+            Self::SharedMemAlloc          => m!("GPU_SMEM_ALLOC",          SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemLoadI64        => m!("GPU_SMEM_LOAD_I64",       SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemStoreI64       => m!("GPU_SMEM_STORE_I64",      SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemLoadF64        => m!("GPU_SMEM_LOAD_F64",       SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemStoreF64       => m!("GPU_SMEM_STORE_F64",      SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemAtomicAddI64   => m!("GPU_SMEM_ATOMIC_ADD_I64", SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemAtomicAddF64   => m!("GPU_SMEM_ATOMIC_ADD_F64", SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemAtomicCasI64   => m!("GPU_SMEM_ATOMIC_CAS_I64", SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemAtomicMaxI64   => m!("GPU_SMEM_ATOMIC_MAX_I64", SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemAtomicMinI64   => m!("GPU_SMEM_ATOMIC_MIN_I64", SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemLoadU32        => m!("GPU_SMEM_LOAD_U32",       SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+            Self::SharedMemStoreU32       => m!("GPU_SMEM_STORE_U32",      SharedMemory,      stream=false, sync=false, alloc=false, dealloc=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this GPU sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category of this GPU sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self as u8 {
-            0x00..=0x0F => "Kernel Execution",
-            0x10..=0x1F => "Synchronization",
-            0x20..=0x2F => "Memory Operations",
-            0x30..=0x3F => "Stream Management",
-            0x40..=0x4F => "Event Management",
-            0x50..=0x5F => "Device Management",
-            0x60..=0x6F => "Unified Memory",
-            0x70..=0x7F => "Graph API",
-            0x80..=0x8F => "Profiling",
-            0x90..=0x9F => "Device Enumeration",
-            0xA0..=0xAF => "Thread Intrinsics",
-            0xB0..=0xBF => "Shared Memory",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this operation requires a stream.
+    #[inline]
     pub fn requires_stream(self) -> bool {
-        matches!(
-            self,
-            Self::Launch
-                | Self::LaunchCooperative
-                | Self::MemcpyAsync
-                | Self::MemsetAsync
-                | Self::Memcpy2DAsync
-                | Self::StreamWaitEvent
-                | Self::EventRecord
-                | Self::EventRecordWithFlags
-                | Self::Prefetch
-                | Self::PrefetchAsync
-                | Self::GraphBeginCapture
-                | Self::GraphEndCapture
-                | Self::GraphLaunch
-                | Self::StreamAddCallback
-        )
+        self.meta().requires_stream
     }
 
     /// Returns true if this operation is a synchronization operation.
+    #[inline]
     pub fn is_sync(self) -> bool {
-        matches!(
-            self,
-            Self::SyncStream | Self::SyncDevice | Self::SyncEvent | Self::EventSynchronize
-        )
+        self.meta().is_sync
     }
 
     /// Returns true if this operation allocates resources.
+    #[inline]
     pub fn allocates(self) -> bool {
-        matches!(
-            self,
-            Self::Alloc
-                | Self::MallocManaged
-                | Self::StreamCreate
-                | Self::StreamCreateWithPriority
-                | Self::StreamCreateNonBlocking
-                | Self::EventCreate
-                | Self::EventCreateWithFlags
-                | Self::GraphCreate
-                | Self::GraphInstantiate
-        )
+        self.meta().allocates
     }
 
     /// Returns true if this operation frees resources.
+    #[inline]
     pub fn deallocates(self) -> bool {
-        matches!(
-            self,
-            Self::Free
-                | Self::StreamDestroy
-                | Self::EventDestroy
-                | Self::GraphDestroy
-                | Self::GraphExecDestroy
-        )
+        self.meta().deallocates
     }
 }
 
@@ -15392,5 +15498,139 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 77);
+    }
+
+    // ========================================================================
+    // GpuSubOpcode meta() drift pins
+    //
+    // Mirrors the SystemSubOpcode pin set.  The legacy `category()`
+    // accessor inferred bands from `match self as u8` over 16-byte
+    // windows, and `requires_stream()` had a latent undercount for
+    // the explicitly-named `MemcpyAsyncH2D` / `MemcpyAsyncD2H`
+    // variants that take a `stream:reg` argument but were never
+    // tagged.
+    // ========================================================================
+
+    fn for_every_gpu_sub_opcode<F: FnMut(GpuSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = GpuSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "GpuSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_meta_count_pinned_at_ninety_seven() {
+        let mut count = 0;
+        for_every_gpu_sub_opcode(|_| count += 1);
+        assert_eq!(count, 97,
+            "GpuSubOpcode variant count drift: expected 97, got {}", count);
+    }
+
+    #[test]
+    fn gpu_meta_category_matches_byte_range_band() {
+        // Pin that meta()'s structural categorisation agrees with
+        // the prior 16-byte encoding window, so renumbering a
+        // variant either keeps it in band or surfaces a test
+        // failure.
+        for_every_gpu_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => GpuCategory::KernelExecution,
+                0x10..=0x1F => GpuCategory::Synchronization,
+                0x20..=0x2F => GpuCategory::MemoryOperations,
+                0x30..=0x3F => GpuCategory::StreamManagement,
+                0x40..=0x4F => GpuCategory::EventManagement,
+                0x50..=0x5F => GpuCategory::DeviceManagement,
+                0x60..=0x6F => GpuCategory::UnifiedMemory,
+                0x70..=0x7F => GpuCategory::GraphApi,
+                0x80..=0x8F => GpuCategory::Profiling,
+                0x90..=0x9F => GpuCategory::DeviceEnumeration,
+                0xA0..=0xAF => GpuCategory::ThreadIntrinsics,
+                0xB0..=0xBF => GpuCategory::SharedMemory,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn gpu_meta_async_variants_require_stream() {
+        // Closes the legacy `requires_stream()` undercount: every
+        // explicitly-named `*Async*` variant takes a stream
+        // argument and must report `requires_stream=true`.
+        for_every_gpu_sub_opcode(|op| {
+            if op.mnemonic().contains("ASYNC") {
+                assert!(op.requires_stream(),
+                    "{:?} ({}) carries ASYNC in its mnemonic — must require a stream",
+                    op, op.mnemonic());
+            }
+        });
+    }
+
+    #[test]
+    fn gpu_meta_alloc_dealloc_disjoint() {
+        // No single op both allocates and deallocates.  An op
+        // tagged as both would be a drift defect at the structural
+        // level and break ownership tracking.
+        for_every_gpu_sub_opcode(|op| {
+            assert!(!(op.allocates() && op.deallocates()),
+                "{:?}: tagged both allocates and deallocates", op);
+        });
+    }
+
+    #[test]
+    fn gpu_meta_alloc_dealloc_pairing() {
+        // Pin the canonical allocator / deallocator counts so a
+        // future "Create" without a paired "Destroy" surfaces here.
+        // 9 allocators (Alloc / MallocManaged + 3 stream creators
+        // + 2 event creators + GraphCreate / GraphInstantiate);
+        // 5 deallocators (Free + Stream/Event/Graph/GraphExec
+        // destroyers).
+        let mut alloc = 0;
+        let mut dealloc = 0;
+        for_every_gpu_sub_opcode(|op| {
+            if op.allocates()   { alloc += 1; }
+            if op.deallocates() { dealloc += 1; }
+        });
+        assert_eq!(alloc, 9, "allocator count drift");
+        assert_eq!(dealloc, 5, "deallocator count drift");
+    }
+
+    #[test]
+    fn gpu_meta_is_sync_set_pinned() {
+        // is_sync covers exactly the four host-side synchronisation
+        // ops.  Thread-level barriers (SyncThreads / SyncWarp) sit
+        // in the ThreadIntrinsics band and are no-ops on CPU
+        // fallback — they intentionally do *not* set is_sync per
+        // the legacy semantics (kept to preserve callers that
+        // count host-side syncs only).
+        let mut sync = 0;
+        for_every_gpu_sub_opcode(|op| {
+            if op.is_sync() { sync += 1; }
+        });
+        assert_eq!(sync, 4,
+            "host-side sync count drift: expected 4 (SyncStream/SyncDevice/SyncEvent/EventSynchronize)");
+    }
+
+    #[test]
+    fn gpu_meta_mnemonic_uniqueness_and_prefix() {
+        // Every mnemonic must be distinct AND start with `"GPU_"`
+        // for grep-ability and to match the encoding-class
+        // documentation.
+        let mut seen: Vec<&'static str> = Vec::with_capacity(97);
+        for_every_gpu_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("GPU_"),
+                "{:?}: mnemonic {:?} not in `GPU_*` namespace", op, m);
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 97);
     }
 }
