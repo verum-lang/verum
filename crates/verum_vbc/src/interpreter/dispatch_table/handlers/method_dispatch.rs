@@ -7596,7 +7596,7 @@ pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult
 /// and `make_some_value` / `make_none_value` above —
 /// `[ObjectHeader][tag: u32][field_count: u32][payload: Value]` — via
 /// the shared [`alloc_variant_with_payload`] helper.
-fn make_result_variant(
+pub(super) fn make_result_variant(
     state: &mut InterpreterState,
     tag: u32,
     payload: Value,
@@ -7613,7 +7613,7 @@ fn make_result_variant(
 /// the parallel alloc-with-init blocks `make_some_value` /
 /// `make_result_variant` previously each carried.
 #[inline]
-fn alloc_variant_with_payload(
+pub(super) fn alloc_variant_with_payload(
     state: &mut InterpreterState,
     tag: u32,
     payload: Value,
@@ -7643,7 +7643,7 @@ fn alloc_variant_with_payload(
 /// (tag=N, field_count=0)` so `deep_value_eq` against an opcode-built
 /// counterpart matches bit-for-bit.
 #[inline]
-fn alloc_unit_variant(
+pub(super) fn alloc_unit_variant(
     state: &mut InterpreterState,
     tag: u32,
 ) -> InterpreterResult<Value> {

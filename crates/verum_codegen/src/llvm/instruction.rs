@@ -17168,7 +17168,12 @@ fn lower_arith_extended<'ctx>(
 
     // Most ArithExtended ops: operands[0]=dst, operands[1]=a, operands[2]=b (or just src)
     match sub {
-        // ==== Checked Arithmetic: returns overflow-detected pair ====
+        // ==== Checked Arithmetic: produces `Maybe<Int>` heap variant ====
+        // Each arm calls the LLVM `*.with.overflow.i64` intrinsic to
+        // get a `(value, overflow_flag)` pair, then wraps via
+        // `build_maybe_int_wrap` to produce the same `Maybe<Int>`
+        // shape the Tier-0 interpreter emits at
+        // `arith_extended::CheckedAddI` (and friends).
         Some(ArithSubOpcode::CheckedAddI) | Some(ArithSubOpcode::CheckedAddU) => {
             if operands.len() < 3 {
                 return Ok(());
@@ -17176,13 +17181,15 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
-            // Use LLVM sadd.with.overflow intrinsic
             let intrinsic_name = if matches!(sub, Some(ArithSubOpcode::CheckedAddU)) {
                 "llvm.uadd.with.overflow.i64"
             } else {
                 "llvm.sadd.with.overflow.i64"
             };
-            let result = build_overflow_intrinsic(ctx, intrinsic_name, a, b, "checked_add")?;
+            let (val_basic, overflowed) =
+                build_overflow_intrinsic_pair(ctx, intrinsic_name, a, b, "checked_add")?;
+            let value = val_basic.into_int_value();
+            let result = build_maybe_int_wrap(ctx, value, overflowed, "checked_add")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -17198,7 +17205,10 @@ fn lower_arith_extended<'ctx>(
             } else {
                 "llvm.ssub.with.overflow.i64"
             };
-            let result = build_overflow_intrinsic(ctx, intrinsic_name, a, b, "checked_sub")?;
+            let (val_basic, overflowed) =
+                build_overflow_intrinsic_pair(ctx, intrinsic_name, a, b, "checked_sub")?;
+            let value = val_basic.into_int_value();
+            let result = build_maybe_int_wrap(ctx, value, overflowed, "checked_sub")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -17214,11 +17224,24 @@ fn lower_arith_extended<'ctx>(
             } else {
                 "llvm.smul.with.overflow.i64"
             };
-            let result = build_overflow_intrinsic(ctx, intrinsic_name, a, b, "checked_mul")?;
+            let (val_basic, overflowed) =
+                build_overflow_intrinsic_pair(ctx, intrinsic_name, a, b, "checked_mul")?;
+            let value = val_basic.into_int_value();
+            let result = build_maybe_int_wrap(ctx, value, overflowed, "checked_mul")?;
             ctx.set_register(dst, result);
             Ok(())
         }
         Some(ArithSubOpcode::CheckedDivI) => {
+            // Tier-0 mirror: `i64::checked_div` returns `None` when
+            // `b == 0` OR when `a == i64::MIN && b == -1` (the unique
+            // 2's-complement signed-overflow case). Same condition
+            // computed here and fed through `build_maybe_int_wrap` so
+            // the Tier-1 result is bit-equivalent to Tier-0's.
+            //
+            // Pre-this change, the AOT path returned RAW `0` on
+            // division-by-zero (silently wrong) and undefined
+            // behaviour on i64::MIN/-1 (LLVM `sdiv` is UB at that
+            // input).
             if operands.len() < 3 {
                 return Ok(());
             }
@@ -17227,41 +17250,48 @@ fn lower_arith_extended<'ctx>(
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
             let i64_type = ctx.types().i64_type();
             let zero = i64_type.const_int(0, false);
+            let int_min = i64_type.const_int(i64::MIN as u64, false);
+            // Build sentinel `-1` via const cast; `const_int(u64::MAX,..)`
+            // yields all-bits-set which equals -1 as i64.
+            let neg_one = i64_type.const_int(u64::MAX, false);
+
             let is_zero = ctx
                 .builder()
-                .build_int_compare(IntPredicate::EQ, b, zero, "div_zero_check")
+                .build_int_compare(IntPredicate::EQ, b, zero, "div_zero")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let entry_bb = ctx
+            let a_is_min = ctx
                 .builder()
-                .get_insert_block()
-                .or_internal("no insert block")?;
-            let current_fn = entry_bb
-                .get_parent()
-                .or_internal("block has no parent function")?;
-            let div_bb = ctx
-                .llvm_context()
-                .append_basic_block(current_fn, "checked_div_ok");
-            let merge_bb = ctx
-                .llvm_context()
-                .append_basic_block(current_fn, "checked_div_merge");
-            ctx.builder()
-                .build_conditional_branch(is_zero, merge_bb, div_bb)
+                .build_int_compare(IntPredicate::EQ, a, int_min, "div_a_is_min")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.builder().position_at_end(div_bb);
+            let b_is_neg_one = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, b, neg_one, "div_b_is_neg_one")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let signed_overflow = ctx
+                .builder()
+                .build_and(a_is_min, b_is_neg_one, "div_signed_overflow")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let is_none = ctx
+                .builder()
+                .build_or(is_zero, signed_overflow, "div_is_none")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+            // Compute a guarded divisor so the `sdiv` itself doesn't
+            // hit UB — `select(is_none, 1, b)` keeps the divisor in
+            // the safe range without needing a basic-block split.
+            let one = i64_type.const_int(1, false);
+            let safe_b = ctx
+                .builder()
+                .build_select(is_none, one, b, "div_safe_b")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
             let div_result = ctx
                 .builder()
-                .build_int_signed_div(a, b, "checked_div")
+                .build_int_signed_div(a, safe_b, "checked_div_val")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.builder()
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.builder().position_at_end(merge_bb);
-            let phi = ctx
-                .builder()
-                .build_phi(i64_type, "checked_div_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            phi.add_incoming(&[(&zero, entry_bb), (&div_result, div_bb)]);
-            ctx.set_register(dst, phi.as_basic_value().into());
+
+            let result = build_maybe_int_wrap(ctx, div_result, is_none, "checked_div")?;
+            ctx.set_register(dst, result);
             Ok(())
         }
 
@@ -22582,9 +22612,40 @@ fn build_overflow_intrinsic<'ctx>(
     b: verum_llvm::values::IntValue<'ctx>,
     name: &str,
 ) -> Result<BasicValueEnum<'ctx>> {
+    // Delegate to the pair variant and discard the overflow flag.
+    let (val_basic, _flag) = build_overflow_intrinsic_pair(ctx, intrinsic_name, a, b, name)?;
+    Ok(val_basic)
+}
+
+/// Like [`build_overflow_intrinsic`] but returns BOTH the arithmetic
+/// result and the i1 overflow flag. Used by the `CheckedAddI` /
+/// `CheckedSubI` / `CheckedMulI` (and the unsigned variants) arms to
+/// build a `Maybe<Int>` heap variant via [`build_maybe_int_wrap`] —
+/// matching the Tier-0 interpreter's
+/// `arith_extended::CheckedAddI` shape (which also returns
+/// `Maybe<Int>` per the canonical `core/base/maybe.vr` declaration).
+///
+/// Pre-this helper, the AOT path consumed `build_overflow_intrinsic`
+/// (value-only) and stored the raw i64 directly into the destination
+/// register — silently dropping overflow detection. User code like
+/// `if let Some(x) = checked_add(a, b)` then succeeded UNCONDITIONALLY
+/// in AOT (because the value side held a non-pointer i64 that
+/// pattern-match dispatch couldn't reject), while the interpreter
+/// correctly produced `None` on overflow.  Pair return + variant
+/// wrap close that tier divergence.
+fn build_overflow_intrinsic_pair<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    intrinsic_name: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    b: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<(
+    BasicValueEnum<'ctx>,
+    verum_llvm::values::IntValue<'ctx>,
+)> {
     let i64_ty = ctx.types().i64_type();
     let i1_ty = ctx.llvm_context().bool_type();
-    // Overflow intrinsic returns { i64, i1 }
+    // Overflow intrinsic returns { i64, i1 }.
     let struct_ty = ctx
         .llvm_context()
         .struct_type(&[i64_ty.into(), i1_ty.into()], false);
@@ -22600,12 +22661,94 @@ fn build_overflow_intrinsic<'ctx>(
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("overflow intrinsic: expected return value"))?;
-    // Extract result value (index 0)
     let value = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 0, &format!("{}_val", name))
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-    Ok(value)
+    let flag_basic = ctx
+        .builder()
+        .build_extract_value(result.into_struct_value(), 1, &format!("{}_flag", name))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    Ok((value, flag_basic.into_int_value()))
+}
+
+/// Wrap an `(value: i64, is_none: i1)` pair into a `Maybe<Int>` heap
+/// variant matching the canonical `MAYBE_VARIANT_LAYOUT`
+/// (`None=0, Some=1`). Returns the variant pointer cast to `i64`
+/// (matches the VBC register-value convention — heap pointers are
+/// stored as i64 with the pointer-tag NaN-box header set when read
+/// through `Value::from_ptr`).
+///
+/// The shape mirrors `interpreter::dispatch_table::handlers::method_dispatch::
+/// {make_some_value, make_none_value}` exactly — same canonical tags
+/// drawn from `verum_common::well_known_types::{maybe_success_tag,
+/// maybe_none_tag}`, same `[ObjectHeader][tag: u32][field_count: u32]
+/// [payload?: Value]` layout via `RuntimeLowering::lower_make_variant`.
+/// Bit-equivalent to the Tier-0 output, so user pattern-matches and
+/// `format_variant_for_print_depth` work uniformly across tiers.
+///
+/// Used by every Checked* arm whose result type is `Maybe<Int>` —
+/// `CheckedAddI` / `SubI` / `MulI` / `DivI` plus the unsigned
+/// variants.
+fn build_maybe_int_wrap<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    value: verum_llvm::values::IntValue<'ctx>,
+    is_none: verum_llvm::values::IntValue<'ctx>,
+    label: &str,
+) -> Result<BasicValueEnum<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let module = ctx.get_module();
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let current_fn = ctx.function();
+    let some_tag = verum_common::well_known_types::maybe_success_tag();
+    let none_tag = verum_common::well_known_types::maybe_none_tag();
+
+    let some_bb = ctx
+        .llvm_context()
+        .append_basic_block(current_fn, &format!("{}_some", label));
+    let none_bb = ctx
+        .llvm_context()
+        .append_basic_block(current_fn, &format!("{}_none", label));
+    let merge_bb = ctx
+        .llvm_context()
+        .append_basic_block(current_fn, &format!("{}_merge", label));
+
+    // Branch: is_none → None, !is_none → Some.
+    ctx.builder()
+        .build_conditional_branch(is_none, none_bb, some_bb)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    // Some path: alloc Maybe.Some(tag=1, field_count=1) + store payload.
+    ctx.builder().position_at_end(some_bb);
+    let some_ptr = runtime.lower_make_variant(ctx.builder(), &module, some_tag, 1)?;
+    runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, value)?;
+    let some_int = ctx
+        .builder()
+        .build_ptr_to_int(some_ptr, i64_ty, &format!("{}_some_int", label))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.builder()
+        .build_unconditional_branch(merge_bb)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    // None path: alloc Maybe.None(tag=0, field_count=0).
+    ctx.builder().position_at_end(none_bb);
+    let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, none_tag, 0)?;
+    let none_int = ctx
+        .builder()
+        .build_ptr_to_int(none_ptr, i64_ty, &format!("{}_none_int", label))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.builder()
+        .build_unconditional_branch(merge_bb)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    // Merge: phi node selects Some/None.
+    ctx.builder().position_at_end(merge_bb);
+    let phi = ctx
+        .builder()
+        .build_phi(i64_ty, &format!("{}_result", label))
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
+    Ok(phi.as_basic_value())
 }
 
 /// Build overflowing arithmetic that returns a heap-allocated tuple [value, overflow_flag].

@@ -2967,26 +2967,15 @@ pub(in super::super) fn handle_ffi_extended(
             // the interpreter panicking on LayoutError.
             const MAX_ALLOC: i64 = 1 << 30; // 1 GiB cap in the interpreter
             if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
-                // Build an Err variant with a nil payload so destructuring
-                // `Err(_)` fires cleanly in user code.
-                let variant_size = 8 + std::mem::size_of::<Value>();
-                let err_obj = state.heap.alloc_with_init(
-                    crate::types::TypeId(0x8000 + 1), // tag=1 = Err
-                    variant_size,
-                    |data| {
-                        let tag_ptr = data.as_mut_ptr() as *mut u32;
-                        unsafe {
-                            *tag_ptr = 1;
-                            *tag_ptr.add(1) = 1;
-                        }
-                    },
+                // Build an Err(nil) variant via the canonical Result
+                // builder so the layout matches `MakeVariant` exactly
+                // and destructuring `Err(_)` fires cleanly in user code.
+                let err_val = super::method_dispatch::make_result_variant(
+                    state,
+                    verum_common::well_known_types::result_error_tag(),
+                    Value::nil(),
                 )?;
-                let err_base = err_obj.as_ptr() as *mut u8;
-                let payload_off = crate::interpreter::heap::OBJECT_HEADER_SIZE + 8;
-                unsafe {
-                    std::ptr::write(err_base.add(payload_off) as *mut Value, Value::nil());
-                }
-                state.set_reg(dst, Value::from_ptr(err_obj.as_ptr()));
+                state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
             let size = raw_size as usize;
@@ -3050,28 +3039,16 @@ pub(in super::super) fn handle_ffi_extended(
             }
             let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
 
-            // Wrap in Ok(tuple). Result layout (from `handle_make_variant`):
-            //  [tag: u32][field_count: u32][payload: Value * N]
-            // Ok = tag 0, single payload field holding the tuple.
-            let variant_size = 8 + std::mem::size_of::<Value>();
-            let variant_obj = state.heap.alloc_with_init(
-                crate::types::TypeId(0x8000), // tag=0 = Ok (variant TypeId base | tag)
-                variant_size,
-                |data| {
-                    let tag_ptr = data.as_mut_ptr() as *mut u32;
-                    unsafe {
-                        *tag_ptr = 0;
-                        *tag_ptr.add(1) = 1;
-                    }
-                },
+            // Wrap in Ok(tuple) via the canonical Result builder —
+            // tag drawn from `RESULT_VARIANT_LAYOUT`, layout
+            // bit-equivalent to `MakeVariant` so user code's
+            // `let Ok(t) = …` destructures correctly.
+            let ok_val = super::method_dispatch::make_result_variant(
+                state,
+                verum_common::well_known_types::result_success_tag(),
+                tuple_val,
             )?;
-            let variant_base = variant_obj.as_ptr() as *mut u8;
-            let payload_offset = crate::interpreter::heap::OBJECT_HEADER_SIZE + 8;
-            unsafe {
-                let field_ptr = variant_base.add(payload_offset) as *mut Value;
-                std::ptr::write(field_ptr, tuple_val);
-            }
-            state.set_reg(dst, Value::from_ptr(variant_obj.as_ptr()));
+            state.set_reg(dst, ok_val);
             Ok(DispatchResult::Continue)
         }
 
@@ -3394,33 +3371,14 @@ pub(in super::super) fn make_oserror_variant_with_msg(
     )?;
     state.record_allocation();
 
-    // Now allocate the Result::Err variant (tag=1, field_count=1, payload=OSError)
-    let variant_data_size = 8 + std::mem::size_of::<Value>(); // tag:u32 + padding:u32 + 1 payload
-    let variant_obj = state.heap.alloc_with_init(
-        TypeId(0x8000 + 1), // tag 1 = Err
-        variant_data_size,
-        |data| {
-            let ptr = data.as_mut_ptr();
-            // SAFETY: `data` is a `&mut [u8]` of exactly `variant_data_size`
-            // bytes. We write a u32 tag + u32 field_count (8 bytes) followed
-            // by a Value payload (8 bytes) — total 16 bytes, matches the
-            // allocation. Pointer alignment is suitable: the heap returns
-            // 8-byte-aligned data and u32 writes only require 4-byte
-            // alignment.
-            unsafe {
-                // Tag
-                *(ptr as *mut u32) = 1; // Err
-                // Field count
-                *((ptr as *mut u32).add(1)) = 1;
-                // Payload[0] = OSError object pointer
-                let payload_ptr = ptr.add(8) as *mut Value;
-                std::ptr::write(payload_ptr, Value::from_ptr(os_error_obj.as_ptr()));
-            }
-        },
-    )?;
-    state.record_allocation();
-
-    Ok(Value::from_ptr(variant_obj.as_ptr()))
+    // Wrap into `Result::Err(os_error_obj)` via the canonical Result
+    // builder — tag drawn from `RESULT_VARIANT_LAYOUT`, layout
+    // bit-equivalent to `MakeVariant` so user `let Err(e) = …` works.
+    super::method_dispatch::make_result_variant(
+        state,
+        verum_common::well_known_types::result_error_tag(),
+        Value::from_ptr(os_error_obj.as_ptr()),
+    )
 }
 
 /// Construct a Result::Ok(ptr_value) variant for mmap.
@@ -3428,57 +3386,21 @@ pub(in super::super) fn make_result_ok_ptr(
     state: &mut InterpreterState,
     ptr_val: i64,
 ) -> InterpreterResult<Value> {
-    use crate::types::TypeId;
-
-    // Result::Ok variant (tag=0, field_count=1, payload=pointer)
-    let variant_data_size = 8 + std::mem::size_of::<Value>();
-    let variant_obj = state.heap.alloc_with_init(
-        TypeId(0x8000), // tag 0 = Ok
-        variant_data_size,
-        |data| {
-            let ptr = data.as_mut_ptr();
-            // SAFETY: See make_oserror_variant_with_msg — same variant
-            // layout, same `variant_data_size` of 16 bytes.
-            unsafe {
-                // Tag
-                *(ptr as *mut u32) = 0; // Ok
-                // Field count
-                *((ptr as *mut u32).add(1)) = 1;
-                // Payload[0] = pointer value
-                let payload_ptr = ptr.add(8) as *mut Value;
-                std::ptr::write(payload_ptr, Value::from_i64(ptr_val));
-            }
-        },
-    )?;
-    state.record_allocation();
-
-    Ok(Value::from_ptr(variant_obj.as_ptr()))
+    super::method_dispatch::make_result_variant(
+        state,
+        verum_common::well_known_types::result_success_tag(),
+        Value::from_i64(ptr_val),
+    )
 }
 
 /// Construct a Result::Ok(()) variant.
 pub(in super::super) fn make_result_ok_unit(
     state: &mut InterpreterState,
 ) -> InterpreterResult<Value> {
-    use crate::types::TypeId;
-
-    // Result::Ok variant (tag=0, field_count=0 for unit payload)
-    let variant_data_size = 8; // tag:u32 + padding:u32, no payload
-    let variant_obj = state.heap.alloc_with_init(
-        TypeId(0x8000), // tag 0 = Ok
-        variant_data_size,
-        |data| {
-            let ptr = data.as_mut_ptr();
-            // SAFETY: `data` is an 8-byte slice; two u32 writes fit and are
-            // 4-byte aligned (heap returns 8-aligned pointers).
-            unsafe {
-                *(ptr as *mut u32) = 0; // Ok
-                *((ptr as *mut u32).add(1)) = 0; // field_count = 0
-            }
-        },
-    )?;
-    state.record_allocation();
-
-    Ok(Value::from_ptr(variant_obj.as_ptr()))
+    super::method_dispatch::alloc_unit_variant(
+        state,
+        verum_common::well_known_types::result_success_tag(),
+    )
 }
 
 /// Convert errno to a human-readable string.
