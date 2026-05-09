@@ -10687,6 +10687,21 @@ impl VbcCodegen {
             descriptor.contexts.push(crate::types::ContextRef(ctx_id));
         }
 
+        // Set parent_type so archive_metadata's Pass-2 function walker
+        // adds this method to the parent type's `methods` list, making it
+        // visible to register_inherent_methods_from_metadata.  Without
+        // this, any method whose compile_function fails (common for async
+        // methods that reference cross-module symbols not yet loaded) gets
+        // a stub with parent_type=None, causing the method to be treated
+        // as a free function — invisible at typecheck call sites.
+        if let Some(type_name) = impl_type_name {
+            descriptor.parent_type = self
+                .type_name_to_id
+                .get(type_name)
+                .copied()
+                .or_else(|| self.get_well_known_type_id(type_name));
+        }
+
         let vbc_func = VbcFunction::new(descriptor, instructions);
         self.push_function_dedup(vbc_func);
     }
