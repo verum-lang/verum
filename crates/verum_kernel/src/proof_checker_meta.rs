@@ -78,7 +78,7 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
     }
     match term {
         Term::Var(i) => Term::Var(*i),
-        Term::Universe(n) => Term::Universe(n.saturating_add(lift)),
+        Term::Universe(level) => Term::Universe(level.clone().shifted_by(lift)),
         Term::Pi(a, b) => Term::Pi(
             Box::new(shift_universes(a, lift)),
             Box::new(shift_universes(b, lift)),
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn shift_universes_zero_lift_is_identity() {
-        let t = Term::Universe(0);
+        let t = Term::universe(0);
         assert_eq!(shift_universes(&t, 0), t);
         let t2 = Term::lam(Term::universe(2), Term::var(0));
         assert_eq!(shift_universes(&t2, 0), t2);
@@ -265,9 +265,9 @@ mod tests {
 
     #[test]
     fn shift_universes_lift_one_bumps_every_universe() {
-        let t = Term::Universe(0);
+        let t = Term::universe(0);
         let shifted = shift_universes(&t, 1);
-        assert_eq!(shifted, Term::Universe(1));
+        assert_eq!(shifted, Term::universe(1));
     }
 
     #[test]
@@ -376,8 +376,8 @@ mod tests {
         // rejected at every higher lift. Universe-stability cuts
         // both ways: true verdicts stay true, false verdicts stay
         // false.
-        let term = Term::Universe(0); // Universe(0) : Universe(0) — REJECTED.
-        let claimed_type = Term::Universe(0);
+        let term = Term::universe(0); // Universe(0) : Universe(0) — REJECTED.
+        let claimed_type = Term::universe(0);
         let cert = Certificate {
             term,
             claimed_type,
@@ -402,8 +402,8 @@ mod tests {
     #[test]
     fn shift_universes_in_context_preserves_depth() {
         let ctx = Context::new()
-            .extend(Term::Universe(0))
-            .extend(Term::Universe(1));
+            .extend(Term::universe(0))
+            .extend(Term::universe(1));
         let shifted = shift_universes_in_context(&ctx, 1);
         assert_eq!(shifted.depth(), ctx.depth());
     }
@@ -416,8 +416,8 @@ mod tests {
         // implementation drift here is a soundness regression.
         let probes = [
             Term::Var(0),
-            Term::Universe(0),
-            Term::Universe(42),
+            Term::universe(0),
+            Term::universe(42),
             Term::pi(Term::universe(1), Term::universe(2)),
             Term::lam(
                 Term::universe(0),

@@ -46,7 +46,7 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
-use crate::proof_checker::{CheckError, Term};
+use crate::proof_checker::{CheckError, Level, Term};
 
 // =============================================================================
 // Semantic domain — the load-bearing distinguishing feature of NbE
@@ -94,8 +94,10 @@ impl Closure {
 ///     Neutrals can't be reduced further.
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// Universe at level n.
-    VUniverse(u32),
+    /// Universe at the given [`Level`] — concrete or polymorphic.
+    /// The carrier shape mirrors `Term::Universe`'s post-FV-19
+    /// universe-polymorphic representation.
+    VUniverse(Level),
     /// `Π(x : A). B` as a closure-bearing semantic value.
     VPi {
         /// Domain value (already evaluated).
@@ -140,7 +142,7 @@ pub type Env = Vec<Value>;
 /// the env state at the binding site.
 pub fn eval(term: &Term, env: &Env) -> Value {
     match term {
-        Term::Universe(n) => Value::VUniverse(*n),
+        Term::Universe(level) => Value::VUniverse(level.clone()),
 
         Term::Var(i) => {
             // env is outer-first; Var(i) means "i'th binder from
@@ -214,7 +216,7 @@ pub fn apply_value(f: Value, x: Value) -> Value {
 /// de Bruijn indices for Lam bodies.
 pub fn quote(value: &Value, level: usize) -> Term {
     match value {
-        Value::VUniverse(n) => Term::Universe(*n),
+        Value::VUniverse(level) => Term::Universe(level.clone()),
 
         Value::VPi { domain, codomain } => {
             let dom_term = quote(domain, level);
@@ -271,7 +273,7 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
 /// syntactic comparison after normalisation.
 pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
     match (a, b) {
-        (Value::VUniverse(n), Value::VUniverse(m)) => n == m,
+        (Value::VUniverse(n), Value::VUniverse(m)) => crate::proof_checker::level_eq(n, m),
 
         (
             Value::VPi {
@@ -419,16 +421,22 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             .cloned()
             .ok_or_else(|| CheckError::UnboundVariable(*i)),
 
-        // T-Univ.  Mirrors the trusted base's universe-overflow
-        // check: a `Universe(u32::MAX)` would wrap to 0 in release
-        // builds and produce the unsound judgement
-        // `Universe(u32::MAX) : Universe(0)`; reject explicitly
-        // instead.  The corresponding rule in the bidirectional
-        // kernel lives at `proof_checker.rs::infer` Term::Universe.
-        Term::Universe(n) => match n.checked_add(1) {
-            Some(succ) => Ok(Value::VUniverse(succ)),
-            None => Err(CheckError::UniverseOverflow { level: *n }),
-        },
+        // T-Univ — universe-polymorphic mirror of the trusted base.
+        // Concrete-overflow rejected via [`Level::checked_succ`];
+        // symbolic carriers pass through structurally.  Mirrors
+        // `proof_checker.rs::infer` Term::Universe arm.
+        Term::Universe(level) => {
+            let level = level.clone().normalize();
+            match level.checked_succ() {
+                Some(next) => Ok(Value::VUniverse(next)),
+                None => Err(CheckError::UniverseOverflow {
+                    level: match level {
+                        Level::Concrete(n) => n,
+                        _ => u32::MAX,
+                    },
+                }),
+            }
+        }
 
         Term::Pi(a, b) => {
             let a_ty = infer_value(ctx, a)?;
@@ -437,7 +445,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             let extended = ctx.extend(a_value);
             let b_ty = infer_value(&extended, b)?;
             let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
-            Ok(Value::VUniverse(n.max(m)))
+            Ok(Value::VUniverse(n.max_with(m)))
         }
 
         Term::Lam(domain, body) => {
@@ -491,10 +499,12 @@ pub fn check(ctx: &NbeContext, term: &Term, expected: &Term) -> Result<(), Check
     }
 }
 
-/// If `value` is `VUniverse(n)`, return `n`; else `None`.
-fn expect_universe(value: &Value) -> Option<u32> {
+/// If `value` is `VUniverse(level)`, return the normalised level;
+/// else `None`.  Universe-polymorphic — the returned level may be
+/// symbolic.
+fn expect_universe(value: &Value) -> Option<Level> {
     match value {
-        Value::VUniverse(n) => Some(*n),
+        Value::VUniverse(level) => Some(level.clone().normalize()),
         _ => None,
     }
 }
@@ -580,10 +590,10 @@ mod tests {
     #[test]
     fn eval_quote_universe_round_trip() {
         let env: Env = vec![];
-        let v = eval(&Term::Universe(0), &env);
-        assert!(matches!(v, Value::VUniverse(0)));
+        let v = eval(&Term::universe(0), &env);
+        assert!(matches!(&v, Value::VUniverse(l) if l.as_concrete() == Some(0)));
         let t = quote(&v, 0);
-        assert!(matches!(t, Term::Universe(0)));
+        assert!(matches!(&t, Term::Universe(l) if l.as_concrete() == Some(0)));
     }
 
     #[test]
@@ -610,8 +620,8 @@ mod tests {
 
     #[test]
     fn def_eq_distinct_universes_rejected() {
-        let v_a = Value::VUniverse(0);
-        let v_b = Value::VUniverse(1);
+        let v_a = Value::VUniverse(Level::Concrete(0));
+        let v_b = Value::VUniverse(Level::Concrete(1));
         assert!(!def_eq(&v_a, &v_b, 0));
     }
 
@@ -672,8 +682,8 @@ mod tests {
     #[test]
     fn nbe_rejects_universe_mismatch() {
         // Mismatched universe levels — both kernels must reject.
-        let term = Term::Universe(0);
-        let claimed_type = Term::Universe(0); // Wrong: should be Universe(1).
+        let term = Term::universe(0);
+        let claimed_type = Term::universe(0); // Wrong: should be Universe(1).
         let cert = Certificate {
             term,
             claimed_type,
@@ -689,7 +699,7 @@ mod tests {
     fn nbe_rejects_unbound_variable() {
         // Var(0) at empty context — neither kernel should accept.
         let term = Term::Var(0);
-        let claimed_type = Term::Universe(0);
+        let claimed_type = Term::universe(0);
         let cert = Certificate {
             term,
             claimed_type,
@@ -710,10 +720,10 @@ mod tests {
             env: vec![],
             body: Term::Var(0),
         };
-        let result = closure.apply(Value::VUniverse(0));
+        let result = closure.apply(Value::VUniverse(Level::Concrete(0)));
         match result {
-            Value::VUniverse(0) => {}
-            other => panic!("expected VUniverse(0), got {:?}", other),
+            Value::VUniverse(l) if l.as_concrete() == Some(0) => {}
+            other => panic!("expected VUniverse(Concrete(0)), got {:?}", other),
         }
     }
 
@@ -734,11 +744,11 @@ mod tests {
     fn nbe_context_extend_pushes_fresh_level() {
         let ctx = NbeContext::new();
         assert_eq!(ctx.level(), 0);
-        let extended = ctx.extend(Value::VUniverse(0));
+        let extended = ctx.extend(Value::VUniverse(Level::Concrete(0)));
         assert_eq!(extended.level(), 1);
         // The extended context's most-recent type binding is the
         // pushed value.
         let ty = extended.lookup(0).unwrap();
-        assert!(matches!(ty, Value::VUniverse(0)));
+        assert!(matches!(ty, Value::VUniverse(l) if l.as_concrete() == Some(0)));
     }
 }
