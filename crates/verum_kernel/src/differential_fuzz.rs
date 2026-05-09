@@ -294,6 +294,21 @@ fn lift_universes_in_term(term: &Term, delta: u32) -> Term {
         ),
         Term::Fst(p) => Term::Fst(Box::new(lift_universes_in_term(p, delta))),
         Term::Snd(p) => Term::Snd(Box::new(lift_universes_in_term(p, delta))),
+        Term::Id { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(lift_universes_in_term(ty, delta)),
+            lhs: Box::new(lift_universes_in_term(lhs, delta)),
+            rhs: Box::new(lift_universes_in_term(rhs, delta)),
+        },
+        Term::Refl(value) => Term::Refl(Box::new(lift_universes_in_term(value, delta))),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(lift_universes_in_term(motive, delta)),
+            base: Box::new(lift_universes_in_term(base, delta)),
+            scrutinee: Box::new(lift_universes_in_term(scrutinee, delta)),
+        },
     }
 }
 

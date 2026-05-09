@@ -456,7 +456,7 @@ pub enum Term {
     /// for de Bruijn 0 in the body of `f`.
     App(Box<Term>, Box<Term>),
 
-    // ---- Σ-types (FV-20): dependent pairs ----
+    // ---- Σ-types: dependent pairs ----
 
     /// Dependent pair type `Σ(x : A). B`.  Like `Pi`, the body `B`
     /// is under a binder: de Bruijn 0 in `B` refers to the first
@@ -475,6 +475,47 @@ pub enum Term {
     /// Second projection `snd(p)`.  When `p` reduces to `Pair(_, b)`,
     /// β-projection collapses to `b`.
     Snd(Box<Term>),
+
+    // ---- Identity types: intensional equality ----
+
+    /// Identity type `Id(A, a, b)` — the type of paths from `a` to
+    /// `b` in `A`.  Foundational equality-reasoning primitive: every
+    /// "x = y" proposition becomes verifiable in the trusted base
+    /// once Id is admitted.
+    Id {
+        /// The carrier type `A`.
+        ty: Box<Term>,
+        /// The left endpoint `a : A`.
+        lhs: Box<Term>,
+        /// The right endpoint `b : A`.
+        rhs: Box<Term>,
+    },
+    /// Reflexivity constructor `refl(a) : Id(A, a, a)`.  The unique
+    /// canonical inhabitant of `Id(A, a, a)`; J-reduction collapses
+    /// path induction at the refl scrutinee.
+    Refl(Box<Term>),
+    /// Paulin-Mohring J eliminator (path induction).
+    ///
+    ///     motive    : Π(_ : A). Universe(n)
+    ///     base      : motive(a)                — proof at the lhs
+    ///     scrutinee : Id(A, a, b)
+    ///   ──────────────────────────────────────────────────────
+    ///     J(motive, base, scrutinee) : motive(b)
+    ///
+    /// This is the simplified J that every dependent type theory
+    /// admits.  The β-rule is `J(_, base, Refl(_)) → base`,
+    /// established by [`whnf_fuel`].  symm / trans / transport /
+    /// cong / `Π`-extensionality are all derivable from J +
+    /// [`Term::Refl`].
+    J {
+        /// Motive `P : Π(_ : A). Universe(n)` — the predicate to
+        /// transport across the path.
+        motive: Box<Term>,
+        /// Base case `h : P(a)` — proof at the lhs of the path.
+        base: Box<Term>,
+        /// The path being eliminated: `eq : Id(A, a, b)`.
+        scrutinee: Box<Term>,
+    },
 }
 
 impl Term {
@@ -536,6 +577,29 @@ impl Term {
     /// Convenience: build `Snd(p)`.
     pub fn snd(p: Term) -> Self {
         Term::Snd(Box::new(p))
+    }
+
+    /// Convenience: build `Id(ty, lhs, rhs)` — identity type.
+    pub fn id_ty(ty: Term, lhs: Term, rhs: Term) -> Self {
+        Term::Id {
+            ty: Box::new(ty),
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        }
+    }
+
+    /// Convenience: build `Refl(value)` — reflexivity at value.
+    pub fn refl(value: Term) -> Self {
+        Term::Refl(Box::new(value))
+    }
+
+    /// Convenience: build `J { motive, base, scrutinee }`.
+    pub fn j(motive: Term, base: Term, scrutinee: Term) -> Self {
+        Term::J {
+            motive: Box::new(motive),
+            base: Box::new(base),
+            scrutinee: Box::new(scrutinee),
+        }
     }
 }
 
@@ -629,6 +693,23 @@ pub(crate) fn shift_up(term: Term, amount: usize, cutoff: usize) -> Term {
         ),
         Term::Fst(p) => Term::Fst(Box::new(shift_up(*p, amount, cutoff))),
         Term::Snd(p) => Term::Snd(Box::new(shift_up(*p, amount, cutoff))),
+
+        // ---- Identity types ----
+        Term::Id { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(shift_up(*ty, amount, cutoff)),
+            lhs: Box::new(shift_up(*lhs, amount, cutoff)),
+            rhs: Box::new(shift_up(*rhs, amount, cutoff)),
+        },
+        Term::Refl(value) => Term::Refl(Box::new(shift_up(*value, amount, cutoff))),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(shift_up(*motive, amount, cutoff)),
+            base: Box::new(shift_up(*base, amount, cutoff)),
+            scrutinee: Box::new(shift_up(*scrutinee, amount, cutoff)),
+        },
     }
 }
 
@@ -674,6 +755,25 @@ fn subst(term: Term, target: usize, replacement: &Term) -> Term {
         ),
         Term::Fst(p) => Term::Fst(Box::new(subst(*p, target, replacement))),
         Term::Snd(p) => Term::Snd(Box::new(subst(*p, target, replacement))),
+
+        // ---- Identity types ----  No new term-level
+        // binders (Id's three args don't bind; Refl carries a value;
+        // J's motive/base/scrutinee live at the same depth).
+        Term::Id { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(subst(*ty, target, replacement)),
+            lhs: Box::new(subst(*lhs, target, replacement)),
+            rhs: Box::new(subst(*rhs, target, replacement)),
+        },
+        Term::Refl(value) => Term::Refl(Box::new(subst(*value, target, replacement))),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(subst(*motive, target, replacement)),
+            base: Box::new(subst(*base, target, replacement)),
+            scrutinee: Box::new(subst(*scrutinee, target, replacement)),
+        },
     }
 }
 
@@ -736,7 +836,7 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
                 }
             }
 
-            // Σ-projection (FV-20): Fst(Pair(a, _)) → a;
+            // Σ-projection: Fst(Pair(a, _)) → a;
             // Snd(Pair(_, b)) → b.  Stuck on non-pair head.
             Term::Fst(p) => {
                 let (p_whnf, fuel_after) = whnf_fuel(*p, fuel);
@@ -758,6 +858,35 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
                         term = *b;
                     }
                     other => return (Term::Snd(Box::new(other)), fuel),
+                }
+            }
+
+            // J β-rule: J(motive, base, Refl(_)) → base.
+            // Path induction collapses immediately when the path is
+            // refl — the only canonical inhabitant of `Id(A, a, a)`.
+            // For any other (open / neutral) scrutinee J stays stuck.
+            Term::J {
+                motive,
+                base,
+                scrutinee,
+            } => {
+                let (s_whnf, fuel_after) = whnf_fuel(*scrutinee, fuel);
+                fuel = fuel_after;
+                match s_whnf {
+                    Term::Refl(_) => {
+                        // Continue reducing the base term.
+                        term = *base;
+                    }
+                    other => {
+                        return (
+                            Term::J {
+                                motive,
+                                base,
+                                scrutinee: Box::new(other),
+                            },
+                            fuel,
+                        );
+                    }
                 }
             }
 
@@ -796,7 +925,7 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         (Term::Pi(a1, b1), Term::Pi(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Lam(a1, b1), Term::Lam(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::App(f1, x1), Term::App(f2, x2)) => def_eq(f1, f2) && def_eq(x1, x2),
-        // Σ-types (FV-20): structural component-wise equality.  The
+        // Σ-types: structural component-wise equality.  The
         // β-projection rules in `whnf_fuel` collapse `Fst(Pair(a, _))`
         // and `Snd(Pair(_, b))` BEFORE we reach this point, so any
         // residual `Fst` / `Snd` here is stuck on a non-pair head
@@ -805,6 +934,20 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         (Term::Pair(a1, b1), Term::Pair(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Fst(p1), Term::Fst(p2)) => def_eq(p1, p2),
         (Term::Snd(p1), Term::Snd(p2)) => def_eq(p1, p2),
+        // Identity types: three-component structural
+        // equality for `Id`; one-component for `Refl` (a = b ⇔
+        // refl_a ≡ refl_b iff a ≡ b); three-component for `J` (only
+        // hits when J is stuck on a neutral scrutinee — refl
+        // β-collapses in `whnf_fuel`).
+        (
+            Term::Id { ty: t1, lhs: l1, rhs: r1 },
+            Term::Id { ty: t2, lhs: l2, rhs: r2 },
+        ) => def_eq(t1, t2) && def_eq(l1, l2) && def_eq(r1, r2),
+        (Term::Refl(v1), Term::Refl(v2)) => def_eq(v1, v2),
+        (
+            Term::J { motive: m1, base: b1, scrutinee: s1 },
+            Term::J { motive: m2, base: b2, scrutinee: s2 },
+        ) => def_eq(m1, m2) && def_eq(b1, b2) && def_eq(s1, s2),
         // η-equivalence — one-sided cases. When one side is a
         // λx.(f x) and the other is `f`, they're equal iff `x`
         // does not appear free in `f`. This rule fires AFTER WHNF
@@ -880,6 +1023,21 @@ fn is_free_in(term: &Term, target: usize) -> bool {
         Term::Sigma(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
         Term::Pair(a, b) => is_free_in(a, target) || is_free_in(b, target),
         Term::Fst(p) | Term::Snd(p) => is_free_in(p, target),
+        // Identity types: non-binding everywhere — no
+        // shift on `target`.
+        Term::Id { ty, lhs, rhs } => {
+            is_free_in(ty, target) || is_free_in(lhs, target) || is_free_in(rhs, target)
+        }
+        Term::Refl(value) => is_free_in(value, target),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            is_free_in(motive, target)
+                || is_free_in(base, target)
+                || is_free_in(scrutinee, target)
+        }
     }
 }
 
@@ -926,11 +1084,28 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
         ),
         Term::Fst(p) => Term::Fst(Box::new(shift_down(*p, amount, cutoff))),
         Term::Snd(p) => Term::Snd(Box::new(shift_down(*p, amount, cutoff))),
+
+        // ---- Identity types ----
+        Term::Id { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(shift_down(*ty, amount, cutoff)),
+            lhs: Box::new(shift_down(*lhs, amount, cutoff)),
+            rhs: Box::new(shift_down(*rhs, amount, cutoff)),
+        },
+        Term::Refl(value) => Term::Refl(Box::new(shift_down(*value, amount, cutoff))),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(shift_down(*motive, amount, cutoff)),
+            base: Box::new(shift_down(*base, amount, cutoff)),
+            scrutinee: Box::new(shift_down(*scrutinee, amount, cutoff)),
+        },
     }
 }
 
 // =============================================================================
-// Bidirectional type checker — the six rules (eight, post-FV-20)
+// Bidirectional type checker — the six rules (eleven, post-)
 // =============================================================================
 
 /// Type-checking error. Each error names the kernel rule that
@@ -945,10 +1120,26 @@ pub enum CheckError {
     NotAType(Term),
     /// T-App-Elim: function side isn't a Pi type.
     NotAFunction(Term),
-    /// T-Fst-Elim / T-Snd-Elim (FV-20): the projected term's type
+    /// T-Fst-Elim / T-Snd-Elim: the projected term's type
     /// isn't a Σ-type, so first/second-component projection has
     /// no meaning.  Carries the inferred type for diagnostics.
     NotASigma(Term),
+    /// T-J-Elim: the J scrutinee's type isn't an `Id(_, _, _)`,
+    /// so path induction has no path to eliminate.
+    NotAnIdentity(Term),
+    /// T-Refl-Intro: the body of a `Refl(v)` claimed at
+    /// `Id(A, a, b)` has `a ≢ b` after definitional equality
+    /// reduction.  Refl can only inhabit reflexive identity types.
+    ReflEndpointMismatch {
+        /// The lhs of the claimed Id type.
+        lhs: Term,
+        /// The rhs of the claimed Id type.
+        rhs: Term,
+    },
+    /// T-J-Elim: the J motive isn't a `Π(_ : A). U(_)`
+    /// shape — path induction needs a non-dependent motive index by
+    /// the path's right endpoint.
+    NotAValidJMotive(Term),
     /// T-App-Elim: argument's type doesn't match the Pi's domain.
     DomainMismatch {
         /// Domain type expected by the Pi.
@@ -1147,6 +1338,101 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 Term::Sigma(_, b) => Ok(subst(*b, 0, &Term::Fst(p.clone()))),
                 other => Err(CheckError::NotASigma(other)),
             }
+        }
+
+        // ---- Identity types ----
+
+        // T-Id-Form: A : Universe(n), a : A, b : A ⇒ Id(A, a, b) : Universe(n).
+        // The Id type lives at the same universe as its carrier — it
+        // doesn't introduce a fresh universe level.
+        Term::Id { ty, lhs, rhs } => {
+            let ty_kind = infer(ctx, ty)?;
+            let n = expect_universe(&ty_kind)
+                .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
+            let lhs_ty = infer(ctx, lhs)?;
+            if !def_eq(&lhs_ty, ty) {
+                return Err(CheckError::DomainMismatch {
+                    expected: (**ty).clone(),
+                    actual: lhs_ty,
+                });
+            }
+            let rhs_ty = infer(ctx, rhs)?;
+            if !def_eq(&rhs_ty, ty) {
+                return Err(CheckError::DomainMismatch {
+                    expected: (**ty).clone(),
+                    actual: rhs_ty,
+                });
+            }
+            Ok(Term::Universe(n))
+        }
+
+        // T-Refl-Intro: a : A ⇒ Refl(a) : Id(A, a, a).  Synthesis
+        // mode: we infer A from a, then build the symmetric Id.
+        // Asymmetric Id claims (Id(A, a, b) with a ≢ b) are
+        // discharged via `check`/Certificate's def_eq.
+        Term::Refl(value) => {
+            let value_ty = infer(ctx, value)?;
+            Ok(Term::Id {
+                ty: Box::new(value_ty),
+                lhs: value.clone(),
+                rhs: value.clone(),
+            })
+        }
+
+        // T-J-Elim (Paulin-Mohring path induction).
+        //
+        //   motive    : Π(_ : A). Universe(n)
+        //   base      : motive(a)              where `a` is the lhs
+        //                                       of scrutinee's Id
+        //   scrutinee : Id(A, a, b)
+        //   ─────────────────────────────────────────────────────
+        //   J(motive, base, scrutinee) : motive(b)
+        //
+        // β-rule (whnf): J(_, base, Refl(_)) → base.
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            // Infer the scrutinee's Id type to extract `A`, `a`, `b`.
+            let s_ty = whnf(infer(ctx, scrutinee)?);
+            let (a_ty, a_lhs, a_rhs) = match s_ty {
+                Term::Id { ty, lhs, rhs } => (ty, lhs, rhs),
+                other => return Err(CheckError::NotAnIdentity(other)),
+            };
+
+            // Validate the motive is Π(_ : A). Universe(_).
+            let motive_ty = whnf(infer(ctx, motive)?);
+            let (motive_dom, motive_codom) = match &motive_ty {
+                Term::Pi(d, c) => (d.as_ref().clone(), c.as_ref().clone()),
+                _ => return Err(CheckError::NotAValidJMotive((**motive).clone())),
+            };
+            if !def_eq(&motive_dom, &a_ty) {
+                return Err(CheckError::DomainMismatch {
+                    expected: (*a_ty).clone(),
+                    actual: motive_dom,
+                });
+            }
+            // The motive's codomain (under the binder) must reduce
+            // to a Universe.  We require this constraint so the
+            // J-eliminator's result is well-typed.
+            if expect_universe(&motive_codom).is_none() {
+                return Err(CheckError::NotAValidJMotive((**motive).clone()));
+            }
+
+            // The base must inhabit `motive(a_lhs)` — the motive
+            // applied to the path's LEFT endpoint.
+            let expected_base_ty = whnf(Term::App(motive.clone(), a_lhs.clone()));
+            let actual_base_ty = infer(ctx, base)?;
+            if !def_eq(&actual_base_ty, &expected_base_ty) {
+                return Err(CheckError::DomainMismatch {
+                    expected: expected_base_ty,
+                    actual: actual_base_ty,
+                });
+            }
+
+            // Result: motive applied to the path's RIGHT endpoint.
+            Ok(Term::App(motive.clone(), a_rhs))
         }
     }
 }
@@ -1649,11 +1935,11 @@ mod tests {
     }
 
     // =========================================================================
-    // FV-19 — Universe polymorphism (Level variables, Succ, Max).
+    // — Universe polymorphism (Level variables, Succ, Max).
     //
     // Each test pins a specific algebraic property of the universe-level
     // calculus or its interaction with the kernel rules.  These are the
-    // load-bearing tests for the post-FV-19 universe-polymorphic kernel
+    // load-bearing tests for the post-universe-polymorphic kernel
     // surface.  Removing any of them silently widens the trust extension.
     // =========================================================================
 
@@ -1990,7 +2276,7 @@ mod tests {
     }
 
     // =========================================================================
-    // FV-20 — Σ-types (dependent pairs).
+    // — Σ-types (dependent pairs).
     //
     // Each test pins one of the four new kernel rules (T-Sigma-Form,
     // T-Pair-Intro, T-Fst-Elim, T-Snd-Elim) plus the β-projection
@@ -2094,7 +2380,7 @@ mod tests {
     #[test]
     fn fst_on_non_sigma_is_rejected() {
         // Fst on a Universe-typed term is structurally invalid:
-        // the kernel rejects with NotASigma (FV-20 error variant).
+        // the kernel rejects with NotASigma (error variant).
         let ctx = Context::new();
         let bad = Term::fst(Term::universe(0)); // Type@0 isn't Σ-typed
         match infer(&ctx, &bad) {
@@ -2185,5 +2471,191 @@ mod tests {
             metadata: Default::default(),
         };
         cert.verify().expect("polymorphic Σ certificate should verify");
+    }
+
+    // =========================================================================
+    // Identity types — T-Id-Form / T-Refl-Intro / T-J-Elim with the J β-rule.
+    // =========================================================================
+
+    #[test]
+    fn t_id_form_at_concrete_universe() {
+        // Id(Type@0, ?, ?) needs Type@0-typed endpoints — synthesise
+        // them from a hypothesis bound at Type@0.
+        // ctx: x : Type@0
+        let ctx = Context::new().extend(Term::universe(0));
+        // Id(Type@0, x, x) — non-trivial since the carrier itself
+        // lives at Type@1.  But the endpoints must inhabit the
+        // carrier; use Var(0) (the bound x : Type@0).
+        let id = Term::id_ty(Term::universe(0), Term::Var(0), Term::Var(0));
+        let inferred = infer(&ctx, &id).unwrap();
+        // Id at carrier Type@0 lives at Type@1 (the carrier's own
+        // universe).
+        assert!(def_eq(&inferred, &Term::universe(1)));
+    }
+
+    #[test]
+    fn t_refl_synthesises_id_at_value() {
+        // λ(x : Type@0). Refl(x) : Π(x : Type@0). Id(Type@0, x, x).
+        let ctx = Context::new();
+        let lam = Term::lam(Term::universe(0), Term::refl(Term::Var(0)));
+        let inferred = infer(&ctx, &lam).unwrap();
+        let expected = Term::pi(
+            Term::universe(0),
+            Term::id_ty(Term::universe(1), Term::Var(0), Term::Var(0)),
+        );
+        // The synthesised type's carrier is the inferred type of x,
+        // which is Type@0.  In synthesis mode the kernel constructs
+        // `Id(Type@0, x, x)` (the type of x is Type@0); that's
+        // structurally what `infer` produces:
+        let synthesised = Term::pi(
+            Term::universe(0),
+            Term::id_ty(Term::universe(0), Term::Var(0), Term::Var(0)),
+        );
+        // Either form would round-trip via the body's carrier.  We
+        // assert the synthesised form (which mirrors the actual
+        // synthesis path).
+        assert!(
+            def_eq(&inferred, &synthesised),
+            "Refl synthesis: expected {:?}, got {:?}",
+            synthesised,
+            inferred,
+        );
+        // Sanity: the hand-derived `expected` form (with Type@1
+        // carrier) is structurally distinct from `inferred`.
+        assert!(!def_eq(&inferred, &expected));
+    }
+
+    #[test]
+    fn beta_j_on_refl_collapses_to_base() {
+        // J(motive, base, Refl(_)) ≡ base.
+        // Build a closed J on Refl: J(λx.Type@0, Type@0, Refl(Type@0))
+        // → Type@0 by the J β-rule.
+        let motive = Term::lam(Term::universe(0), Term::universe(0));
+        let base = Term::universe(0);
+        let scrutinee = Term::refl(Term::universe(0));
+        let j = Term::j(motive, base.clone(), scrutinee);
+        assert!(def_eq(&j, &base));
+    }
+
+    #[test]
+    fn t_j_elim_with_constant_motive_typechecks() {
+        // Constant motive: λ(_ : Type@0). Type@0.
+        // base : Type@0, scrutinee : Id(Type@0, x, x) — applied at
+        // a hypothesis x.  Result type: motive(x) ≡ Type@0.
+        let ctx = Context::new()
+            .extend(Term::universe(0)) // x : Type@0
+            ;
+        let motive = Term::lam(Term::universe(0), Term::universe(0));
+        let base = Term::Var(0); // x — but we need x : motive(x_lhs).
+                                  // motive(_) = Type@0, so base must
+                                  // have type Type@0.  Var(0) (the
+                                  // hypothesis x : Type@0) works.
+        let scrutinee = Term::refl(Term::Var(0)); // refl_x : Id(Type@0, x, x)
+        let j = Term::j(motive.clone(), base.clone(), scrutinee);
+        // J(constant_motive, base, scrutinee) ≡ base by β-rule.
+        let inferred = infer(&ctx, &j).unwrap();
+        // Result type: motive applied to the rhs of the scrutinee's
+        // Id, which is x.  motive(x) reduces to Type@0.
+        assert!(
+            def_eq(&inferred, &Term::universe(0)),
+            "T-J-Elim with constant motive: got {:?}",
+            inferred,
+        );
+    }
+
+    #[test]
+    fn t_j_rejects_non_id_scrutinee() {
+        // J on a non-Id-typed scrutinee → NotAnIdentity.
+        let ctx = Context::new();
+        let motive = Term::lam(Term::universe(0), Term::universe(0));
+        let base = Term::universe(0);
+        // Scrutinee is Type@0 — not an identity.
+        let scrutinee = Term::universe(0);
+        let bad = Term::j(motive, base, scrutinee);
+        match infer(&ctx, &bad) {
+            Err(CheckError::NotAnIdentity(_)) => {}
+            other => panic!("expected NotAnIdentity, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn certificate_refl_identity_at_universe_verifies() {
+        // λ(A : Type@0). λ(x : A). Refl(x)
+        //   has type Π(A : Type@0). Π(x : A). Id(A, x, x).
+        let term = Term::lam(
+            Term::universe(0),
+            Term::lam(Term::Var(0), Term::refl(Term::Var(0))),
+        );
+        let claimed_type = Term::pi(
+            Term::universe(0),
+            Term::pi(
+                Term::Var(0),
+                Term::id_ty(Term::Var(1), Term::Var(0), Term::Var(0)),
+            ),
+        );
+        let cert = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        cert.verify().expect("refl-at-A certificate should verify");
+    }
+
+    #[test]
+    fn certificate_distinct_endpoint_refl_is_rejected() {
+        // λ(A : Type@0). λ(x : A). λ(y : A). Refl(x)
+        //   claimed at  Π(A : Type@0). Π(x : A). Π(y : A). Id(A, x, y)
+        // Since Refl(x) inhabits Id(A, x, x) — NOT Id(A, x, y) — the
+        // certificate must reject.
+        let term = Term::lam(
+            Term::universe(0),
+            Term::lam(
+                Term::Var(0),
+                Term::lam(Term::Var(1), Term::refl(Term::Var(1))),
+            ),
+        );
+        let claimed_type = Term::pi(
+            Term::universe(0),
+            Term::pi(
+                Term::Var(0),
+                Term::pi(
+                    Term::Var(1),
+                    Term::id_ty(Term::Var(2), Term::Var(1), Term::Var(0)),
+                ),
+            ),
+        );
+        let cert = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        match cert.verify() {
+            Err(CheckError::TypeMismatch { .. }) => {}
+            other => panic!("expected TypeMismatch on refl with distinct endpoints, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn certificate_polymorphic_refl_verifies() {
+        // λ(A : Type@u). λ(x : A). Refl(x)
+        //   has type Π(A : Type@u). Π(x : A). Id(A, x, x)
+        // Universe-polymorphic refl over a level variable.
+        let term = Term::lam(
+            Term::universe_var("u"),
+            Term::lam(Term::Var(0), Term::refl(Term::Var(0))),
+        );
+        let claimed_type = Term::pi(
+            Term::universe_var("u"),
+            Term::pi(
+                Term::Var(0),
+                Term::id_ty(Term::Var(1), Term::Var(0), Term::Var(0)),
+            ),
+        );
+        let cert = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        cert.verify().expect("polymorphic refl certificate should verify");
     }
 }

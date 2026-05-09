@@ -95,8 +95,7 @@ impl Closure {
 #[derive(Debug, Clone)]
 pub enum Value {
     /// Universe at the given [`Level`] — concrete or polymorphic.
-    /// The carrier shape mirrors `Term::Universe`'s post-FV-19
-    /// universe-polymorphic representation.
+    /// The carrier shape mirrors `Term::Universe`'s post-    /// universe-polymorphic representation.
     VUniverse(Level),
     /// `Π(x : A). B` as a closure-bearing semantic value.
     VPi {
@@ -124,6 +123,17 @@ pub enum Value {
     },
     /// Pair value `(a, b)`.
     VPair(Box<Value>, Box<Value>),
+    /// Identity type `Id(A, a, b)`.
+    VId {
+        /// Carrier type as a value.
+        ty: Box<Value>,
+        /// Left endpoint as a value.
+        lhs: Box<Value>,
+        /// Right endpoint as a value.
+        rhs: Box<Value>,
+    },
+    /// Reflexivity proof `refl(a) : Id(A, a, a)`.
+    VRefl(Box<Value>),
 }
 
 /// Neutral term — a stuck reduction. Represents level-indexed free
@@ -139,17 +149,28 @@ pub enum Neutral {
     NFst(Box<Neutral>),
     /// Stuck second projection `snd(n)`.
     NSnd(Box<Neutral>),
-    /// **FV-21 soundness gate**: a stuck head that is itself a
-    /// non-function, non-pair value (e.g. `Universe(_)` applied to
-    /// an argument or projected via `fst`/`snd`).  Wrapping the
+    /// Stuck path induction — the J scrutinee canonicalised to a
+    /// neutral path (free variable, stuck projection, etc.) rather
+    /// than a refl, so the β-rule `J(_, h, refl) → h` did not fire.
+    NJ {
+        /// Motive value `P : Π(_ : A). Universe(_)`.
+        motive: Box<Value>,
+        /// Base case `h : P(a)`.
+        base: Box<Value>,
+        /// Stuck path scrutinee head.
+        scrutinee: Box<Neutral>,
+    },
+    /// Soundness gate: a stuck head that is itself a non-function,
+    /// non-pair, non-path value (e.g. `Universe(_)` applied to an
+    /// argument or projected via `fst`/`snd`).  Wrapping the
     /// offending value here preserves structural distinctness so
-    /// that `def_eq` does NOT silently equate `App(Universe(MAX), x)`
-    /// with `Universe(MAX)`.  In a sound run the type-checker
-    /// rejects BEFORE reaching this branch (NotAFunction /
-    /// NotASigma / UniverseOverflow), but the kernel runs on
-    /// adversarial fuzz input via the differential harness, and the
+    /// `def_eq` does NOT silently equate `App(Universe(MAX), x)`
+    /// with `Universe(MAX)`.  The trusted-base type-checker rejects
+    /// the offending shapes BEFORE reaching this branch (via
+    /// NotAFunction / NotASigma / NotAnIdentity / UniverseOverflow);
+    /// adversarial fuzz input may still reach it, and the
     /// stuck-head form keeps the kernel's reject/accept verdicts in
-    /// sync with `proof_checker.rs`'s structural rejection.
+    /// sync with the trusted base.
     NStuck(Box<Value>),
 }
 
@@ -232,16 +253,49 @@ pub fn eval(term: &Term, env: &Env) -> Value {
 
         Term::Fst(p) => apply_fst(eval(p, env)),
         Term::Snd(p) => apply_snd(eval(p, env)),
+
+        Term::Id { ty, lhs, rhs } => Value::VId {
+            ty: Box::new(eval(ty, env)),
+            lhs: Box::new(eval(lhs, env)),
+            rhs: Box::new(eval(rhs, env)),
+        },
+
+        Term::Refl(value) => Value::VRefl(Box::new(eval(value, env))),
+
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => apply_j(eval(motive, env), eval(base, env), eval(scrutinee, env)),
+    }
+}
+
+/// Path induction on a value.  Reduces `J(_, base, refl) → base`;
+/// stays stuck on neutral scrutinees via `NJ`; falls through
+/// `NStuck` for non-path, non-neutral heads.
+pub fn apply_j(motive: Value, base: Value, scrutinee: Value) -> Value {
+    match scrutinee {
+        Value::VRefl(_) => base,
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NJ {
+            motive: Box::new(motive),
+            base: Box::new(base),
+            scrutinee: Box::new(n),
+        }),
+        other => Value::VNeutral(Neutral::NJ {
+            motive: Box::new(motive),
+            base: Box::new(base),
+            scrutinee: Box::new(Neutral::NStuck(Box::new(other))),
+        }),
     }
 }
 
 /// Apply one value to another.
 ///
 /// β-reduces for `VLam`; builds a stuck `NApp` for neutrals; **for
-/// non-function heads (FV-21 soundness gate)** wraps the head in
+/// non-function heads (soundness gate)** wraps the head in
 /// `NStuck` so the resulting `App` is structurally distinct from
 /// the bare head.  This closes the disagreement found by
-/// `multi_kernel_agreement_on_arbitrary_cert`: pre-FV-21 the
+/// `multi_kernel_agreement_on_arbitrary_cert`: pre-the
 /// fallback `_ => f` silently dropped the application, making
 /// `App(Universe(MAX), x)` evaluate to `Universe(MAX)` and unsoundly
 /// matching the term's inferred type.
@@ -252,7 +306,7 @@ pub fn apply_value(f: Value, x: Value) -> Value {
             Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(x)))
         }
         other => {
-            // FV-21: wrap the non-function head in NStuck so def_eq
+            // wrap the non-function head in NStuck so def_eq
             // sees the application structurally and doesn't equate
             // `App(other, x)` with `other`.
             Value::VNeutral(Neutral::NApp(
@@ -263,9 +317,9 @@ pub fn apply_value(f: Value, x: Value) -> Value {
     }
 }
 
-/// First projection on a value (FV-20).  Reduces `VPair(a, _)` → `a`;
+/// First projection on a value.  Reduces `VPair(a, _)` → `a`;
 /// stays stuck on neutrals via `NFst`; falls through `NStuck` for
-/// non-pair, non-neutral heads (FV-21).
+/// non-pair, non-neutral heads.
 pub fn apply_fst(p: Value) -> Value {
     match p {
         Value::VPair(a, _) => *a,
@@ -276,7 +330,7 @@ pub fn apply_fst(p: Value) -> Value {
     }
 }
 
-/// Second projection on a value (FV-20).  Symmetric to [`apply_fst`].
+/// Second projection on a value.  Symmetric to [`apply_fst`].
 pub fn apply_snd(p: Value) -> Value {
     match p {
         Value::VPair(_, b) => *b,
@@ -329,6 +383,12 @@ pub fn quote(value: &Value, level: usize) -> Term {
         Value::VPair(a, b) => {
             Term::Pair(Box::new(quote(a, level)), Box::new(quote(b, level)))
         }
+        Value::VId { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(quote(ty, level)),
+            lhs: Box::new(quote(lhs, level)),
+            rhs: Box::new(quote(rhs, level)),
+        },
+        Value::VRefl(value) => Term::Refl(Box::new(quote(value, level))),
     }
 }
 
@@ -355,10 +415,19 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
         }
         Neutral::NFst(n) => Term::Fst(Box::new(quote_neutral(n, level))),
         Neutral::NSnd(n) => Term::Snd(Box::new(quote_neutral(n, level))),
-        // FV-21: read back the wrapped value directly — quote sees
-        // exactly what the offending term was, so structural
-        // distinctness across `App(Stuck, x)` vs `bare_value` is
-        // preserved at readback time.
+        Neutral::NJ {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(quote(motive, level)),
+            base: Box::new(quote(base, level)),
+            scrutinee: Box::new(quote_neutral(scrutinee, level)),
+        },
+        // Read back the wrapped value directly — quote sees exactly
+        // what the offending term was, so structural distinctness
+        // across `App(Stuck, x)` vs `bare_value` is preserved at
+        // readback time.
         Neutral::NStuck(v) => quote(v, level),
     }
 }
@@ -439,6 +508,13 @@ pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
             def_eq(a1, a2, level) && def_eq(b1, b2, level)
         }
 
+        (
+            Value::VId { ty: t1, lhs: l1, rhs: r1 },
+            Value::VId { ty: t2, lhs: l2, rhs: r2 },
+        ) => def_eq(t1, t2, level) && def_eq(l1, l2, level) && def_eq(r1, r2, level),
+
+        (Value::VRefl(v1), Value::VRefl(v2)) => def_eq(v1, v2, level),
+
         _ => false,
     }
 }
@@ -460,8 +536,24 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
         }
         (Neutral::NFst(n1), Neutral::NFst(n2)) => def_eq_neutral(n1, n2, level),
         (Neutral::NSnd(n1), Neutral::NSnd(n2)) => def_eq_neutral(n1, n2, level),
-        // FV-21: two stuck heads are equal iff their wrapped values
-        // are equal — preserves structural distinctness w.r.t. bare
+        (
+            Neutral::NJ {
+                motive: m1,
+                base: b1,
+                scrutinee: s1,
+            },
+            Neutral::NJ {
+                motive: m2,
+                base: b2,
+                scrutinee: s2,
+            },
+        ) => {
+            def_eq(m1, m2, level)
+                && def_eq(b1, b2, level)
+                && def_eq_neutral(s1, s2, level)
+        }
+        // Two stuck heads are equal iff their wrapped values are
+        // equal — preserves structural distinctness w.r.t. bare
         // values (which compare via their own arms in `def_eq`).
         (Neutral::NStuck(v1), Neutral::NStuck(v2)) => def_eq(v1, v2, level),
         _ => false,
@@ -657,6 +749,88 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                 }
                 other => Err(CheckError::NotASigma(quote(&other, ctx.level()))),
             }
+        }
+
+        // ---- Identity types ----
+
+        // T-Id-Form: A : Universe(n), a, b : A ⇒ Id(A, a, b) : Universe(n).
+        Term::Id { ty, lhs, rhs } => {
+            let ty_kind = infer_value(ctx, ty)?;
+            let n = expect_universe(&ty_kind)
+                .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
+            let ty_value = eval(ty, ctx.env());
+            let lhs_ty = infer_value(ctx, lhs)?;
+            if !def_eq(&lhs_ty, &ty_value, ctx.level()) {
+                return Err(CheckError::DomainMismatch {
+                    expected: quote(&ty_value, ctx.level()),
+                    actual: quote(&lhs_ty, ctx.level()),
+                });
+            }
+            let rhs_ty = infer_value(ctx, rhs)?;
+            if !def_eq(&rhs_ty, &ty_value, ctx.level()) {
+                return Err(CheckError::DomainMismatch {
+                    expected: quote(&ty_value, ctx.level()),
+                    actual: quote(&rhs_ty, ctx.level()),
+                });
+            }
+            Ok(Value::VUniverse(n))
+        }
+
+        // T-Refl-Intro: a : A ⇒ Refl(a) : Id(A, a, a).
+        Term::Refl(value) => {
+            let value_ty = infer_value(ctx, value)?;
+            let value_eval = eval(value, ctx.env());
+            Ok(Value::VId {
+                ty: Box::new(value_ty),
+                lhs: Box::new(value_eval.clone()),
+                rhs: Box::new(value_eval),
+            })
+        }
+
+        // T-J-Elim (Paulin-Mohring path induction): mirrors
+        // `proof_checker::infer Term::J`.
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => {
+            let s_ty = infer_value(ctx, scrutinee)?;
+            let (a_ty, a_lhs, a_rhs) = match s_ty {
+                Value::VId { ty, lhs, rhs } => (ty, lhs, rhs),
+                other => return Err(CheckError::NotAnIdentity(quote(&other, ctx.level()))),
+            };
+
+            let motive_ty = infer_value(ctx, motive)?;
+            let (motive_dom, motive_codom) = match &motive_ty {
+                Value::VPi { domain, codomain } => (domain.clone(), codomain.clone()),
+                _ => return Err(CheckError::NotAValidJMotive((**motive).clone())),
+            };
+            if !def_eq(&motive_dom, &a_ty, ctx.level()) {
+                return Err(CheckError::DomainMismatch {
+                    expected: quote(&a_ty, ctx.level()),
+                    actual: quote(&motive_dom, ctx.level()),
+                });
+            }
+            // Validate motive's codomain is a Universe at every input.
+            let probe = Value::VNeutral(Neutral::NVar(ctx.level()));
+            let codom_at_probe = motive_codom.apply(probe);
+            if expect_universe(&codom_at_probe).is_none() {
+                return Err(CheckError::NotAValidJMotive((**motive).clone()));
+            }
+
+            // The base must inhabit `motive(a_lhs)`.
+            let motive_value = eval(motive, ctx.env());
+            let expected_base_ty = apply_value(motive_value.clone(), (*a_lhs).clone());
+            let actual_base_ty = infer_value(ctx, base)?;
+            if !def_eq(&actual_base_ty, &expected_base_ty, ctx.level()) {
+                return Err(CheckError::DomainMismatch {
+                    expected: quote(&expected_base_ty, ctx.level()),
+                    actual: quote(&actual_base_ty, ctx.level()),
+                });
+            }
+
+            // Result: motive applied to the path's RIGHT endpoint.
+            Ok(apply_value(motive_value, *a_rhs))
         }
     }
 }

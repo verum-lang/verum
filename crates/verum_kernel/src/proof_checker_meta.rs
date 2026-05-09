@@ -101,6 +101,21 @@ pub fn shift_universes(term: &Term, lift: u32) -> Term {
         ),
         Term::Fst(p) => Term::Fst(Box::new(shift_universes(p, lift))),
         Term::Snd(p) => Term::Snd(Box::new(shift_universes(p, lift))),
+        Term::Id { ty, lhs, rhs } => Term::Id {
+            ty: Box::new(shift_universes(ty, lift)),
+            lhs: Box::new(shift_universes(lhs, lift)),
+            rhs: Box::new(shift_universes(rhs, lift)),
+        },
+        Term::Refl(value) => Term::Refl(Box::new(shift_universes(value, lift))),
+        Term::J {
+            motive,
+            base,
+            scrutinee,
+        } => Term::J {
+            motive: Box::new(shift_universes(motive, lift)),
+            base: Box::new(shift_universes(base, lift)),
+            scrutinee: Box::new(shift_universes(scrutinee, lift)),
+        },
     }
 }
 
