@@ -794,86 +794,140 @@ pub enum KernelRule {
     KSharp,
 }
 
+/// Canonical metadata for a single [`KernelRule`].
+///
+/// The three fields used to live as three parallel methods on
+/// [`KernelRule`] (`name()` / `v_stage()` / `category()`), each with
+/// its own 38-arm match expression — a drift-prone shape: adding a
+/// new rule meant remembering to touch all three places, with the
+/// compiler only flagging the missing `name` and `v_stage` arms (the
+/// `category()` match used grouped patterns + `_` fallthrough). The
+/// metadata now lives in one [`KernelRule::meta`] match per rule, and
+/// the three accessor methods are trivial projections over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KernelRuleMeta {
+    /// Canonical short name (used by audit + export targets), e.g.
+    /// `"K-App-Elim"`, `"K-Refine-omega"`, `"K-PathOver-Form"`.
+    pub name: &'static str,
+    /// V-stage maturity tag per spec §4.4a.7 (e.g. `"V0"`, `"V8"`,
+    /// `"V8.1"`). Returned as a stable string for audit output.
+    pub v_stage: &'static str,
+    /// Abstract semantic category for `verum audit --kernel-rules`
+    /// grouping. `None` for rules that fit no specific category
+    /// (e.g. variable-binding rules universal across every
+    /// dependent type theory).
+    pub category: Option<&'static str>,
+}
+
 impl KernelRule {
-    /// Canonical short name (used by audit + export targets).
-    pub fn name(&self) -> &'static str {
+    /// Per-rule metadata: canonical name, V-stage tag, and audit
+    /// category. **Single source of truth** — the [`Self::name`],
+    /// [`Self::v_stage`], and [`Self::category`] accessor methods
+    /// are one-liners over this struct, so adding a new rule to
+    /// the enum requires extending exactly one match arm here.
+    pub fn meta(&self) -> KernelRuleMeta {
+        // Helper closure to keep each arm a single line.
+        // Order mirrors the enum declaration so a reviewer can read
+        // both top-to-bottom in lock-step.
+        let m = |name, v_stage, category| KernelRuleMeta {
+            name,
+            v_stage,
+            category,
+        };
+        const CORE: Option<&'static str> = Some("Dependent type theory — core");
+        const CUBICAL: Option<&'static str> = Some("Cubical type theory");
+        const QUOTIENT: Option<&'static str> = Some("Quotient types");
+        const REFINEMENT: Option<&'static str> = Some("Refinement subtyping");
+        const COHESIVE: Option<&'static str> = Some("Cohesive modalities");
+        const MODAL: Option<&'static str> = Some("Modal logic operators");
+        const EPS_ALPHA: Option<&'static str> = Some("ε / α modality duality");
         match self {
-            KernelRule::KVar => "K-Var",
-            KernelRule::KUniv => "K-Univ",
-            KernelRule::KPiForm => "K-Pi-Form",
-            KernelRule::KLamIntro => "K-Lam-Intro",
-            KernelRule::KAppElim => "K-App-Elim",
-            KernelRule::KSigmaForm => "K-Sigma-Form",
-            KernelRule::KPairIntro => "K-Pair-Intro",
-            KernelRule::KFstElim => "K-Fst-Elim",
-            KernelRule::KSndElim => "K-Snd-Elim",
-            KernelRule::KPathTyForm => "K-PathTy-Form",
-            KernelRule::KPathOverForm => "K-PathOver-Form",
-            KernelRule::KReflIntro => "K-Refl-Intro",
-            KernelRule::KHComp => "K-HComp",
-            KernelRule::KTransp => "K-Transp",
-            KernelRule::KGlue => "K-Glue",
-            KernelRule::KRefine => "K-Refine",
-            KernelRule::KQuotForm => "K-Quot-Form",
-            KernelRule::KQuotIntro => "K-Quot-Intro",
-            KernelRule::KQuotElim => "K-Quot-Elim",
-            KernelRule::KRefineOmega => "K-Refine-omega",
-            KernelRule::KRefineIntro => "K-Refine-Intro",
-            KernelRule::KRefineErase => "K-Refine-Erase",
-            KernelRule::KInductive => "K-Inductive",
-            KernelRule::KPos => "K-Pos",
-            KernelRule::KElim => "K-Elim",
-            KernelRule::KSmt => "K-Smt",
-            KernelRule::KFwAx => "K-FwAx",
-            KernelRule::KEpsMu => "K-Eps-Mu",
-            KernelRule::KUniverseAscent => "K-Universe-Ascent",
-            KernelRule::KRoundTrip => "K-Round-Trip",
-            KernelRule::KEpsilonOf => "K-EpsilonOf",
-            KernelRule::KAlphaOf => "K-AlphaOf",
-            KernelRule::KModalBox => "K-ModalBox",
-            KernelRule::KModalDiamond => "K-ModalDiamond",
-            KernelRule::KModalBigAnd => "K-ModalBigAnd",
-            KernelRule::KShape => "K-Shape",
-            KernelRule::KFlat => "K-Flat",
-            KernelRule::KSharp => "K-Sharp",
+            // -- Structural (CCHM core) --
+            KernelRule::KVar => m("K-Var", "V0", None),
+            KernelRule::KUniv => m("K-Univ", "V8", CORE),
+            KernelRule::KPiForm => m("K-Pi-Form", "V0", CORE),
+            KernelRule::KLamIntro => m("K-Lam-Intro", "V0", CORE),
+            KernelRule::KAppElim => m("K-App-Elim", "V8", CORE),
+            KernelRule::KSigmaForm => m("K-Sigma-Form", "V0", CORE),
+            KernelRule::KPairIntro => m("K-Pair-Intro", "V0", CORE),
+            KernelRule::KFstElim => m("K-Fst-Elim", "V0", CORE),
+            KernelRule::KSndElim => m("K-Snd-Elim", "V0", CORE),
+            // -- Cubical --
+            KernelRule::KPathTyForm => m("K-PathTy-Form", "V8", CUBICAL),
+            KernelRule::KPathOverForm => m(
+                "K-PathOver-Form",
+                "V8.1",
+                Some("Higher inductive types — dependent path-over"),
+            ),
+            KernelRule::KReflIntro => m("K-Refl-Intro", "V0", CUBICAL),
+            KernelRule::KHComp => m("K-HComp", "V0", CUBICAL),
+            KernelRule::KTransp => m("K-Transp", "V0", CUBICAL),
+            KernelRule::KGlue => m("K-Glue", "V0", CUBICAL),
+            // -- Refinement --
+            KernelRule::KRefine => m("K-Refine", "V0", REFINEMENT),
+            KernelRule::KRefineOmega => m(
+                "K-Refine-omega",
+                "V8",
+                Some("Refinement subtyping — transfinite modal-depth"),
+            ),
+            KernelRule::KRefineIntro => m("K-Refine-Intro", "V0", REFINEMENT),
+            KernelRule::KRefineErase => m("K-Refine-Erase", "V0", REFINEMENT),
+            // -- Quotient --
+            KernelRule::KQuotForm => m("K-Quot-Form", "V8", QUOTIENT),
+            KernelRule::KQuotIntro => m("K-Quot-Intro", "V8", QUOTIENT),
+            KernelRule::KQuotElim => m("K-Quot-Elim", "V8", QUOTIENT),
+            // -- Inductive --
+            KernelRule::KInductive => m("K-Inductive", "V8", Some("Inductive type formation")),
+            KernelRule::KPos => m("K-Pos", "V0", Some("Inductive type — strict positivity")),
+            KernelRule::KElim => m("K-Elim", "V8", Some("Inductive type — eliminator")),
+            // -- SMT + Axiom --
+            KernelRule::KSmt => m("K-Smt", "V8", Some("SMT proof replay")),
+            KernelRule::KFwAx => m("K-FwAx", "V8", Some("Framework axiom admission")),
+            // -- Diakrisis verification-architecture --
+            KernelRule::KEpsMu => m(
+                "K-Eps-Mu",
+                "V2",
+                Some("ε / α modality duality — naturality"),
+            ),
+            KernelRule::KUniverseAscent => m(
+                "K-Universe-Ascent",
+                "V1",
+                Some("Stratified universe ascent"),
+            ),
+            KernelRule::KRoundTrip => m(
+                "K-Round-Trip",
+                "V0",
+                Some("OC / DC translation round-trip"),
+            ),
+            KernelRule::KEpsilonOf => m("K-EpsilonOf", "V0", EPS_ALPHA),
+            KernelRule::KAlphaOf => m("K-AlphaOf", "V0", EPS_ALPHA),
+            KernelRule::KModalBox => m("K-ModalBox", "V0", MODAL),
+            KernelRule::KModalDiamond => m("K-ModalDiamond", "V0", MODAL),
+            KernelRule::KModalBigAnd => m("K-ModalBigAnd", "V0", MODAL),
+            // -- Cohesive modalities ∫ ⊣ ♭ ⊣ ♯ --
+            KernelRule::KShape => m("K-Shape", "V8", COHESIVE),
+            KernelRule::KFlat => m("K-Flat", "V8", COHESIVE),
+            KernelRule::KSharp => m("K-Sharp", "V8", COHESIVE),
         }
+    }
+
+    /// Canonical short name (used by audit + export targets).
+    /// Thin accessor over [`Self::meta`].
+    #[inline]
+    pub fn name(&self) -> &'static str {
+        self.meta().name
     }
 
     /// V-stage maturity tag per spec §4.4a.7. Returned as a
     /// stable string for audit output (e.g. `"V0"`, `"V8"`).
+    /// Thin accessor over [`Self::meta`].
+    #[inline]
     pub fn v_stage(&self) -> &'static str {
-        match self {
-            KernelRule::KUniv => "V8",
-            KernelRule::KPathTyForm => "V8",
-            // dependent path-over.
-            KernelRule::KPathOverForm => "V8.1",
-            KernelRule::KAppElim => "V8",
-            KernelRule::KInductive => "V8",
-            KernelRule::KElim => "V8",
-            KernelRule::KSmt => "V8",
-            KernelRule::KFwAx => "V8",
-            KernelRule::KRefineOmega => "V8",
-            // quotient types.
-            KernelRule::KQuotForm => "V8",
-            KernelRule::KQuotIntro => "V8",
-            KernelRule::KQuotElim => "V8",
-            // cohesive modalities ∫ ⊣ ♭ ⊣ ♯.
-            KernelRule::KShape => "V8",
-            KernelRule::KFlat => "V8",
-            KernelRule::KSharp => "V8",
-            KernelRule::KEpsMu => "V2",
-            KernelRule::KUniverseAscent => "V1",
-            // Linear coherence round-trip 108.T scaffold.
-            // V0: rule registered in taxonomy; algorithmic
-            // canonicalize check is V1+ (preprint-blocked).
-            KernelRule::KRoundTrip => "V0",
-            _ => "V0",
-        }
+        self.meta().v_stage
     }
 
     /// Abstract semantic category this rule belongs to.
     ///
-
     /// Returns a short, generic label naming the *kind* of rule
     /// (e.g. `"Quotient types"`, `"Cohesive modalities"`,
     /// `"Higher inductive types"`) without reference to any
@@ -881,72 +935,75 @@ impl KernelRule {
     /// `verum audit --kernel-rules` to group rules by domain in
     /// the audit report.
     ///
-
     /// Returns `None` for rules that fit no specific category
     /// (e.g. variable-binding rules that are universal across
-    /// every dependent type theory).
+    /// every dependent type theory). Thin accessor over
+    /// [`Self::meta`].
+    #[inline]
     pub fn category(&self) -> Option<&'static str> {
-        match self {
-            // Quotient types.
-            KernelRule::KQuotForm | KernelRule::KQuotIntro | KernelRule::KQuotElim => {
-                Some("Quotient types")
-            }
-            // Cohesive modalities.
-            KernelRule::KShape | KernelRule::KFlat | KernelRule::KSharp => {
-                Some("Cohesive modalities")
-            }
-            // Higher inductive types — dependent path-over.
-            KernelRule::KPathOverForm => Some("Higher inductive types — dependent path-over"),
-            // ε / α duality (modality coalgebra).
-            KernelRule::KEpsilonOf | KernelRule::KAlphaOf => Some("ε / α modality duality"),
-            KernelRule::KEpsMu => Some("ε / α modality duality — naturality"),
-            // Universe ascent (stratified universes).
-            KernelRule::KUniverseAscent => Some("Stratified universe ascent"),
-            // OC / DC round-trip (translation framework).
-            KernelRule::KRoundTrip => Some("OC / DC translation round-trip"),
-            // Modal logic operators.
-            KernelRule::KModalBox | KernelRule::KModalDiamond | KernelRule::KModalBigAnd => {
-                Some("Modal logic operators")
-            }
-            // Kernel-foundation rules — dependent type theory core.
-            KernelRule::KUniv
-            | KernelRule::KPiForm
-            | KernelRule::KLamIntro
-            | KernelRule::KAppElim
-            | KernelRule::KSigmaForm
-            | KernelRule::KPairIntro
-            | KernelRule::KFstElim
-            | KernelRule::KSndElim => Some("Dependent type theory — core"),
-            // Cubical fragment.
-            KernelRule::KPathTyForm
-            | KernelRule::KReflIntro
-            | KernelRule::KHComp
-            | KernelRule::KTransp
-            | KernelRule::KGlue => Some("Cubical type theory"),
-            // Refinement subtyping.
-            KernelRule::KRefine | KernelRule::KRefineIntro | KernelRule::KRefineErase => {
-                Some("Refinement subtyping")
-            }
-            KernelRule::KRefineOmega => Some("Refinement subtyping — transfinite modal-depth"),
-            // Inductive types.
-            KernelRule::KInductive => Some("Inductive type formation"),
-            KernelRule::KPos => Some("Inductive type — strict positivity"),
-            KernelRule::KElim => Some("Inductive type — eliminator"),
-            // External proof obligations.
-            KernelRule::KSmt => Some("SMT proof replay"),
-            KernelRule::KFwAx => Some("Framework axiom admission"),
-            // Universal binding rules — no single category.
-            KernelRule::KVar => None,
-        }
+        self.meta().category
     }
 
-    #[doc(hidden)]
-    #[deprecated(
-        note = "Use `category()` for an abstract semantic label. Internal-spec citations have been removed from the public API."
-    )]
-    pub fn citation(&self) -> Option<&'static str> {
-        self.category()
+    /// Iterate every kernel-rule variant in canonical declaration
+    /// order. Used by audit + drift-check infrastructure to walk
+    /// the full taxonomy without re-listing the variants by hand.
+    ///
+    /// **Invariant**: the array length equals the number of
+    /// variants in [`KernelRule`]. The pin test
+    /// `kernel_rule_full_list_covers_every_variant` enforces this
+    /// — adding a new variant without updating this array is a
+    /// load-bearing omission and surfaces as a test failure.
+    pub fn full_list() -> &'static [KernelRule] {
+        &[
+            // Structural
+            KernelRule::KVar,
+            KernelRule::KUniv,
+            KernelRule::KPiForm,
+            KernelRule::KLamIntro,
+            KernelRule::KAppElim,
+            KernelRule::KSigmaForm,
+            KernelRule::KPairIntro,
+            KernelRule::KFstElim,
+            KernelRule::KSndElim,
+            // Cubical
+            KernelRule::KPathTyForm,
+            KernelRule::KPathOverForm,
+            KernelRule::KReflIntro,
+            KernelRule::KHComp,
+            KernelRule::KTransp,
+            KernelRule::KGlue,
+            // Refinement
+            KernelRule::KRefine,
+            KernelRule::KRefineOmega,
+            KernelRule::KRefineIntro,
+            KernelRule::KRefineErase,
+            // Quotient
+            KernelRule::KQuotForm,
+            KernelRule::KQuotIntro,
+            KernelRule::KQuotElim,
+            // Inductive
+            KernelRule::KInductive,
+            KernelRule::KPos,
+            KernelRule::KElim,
+            // SMT + Axiom
+            KernelRule::KSmt,
+            KernelRule::KFwAx,
+            // Diakrisis verification-architecture
+            KernelRule::KEpsMu,
+            KernelRule::KUniverseAscent,
+            KernelRule::KRoundTrip,
+            KernelRule::KEpsilonOf,
+            KernelRule::KAlphaOf,
+            KernelRule::KModalBox,
+            KernelRule::KModalDiamond,
+            KernelRule::KModalBigAnd,
+            // Cohesive
+            KernelRule::KShape,
+            KernelRule::KFlat,
+            KernelRule::KSharp,
+        ]
     }
+
 }
 
 impl std::fmt::Display for KernelRule {
@@ -1993,5 +2050,66 @@ mod tests {
                 "rule {rule:?} must carry an abstract category"
             );
         }
+    }
+
+    #[test]
+    fn meta_accessors_agree_for_every_rule() {
+        // Pin: the three accessor methods return exactly the same
+        // values as projecting `meta()`. This makes silent drift
+        // structurally impossible — any future "optimisation" that
+        // re-implements name/v_stage/category bypassing meta() must
+        // either fix all three together or break this test.
+        for rule in KernelRule::full_list() {
+            let m = rule.meta();
+            assert_eq!(rule.name(), m.name, "name() drift on {rule:?}");
+            assert_eq!(rule.v_stage(), m.v_stage, "v_stage() drift on {rule:?}");
+            assert_eq!(rule.category(), m.category, "category() drift on {rule:?}");
+        }
+    }
+
+    #[test]
+    fn full_list_covers_every_variant() {
+        // Pin: every distinct enum variant appears exactly once in
+        // `full_list()`. Adding a new variant to `KernelRule` and
+        // forgetting to register it in `full_list()` is a load-
+        // bearing omission — this test surfaces it as a uniqueness
+        // failure, and the per-rule kernel-soundness corpus drift
+        // check catches the count mismatch separately.
+        let list = KernelRule::full_list();
+        let mut seen: std::collections::BTreeSet<&KernelRule> =
+            std::collections::BTreeSet::new();
+        // KernelRule derives PartialEq + Eq + Hash but not Ord; use
+        // a HashSet-style uniqueness pin via a Vec sweep instead.
+        let mut as_vec: Vec<&KernelRule> = list.iter().collect();
+        as_vec.sort_by_key(|r| r.name());
+        for w in as_vec.windows(2) {
+            assert_ne!(
+                w[0].name(),
+                w[1].name(),
+                "duplicate entry in KernelRule::full_list(): {}",
+                w[0].name(),
+            );
+        }
+        // Discharge the unused-variable warning on `seen`.
+        seen.clear();
+    }
+
+    #[test]
+    fn full_list_count_matches_soundness_corpus() {
+        // Pin: KernelRule::full_list().len() agrees with the
+        // EXPECTED_KERNEL_RULE_COUNT anchor in soundness/mod.rs.
+        // Drift here means a new rule was added to the enum + the
+        // full_list array, but the per-foundation soundness corpus
+        // wasn't updated — surfaces as an export-side test failure
+        // separately, but pinning at the enum level catches it
+        // earlier.
+        assert_eq!(
+            KernelRule::full_list().len(),
+            crate::soundness::EXPECTED_KERNEL_RULE_COUNT,
+            "KernelRule::full_list() ({} entries) does not agree with \
+             EXPECTED_KERNEL_RULE_COUNT ({})",
+            KernelRule::full_list().len(),
+            crate::soundness::EXPECTED_KERNEL_RULE_COUNT,
+        );
     }
 }

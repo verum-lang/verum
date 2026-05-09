@@ -135,6 +135,44 @@ impl TypeChecker {
             commit_resolved_in_item(item, &self.resolved_call_targets);
         }
     }
+
+    /// Take ownership of the resolved-call-target side-table,
+    /// leaving an empty table behind.  Used by the pipeline to
+    /// transfer the table from the dropped typechecker to the
+    /// pipeline state, where it can be applied to the AST via
+    /// `apply_resolved_call_targets` (the call site has `&mut Module`
+    /// access; the typechecker phase has only `&Module`).
+    pub fn take_resolved_call_targets(
+        &mut self,
+    ) -> std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    > {
+        std::mem::take(&mut self.resolved_call_targets)
+    }
+}
+
+/// Walk `module` mutably and stamp every `MethodCall` expression's
+/// `resolved_call_target` from the supplied side-table.  Same shape
+/// as `TypeChecker::commit_resolved_call_targets`, exposed as a
+/// free function so the pipeline can apply the table without
+/// holding a TypeChecker.
+///
+/// Idempotent — running twice produces the same AST.
+/// No-op when `table` is empty.
+pub fn apply_resolved_call_targets(
+    module: &mut verum_ast::Module,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    if table.is_empty() {
+        return;
+    }
+    for item in module.items.iter_mut() {
+        commit_resolved_in_item(item, table);
+    }
 }
 
 fn commit_resolved_in_item(

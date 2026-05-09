@@ -864,6 +864,19 @@ pub struct CompilationPipeline<'s> {
     /// type information for things like closure parameter inference.
     type_registry: Option<verum_types::TypeRegistry>,
 
+    /// #91/#95 — typechecker-resolved call targets, drained from
+    /// `TypeChecker::resolved_call_targets` after inference.  Keyed
+    /// by `MethodCall` expression `Span`.  Applied to the AST via
+    /// `apply_resolved_call_targets(&mut module)` after type
+    /// checking, before codegen.  The codegen's
+    /// `compile_method_call` fast path then reads
+    /// `Expr::resolved_call_target` and skips the legacy 7-step
+    /// name-resolution cascade in `try_resolve_static_method`.
+    pub(crate) resolved_call_targets: std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+
     /// Stdlib metadata for NormalBuild mode.
     ///
 
@@ -1218,6 +1231,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_artifacts: None,
             collected_contexts: List::new(),
             type_registry: None,
+            resolved_call_targets: std::collections::HashMap::new(),
             // T2-extended single-path: when the compiler binary
             // embeds a precompiled stdlib `runtime.core_metadata`
             // sidecar, the typecheck phase prefers the
@@ -1343,6 +1357,7 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_artifacts: None,
             collected_contexts: List::new(),
             type_registry: None,
+            resolved_call_targets: std::collections::HashMap::new(),
             stdlib_metadata: StdlibMetadataState::Eager(None),
             deferred_verification_goals: verum_common::List::new(), // Not used in bootstrap mode
             // Stdlib bootstrap mode fields - initialized

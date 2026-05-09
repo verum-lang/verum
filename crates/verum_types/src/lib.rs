@@ -308,6 +308,7 @@ pub use implicit::{
     ConstraintSource, ImplicitArg, ImplicitConstraint, ImplicitContext, ImplicitElaborator,
     ImplicitResolver,
 };
+pub use infer::core::apply_resolved_call_targets;
 pub use infer::{InferMode, InferResult, TypeChecker};
 pub use module_context::{
     DependencyGraph, FunctionTypeInfo, InferenceState, ModuleContext, ModuleInferenceMetrics,

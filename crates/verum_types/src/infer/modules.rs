@@ -13666,6 +13666,15 @@ impl TypeChecker {
                 if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
                     early_method_info
                 {
+                    // #91/#95 — inherent-method dispatch resolved to a
+                    // canonical `Type.method` qualified name.  Stamp
+                    // the side-table so the VBC compile_method_call
+                    // fast path picks it up and skips the legacy
+                    // 7-step name-resolution cascade.  Codegen will
+                    // do `lookup_function("Type.method")` directly.
+                    let qualified =
+                        format!("{}.{}", type_name_text.as_str(), method_name_text.as_str());
+                    self.record_resolved_static_call(span, qualified);
                     // Register type bounds for fresh type variables
                     for (fresh_var, bounds) in &type_bounds {
                         for bound in bounds {
@@ -16279,6 +16288,7 @@ impl TypeChecker {
                 // First check: only look at aliases that have the method registered.
                 // This avoids iterating through all aliases and calling the Numeric protocol checker.
                 let mut found = None;
+                let mut found_alias_name: Option<verum_common::Text> = None;
                 for (alias_name, alias_target) in &self.ctx.type_aliases {
                     // Quick check: does this alias even have the method?
                     let has_method = methods_guard
@@ -16301,17 +16311,25 @@ impl TypeChecker {
                                 let (ty, fresh_vars, type_bounds) =
                                     scheme.instantiate_with_type_bounds();
                                 found = Some(((ty, fresh_vars, impl_vc), type_bounds));
+                                found_alias_name = Some(alias_name.clone());
                                 break;
                             }
                         }
                     }
                 }
-                found
+                (found, found_alias_name)
             };
 
-            if let Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)) =
-                alias_method_info
+            if let (
+                Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds)),
+                Some(alias_name),
+            ) = (alias_method_info.0, alias_method_info.1)
             {
+                // #91/#95 — alias-target dispatch resolved to
+                // `<alias_name>.<method>`.  Same architectural
+                // rationale as the direct inherent-method site.
+                let qualified = format!("{}.{}", alias_name.as_str(), method.name.as_str());
+                self.record_resolved_static_call(span, qualified);
                 // Register type bounds for fresh type variables
                 for (fresh_var, bounds) in &type_bounds {
                     for bound in bounds {
