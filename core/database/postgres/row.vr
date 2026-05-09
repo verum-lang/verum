@@ -200,6 +200,17 @@ implement Row {
         }
     }
 
+    /// Nullable BOOLEAN. Returns `Ok(None)` for SQL NULL.
+    public fn get_bool_opt(&self, name: &str) -> Result<Maybe<Bool>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
+        if self.values[col_idx] is WvNull {
+            return Ok(None);
+        }
+        // Reuse the panicking variant by re-fetching; it cannot be NULL here.
+        self.get_bool(name).map(Some)
+    }
+
     // -------------------------------------------------------------------------
     // Integer — INT2, INT4, INT8
     // -------------------------------------------------------------------------
