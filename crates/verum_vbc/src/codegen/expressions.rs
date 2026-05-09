@@ -269,6 +269,9 @@ fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
     if let Some(v) = verum_common::posix_files::file_flag_value(name, target_os) {
         return v;
     }
+    if let Some(v) = verum_common::os_memory::os_memory_const_value(name, target_os) {
+        return v;
+    }
     match name {
         // Atomic ordering (core/intrinsics/atomic.vr) — target-independent.
         "ORDERING_RELAXED" => 0,
@@ -26612,6 +26615,17 @@ mod tests {
         assert_eq!(resolve_stdlib_constant_value("O_TRUNC", "linux"), 512);
         assert_eq!(resolve_stdlib_constant_value("O_APPEND", "linux"), 1024);
         assert_eq!(resolve_stdlib_constant_value("O_NONBLOCK", "linux"), 2048);
+
+        // OS memory constants (Linux divergent values).
+        assert_eq!(
+            resolve_stdlib_constant_value("MAP_ANONYMOUS", "linux"),
+            0x20,
+        );
+        assert_eq!(resolve_stdlib_constant_value("MADV_FREE", "linux"), 8);
+        assert_eq!(
+            resolve_stdlib_constant_value("MAP_HUGETLB", "linux"),
+            0x40000,
+        );
     }
 
     #[test]
@@ -26644,6 +26658,30 @@ mod tests {
         assert_eq!(resolve_stdlib_constant_value("O_TRUNC", "darwin"), 0x400);
         assert_eq!(resolve_stdlib_constant_value("O_APPEND", "macos"), 8);
         assert_eq!(resolve_stdlib_constant_value("O_NONBLOCK", "darwin"), 4);
+
+        // OS memory constants (Darwin divergent values).
+        assert_eq!(
+            resolve_stdlib_constant_value("MAP_ANONYMOUS", "macos"),
+            0x1000,
+        );
+        assert_eq!(resolve_stdlib_constant_value("MADV_FREE", "darwin"), 5);
+    }
+
+    /// Windows-only constants resolve correctly when target is windows.
+    #[test]
+    fn target_conditional_constants_windows_memory() {
+        assert_eq!(
+            resolve_stdlib_constant_value("MEM_COMMIT", "windows"),
+            0x1000,
+        );
+        assert_eq!(
+            resolve_stdlib_constant_value("MEM_RESERVE", "windows"),
+            0x2000,
+        );
+        assert_eq!(
+            resolve_stdlib_constant_value("PAGE_READWRITE", "windows"),
+            0x04,
+        );
     }
 
     /// Cross-platform constants (atomic ordering, EPERM/ENOENT/...,

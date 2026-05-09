@@ -1855,20 +1855,30 @@ impl VbcCodegen {
             ("PAGE_SIZE", 4096),
             ("SIZE_CLASS_COUNT", 8),
             ("GLOBAL_EPOCH", 0),
-            ("PROT_READ", 1),
-            ("PROT_WRITE", 2),
-            ("PROT_NONE", 0),
-            ("MAP_PRIVATE", 2),
-            ("MAP_ANONYMOUS", 0x20),
-            ("MAP_ANON", 0x1000),
-            ("MAP_HUGETLB", 0x40000),
-            ("MADV_HUGEPAGE", 14),
-            ("MEM_COMMIT", 0x1000),
-            ("MEM_RESERVE", 0x2000),
-            ("MEM_RELEASE", 0x8000_i64),
-            ("MEM_LARGE_PAGES", 0x20000000),
-            ("PAGE_READWRITE", 4),
-            ("PAGE_NOACCESS", 1),
+            // Cross-platform POSIX page-protection bits (sourced from
+            // `verum_common::os_memory` — single source of truth).
+            ("PROT_READ", verum_common::os_memory::PROT_READ),
+            ("PROT_WRITE", verum_common::os_memory::PROT_WRITE),
+            ("PROT_NONE", verum_common::os_memory::PROT_NONE),
+            // Cross-platform mmap mode bits.
+            ("MAP_PRIVATE", verum_common::os_memory::MAP_PRIVATE),
+            // Platform-divergent — Linux vs Darwin diverge on 0x20 vs 0x1000.
+            // Historical hand-table mixed Linux MAP_ANONYMOUS=0x20 with
+            // Darwin MAP_ANON=0x1000 in the same lookup. Phase-2 dispatch
+            // (commit 8e0993944) makes this target-conditional via
+            // `os_memory::os_memory_const_value(name, target_os)` —
+            // entries below are kept for non-dispatch consumers / fallback.
+            ("MAP_ANONYMOUS", verum_common::os_memory::linux::MAP_ANONYMOUS), // 0x20 (Linux)
+            ("MAP_ANON", verum_common::os_memory::darwin::MAP_ANON),           // 0x1000 (Darwin)
+            ("MAP_HUGETLB", verum_common::os_memory::linux::MAP_HUGETLB),     // 0x40000 (Linux only)
+            ("MADV_HUGEPAGE", verum_common::os_memory::linux::MADV_HUGEPAGE), // 14 (Linux only)
+            // Windows VirtualAlloc / MemoryProtection constants.
+            ("MEM_COMMIT", verum_common::os_memory::windows::MEM_COMMIT),
+            ("MEM_RESERVE", verum_common::os_memory::windows::MEM_RESERVE),
+            ("MEM_RELEASE", verum_common::os_memory::windows::MEM_RELEASE),
+            ("MEM_LARGE_PAGES", verum_common::os_memory::windows::MEM_LARGE_PAGES),
+            ("PAGE_READWRITE", verum_common::os_memory::windows::PAGE_READWRITE),
+            ("PAGE_NOACCESS", verum_common::os_memory::windows::PAGE_NOACCESS),
             // Log level constants (core/base/log.vr)
             ("LOG_TRACE", 0),
             ("LOG_DEBUG", 1),
@@ -1903,7 +1913,7 @@ impl VbcCodegen {
             ("GEN_UNALLOCATED", 0),
             ("GEN_FREED", 0),
             // Memory management constants
-            ("MADV_FREE", 8),
+            ("MADV_FREE", verum_common::os_memory::linux::MADV_FREE), // 8 (Linux); Darwin=5
             // Cross-platform POSIX socket constants — Linux + Darwin agree,
             // sourced from `verum_common::posix_sockets` (single source of truth).
             ("AF_INET", verum_common::posix_sockets::AF_INET),
