@@ -98,99 +98,133 @@ pub enum LanguageProfile {
     Research,
 }
 
+/// Per-variant projection for [`LanguageProfile`].
+///
+/// `permissiveness_rank` encodes the profile hierarchy as a dense
+/// monotone scale: Application=0 (most restrictive, fewest features
+/// available), Systems=1, Research=2 (least restrictive, all features
+/// available). Both directional rules — "can access target" and
+/// "can be child of parent" — collapse to single rank comparisons:
+///
+///   * `self.can_access(target)`        = `self.rank >= target.rank`
+///   * `self.can_be_child_of(parent)`   = `self.rank <= parent.rank`
+///
+/// This makes profile transitivity / antisymmetry / well-foundedness
+/// structurally guaranteed instead of riding two parallel 9-arm
+/// match tables.
+///
+/// `unavailable_features` returns a static slice of human-readable
+/// labels (cached as `&'static [&'static str]`) instead of allocating
+/// a fresh `List<Text>` on every call. `Application` listed first;
+/// `Research` is always empty.
+#[derive(Debug, Clone, Copy)]
+pub struct LanguageProfileMeta {
+    pub name: &'static str,
+    pub permissiveness_rank: u8,
+    pub unavailable_features_static: &'static [&'static str],
+}
+
 impl LanguageProfile {
-    /// Check if this profile can access modules with the target profile.
-    ///
+    pub const ALL: &'static [Self] = &[Self::Application, Self::Systems, Self::Research];
 
-    /// Profile compatibility follows the hierarchy:
-    /// - Research can access: Research, Systems, Application
-    /// - Systems can access: Systems, Application
-    /// - Application can access: Application only
-    ///
-
-    /// Profile compatibility follows the hierarchy:
-    /// Research can access everything, Systems can access Systems+Application,
-    /// Application can only access Application.
-    pub fn can_access(&self, target: LanguageProfile) -> bool {
-        match (self, target) {
-            // Research can access everything
-            (LanguageProfile::Research, _) => true,
-            // Systems can access Systems and Application
-            (LanguageProfile::Systems, LanguageProfile::Research) => false,
-            (LanguageProfile::Systems, _) => true,
-            // Application can only access Application
-            (LanguageProfile::Application, LanguageProfile::Application) => true,
-            (LanguageProfile::Application, _) => false,
+    pub const fn meta(self) -> LanguageProfileMeta {
+        match self {
+            Self::Application => LanguageProfileMeta {
+                name: "application",
+                permissiveness_rank: 0,
+                unavailable_features_static: &[
+                    "Unsafe pointer operations",
+                    "Manual memory management",
+                    "Inline assembly",
+                    "Raw FFI bindings",
+                ],
+            },
+            Self::Systems => LanguageProfileMeta {
+                name: "systems",
+                permissiveness_rank: 1,
+                unavailable_features_static: &[
+                    "Dependent types (Pi/Sigma)",
+                    "Formal proof verification",
+                    "SMT-backed contracts",
+                ],
+            },
+            Self::Research => LanguageProfileMeta {
+                name: "research",
+                permissiveness_rank: 2,
+                unavailable_features_static: &[],
+            },
         }
     }
 
-    /// Check if a child module can have this profile given the parent profile.
-    ///
-
-    /// Child modules can be MORE restrictive (lower in hierarchy) but NOT less restrictive.
-    ///
-
-    /// Profile inheritance rules: child modules can be MORE restrictive
-    /// (lower in hierarchy) but NOT less restrictive than parent.
-    pub fn can_be_child_of(&self, parent: LanguageProfile) -> bool {
-        // Child can be same or more restrictive than parent
-        match (parent, self) {
-            // Research parent allows any child
-            (LanguageProfile::Research, _) => true,
-            // Systems parent allows Systems or Application child
-            (LanguageProfile::Systems, LanguageProfile::Research) => false,
-            (LanguageProfile::Systems, _) => true,
-            // Application parent only allows Application child
-            (LanguageProfile::Application, LanguageProfile::Application) => true,
-            (LanguageProfile::Application, _) => false,
-        }
+    /// Permissiveness rank: Application=0 (most restrictive),
+    /// Research=2 (least restrictive). The rank is dense and
+    /// strictly monotone in declaration order.
+    #[inline]
+    pub const fn permissiveness_rank(&self) -> u8 {
+        self.meta().permissiveness_rank
     }
 
-    /// Parse profile from string.
+    /// Check if this profile can access modules with the target
+    /// profile. Profile hierarchy: Research ≥ Systems ≥ Application.
+    /// A profile may access targets at its own permissiveness level
+    /// or below (`self.rank >= target.rank`).
+    #[inline]
+    pub const fn can_access(&self, target: LanguageProfile) -> bool {
+        self.permissiveness_rank() >= target.permissiveness_rank()
+    }
+
+    /// Check if a child module can have this profile given the
+    /// parent profile. Child modules can be the same or MORE
+    /// restrictive than the parent — never less restrictive
+    /// (`self.rank <= parent.rank`).
+    #[inline]
+    pub const fn can_be_child_of(&self, parent: LanguageProfile) -> bool {
+        self.permissiveness_rank() <= parent.permissiveness_rank()
+    }
+
+    /// Parse profile from string (case-insensitive).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "application" => Some(LanguageProfile::Application),
-            "systems" => Some(LanguageProfile::Systems),
-            "research" => Some(LanguageProfile::Research),
-            _ => None,
+        let lowered = s.to_lowercase();
+        for v in Self::ALL {
+            if v.meta().name == lowered.as_str() {
+                return Some(*v);
+            }
         }
+        None
     }
 
     /// Get the display name of this profile.
-    pub fn name(&self) -> &'static str {
-        match self {
-            LanguageProfile::Application => "application",
-            LanguageProfile::Systems => "systems",
-            LanguageProfile::Research => "research",
-        }
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
     }
 
-    /// Get unavailable features when accessing from this profile to target.
-    ///
+    /// Convenience synonym for `name()` matching the meta() series
+    /// idiom across the codebase. Both methods return identical
+    /// strings.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
 
-    /// Lists features unavailable when accessing from a less permissive profile.
+    /// Static label slice of features unavailable from this profile
+    /// (zero-alloc — closes a perf defect: the legacy
+    /// `unavailable_features` allocated a fresh `List<Text>` of 0/3/4
+    /// entries on every call).
+    #[inline]
+    pub const fn unavailable_features_static(&self) -> &'static [&'static str] {
+        self.meta().unavailable_features_static
+    }
+
+    /// Owning version preserved for source compatibility with the
+    /// legacy signature: `_target` is intentionally unused (the
+    /// answer depends only on `self` — a feature unavailable from
+    /// `Application` is unavailable to every target it can access).
     pub fn unavailable_features(&self, _target: LanguageProfile) -> List<Text> {
         let mut features = List::new();
-
-        match self {
-            LanguageProfile::Application => {
-                // Application cannot use these features from Systems/Research
-                features.push(Text::from("Unsafe pointer operations"));
-                features.push(Text::from("Manual memory management"));
-                features.push(Text::from("Inline assembly"));
-                features.push(Text::from("Raw FFI bindings"));
-            }
-            LanguageProfile::Systems => {
-                // Systems cannot use these features from Research
-                features.push(Text::from("Dependent types (Pi/Sigma)"));
-                features.push(Text::from("Formal proof verification"));
-                features.push(Text::from("SMT-backed contracts"));
-            }
-            LanguageProfile::Research => {
-                // Research has access to everything
-            }
+        for label in self.unavailable_features_static() {
+            features.push(Text::from(*label));
         }
-
         features
     }
 }
@@ -233,77 +267,133 @@ pub enum ModuleFeature {
     RawFfi,
 }
 
+/// Per-variant projection for [`ModuleFeature`].
+///
+/// `name` is the canonical snake_case form returned by `name()` /
+/// `as_str()`. `aliases` carries the legacy CamelCase / shortened
+/// parse aliases (e.g. `"InlineAsm"`, `"smt"`, `"gpu"`).
+/// `minimum_profile` is the least permissive profile under which this
+/// feature is available — every more-permissive profile inherits it
+/// automatically. `is_compatible_with(profile)` collapses to
+/// `profile.permissiveness_rank() >= self.minimum_profile().permissiveness_rank()`,
+/// so adding a new feature only requires picking its `minimum_profile`
+/// once.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleFeatureMeta {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub minimum_profile: LanguageProfile,
+}
+
 impl ModuleFeature {
-    /// Parse feature from string.
+    pub const ALL: &'static [Self] = &[
+        Self::Unsafe,
+        Self::InlineAsm,
+        Self::CustomAllocator,
+        Self::DependentTypes,
+        Self::FormalVerification,
+        Self::SmtSolver,
+        Self::GpuCompute,
+        Self::Simd,
+        Self::RawFfi,
+    ];
+
+    pub const fn meta(self) -> ModuleFeatureMeta {
+        match self {
+            Self::Unsafe => ModuleFeatureMeta {
+                name: "unsafe",
+                aliases: &[],
+                minimum_profile: LanguageProfile::Systems,
+            },
+            Self::InlineAsm => ModuleFeatureMeta {
+                name: "inline_asm",
+                aliases: &["inlineasm"],
+                minimum_profile: LanguageProfile::Systems,
+            },
+            Self::CustomAllocator => ModuleFeatureMeta {
+                name: "custom_allocator",
+                aliases: &["customallocator"],
+                minimum_profile: LanguageProfile::Systems,
+            },
+            Self::DependentTypes => ModuleFeatureMeta {
+                name: "dependent_types",
+                aliases: &["dependenttypes"],
+                minimum_profile: LanguageProfile::Research,
+            },
+            Self::FormalVerification => ModuleFeatureMeta {
+                name: "formal_verification",
+                aliases: &["formalverification"],
+                minimum_profile: LanguageProfile::Research,
+            },
+            Self::SmtSolver => ModuleFeatureMeta {
+                name: "smt_solver",
+                aliases: &["smtsolver", "smt"],
+                minimum_profile: LanguageProfile::Research,
+            },
+            Self::GpuCompute => ModuleFeatureMeta {
+                name: "gpu_compute",
+                aliases: &["gpucompute", "gpu"],
+                minimum_profile: LanguageProfile::Application,
+            },
+            Self::Simd => ModuleFeatureMeta {
+                name: "simd",
+                aliases: &[],
+                minimum_profile: LanguageProfile::Application,
+            },
+            Self::RawFfi => ModuleFeatureMeta {
+                name: "raw_ffi",
+                aliases: &["rawffi"],
+                minimum_profile: LanguageProfile::Systems,
+            },
+        }
+    }
+
+    /// Parse feature from string (case-insensitive — accepts the
+    /// canonical snake_case name plus any legacy alias listed in
+    /// `meta().aliases`).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "unsafe" => Some(ModuleFeature::Unsafe),
-            "inline_asm" | "inlineasm" => Some(ModuleFeature::InlineAsm),
-            "custom_allocator" | "customallocator" => Some(ModuleFeature::CustomAllocator),
-            "dependent_types" | "dependenttypes" => Some(ModuleFeature::DependentTypes),
-            "formal_verification" | "formalverification" => Some(ModuleFeature::FormalVerification),
-            "smt_solver" | "smtsolver" | "smt" => Some(ModuleFeature::SmtSolver),
-            "gpu_compute" | "gpucompute" | "gpu" => Some(ModuleFeature::GpuCompute),
-            "simd" => Some(ModuleFeature::Simd),
-            "raw_ffi" | "rawffi" => Some(ModuleFeature::RawFfi),
-            _ => None,
+        let lowered = s.to_lowercase();
+        for v in Self::ALL {
+            let m = v.meta();
+            if m.name == lowered.as_str() {
+                return Some(*v);
+            }
+            for alias in m.aliases {
+                if *alias == lowered.as_str() {
+                    return Some(*v);
+                }
+            }
         }
+        None
     }
 
-    /// Get the name of this feature.
-    pub fn name(&self) -> &'static str {
-        match self {
-            ModuleFeature::Unsafe => "unsafe",
-            ModuleFeature::InlineAsm => "inline_asm",
-            ModuleFeature::CustomAllocator => "custom_allocator",
-            ModuleFeature::DependentTypes => "dependent_types",
-            ModuleFeature::FormalVerification => "formal_verification",
-            ModuleFeature::SmtSolver => "smt_solver",
-            ModuleFeature::GpuCompute => "gpu_compute",
-            ModuleFeature::Simd => "simd",
-            ModuleFeature::RawFfi => "raw_ffi",
-        }
+    /// Get the canonical snake_case name of this feature.
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
     }
 
-    /// Check if this feature is compatible with the given profile.
-    ///
-
-    /// Some features require certain profiles to be used.
-    pub fn is_compatible_with(&self, profile: LanguageProfile) -> bool {
-        match self {
-            // These features require at least Systems profile
-            ModuleFeature::Unsafe
-            | ModuleFeature::InlineAsm
-            | ModuleFeature::CustomAllocator
-            | ModuleFeature::RawFfi => matches!(
-                profile,
-                LanguageProfile::Systems | LanguageProfile::Research
-            ),
-
-            // These features require Research profile
-            ModuleFeature::DependentTypes
-            | ModuleFeature::FormalVerification
-            | ModuleFeature::SmtSolver => matches!(profile, LanguageProfile::Research),
-
-            // These features work with any profile
-            ModuleFeature::GpuCompute | ModuleFeature::Simd => true,
-        }
+    /// Convenience synonym for `name()` matching the meta() series
+    /// idiom.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Get the minimum required profile for this feature.
-    pub fn minimum_profile(&self) -> LanguageProfile {
-        match self {
-            ModuleFeature::Unsafe
-            | ModuleFeature::InlineAsm
-            | ModuleFeature::CustomAllocator
-            | ModuleFeature::RawFfi => LanguageProfile::Systems,
+    #[inline]
+    pub const fn minimum_profile(&self) -> LanguageProfile {
+        self.meta().minimum_profile
+    }
 
-            ModuleFeature::DependentTypes
-            | ModuleFeature::FormalVerification
-            | ModuleFeature::SmtSolver => LanguageProfile::Research,
-
-            ModuleFeature::GpuCompute | ModuleFeature::Simd => LanguageProfile::Application,
-        }
+    /// Check if this feature is compatible with the given profile.
+    /// True when `profile` is at least as permissive as
+    /// `self.minimum_profile()` — i.e. their permissiveness ranks
+    /// are ordered correctly. Single rank comparison instead of two
+    /// parallel matches!.
+    #[inline]
+    pub const fn is_compatible_with(&self, profile: LanguageProfile) -> bool {
+        profile.permissiveness_rank() >= self.minimum_profile().permissiveness_rank()
     }
 }
 
@@ -929,6 +1019,214 @@ mod tests {
             Some(LanguageProfile::Research)
         );
         assert_eq!(LanguageProfile::from_str("invalid"), None);
+    }
+
+    // -------------------------------------------------------------------
+    // meta() consolidation drift pins. Each pin closes a failure mode
+    // exposed by the rank-based collapse of can_access /
+    // can_be_child_of / is_compatible_with into single comparisons.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_language_profile_round_trip_unique_and_dense_rank() {
+        // Round-trip via the canonical name + ALL slice.
+        for v in LanguageProfile::ALL {
+            let s = v.name();
+            assert_eq!(
+                LanguageProfile::from_str(s),
+                Some(*v),
+                "LanguageProfile::{:?}: name '{}' must round-trip",
+                v,
+                s
+            );
+            assert_eq!(v.as_str(), v.name(), "as_str ↔ name agreement");
+        }
+        // Names are unique across variants.
+        let names: Vec<&str> =
+            LanguageProfile::ALL.iter().map(|v| v.name()).collect();
+        let mut dedup = names.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), names.len(), "duplicate canonical name");
+        // Permissiveness ranks are dense 0..=2 in declaration order.
+        for (i, v) in LanguageProfile::ALL.iter().enumerate() {
+            assert_eq!(
+                v.permissiveness_rank() as usize,
+                i,
+                "LanguageProfile::{:?}: rank drift at slot {}",
+                v,
+                i
+            );
+        }
+        // Strict monotonicity.
+        for w in LanguageProfile::ALL.windows(2) {
+            assert!(
+                w[0].permissiveness_rank() < w[1].permissiveness_rank(),
+                "rank monotonicity violated: {:?} -> {:?}",
+                w[0],
+                w[1]
+            );
+        }
+    }
+
+    #[test]
+    fn meta_pin_language_profile_can_access_table_full() {
+        // Reference table — exhaustive; pinned exactly to the legacy
+        // 9-arm match. Rows = self, cols = target.
+        //                  Application  Systems  Research
+        //   Application       true       false    false
+        //   Systems           true       true     false
+        //   Research          true       true     true
+        let table: [[bool; 3]; 3] = [
+            [true, false, false],
+            [true, true, false],
+            [true, true, true],
+        ];
+        for (i, a) in LanguageProfile::ALL.iter().enumerate() {
+            for (j, b) in LanguageProfile::ALL.iter().enumerate() {
+                assert_eq!(
+                    a.can_access(*b),
+                    table[i][j],
+                    "can_access drift: {:?} -> {:?}",
+                    a,
+                    b
+                );
+            }
+        }
+        // Reflexivity: every profile can access itself.
+        for v in LanguageProfile::ALL {
+            assert!(v.can_access(*v));
+        }
+        // can_be_child_of is the dual: can_be_child_of(parent) iff
+        // self.rank <= parent.rank, which is parent.can_access(self).
+        for a in LanguageProfile::ALL {
+            for b in LanguageProfile::ALL {
+                assert_eq!(
+                    a.can_be_child_of(*b),
+                    b.can_access(*a),
+                    "duality: a.can_be_child_of(b) == b.can_access(a) — \
+                     a={:?}, b={:?}",
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn meta_pin_module_feature_round_trip_unique_and_min_profile_partition() {
+        // Round-trip + uniqueness + alias coverage.
+        for v in ModuleFeature::ALL {
+            let s = v.name();
+            assert_eq!(
+                ModuleFeature::from_str(s),
+                Some(*v),
+                "ModuleFeature::{:?}: name '{}' round-trip",
+                v,
+                s
+            );
+            assert_eq!(v.as_str(), v.name());
+            for alias in v.meta().aliases {
+                assert_eq!(
+                    ModuleFeature::from_str(alias),
+                    Some(*v),
+                    "ModuleFeature::{:?}: alias '{}' must parse",
+                    v,
+                    alias
+                );
+            }
+        }
+        // Case-insensitivity preserved.
+        assert_eq!(
+            ModuleFeature::from_str("UNSAFE"),
+            Some(ModuleFeature::Unsafe)
+        );
+        assert_eq!(
+            ModuleFeature::from_str("Smt"),
+            Some(ModuleFeature::SmtSolver)
+        );
+        // is_compatible_with classification — every variant agrees
+        // with the rank comparison and with the legacy partition.
+        for f in ModuleFeature::ALL {
+            for p in LanguageProfile::ALL {
+                let expected = p.permissiveness_rank()
+                    >= f.minimum_profile().permissiveness_rank();
+                assert_eq!(
+                    f.is_compatible_with(*p),
+                    expected,
+                    "is_compatible_with drift: {:?} on {:?}",
+                    f,
+                    p
+                );
+            }
+        }
+        // Bucket counts pin: exactly 4 require Systems, exactly 3
+        // require Research, exactly 2 work in Application.
+        let app_features = ModuleFeature::ALL
+            .iter()
+            .filter(|f| f.minimum_profile() == LanguageProfile::Application)
+            .count();
+        let sys_features = ModuleFeature::ALL
+            .iter()
+            .filter(|f| f.minimum_profile() == LanguageProfile::Systems)
+            .count();
+        let res_features = ModuleFeature::ALL
+            .iter()
+            .filter(|f| f.minimum_profile() == LanguageProfile::Research)
+            .count();
+        assert_eq!(app_features, 2, "Application-min: GpuCompute, Simd");
+        assert_eq!(
+            sys_features, 4,
+            "Systems-min: Unsafe, InlineAsm, CustomAllocator, RawFfi"
+        );
+        assert_eq!(
+            res_features, 3,
+            "Research-min: DependentTypes, FormalVerification, SmtSolver"
+        );
+        assert_eq!(app_features + sys_features + res_features, 9);
+    }
+
+    #[test]
+    fn meta_pin_unavailable_features_zero_alloc_static_slice() {
+        // Static-slice access (zero-alloc fast path).
+        assert_eq!(
+            LanguageProfile::Application.unavailable_features_static().len(),
+            4
+        );
+        assert_eq!(
+            LanguageProfile::Systems.unavailable_features_static().len(),
+            3
+        );
+        assert!(
+            LanguageProfile::Research
+                .unavailable_features_static()
+                .is_empty()
+        );
+        // Owning version preserves the legacy contract: the labels
+        // produced by the static slice match those returned by the
+        // owning method (target argument is intentionally inert —
+        // the answer depends only on `self`).
+        for from in LanguageProfile::ALL {
+            for to in LanguageProfile::ALL {
+                let owned = from.unavailable_features(*to);
+                let static_slice = from.unavailable_features_static();
+                assert_eq!(
+                    owned.len(),
+                    static_slice.len(),
+                    "unavailable_features count mismatch from={:?} to={:?}",
+                    from,
+                    to
+                );
+                for (i, label) in static_slice.iter().enumerate() {
+                    assert_eq!(
+                        owned.get(i).map(|t| t.as_str()),
+                        Some(*label),
+                        "unavailable_features label mismatch at {}",
+                        i
+                    );
+                }
+            }
+        }
     }
 
     #[test]
