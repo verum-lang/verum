@@ -731,7 +731,7 @@ pub fn emit_range_table_lookup<'ctx>(
             &[ch.into(), table_ptr.into(), count_val.into()],
             "unicode_lookup",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("unicode range lookup: expected return value"))?
@@ -911,7 +911,7 @@ pub fn emit_case_conversion<'ctx>(
     let call_result = ctx
         .builder()
         .build_call(convert_fn, &[ch.into(), dir_val.into()], "case_conv")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("case conversion: expected return value"))?
@@ -1154,41 +1154,41 @@ pub fn emit_utf8_decode_inline<'ctx>(
     let b0_ptr = unsafe {
         builder
             .build_in_bounds_gep(i8_ty, bytes_ptr, &[idx_val], "b0_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     };
     let b0 = builder
         .build_load(i8_ty, b0_ptr, "b0")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .into_int_value();
     let b0_64 = builder
         .build_int_z_extend(b0, i64_ty, "b0_64")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Helper: load bytes[idx + offset] & 0x3F as i64
     let load_cont = |offset: u64, name: &str| -> Result<IntValue<'ctx>> {
         let off = i64_ty.const_int(offset, false);
         let idx_plus = builder
             .build_int_add(idx_val, off, &format!("{}_idx", name))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let ptr = unsafe {
             builder
                 .build_in_bounds_gep(i8_ty, bytes_ptr, &[idx_plus], &format!("{}_ptr", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let byte = builder
             .build_load(i8_ty, ptr, name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let byte_64 = builder
             .build_int_z_extend(byte, i64_ty, &format!("{}_64", name))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let masked = builder
             .build_and(
                 byte_64,
                 i64_ty.const_int(0x3F, false),
                 &format!("{}_masked", name),
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         Ok(masked)
     };
 
@@ -1213,22 +1213,22 @@ pub fn emit_utf8_decode_inline<'ctx>(
             i64_ty.const_int(0x80, false),
             "is_ascii",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_conditional_branch(is_ascii, ascii_bb, check_2_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // ASCII: return b0
     builder.position_at_end(ascii_bb);
     builder
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Check 2-byte: (b0 & 0xE0) == 0xC0
     builder.position_at_end(check_2_bb);
     let masked_e0 = builder
         .build_and(b0_64, i64_ty.const_int(0xE0, false), "masked_e0")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_2byte = builder
         .build_int_compare(
             IntPredicate::EQ,
@@ -1236,32 +1236,32 @@ pub fn emit_utf8_decode_inline<'ctx>(
             i64_ty.const_int(0xC0, false),
             "is_2byte",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_conditional_branch(is_2byte, decode_2_bb, check_3_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // 2-byte: ((b0 & 0x1F) << 6) | (b1 & 0x3F)
     builder.position_at_end(decode_2_bb);
     let b0_1f = builder
         .build_and(b0_64, i64_ty.const_int(0x1F, false), "b0_1f")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b0_shifted = builder
         .build_left_shift(b0_1f, i64_ty.const_int(6, false), "b0_sh6")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b1_masked = load_cont(1, "b1")?;
     let result_2 = builder
         .build_or(b0_shifted, b1_masked, "cp_2byte")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Check 3-byte: (b0 & 0xF0) == 0xE0
     builder.position_at_end(check_3_bb);
     let masked_f0 = builder
         .build_and(b0_64, i64_ty.const_int(0xF0, false), "masked_f0")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_3byte = builder
         .build_int_compare(
             IntPredicate::EQ,
@@ -1269,39 +1269,39 @@ pub fn emit_utf8_decode_inline<'ctx>(
             i64_ty.const_int(0xE0, false),
             "is_3byte",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_conditional_branch(is_3byte, decode_3_bb, check_4_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // 3-byte: ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F)
     builder.position_at_end(decode_3_bb);
     let b0_0f = builder
         .build_and(b0_64, i64_ty.const_int(0x0F, false), "b0_0f")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b0_sh12 = builder
         .build_left_shift(b0_0f, i64_ty.const_int(12, false), "b0_sh12")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b1_3 = load_cont(1, "b1_3")?;
     let b1_sh6 = builder
         .build_left_shift(b1_3, i64_ty.const_int(6, false), "b1_sh6")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b2_masked = load_cont(2, "b2")?;
     let tmp_3 = builder
         .build_or(b0_sh12, b1_sh6, "tmp_3a")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result_3 = builder
         .build_or(tmp_3, b2_masked, "cp_3byte")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Check 4-byte: (b0 & 0xF8) == 0xF0
     builder.position_at_end(check_4_bb);
     let masked_f8 = builder
         .build_and(b0_64, i64_ty.const_int(0xF8, false), "masked_f8")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_4byte = builder
         .build_int_compare(
             IntPredicate::EQ,
@@ -1309,53 +1309,53 @@ pub fn emit_utf8_decode_inline<'ctx>(
             i64_ty.const_int(0xF0, false),
             "is_4byte",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_conditional_branch(is_4byte, decode_4_bb, replacement_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // 4-byte: ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F)
     builder.position_at_end(decode_4_bb);
     let b0_07 = builder
         .build_and(b0_64, i64_ty.const_int(0x07, false), "b0_07")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b0_sh18 = builder
         .build_left_shift(b0_07, i64_ty.const_int(18, false), "b0_sh18")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b1_4 = load_cont(1, "b1_4")?;
     let b1_sh12_4 = builder
         .build_left_shift(b1_4, i64_ty.const_int(12, false), "b1_sh12_4")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b2_4 = load_cont(2, "b2_4")?;
     let b2_sh6_4 = builder
         .build_left_shift(b2_4, i64_ty.const_int(6, false), "b2_sh6_4")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let b3_masked = load_cont(3, "b3")?;
     let tmp_4a = builder
         .build_or(b0_sh18, b1_sh12_4, "tmp_4a")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let tmp_4b = builder
         .build_or(tmp_4a, b2_sh6_4, "tmp_4b")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result_4 = builder
         .build_or(tmp_4b, b3_masked, "cp_4byte")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Replacement: return 0xFFFD
     builder.position_at_end(replacement_bb);
     let replacement = i64_ty.const_int(0xFFFD, false);
     builder
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Merge with phi
     builder.position_at_end(merge_bb);
     let phi = builder
         .build_phi(i64_ty, "utf8_cp")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     phi.add_incoming(&[
         (&b0_64, ascii_bb),
         (&result_2, decode_2_bb),

@@ -56,7 +56,7 @@ use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::SystemSubOpcode;
 
 use super::context::FunctionContext;
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::types::TypeLowering;
 
 /// LLVM calling convention constants.
@@ -138,7 +138,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 &[dst.into(), src.into(), size.into(), is_volatile.into()],
                 "memcpy",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -166,7 +166,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 &[dst.into(), src.into(), size.into(), is_volatile.into()],
                 "memmove",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -192,7 +192,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let value_i8 = if value.get_type().get_bit_width() > 8 {
             builder
                 .build_int_truncate(value, i8_type, "memset_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         } else {
             value
         };
@@ -204,7 +204,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 &[dst.into(), value_i8.into(), size.into(), is_volatile.into()],
                 "memset",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -252,7 +252,7 @@ impl<'ctx> FfiLowering<'ctx> {
                 &[dst.into(), zero_i8.into(), size.into(), is_volatile.into()],
                 "secure_zero",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -276,7 +276,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let args: [BasicMetadataValueEnum<'ctx>; 3] = [ptr1.into(), ptr2.into(), size.into()];
         let result = builder
             .build_call(memcmp_fn, &args, "memcmp")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("memcmp should return i32"))?
@@ -303,7 +303,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let args: [BasicMetadataValueEnum<'ctx>; 1] = [size.into()];
         let raw_ptr = builder
             .build_call(malloc_fn, &args, "malloc")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("malloc should return ptr"))?
@@ -320,10 +320,10 @@ impl<'ctx> FfiLowering<'ctx> {
         let ok_bb = self.context.append_basic_block(func, "malloc_ok");
         let is_null = builder
             .build_is_null(raw_ptr, "malloc_null")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder
             .build_conditional_branch(is_null, oom_bb, ok_bb)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder.position_at_end(oom_bb);
         let exit_fn = if let Some(f) = module.get_function("verum_internal_exit_i64") {
             f
@@ -340,10 +340,10 @@ impl<'ctx> FfiLowering<'ctx> {
         let i64_type = self.context.i64_type();
         builder
             .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder
             .build_unreachable()
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder.position_at_end(ok_bb);
 
         Ok(raw_ptr)
@@ -362,7 +362,7 @@ impl<'ctx> FfiLowering<'ctx> {
 
         builder
             .build_call(free_fn, &[ptr.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -382,7 +382,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let args: [BasicMetadataValueEnum<'ctx>; 2] = [ptr.into(), size.into()];
         let result = builder
             .build_call(realloc_fn, &args, "realloc")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("realloc should return ptr"))?
@@ -422,7 +422,7 @@ impl<'ctx> FfiLowering<'ctx> {
 
         let result = builder
             .build_load(int_type, ptr, "deref_raw")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         Ok(result)
@@ -458,18 +458,18 @@ impl<'ctx> FfiLowering<'ctx> {
         let adjusted_value = if val_bits > target_bits {
             builder
                 .build_int_truncate(value, int_type, "trunc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         } else if val_bits < target_bits {
             builder
                 .build_int_s_extend(value, int_type, "sext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         } else {
             value
         };
 
         builder
             .build_store(ptr, adjusted_value)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -486,7 +486,7 @@ impl<'ctx> FfiLowering<'ctx> {
 
         let result = builder
             .build_load(ptr_type, ptr, "deref_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_pointer_value();
 
         Ok(result)
@@ -507,7 +507,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let result = unsafe {
             builder
                 .build_gep(i8_type, ptr, &[offset], "ptr_add")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
 
         Ok(result)
@@ -525,14 +525,14 @@ impl<'ctx> FfiLowering<'ctx> {
         // Negate the offset
         let neg_offset = builder
             .build_int_neg(offset, "neg_offset")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let i8_type = self.context.i8_type();
 
         let result = unsafe {
             builder
                 .build_gep(i8_type, ptr, &[neg_offset], "ptr_sub")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
 
         Ok(result)
@@ -552,14 +552,14 @@ impl<'ctx> FfiLowering<'ctx> {
         // Convert pointers to integers and subtract
         let int1 = builder
             .build_ptr_to_int(ptr1, i64_type, "ptr1_int")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let int2 = builder
             .build_ptr_to_int(ptr2, i64_type, "ptr2_int")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let diff = builder
             .build_int_sub(int1, int2, "ptr_diff")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(diff)
     }
@@ -576,7 +576,7 @@ impl<'ctx> FfiLowering<'ctx> {
 
         let result = builder
             .build_int_compare(IntPredicate::EQ, ptr, null_ptr, "is_null")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(result)
     }
@@ -617,7 +617,7 @@ impl<'ctx> FfiLowering<'ctx> {
         // Build the call
         let call_site = builder
             .build_call(func, &meta_args, "ffi_call")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Set the calling convention on the call site
         call_site.set_call_convention(calling_convention);
@@ -644,7 +644,7 @@ impl<'ctx> FfiLowering<'ctx> {
 
         let call_site = builder
             .build_indirect_call(fn_type, fn_ptr, &meta_args, "indirect_call")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         call_site.set_call_convention(calling_convention);
 
@@ -698,7 +698,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let empty_args: [BasicMetadataValueEnum<'ctx>; 0] = [];
         let errno_ptr = builder
             .build_call(errno_fn, &empty_args, "errno_loc")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("__errno_location should return ptr"))?
@@ -708,7 +708,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let i32_type = self.context.i32_type();
         let errno_val = builder
             .build_load(i32_type, errno_ptr, "errno")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         Ok(errno_val)
@@ -728,7 +728,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let empty_args: [BasicMetadataValueEnum<'ctx>; 0] = [];
         let errno_ptr = builder
             .build_call(errno_fn, &empty_args, "errno_loc")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("__errno_location should return ptr"))?
@@ -737,7 +737,7 @@ impl<'ctx> FfiLowering<'ctx> {
         // Store the new value
         builder
             .build_store(errno_ptr, value)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -905,7 +905,7 @@ impl<'ctx> FfiLowering<'ctx> {
         builder.position_at_end(entry);
         builder
             .build_return(None)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(wrapper)
     }
@@ -955,14 +955,14 @@ impl<'ctx> FfiLowering<'ctx> {
             .into_int_value();
         let new_ptr = builder
             .build_call(os_alloc, &[new_size.into()], "new_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("verum_os_alloc returned void".to_string()))?
             .into_pointer_value();
         builder
             .build_return(Some(&new_ptr))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(wrapper)
     }

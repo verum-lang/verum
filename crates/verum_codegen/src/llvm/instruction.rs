@@ -49,7 +49,7 @@ fn checked_malloc_instr<'ctx>(
 
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("malloc returned void"))?
@@ -67,10 +67,10 @@ fn checked_malloc_instr<'ctx>(
 
     let is_null = builder
         .build_is_null(raw_ptr, "malloc_null")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_conditional_branch(is_null, oom_bb, ok_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     builder.position_at_end(oom_bb);
     // Libc-free OOM abort: route through `verum_os_exit` (defined in
@@ -90,10 +90,10 @@ fn checked_malloc_instr<'ctx>(
     };
     builder
         .build_call(exit_fn, &[i32_type.const_int(1, false).into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     builder
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     builder.position_at_end(ok_bb);
     Ok(raw_ptr)
@@ -1589,7 +1589,7 @@ fn as_ptr<'ctx>(
         BasicValueEnum::IntValue(i) => ctx
             .builder()
             .build_int_to_ptr(i, ctx.types().ptr_type(), name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+            .or_llvm_err(),
         BasicValueEnum::FloatValue(f) => {
             // Defensive: variant-payload extraction can flow a Float
             // register into a deref site (e.g. when a heap-tagged
@@ -1604,24 +1604,24 @@ fn as_ptr<'ctx>(
             let as_int = ctx
                 .builder()
                 .build_bit_cast(f, i64_ty, &format!("{}_f2i", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             ctx.builder()
                 .build_int_to_ptr(as_int, ctx.types().ptr_type(), name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }
         BasicValueEnum::StructValue(s) => {
             // CBGR reference struct {ptr, i32, i32} — extract field 0 (the raw pointer)
             let field0 = ctx
                 .builder()
                 .build_extract_value(s, 0, &format!("{}.ptr", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             match field0 {
                 BasicValueEnum::PointerValue(p) => Ok(p),
                 BasicValueEnum::IntValue(i) => ctx
                     .builder()
                     .build_int_to_ptr(i, ctx.types().ptr_type(), name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+                    .or_llvm_err(),
                 _ => Err(LlvmLoweringError::internal(format!(
                     "{}: CBGR field 0 is not pointer or int: {:?}",
                     name, field0
@@ -1652,22 +1652,22 @@ fn as_i64<'ctx>(
             } else if i.get_type().get_bit_width() < 64 {
                 ctx.builder()
                     .build_int_z_extend(i, i64_type, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             } else {
                 ctx.builder()
                     .build_int_truncate(i, i64_type, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             }
         }
         BasicValueEnum::PointerValue(p) => ctx
             .builder()
             .build_ptr_to_int(p, i64_type, name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+            .or_llvm_err(),
         BasicValueEnum::FloatValue(f) => ctx
             .builder()
             .build_bit_cast(f, i64_type, name)
             .map(|v| v.into_int_value())
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+            .or_llvm_err(),
         _ => Ok(i64_type.const_zero()),
     }
 }
@@ -1697,7 +1697,7 @@ fn emit_text_free<'ctx>(
 
     ctx.builder()
         .build_call(free_fn, &[text_i64.into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok(())
 }
 
@@ -1807,7 +1807,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_signed_int_to_float(src_val, ctx.types().f64_type(), "sitofp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             ctx.mark_float_register(dst.0);
             Ok(())
@@ -1826,7 +1826,7 @@ pub fn lower_instruction<'ctx>(
                         .unwrap_or_else(|| module.add_function("llvm.floor.f64", fn_type, None));
                     ctx.builder()
                         .build_call(func, &[src_val.into()], "floor")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("floor: expected return value"))?
@@ -1841,7 +1841,7 @@ pub fn lower_instruction<'ctx>(
                         .unwrap_or_else(|| module.add_function("llvm.ceil.f64", fn_type, None));
                     ctx.builder()
                         .build_call(func, &[src_val.into()], "ceil")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("ceil: expected return value"))?
@@ -1856,7 +1856,7 @@ pub fn lower_instruction<'ctx>(
                         .unwrap_or_else(|| module.add_function("llvm.round.f64", fn_type, None));
                     ctx.builder()
                         .build_call(func, &[src_val.into()], "round")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("round: expected return value"))?
@@ -1866,7 +1866,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_to_signed_int(rounded, ctx.types().i64_type(), "fptosi")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -1877,7 +1877,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_truncate(src_val, ctx.types().i32_type(), "trunc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -1888,7 +1888,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_z_extend(src_val, ctx.types().i64_type(), "zext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -1899,7 +1899,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_z_extend(src_val, ctx.types().i64_type(), "zext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -1922,15 +1922,15 @@ pub fn lower_instruction<'ctx>(
                 BinaryIntOp::Add => ctx
                     .builder()
                     .build_int_add(lhs, rhs, "add")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryIntOp::Sub => ctx
                     .builder()
                     .build_int_sub(lhs, rhs, "sub")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryIntOp::Mul => ctx
                     .builder()
                     .build_int_mul(lhs, rhs, "mul")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryIntOp::Div => safe_int_div(ctx, lhs, rhs, "sdiv")?,
                 BinaryIntOp::Mod => safe_int_rem(ctx, lhs, rhs, "srem")?,
                 BinaryIntOp::Pow => {
@@ -1958,23 +1958,23 @@ pub fn lower_instruction<'ctx>(
                 BinaryFloatOp::Add => ctx
                     .builder()
                     .build_float_add(lhs, rhs, "fadd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryFloatOp::Sub => ctx
                     .builder()
                     .build_float_sub(lhs, rhs, "fsub")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryFloatOp::Mul => ctx
                     .builder()
                     .build_float_mul(lhs, rhs, "fmul")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryFloatOp::Div => ctx
                     .builder()
                     .build_float_div(lhs, rhs, "fdiv")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryFloatOp::Mod => ctx
                     .builder()
                     .build_float_rem(lhs, rhs, "frem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryFloatOp::Pow => {
                     // Float power via llvm.pow.f64 intrinsic
                     lower_float_pow(ctx, lhs, rhs)?
@@ -1996,34 +1996,34 @@ pub fn lower_instruction<'ctx>(
                 UnaryIntOp::Neg => ctx
                     .builder()
                     .build_int_neg(src_val, "neg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 UnaryIntOp::Abs => {
                     // abs(x) = x < 0 ? -x : x
                     let zero = ctx.types().i64_type().const_zero();
                     let is_neg = ctx
                         .builder()
                         .build_int_compare(IntPredicate::SLT, src_val, zero, "is_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_val = ctx
                         .builder()
                         .build_int_neg(src_val, "neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_select(is_neg, neg_val, src_val, "abs")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value()
                 }
                 UnaryIntOp::Inc => {
                     let one = ctx.types().i64_type().const_int(1, false);
                     ctx.builder()
                         .build_int_add(src_val, one, "inc")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 }
                 UnaryIntOp::Dec => {
                     let one = ctx.types().i64_type().const_int(1, false);
                     ctx.builder()
                         .build_int_sub(src_val, one, "dec")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 }
             };
 
@@ -2038,21 +2038,21 @@ pub fn lower_instruction<'ctx>(
                 UnaryFloatOp::Neg => ctx
                     .builder()
                     .build_float_neg(src_val, "fneg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 UnaryFloatOp::Abs => {
                     // Requires fabs intrinsic - for now just negate and select
                     let neg_val = ctx
                         .builder()
                         .build_float_neg(src_val, "fneg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let zero = ctx.types().f64_type().const_float(0.0);
                     let is_neg = ctx
                         .builder()
                         .build_float_compare(FloatPredicate::OLT, src_val, zero, "is_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_select(is_neg, neg_val, src_val, "fabs")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_float_value()
                 }
                 _ => {
@@ -2077,7 +2077,7 @@ pub fn lower_instruction<'ctx>(
                     let result = ctx
                         .builder()
                         .build_not(iv, "not")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, result.into());
                 }
                 _ => {
@@ -2091,11 +2091,11 @@ pub fn lower_instruction<'ctx>(
                         let is_zero = ctx
                             .builder()
                             .build_int_compare(IntPredicate::EQ, src_val, zero, "lnot")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         let result = ctx
                             .builder()
                             .build_int_z_extend(is_zero, ctx.types().i64_type(), "lnot_ext")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         ctx.set_register(dst.0, result.into());
                         ctx.mark_bool_register(dst.0);
                     } else {
@@ -2103,7 +2103,7 @@ pub fn lower_instruction<'ctx>(
                         let result = ctx
                             .builder()
                             .build_not(src_val, "bnot")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         ctx.set_register(dst.0, result.into());
                     }
                 }
@@ -2122,31 +2122,31 @@ pub fn lower_instruction<'ctx>(
                 BitwiseOp::And => ctx
                     .builder()
                     .build_and(lhs, rhs, "and")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Or => ctx
                     .builder()
                     .build_or(lhs, rhs, "or")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Xor => ctx
                     .builder()
                     .build_xor(lhs, rhs, "xor")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Not => ctx
                     .builder()
                     .build_not(lhs, "bnot")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Shl => ctx
                     .builder()
                     .build_left_shift(lhs, rhs, "shl")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Shr => ctx
                     .builder()
                     .build_right_shift(lhs, rhs, true, "ashr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BitwiseOp::Ushr => ctx
                     .builder()
                     .build_right_shift(lhs, rhs, false, "lshr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
             };
 
             ctx.set_register(dst.0, result.into());
@@ -2194,7 +2194,7 @@ pub fn lower_instruction<'ctx>(
                 let lhs_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[lhs_i64.into()], "cmpi_str_a_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -2206,7 +2206,7 @@ pub fn lower_instruction<'ctx>(
                 let rhs_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[rhs_i64.into()], "cmpi_str_b_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -2222,7 +2222,7 @@ pub fn lower_instruction<'ctx>(
                 let cmp_result = ctx
                     .builder()
                     .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("strcmp: expected return value"))?;
@@ -2232,14 +2232,14 @@ pub fn lower_instruction<'ctx>(
 
                 ctx.builder()
                     .build_int_compare(pred, cmp_int, zero_i32, "strcmp_cmp")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
                 let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
 
                 ctx.builder()
                     .build_int_compare(pred, lhs, rhs, "icmp")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
 
             ctx.set_register(dst.0, result.into());
@@ -2263,7 +2263,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_compare(pred, lhs, rhs, "fcmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             ctx.set_register(dst.0, result.into());
             ctx.mark_bool_register(dst.0);
@@ -2289,7 +2289,7 @@ pub fn lower_instruction<'ctx>(
             let br_instr = ctx
                 .builder()
                 .build_unconditional_branch(target_block)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Attach loop metadata if pending (from a preceding LoopHint instruction).
             // Backward jumps are loop back-edges; forward jumps could also be loop latches
@@ -2372,7 +2372,7 @@ pub fn lower_instruction<'ctx>(
             let mut cond_i1 = ctx
                 .builder()
                 .build_int_truncate(cond_val, i1_type, "cond_i1")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Apply pending branch hint via llvm.expect.i1(i1 %cond, i1 %expected)
             if let Some(expected) = ctx.pending_branch_hint.take() {
                 use verum_llvm::intrinsics::Intrinsic;
@@ -2398,7 +2398,7 @@ pub fn lower_instruction<'ctx>(
                 ctx.create_block(target_idx + 1000, &format!("fallthrough_{}", target_idx));
             ctx.builder()
                 .build_conditional_branch(cond_i1, target_block, fallthrough)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.position_at_end(fallthrough);
             Ok(())
         }
@@ -2410,7 +2410,7 @@ pub fn lower_instruction<'ctx>(
             let mut cond_i1 = ctx
                 .builder()
                 .build_int_truncate(cond_val, i1_type, "cond_i1")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Apply pending branch hint via llvm.expect.i1
             if let Some(expected) = ctx.pending_branch_hint.take() {
                 use verum_llvm::intrinsics::Intrinsic;
@@ -2437,7 +2437,7 @@ pub fn lower_instruction<'ctx>(
             // JmpNot: branch to target if condition is FALSE
             ctx.builder()
                 .build_conditional_branch(cond_i1, fallthrough, target_block)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.position_at_end(fallthrough);
             Ok(())
         }
@@ -2458,7 +2458,7 @@ pub fn lower_instruction<'ctx>(
             let cond = ctx
                 .builder()
                 .build_int_compare(pred, lhs, rhs, "jmpcmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             let target_idx = *offset as u32;
             let target_block = ctx.get_block(target_idx)?;
@@ -2466,7 +2466,7 @@ pub fn lower_instruction<'ctx>(
                 ctx.create_block(target_idx + 1000, &format!("fallthrough_{}", target_idx));
             ctx.builder()
                 .build_conditional_branch(cond, target_block, fallthrough)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.position_at_end(fallthrough);
             Ok(())
         }
@@ -2554,14 +2554,14 @@ pub fn lower_instruction<'ctx>(
                     // Function is declared as void — emit RetV instead
                     ctx.builder()
                         .build_return(None)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 Some(expected_ret) => {
                     // Coerce value to match declared return type if needed
                     let coerced = coerce_value(ctx, ret_val, expected_ret, "ret_coerce")?;
                     ctx.builder()
                         .build_return(Some(&coerced))
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
             }
             Ok(())
@@ -2612,7 +2612,7 @@ pub fn lower_instruction<'ctx>(
                     // Truly void function
                     ctx.builder()
                         .build_return(None)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 Some(ret_ty) => {
                     // Function declared with return type but executing void return
@@ -2626,7 +2626,7 @@ pub fn lower_instruction<'ctx>(
                     };
                     ctx.builder()
                         .build_return(Some(&default_val))
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
             }
             Ok(())
@@ -2677,16 +2677,16 @@ pub fn lower_instruction<'ctx>(
             let call_site = ctx
                 .builder()
                 .build_call(llvm_fn, &arg_vals, "tail_call")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             call_site.set_tail_call(true);
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 ctx.builder()
                     .build_return(Some(&ret_val))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             } else {
                 ctx.builder()
                     .build_return(None)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             Ok(())
         }
@@ -2706,7 +2706,7 @@ pub fn lower_instruction<'ctx>(
                     // Convert integer to pointer (alloca mode may store pointers as ints)
                     ctx.builder()
                         .build_int_to_ptr(i, ctx.types().ptr_type(), "closure_from_int")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 }
                 _ => {
                     // Non-pointer, non-int value (e.g., unit struct from parameter typing)
@@ -2725,7 +2725,7 @@ pub fn lower_instruction<'ctx>(
             let fn_ptr = ctx
                 .builder()
                 .build_load(ptr_type, closure_ptr, "closure_fn")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_pointer_value();
 
             // Load env_ptr from closure struct offset 8
@@ -2738,12 +2738,12 @@ pub fn lower_instruction<'ctx>(
                         &[i64_type.const_int(8, false)],
                         "env_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let env_ptr = ctx
                 .builder()
                 .build_load(ptr_type, env_slot, "closure_env")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Build argument list: [env_ptr, ...args]
             // Coerce all args to i64 since closure functions use uniform i64 parameters.
@@ -2768,7 +2768,7 @@ pub fn lower_instruction<'ctx>(
             let call_site = ctx
                 .builder()
                 .build_indirect_call(fn_type, fn_ptr, &call_args, "closure_call")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -2877,16 +2877,16 @@ pub fn lower_instruction<'ctx>(
                     let call_result = ctx
                         .builder()
                         .build_call(llvm_fn, &forward_args, "fwd_call")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     if let Some(ret_val) = call_result.try_as_basic_value().basic() {
                         ctx.builder()
                             .build_return(Some(&ret_val))
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                     } else {
                         ctx.builder()
                             .build_return(Some(&i64_type.const_zero()))
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                     }
 
                     // Restore builder position
@@ -2999,7 +2999,7 @@ pub fn lower_instruction<'ctx>(
                     let type_id_val = i64_type.const_int(*type_id as u64, false);
                     ctx.builder()
                         .build_store(obj_ptr, type_id_val)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
 
                 ctx.set_register(dst.0, obj_ptr.into());
@@ -3182,7 +3182,7 @@ pub fn lower_instruction<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(new_fn, &[], "map_new")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -3207,7 +3207,7 @@ pub fn lower_instruction<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(get_fn, &[map_val.into(), key_val.into()], "map_get")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -3248,7 +3248,7 @@ pub fn lower_instruction<'ctx>(
                         &[map_val.into(), key_val.into(), value.into()],
                         "",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             // Track value type: if inserting a list/string, mark the map.
             // Use _chain to propagate back through all Mov copy sources.
@@ -3276,7 +3276,7 @@ pub fn lower_instruction<'ctx>(
                         &[map_val.into(), key_val.into()],
                         "map_contains",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -3335,7 +3335,7 @@ pub fn lower_instruction<'ctx>(
                 // tag = 3
                 ctx.builder()
                     .build_store(iter_ptr, i64_type.const_int(3, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // field 1 = map_ptr as i64
                 let map_val = as_i64(ctx, ctx.get_register(iterable.0)?, "map_val")?;
                 // SAFETY: GEP into the 24-byte map iterator struct [tag, map_ptr, slot] to write the map pointer at field 1 (offset 8)
@@ -3347,11 +3347,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(1, false)],
                             "map_ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f1, map_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // field 2 = slot = 0
                 // SAFETY: GEP into the 24-byte map iterator struct to write the initial slot index (0) at field 2 (offset 16)
                 let f2 = unsafe {
@@ -3362,11 +3362,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(2, false)],
                             "slot_field",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f2, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, iter_ptr.into());
                 ctx.mark_map_iter_register(dst.0);
             } else if ctx.is_gen_register(iterable.0) {
@@ -3602,7 +3602,7 @@ pub fn lower_instruction<'ctx>(
                 BasicValueEnum::IntValue(i) => ctx
                     .builder()
                     .build_int_to_ptr(i, ctx.types().ptr_type(), "variant_from_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => {
                     return Err(LlvmLoweringError::internal(format!(
                         "SetVariantData: expected pointer, got {:?}",
@@ -3619,21 +3619,21 @@ pub fn lower_instruction<'ctx>(
                     } else if i.get_type().get_bit_width() < 64 {
                         ctx.builder()
                             .build_int_z_extend(i, ctx.types().i64_type(), "zext_variant")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         ctx.builder()
                             .build_int_truncate(i, ctx.types().i64_type(), "trunc_variant")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     }
                 }
                 BasicValueEnum::PointerValue(p) => ctx
                     .builder()
                     .build_ptr_to_int(p, ctx.types().i64_type(), "ptr_to_variant")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BasicValueEnum::FloatValue(f) => ctx
                     .builder()
                     .build_bit_cast(f, ctx.types().i64_type(), "f2i_variant")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value(),
                 _ => ctx.types().i64_type().const_zero(),
             };
@@ -3676,7 +3676,7 @@ pub fn lower_instruction<'ctx>(
                 let f64_val = ctx
                     .builder()
                     .build_bit_cast(value, ctx.types().f64_type(), "variant_f64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, f64_val);
                 ctx.mark_float_register(dst.0);
             } else {
@@ -3740,7 +3740,7 @@ pub fn lower_instruction<'ctx>(
                 BasicValueEnum::IntValue(i) => ctx
                     .builder()
                     .build_int_to_ptr(i, ctx.types().ptr_type(), "variant_from_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => {
                     // Non-pointer (e.g., unit struct from bad typing): always false
                     ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
@@ -3753,7 +3753,7 @@ pub fn lower_instruction<'ctx>(
             let is_null = ctx
                 .builder()
                 .build_is_null(variant_ptr, "isvar_is_null")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             let current_bb = ctx
                 .builder()
@@ -3768,7 +3768,7 @@ pub fn lower_instruction<'ctx>(
 
             ctx.builder()
                 .build_conditional_branch(is_null, then_bb, else_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Null path: variant is None (tag 0)
             ctx.builder().position_at_end(then_bb);
@@ -3779,7 +3779,7 @@ pub fn lower_instruction<'ctx>(
             };
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Non-null path: read variant tag from object
             ctx.builder().position_at_end(else_bb);
@@ -3788,10 +3788,10 @@ pub fn lower_instruction<'ctx>(
             let tag_ext = ctx
                 .builder()
                 .build_int_z_extend(tag_result, ctx.types().i64_type(), "tag_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let else_end = ctx
                 .builder()
                 .get_insert_block()
@@ -3802,7 +3802,7 @@ pub fn lower_instruction<'ctx>(
             let phi = ctx
                 .builder()
                 .build_phi(ctx.types().i64_type(), "isvar_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             phi.add_incoming(&[(&null_result, then_bb), (&tag_ext, else_end)]);
 
             ctx.set_register(dst.0, phi.as_basic_value());
@@ -3818,7 +3818,7 @@ pub fn lower_instruction<'ctx>(
                 BasicValueEnum::IntValue(i) => ctx
                     .builder()
                     .build_int_to_ptr(i, ctx.types().ptr_type(), "asvar_from_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => {
                     // Non-pointer: return zero
                     ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
@@ -3956,7 +3956,7 @@ pub fn lower_instruction<'ctx>(
                 ctx.builder().position_at_end(case_block);
                 ctx.builder()
                     .build_unconditional_branch(default_block)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
 
             // Position back at original block and emit switch
@@ -3978,7 +3978,7 @@ pub fn lower_instruction<'ctx>(
 
             ctx.builder()
                 .build_switch(val, default_block, &llvm_cases)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Continue from default block
             ctx.builder().position_at_end(default_block);
@@ -4010,7 +4010,7 @@ pub fn lower_instruction<'ctx>(
                     let i64_val = ctx
                         .builder()
                         .build_ptr_to_int(pv, ctx.types().i64_type(), "deref_generic")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, i64_val.into());
                 } else {
                     // Already i64 (from alloca load) — pass through
@@ -4077,7 +4077,7 @@ pub fn lower_instruction<'ctx>(
                 let loaded = ctx
                     .builder()
                     .build_load(i64_type, ptr, "deref_load")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, loaded);
             }
             Ok(())
@@ -4110,7 +4110,7 @@ pub fn lower_instruction<'ctx>(
                         let slot_i64 = ctx
                             .builder()
                             .build_ptr_to_int(alloca_ptr, ctx.types().i64_type(), "refchk_alloca")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         ctx.set_register(dst.0, slot_i64.into());
                     } else {
                         let ptr = as_ptr(ctx, ctx.get_register(src.0)?, "ptr")?;
@@ -4163,7 +4163,7 @@ pub fn lower_instruction<'ctx>(
                                 ctx.types().i64_type(),
                                 "refunsafe_alloca",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         ctx.set_register(dst.0, slot_i64.into());
                     } else {
                         let ptr = as_ptr(ctx, ctx.get_register(src.0)?, "ptr")?;
@@ -4270,7 +4270,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(await_fn, &[task_val.into()], "await_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -4300,7 +4300,7 @@ pub fn lower_instruction<'ctx>(
             let arr_alloca = ctx
                 .builder()
                 .build_alloca(arr_type, "select_chans")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             for (i, reg) in futures.iter().enumerate() {
                 let val = ctx.get_register(reg.0)?;
@@ -4320,7 +4320,7 @@ pub fn lower_instruction<'ctx>(
                             ],
                             &format!("sel_{}", i),
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let _ = ctx.builder().build_store(elem_ptr, val);
             }
@@ -4344,7 +4344,7 @@ pub fn lower_instruction<'ctx>(
                     &[arr_alloca.into(), n_val.into(), timeout.into()],
                     "select_idx",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -4365,7 +4365,7 @@ pub fn lower_instruction<'ctx>(
             let val = as_i64(ctx, ctx.get_register(value.0)?, "yield_val")?;
             ctx.builder()
                 .build_call(yield_fn, &[val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4412,7 +4412,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(tls_get, &[slot_val.into()], "tls_get")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("TlsGet: expected return value"))?;
@@ -4439,7 +4439,7 @@ pub fn lower_instruction<'ctx>(
             let coerced_val = coerce_value(ctx, val_reg, i64_type.into(), "tls_val")?;
             ctx.builder()
                 .build_call(tls_set, &[slot_val.into(), coerced_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4459,7 +4459,7 @@ pub fn lower_instruction<'ctx>(
         Instruction::Unreachable => {
             ctx.builder()
                 .build_unreachable()
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4499,12 +4499,12 @@ pub fn lower_instruction<'ctx>(
             } else {
                 ctx.builder()
                     .build_int_truncate(cond_val, i1_type, "cond_i1")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
 
             ctx.builder()
                 .build_conditional_branch(cond_bool, cont_bb, then_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Fail block: puts(message) then _exit(1)
             ctx.builder().position_at_end(then_bb);
@@ -4529,16 +4529,16 @@ pub fn lower_instruction<'ctx>(
             let msg_ptr = ctx
                 .builder()
                 .build_global_string_ptr(&full_msg, "assert_msg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_unreachable()
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Continue block
             ctx.builder().position_at_end(cont_bb);
@@ -4579,16 +4579,16 @@ pub fn lower_instruction<'ctx>(
             let msg_ptr = ctx
                 .builder()
                 .build_global_string_ptr(&full_msg, "panic_msg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_unreachable()
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4608,7 +4608,7 @@ pub fn lower_instruction<'ctx>(
                 if ref_struct.get_type().count_fields() > 0 {
                     ctx.builder()
                         .build_extract_value(ref_struct, 0, "ref_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_pointer_value()
                 } else {
                     // Empty struct treated as null pointer
@@ -4620,7 +4620,7 @@ pub fn lower_instruction<'ctx>(
 
             ctx.builder()
                 .build_store(ptr, store_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4651,7 +4651,7 @@ pub fn lower_instruction<'ctx>(
                 if ref_struct.get_type().count_fields() > 0 {
                     ctx.builder()
                         .build_extract_value(ref_struct, 0, "drop_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_pointer_value()
                 } else {
                     return Ok(());
@@ -4673,7 +4673,7 @@ pub fn lower_instruction<'ctx>(
 
             ctx.builder()
                 .build_call(release_fn, &[ptr.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -4703,7 +4703,7 @@ pub fn lower_instruction<'ctx>(
             let call_site = ctx
                 .builder()
                 .build_indirect_call(fn_type, func_ptr, &arg_vals, "callr_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -4746,7 +4746,7 @@ pub fn lower_instruction<'ctx>(
                 let call_site = ctx
                     .builder()
                     .build_call(llvm_fn, &arg_vals, "callg_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                     ctx.set_register(dst.0, ret_val);
@@ -4788,7 +4788,7 @@ pub fn lower_instruction<'ctx>(
                 if sv.get_type().count_fields() > 0 {
                     ctx.builder()
                         .build_extract_value(sv, 0, "vtable_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_pointer_value()
                 } else {
                     ctx.types().ptr_type().const_null()
@@ -4803,7 +4803,7 @@ pub fn lower_instruction<'ctx>(
             let vtable_ptr = ctx
                 .builder()
                 .build_load(ptr_type, recv_ptr, "vtable")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_pointer_value();
 
             // GEP into vtable at method index
@@ -4812,13 +4812,13 @@ pub fn lower_instruction<'ctx>(
             let method_ptr_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(ptr_type, vtable_ptr, &[method_idx], "method_slot")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
 
             let method_ptr = ctx
                 .builder()
                 .build_load(ptr_type, method_ptr_ptr, "method_fn")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_pointer_value();
 
             // Build function type
@@ -4829,7 +4829,7 @@ pub fn lower_instruction<'ctx>(
             let call_site = ctx
                 .builder()
                 .build_indirect_call(fn_type, method_ptr, &arg_vals, "callv_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -4871,7 +4871,7 @@ pub fn lower_instruction<'ctx>(
                     &[a_i64.into(), b_i64.into()],
                     "text_concat_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Free owned operands that were temporaries (e.g., from prior ToString/Concat).
             // The concat result is a NEW allocation, so the operands are no longer needed.
@@ -4920,20 +4920,20 @@ pub fn lower_instruction<'ctx>(
                     } else {
                         ctx.builder()
                             .build_int_z_extend(v, i32_type, "ch_ext")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     }
                 }
                 BasicValueEnum::IntValue(v) => ctx
                     .builder()
                     .build_int_truncate(v, i32_type, "ch_trunc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => i32_type.const_int(0, false),
             };
 
             let result = ctx
                 .builder()
                 .build_call(char_to_text_fn, &[i32_val.into()], "chartotext_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(ret_val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -4957,7 +4957,7 @@ pub fn lower_instruction<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(new_fn, &[], "set_new")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("Set.new should return value"))?;
@@ -4977,7 +4977,7 @@ pub fn lower_instruction<'ctx>(
             if let Some(insert_fn) = module.get_function("Set.insert") {
                 ctx.builder()
                     .build_call(insert_fn, &[set_val.into(), elem_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             Ok(())
         }
@@ -4996,7 +4996,7 @@ pub fn lower_instruction<'ctx>(
                         &[set_val.into(), elem_val.into()],
                         "set_contains",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -5017,7 +5017,7 @@ pub fn lower_instruction<'ctx>(
             if let Some(remove_fn) = module.get_function("Set.remove") {
                 ctx.builder()
                     .build_call(remove_fn, &[set_val.into(), elem_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             Ok(())
         }
@@ -5048,7 +5048,7 @@ pub fn lower_instruction<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(new_fn, &[], "deque_new")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("Deque.new should return value"))?;
@@ -5081,7 +5081,7 @@ pub fn lower_instruction<'ctx>(
                 let one = i64_type.const_int(1, false);
                 ctx.builder()
                     .build_int_add(end_val, one, "inclusive_end")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 end_val
             };
@@ -5098,7 +5098,7 @@ pub fn lower_instruction<'ctx>(
                     &[start_val.into(), effective_end.into()],
                     "range_new",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(ret_val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -5156,11 +5156,11 @@ pub fn lower_instruction<'ctx>(
             let cmp = ctx
                 .builder()
                 .build_int_compare(pred, lhs, rhs, "cmpu")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_int_z_extend(cmp, ctx.types().i64_type(), "cmpu_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -5188,7 +5188,7 @@ pub fn lower_instruction<'ctx>(
                         &[map_val.into(), key_val.into(), val_val.into()],
                         "",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             Ok(())
         }
@@ -5218,7 +5218,7 @@ pub fn lower_instruction<'ctx>(
                     &[ndim.into(), null_shape.into(), dtype.into()],
                     "make_tensor",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("MakeTensor: expected return value"))?;
@@ -5261,7 +5261,7 @@ pub fn lower_instruction<'ctx>(
                 let iter_ptr = checked_malloc_instr(ctx, module, iter_size, "map_iter")?;
                 ctx.builder()
                     .build_store(iter_ptr, i64_type.const_int(3, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let map_val = as_i64(ctx, ctx.get_register(iterable.0)?, "map_val")?;
                 // SAFETY: GEP into the 24-byte map iterator struct [tag, map_ptr, slot] to write the map pointer at field 1 (offset 8)
                 let f1 = unsafe {
@@ -5272,11 +5272,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(1, false)],
                             "map_ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f1, map_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the 24-byte map iterator struct to write the initial slot index (0) at field 2 (offset 16)
                 let f2 = unsafe {
                     ctx.builder()
@@ -5286,11 +5286,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(2, false)],
                             "slot_field",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f2, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, iter_ptr.into());
                 ctx.mark_map_iter_register(dst.0);
             } else if ctx.is_set_register(iterable.0) {
@@ -5301,7 +5301,7 @@ pub fn lower_instruction<'ctx>(
                 let iter_ptr = checked_malloc_instr(ctx, module, iter_size, "set_iter")?;
                 ctx.builder()
                     .build_store(iter_ptr, i64_type.const_int(3, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let set_val = as_i64(ctx, ctx.get_register(iterable.0)?, "set_val")?;
                 // SAFETY: GEP into the 24-byte set iterator struct [tag, set_ptr, slot] to write the set pointer at field 1 (offset 8)
                 let f1 = unsafe {
@@ -5312,11 +5312,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(1, false)],
                             "set_ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f1, set_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the 24-byte set iterator struct to write the initial slot index (0) at field 2 (offset 16)
                 let f2 = unsafe {
                     ctx.builder()
@@ -5326,11 +5326,11 @@ pub fn lower_instruction<'ctx>(
                             &[i64_type.const_int(2, false)],
                             "slot_field",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(f2, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, iter_ptr.into());
                 // Mark as map iter (set uses same iteration logic)
                 ctx.mark_map_iter_register(dst.0);
@@ -5411,7 +5411,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(llvm_fn, &arg_vals, "callc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             if let Some(val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, val);
             }
@@ -5443,7 +5443,7 @@ pub fn lower_instruction<'ctx>(
                                 i64_ty,
                                 "gen_fn_ptr",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         // Function not found — fallback to func_id as integer
                         i64_ty.const_int(*func_id as u64, false)
@@ -5462,7 +5462,7 @@ pub fn lower_instruction<'ctx>(
                 let alloca = ctx
                     .builder()
                     .build_alloca(arr_type, "gen_args")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 for i in 0..args.count {
                     let arg_val =
                         as_i64(ctx, ctx.get_register(args.start.0 + i as u16)?, "gen_arg")?;
@@ -5474,11 +5474,11 @@ pub fn lower_instruction<'ctx>(
                     let gep = unsafe {
                         ctx.builder()
                             .build_in_bounds_gep(arr_type, alloca, &indices, "gen_arg_ptr")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     ctx.builder()
                         .build_store(gep, arg_val)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 alloca.into()
             } else {
@@ -5496,7 +5496,7 @@ pub fn lower_instruction<'ctx>(
                     &[func_ptr_val.into(), num_args_val.into(), args_ptr],
                     "gen_create",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("GenCreate: expected return value"))?;
@@ -5517,7 +5517,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(gen_next_fn, &[gen_val.into()], "gen_next")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("GenNext: expected return value"))?;
@@ -5537,7 +5537,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(gen_has_next_fn, &[gen_val.into()], "gen_has_next")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("GenHasNext: expected return value"))?;
@@ -5564,7 +5564,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(is_done_fn, &[task_val.into()], "is_done")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(1, false).into());
@@ -5587,7 +5587,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(join_fn, &[task_val.into()], "future_get")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -5608,7 +5608,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(gen_next_fn, &[iter_val.into()], "async_next")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("AsyncNext: expected return value"))?;
@@ -5642,7 +5642,7 @@ pub fn lower_instruction<'ctx>(
                     &[type_id.into(), handler_val.into(), null.into()],
                     "",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -5659,7 +5659,7 @@ pub fn lower_instruction<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_context_pop", fn_type, None));
             ctx.builder()
                 .build_call(pop_fn, &[type_id.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -5795,7 +5795,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "syscall_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, val);
@@ -5865,7 +5865,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "mmap_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, val);
@@ -5903,7 +5903,7 @@ pub fn lower_instruction<'ctx>(
                     &[sys_munmap.into(), addr_val.into(), len_val.into()],
                     "munmap_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             if let Some(val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, val);
@@ -5937,7 +5937,7 @@ pub fn lower_instruction<'ctx>(
                     &[engine_val.into(), ops_val.into(), events.into()],
                     "io_submit_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -5986,7 +5986,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "io_poll_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -6032,7 +6032,7 @@ pub fn lower_instruction<'ctx>(
             let nursery = ctx
                 .builder()
                 .build_call(nursery_fn, &[max_tasks.into()], "nursery_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -6054,7 +6054,7 @@ pub fn lower_instruction<'ctx>(
             let timeout_val = ctx.get_register(timeout.0)?;
             ctx.builder()
                 .build_call(set_fn, &[nursery_val.into(), timeout_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         Instruction::NurserySetMaxTasks { nursery, max_tasks } => {
@@ -6071,7 +6071,7 @@ pub fn lower_instruction<'ctx>(
             let max_tasks_val = ctx.get_register(max_tasks.0)?;
             ctx.builder()
                 .build_call(set_fn, &[nursery_val.into(), max_tasks_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         Instruction::NurserySetErrorBehavior { nursery, behavior } => {
@@ -6088,7 +6088,7 @@ pub fn lower_instruction<'ctx>(
             let behavior_val = ctx.get_register(behavior.0)?;
             ctx.builder()
                 .build_call(set_fn, &[nursery_val.into(), behavior_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         Instruction::NurseryEnter { nursery: _ } | Instruction::NurseryExit { nursery: _ } => {
@@ -6110,7 +6110,7 @@ pub fn lower_instruction<'ctx>(
             let nursery_val = ctx.get_register(nursery.0)?;
             ctx.builder()
                 .build_call(cancel_fn, &[nursery_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         Instruction::NurserySpawn { dst, nursery, task } => {
@@ -6137,7 +6137,7 @@ pub fn lower_instruction<'ctx>(
                     &[nursery_val.into(), task_val.into(), arg.into()],
                     "nursery_spawn_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -6161,7 +6161,7 @@ pub fn lower_instruction<'ctx>(
             let raw_result = ctx
                 .builder()
                 .build_call(await_fn, &[nursery_val.into()], "nursery_await_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into())
@@ -6176,11 +6176,11 @@ pub fn lower_instruction<'ctx>(
                     i64_type.const_int(0, false),
                     "nursery_ok",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let success_i64 = ctx
                 .builder()
                 .build_int_z_extend(is_success, i64_type, "nursery_success")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(success.0, success_i64.into());
             Ok(())
         }
@@ -6200,7 +6200,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(get_error_fn, &[nursery_val.into()], "nursery_error")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -6242,13 +6242,13 @@ pub fn lower_instruction<'ctx>(
                 let sum_f = ctx
                     .builder()
                     .build_float_add(dst_f, src_f, "grad_acc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Store as i64 (bitcast f64→i64) for uniform alloca storage
                 let i64_ty = ctx.types().i64_type();
                 let sum_i = ctx
                     .builder()
                     .build_bit_cast(sum_f, i64_ty, "grad_acc_i")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 ctx.set_register(dst.0, sum_i.into());
                 ctx.mark_float_register(dst.0);
@@ -6261,7 +6261,7 @@ pub fn lower_instruction<'ctx>(
                         src_val.into_int_value(),
                         "grad_acc",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, sum.into());
             }
             Ok(())
@@ -6405,7 +6405,7 @@ pub fn lower_instruction<'ctx>(
                             ctx.llvm_context().ptr_type(AddressSpace::default()),
                             "prefetch_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let i32_type = ctx.llvm_context().i32_type();
                     let rw = i32_type.const_int(if *is_read { 0 } else { 1 }, false);
                     let loc = i32_type.const_int(*locality as u64, false);
@@ -6417,7 +6417,7 @@ pub fn lower_instruction<'ctx>(
                             &[ptr_val.into(), rw.into(), loc.into(), cache_type.into()],
                             "",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
             }
             Ok(())
@@ -6433,18 +6433,18 @@ pub fn lower_instruction<'ctx>(
             let slot = ctx
                 .builder()
                 .build_alloca(i64_type, "opt_barrier_slot")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let store = ctx
                 .builder()
                 .build_store(slot, i64_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             store
                 .set_volatile(true)
                 .map_err(|_| LlvmLoweringError::llvm_error("set_volatile failed".to_string()))?;
             let load = ctx
                 .builder()
                 .build_load(i64_type, slot, "opt_barrier_reload")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             load.as_instruction_value().map(|iv| {
                 let _ = iv.set_volatile(true);
             });
@@ -6501,7 +6501,7 @@ pub fn lower_instruction<'ctx>(
                     &[s.into(), e.into(), st.into(), dtype_val.into()],
                     "tensor_arange",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6533,7 +6533,7 @@ pub fn lower_instruction<'ctx>(
                     &[s.into(), e.into(), n.into(), dtype_val.into()],
                     "tensor_linspace",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6557,7 +6557,7 @@ pub fn lower_instruction<'ctx>(
                     &[shape_ptr.into(), shape_len.into(), dtype_val.into()],
                     "tensor_rand",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6576,7 +6576,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(f, &[s.into()], "tensor_clone")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6596,7 +6596,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(f, &[n.into(), dtype_val.into()], "tensor_identity")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6624,7 +6624,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(f, &[s.into(), i.into(), ax.into()], "tensor_index")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6656,7 +6656,7 @@ pub fn lower_instruction<'ctx>(
                     &[s.into(), shape_ptr.into(), shape_len.into()],
                     "tensor_broadcast",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6680,7 +6680,7 @@ pub fn lower_instruction<'ctx>(
                     &[s.into(), axes_ptr.into(), axes_len.into()],
                     "tensor_squeeze",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6704,7 +6704,7 @@ pub fn lower_instruction<'ctx>(
                     &[s.into(), perm_ptr.into(), perm_len.into()],
                     "tensor_permute",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6853,7 +6853,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "tensor_dot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6881,7 +6881,7 @@ pub fn lower_instruction<'ctx>(
                     &[in_ptr.into(), in_len.into(), eq_id.into()],
                     "tensor_einsum",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -6911,11 +6911,11 @@ pub fn lower_instruction<'ctx>(
             let pair_alloca = ctx
                 .builder()
                 .build_alloca(pair_ty, "topk_pair")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let pair_ptr_i64 = ctx
                 .builder()
                 .build_ptr_to_int(pair_alloca, i64_ty, "topk_pair_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into(); 5], false);
             let f = module
                 .get_function("verum_tensor_topk")
@@ -6932,7 +6932,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Read pair[0] and pair[1] into values/indices registers.
             // SAFETY: in-bounds GEP into [i64;2] just allocated above
             let v_gep = unsafe {
@@ -6943,7 +6943,7 @@ pub fn lower_instruction<'ctx>(
                         &[i64_ty.const_zero(), i64_ty.const_int(0, false)],
                         "topk_v_gep",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let i_gep = unsafe {
                 ctx.builder()
@@ -6953,16 +6953,16 @@ pub fn lower_instruction<'ctx>(
                         &[i64_ty.const_zero(), i64_ty.const_int(1, false)],
                         "topk_i_gep",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let v_val = ctx
                 .builder()
                 .build_load(i64_ty, v_gep, "topk_v")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i_val = ctx
                 .builder()
                 .build_load(i64_ty, i_gep, "topk_i")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(values.0, v_val);
             ctx.set_register(indices.0, i_val);
             Ok(())
@@ -7011,7 +7011,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "tensor_batch_norm",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -7045,7 +7045,7 @@ pub fn lower_instruction<'ctx>(
                     &[i.into(), g.into(), b.into(), ns.into(), ep.into()],
                     "tensor_layer_norm",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -7094,7 +7094,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "tensor_conv",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -7137,7 +7137,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "tensor_pool",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -7264,7 +7264,7 @@ pub fn lower_instruction<'ctx>(
             let rnd = ctx
                 .builder()
                 .build_call(rng_fn, &[], "rnd01")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("RandomFloat: expected return value"))?
@@ -7275,7 +7275,7 @@ pub fn lower_instruction<'ctx>(
                 BasicValueEnum::IntValue(v) => ctx
                     .builder()
                     .build_signed_int_to_float(v, f64_ty, "lo_f")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => f64_ty.const_float(0.0),
             };
             let hi_f = match high_val {
@@ -7283,22 +7283,22 @@ pub fn lower_instruction<'ctx>(
                 BasicValueEnum::IntValue(v) => ctx
                     .builder()
                     .build_signed_int_to_float(v, f64_ty, "hi_f")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => f64_ty.const_float(1.0),
             };
             // result = low + rnd * (high - low)
             let range = ctx
                 .builder()
                 .build_float_sub(hi_f, lo_f, "range")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let scaled = ctx
                 .builder()
                 .build_float_mul(rnd, range, "scaled")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_float_add(lo_f, scaled, "randf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -7321,7 +7321,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(newid_fn, &[], "new_id")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("MemNewId: expected return value"))?;
@@ -7348,7 +7348,7 @@ pub fn lower_instruction<'ctx>(
                     &[zero.into(), null_shape.into(), dtype.into()],
                     "mem_alloc_tensor",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -7368,7 +7368,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(rng_fn, &[], "randu64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("RandomU64: expected return value"))?;
@@ -7402,7 +7402,7 @@ pub fn lower_instruction<'ctx>(
                     &[input_val.into(), gamma_val.into(), eps_val.into()],
                     "rms_norm",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -7434,7 +7434,7 @@ pub fn lower_instruction<'ctx>(
                     &[src_val.into(), dim_val.into(), inv_val.into()],
                     "fft",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("TensorFft: expected return value"))?;
@@ -7483,7 +7483,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "scatter",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -7544,7 +7544,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     "flash_attn",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -7567,7 +7567,7 @@ pub fn lower_instruction<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(cv_fn, &[src_val.into()], "contiguous_view")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -7673,11 +7673,11 @@ pub fn lower_instruction<'ctx>(
             let slots = ctx
                 .builder()
                 .build_alloca(pair_ty, "gpu_meminfo")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let slots_i64 = ctx
                 .builder()
                 .build_ptr_to_int(slots, i64_ty, "gpu_meminfo_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let d = as_i64(ctx, ctx.get_register(device.0)?, "dev")?;
             let fn_type = ctx.types().void_type().fn_type(&[i64_ty.into(); 2], false);
             let f = module
@@ -7685,7 +7685,7 @@ pub fn lower_instruction<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_gpu_get_memory_info", fn_type, None));
             ctx.builder()
                 .build_call(f, &[d.into(), slots_i64.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: in-bounds GEP into [i64;2] just allocated above
             let f_gep = unsafe {
                 ctx.builder()
@@ -7695,7 +7695,7 @@ pub fn lower_instruction<'ctx>(
                         &[i64_ty.const_zero(), i64_ty.const_int(0, false)],
                         "free_gep",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let t_gep = unsafe {
                 ctx.builder()
@@ -7705,16 +7705,16 @@ pub fn lower_instruction<'ctx>(
                         &[i64_ty.const_zero(), i64_ty.const_int(1, false)],
                         "total_gep",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let f_val = ctx
                 .builder()
                 .build_load(i64_ty, f_gep, "free")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let t_val = ctx
                 .builder()
                 .build_load(i64_ty, t_gep, "total")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(free.0, f_val);
             ctx.set_register(total.0, t_val);
             Ok(())
@@ -8405,7 +8405,7 @@ fn lower_permission_assert<'ctx>(
         .collect();
     ctx.builder()
         .build_switch(target_i64, deny_bb, &cases)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.builder().position_at_end(deny_bb);
     emit_permission_panic(ctx, scope_tag, target_i64)?;
@@ -8442,7 +8442,7 @@ fn emit_permission_panic<'ctx>(
     let msg_ptr = ctx
         .builder()
         .build_global_string_ptr(&msg, "perm_denied_msg")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
     let exit_fn = module
@@ -8459,13 +8459,13 @@ fn emit_permission_panic<'ctx>(
 
     ctx.builder()
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_call(exit_fn, &[i64_ty.const_int(143, false).into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok(())
 }
 
@@ -8596,7 +8596,7 @@ fn lower_call<'ctx>(
                 let program_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[program_i64.into()], "prog_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -8634,7 +8634,7 @@ fn lower_call<'ctx>(
                         ],
                         "spawn_raw",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -8657,7 +8657,7 @@ fn lower_call<'ctx>(
                 let program_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[program_i64.into()], "prog_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -8674,7 +8674,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(exec_fn, &[program_ptr.into(), args_list.into()], "exec_raw")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -8695,7 +8695,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(wait_fn, &[pid_val.into()], "wait_raw")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -8714,7 +8714,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(read_fn, &[fd_val.into()], "fd_read_raw")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -8732,7 +8732,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(close_fn, &[fd_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -8745,7 +8745,7 @@ fn lower_call<'ctx>(
                 let ptr = ctx
                     .builder()
                     .build_int_to_ptr(ptr_val, ptr_type, "ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: In-bounds GEP to access an array element at the given index; the index is bounds-checked at the VBC level before this instruction
                 let elem_ptr = unsafe {
                     ctx.builder()
@@ -8755,7 +8755,7 @@ fn lower_call<'ctx>(
                 let val = ctx
                     .builder()
                     .build_load(i64_type, elem_ptr, "val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, val);
                 return Ok(());
             }
@@ -8912,7 +8912,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_val.into()], "path_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -8927,7 +8927,7 @@ fn lower_call<'ctx>(
                 let char_result = ctx
                     .builder()
                     .build_call(read_fn, &[path_ptr.into()], "file_content")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| ptr_type.const_null().into());
@@ -8943,7 +8943,7 @@ fn lower_call<'ctx>(
                 let text_result = ctx
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "file_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_from_cstr: no value"))?;
@@ -8961,7 +8961,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(argc_fn, &[], "argc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -8980,7 +8980,7 @@ fn lower_call<'ctx>(
                 let char_result = ctx
                     .builder()
                     .build_call(argv_fn, &[index_val.into()], "argv_i")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| ptr_type.const_null().into());
@@ -8996,7 +8996,7 @@ fn lower_call<'ctx>(
                 let text_result = ctx
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "arg_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_from_cstr: no value"))?;
@@ -9019,7 +9019,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "wpath_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -9028,7 +9028,7 @@ fn lower_call<'ctx>(
                 let content_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[content_i64.into()], "wcontent_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -9047,7 +9047,7 @@ fn lower_call<'ctx>(
                         &[path_ptr.into(), content_ptr.into()],
                         "bytes_written",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9064,7 +9064,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(mutex_fn, &[], "mutex_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9084,7 +9084,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(lock_fn, &[mutex_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9101,7 +9101,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(unlock_fn, &[mutex_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9121,7 +9121,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(trylock_fn, &[mutex_val.into()], "trylock_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9141,7 +9141,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(cond_fn, &[], "cond_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9162,7 +9162,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(wait_fn, &[cond_val.into(), mutex_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9187,7 +9187,7 @@ fn lower_call<'ctx>(
                         &[cond_val.into(), mutex_val.into(), timeout_val.into()],
                         "timedwait_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9207,7 +9207,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(signal_fn, &[cond_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9224,7 +9224,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(broadcast_fn, &[cond_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9242,7 +9242,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(close_fn, &[gen_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9266,7 +9266,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(engine_fn, &[capacity.into()], "io_engine")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9285,7 +9285,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "mono_nanos")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9305,7 +9305,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(sleep_fn, &[nanos_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9320,7 +9320,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_int_sub(sixty_three, clz, "ilog2")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, result.into());
                 } else {
                     ctx.set_register(dst.0, i64_type.const_int(0, false).into());
@@ -9353,7 +9353,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[], "metal_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9376,7 +9376,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[arg.into()], "metal_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9396,7 +9396,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[data_ptr.into(), size.into()], "metal_buf")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9418,7 +9418,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(c_fn, &[arg.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9430,7 +9430,7 @@ fn lower_call<'ctx>(
                 let src_ptr = ctx
                     .builder()
                     .build_int_to_ptr(src, ptr_type, "src_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let c_fn = module
                     .get_function("verum_metal_compile_shader")
                     .unwrap_or_else(|| {
@@ -9440,7 +9440,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[src_ptr.into(), len.into()], "metal_lib")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9455,7 +9455,7 @@ fn lower_call<'ctx>(
                 let name_ptr = ctx
                     .builder()
                     .build_int_to_ptr(name, ptr_type, "nm_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let c_fn = module
                     .get_function("verum_metal_get_pipeline")
                     .unwrap_or_else(|| {
@@ -9465,7 +9465,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[lib.into(), name_ptr.into()], "metal_pipeline")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9501,7 +9501,7 @@ fn lower_call<'ctx>(
                     });
                     ctx.builder()
                         .build_call(c_fn, &call_args, "")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 } else {
                     let c_fn = module.get_function(c_name).unwrap_or_else(|| {
@@ -9511,7 +9511,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(c_fn, &call_args, "metal_async")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9543,7 +9543,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(c_fn, &call_args, "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9559,7 +9559,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[handle.into()], "gpu_time_ns")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9582,7 +9582,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(c_fn, &[a.into(), b.into(), r.into(), n.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9609,7 +9609,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(c_fn, &call_args, "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9637,7 +9637,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "bench_ns")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9672,7 +9672,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(intrinsic_fn, &[arg.into()], "math_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| f64_type.const_float(0.0).into());
@@ -9700,7 +9700,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(intrinsic_fn, &[a.into(), b.into()], "math_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| f64_type.const_float(0.0).into());
@@ -9723,7 +9723,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| f64_type.const_float(0.0).into());
@@ -9742,7 +9742,7 @@ fn lower_call<'ctx>(
                 let n_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "mcpy_n")?;
                 ctx.builder()
                     .build_memcpy(dst_ptr, 1, src_ptr, 1, n_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ctx.get_register(args.start.0)?);
                 return Ok(());
             }
@@ -9755,11 +9755,11 @@ fn lower_call<'ctx>(
                 let val_i8 = ctx
                     .builder()
                     .build_int_truncate(val, i8_type, "mset_byte")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let n_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "mset_n")?;
                 ctx.builder()
                     .build_memset(dst_ptr, 1, val_i8, n_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ctx.get_register(args.start.0)?);
                 return Ok(());
             }
@@ -9771,7 +9771,7 @@ fn lower_call<'ctx>(
                 let n_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "mmov_n")?;
                 ctx.builder()
                     .build_memmove(dst_ptr, 1, src_ptr, 1, n_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ctx.get_register(args.start.0)?);
                 return Ok(());
             }
@@ -9785,11 +9785,11 @@ fn lower_call<'ctx>(
                 let val = ctx
                     .builder()
                     .build_load(i8_type, addr, "byte_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let ext = ctx
                     .builder()
                     .build_int_z_extend(val.into_int_value(), i64_type, "byte_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ext.into());
                 return Ok(());
             }
@@ -9801,10 +9801,10 @@ fn lower_call<'ctx>(
                 let trunc = ctx
                     .builder()
                     .build_int_truncate(val, i8_type, "sb_byte")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(addr, trunc)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9814,7 +9814,7 @@ fn lower_call<'ctx>(
                 let val = ctx
                     .builder()
                     .build_load(i64_type, addr, "i64_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, val);
                 return Ok(());
             }
@@ -9824,7 +9824,7 @@ fn lower_call<'ctx>(
                 let val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "si64_val")?;
                 ctx.builder()
                     .build_store(addr, val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9835,11 +9835,11 @@ fn lower_call<'ctx>(
                 let val = ctx
                     .builder()
                     .build_load(i32_type, addr, "i32_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let ext = ctx
                     .builder()
                     .build_int_z_extend(val.into_int_value(), i64_type, "i32_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ext.into());
                 return Ok(());
             }
@@ -9851,10 +9851,10 @@ fn lower_call<'ctx>(
                 let trunc = ctx
                     .builder()
                     .build_int_truncate(val, i32_type, "si32_trunc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(addr, trunc)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -9877,7 +9877,7 @@ fn lower_call<'ctx>(
                         &[path_val.into()],
                         "fo_cptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("no value"))?
@@ -9899,7 +9899,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(open_fn, &[path_ptr.into(), flags.into()], "fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9916,7 +9916,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "close_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9948,7 +9948,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9964,7 +9964,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "now_ms")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -9986,7 +9986,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(alloc_fn, &[size_val.into()], "alloc_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10010,10 +10010,10 @@ fn lower_call<'ctx>(
                 let ptr_arg = ctx
                     .builder()
                     .build_int_to_ptr(ptr_val.into_int_value(), ptr_ty, "dealloc_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_call(dealloc_fn, &[ptr_arg.into(), size_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10075,7 +10075,7 @@ fn lower_call<'ctx>(
                             BasicValueEnum::IntValue(v) => ctx
                                 .builder()
                                 .build_int_to_ptr(v, ptr_ty, "raw_ptr_arg")
-                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                .or_llvm_err()?
                                 .into(),
                             other => other,
                         }
@@ -10117,7 +10117,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "net_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10153,7 +10153,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "ctx_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10175,7 +10175,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(push_fn, &[fn_val.into(), arg_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10188,7 +10188,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(pop_fn, &[], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10204,7 +10204,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(run_fn, &[depth_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10217,7 +10217,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(depth_fn, &[], "defer_depth")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10238,7 +10238,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(wg_fn, &[], "waitgroup")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10258,7 +10258,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(add_fn, &[wg_val.into(), delta_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10274,7 +10274,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(done_fn, &[wg_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10290,7 +10290,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(wait_fn, &[wg_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10306,7 +10306,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(destroy_fn, &[wg_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10325,7 +10325,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(destroy_fn, &[engine_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10347,7 +10347,7 @@ fn lower_call<'ctx>(
                         &[engine_val.into(), fd_val.into(), events_val.into()],
                         "io_submit",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10385,7 +10385,7 @@ fn lower_call<'ctx>(
                         ],
                         "io_poll",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10404,7 +10404,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(remove_fn, &[engine_val.into(), fd_val.into()], "io_remove")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10429,7 +10429,7 @@ fn lower_call<'ctx>(
                         &[engine_val.into(), fd_val.into(), events_val.into()],
                         "io_modify",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10454,7 +10454,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(create_fn, &[nw_val.into()], "pool")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10479,7 +10479,7 @@ fn lower_call<'ctx>(
                         &[pool_val.into(), func_val.into(), arg_val.into()],
                         "pool_task",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10497,7 +10497,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(await_fn, &[handle_val.into()], "pool_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10516,7 +10516,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(destroy_fn, &[pool_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -10538,7 +10538,7 @@ fn lower_call<'ctx>(
                         &[func_val.into(), arg_val.into()],
                         "pool_global_task",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10573,7 +10573,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[fd_val.into()], "sock_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10600,7 +10600,7 @@ fn lower_call<'ctx>(
                         &[engine_val.into(), fd_val.into(), timeout_val.into()],
                         "async_accept",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10641,7 +10641,7 @@ fn lower_call<'ctx>(
                         ],
                         "async_read",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10682,7 +10682,7 @@ fn lower_call<'ctx>(
                         ],
                         "async_write",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10767,7 +10767,7 @@ fn lower_call<'ctx>(
                     &[ptr_val.into(), expected_val.into(), timeout_val.into()],
                     "futex_wait",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10788,7 +10788,7 @@ fn lower_call<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(wake_fn, &[ptr_val.into(), count_val.into()], "futex_wake")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10811,7 +10811,7 @@ fn lower_call<'ctx>(
             .unwrap_or_else(|| module.add_function("verum_spinlock_lock", fn_type, None));
         ctx.builder()
             .build_call(lock_fn, &[ptr_val.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, i64_type.const_int(0, false).into());
         return Ok(());
     }
@@ -10907,7 +10907,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fopen_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -10924,7 +10924,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(open_fn, &[path_ptr.into(), mode_val.into()], "fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10941,7 +10941,7 @@ fn lower_call<'ctx>(
                     let path_ptr = ctx
                         .builder()
                         .build_call(text_get_ptr_fn, &[path_i64.into()], "fra_cptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -10956,7 +10956,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(read_all_fn, &[path_ptr.into()], "fra_text")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10977,7 +10977,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(read_fn, &[fd_val.into(), max_len.into()], "fread_text")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -10996,7 +10996,7 @@ fn lower_call<'ctx>(
                     let path_ptr = ctx
                         .builder()
                         .build_call(text_get_ptr_fn, &[path_i64.into()], "fwa_cptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11013,7 +11013,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(write_all_fn, &[path_ptr.into(), data_val.into()], "fwa_n")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11033,7 +11033,7 @@ fn lower_call<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(write_fn, &[fd_val.into(), data_val.into()], "fwrite_n")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11048,7 +11048,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fap_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11063,7 +11063,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(append_fn, &[path_ptr.into(), data_val.into()], "fap_n")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11081,7 +11081,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "fclose_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11095,7 +11095,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fra_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11109,7 +11109,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(read_all_fn, &[path_ptr.into()], "fra_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11124,7 +11124,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fwa_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11141,7 +11141,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(write_all_fn, &[path_ptr.into(), data_val.into()], "fwa_n")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11155,7 +11155,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fex_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11167,7 +11167,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(exists_fn, &[path_ptr.into()], "fex_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11181,7 +11181,7 @@ fn lower_call<'ctx>(
                 let path_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fdel_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11193,7 +11193,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(delete_fn, &[path_ptr.into()], "fdel_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11216,7 +11216,7 @@ fn lower_call<'ctx>(
                     });
                 ctx.builder()
                     .build_call(sleep_fn, &[nanos_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -11231,7 +11231,7 @@ fn lower_call<'ctx>(
                 });
                 ctx.builder()
                     .build_call(sleep_fn, &[millis_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -11245,7 +11245,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "time_ms")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11262,7 +11262,7 @@ fn lower_call<'ctx>(
                 let host_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_i64.into()], "tc_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11275,7 +11275,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(connect_fn, &[host_ptr.into(), port_val.into()], "tc_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11298,7 +11298,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(listen_fn, &[port_val.into(), backlog.into()], "tl_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11316,7 +11316,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(accept_fn, &[fd_val.into()], "ta_client")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11337,7 +11337,7 @@ fn lower_call<'ctx>(
                 let host_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_i64.into()], "tlv2_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11371,7 +11371,7 @@ fn lower_call<'ctx>(
                         ],
                         "tlv2_fd",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11391,7 +11391,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(lp_fn, &[fd_val.into()], "tlp_port")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11412,7 +11412,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(send_fn, &[fd_val.into(), data_val.into()], "ts_n")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11437,7 +11437,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[fd_val.into(), max_len.into()], "tr_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11456,7 +11456,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "tcl_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11477,7 +11477,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(bind_fn, &[port_val.into()], "ub_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11493,7 +11493,7 @@ fn lower_call<'ctx>(
                 let host_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_val.into()], "us_hptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -11525,7 +11525,7 @@ fn lower_call<'ctx>(
                         ],
                         "us_n",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11550,7 +11550,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[fd_val.into(), max_len.into()], "ur_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11569,7 +11569,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "ucl_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11600,7 +11600,7 @@ fn lower_call<'ctx>(
                         &[fd_val.into(), max_val.into(), to_val.into()],
                         "trt_r",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11629,7 +11629,7 @@ fn lower_call<'ctx>(
                         &[fd_val.into(), data_val.into(), to_val.into()],
                         "tst_r",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11650,7 +11650,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "tat_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11679,7 +11679,7 @@ fn lower_call<'ctx>(
                         &[host_val.into(), port_val.into(), to_val.into()],
                         "tct_r",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11707,7 +11707,7 @@ fn lower_call<'ctx>(
                         &[fd_val.into(), max_val.into(), to_val.into()],
                         "urt_r",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11729,7 +11729,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "iwr_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11750,7 +11750,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "iww_r")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11802,7 +11802,7 @@ fn lower_call<'ctx>(
         let result = ctx
             .builder()
             .build_call(chan_new_fn, &[cap_val.into()], "chan_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11835,7 +11835,7 @@ fn lower_call<'ctx>(
                         &[chan_val.into(), value.into()],
                         "chan_send_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11854,7 +11854,7 @@ fn lower_call<'ctx>(
                 let ok_alloca = ctx
                     .builder()
                     .build_alloca(i64_type, "chan_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let recv_val = ctx
                     .builder()
                     .build_call(
@@ -11862,7 +11862,7 @@ fn lower_call<'ctx>(
                         &[chan_val.into(), ok_alloca.into()],
                         "chan_recv_val",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11870,12 +11870,12 @@ fn lower_call<'ctx>(
                 let ok_val = ctx
                     .builder()
                     .build_load(i64_type, ok_alloca, "ok_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let is_some = ctx
                     .builder()
                     .build_int_compare(IntPredicate::NE, ok_val, i64_type.const_zero(), "is_some")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 let current_bb = ctx
                     .builder()
@@ -11890,7 +11890,7 @@ fn lower_call<'ctx>(
 
                 ctx.builder()
                     .build_conditional_branch(is_some, some_bb, none_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Some branch: create variant with tag=1, field_count=1
                 ctx.builder().position_at_end(some_bb);
@@ -11905,10 +11905,10 @@ fn lower_call<'ctx>(
                 let some_val = ctx
                     .builder()
                     .build_ptr_to_int(some_variant, i64_type, "some_as_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let some_end = ctx
                     .builder()
                     .get_insert_block()
@@ -11919,7 +11919,7 @@ fn lower_call<'ctx>(
                 let none_val = i64_type.const_zero();
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let none_end = ctx
                     .builder()
                     .get_insert_block()
@@ -11930,7 +11930,7 @@ fn lower_call<'ctx>(
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "chan_recv_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&some_val, some_end), (&none_val, none_end)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
@@ -11944,7 +11944,7 @@ fn lower_call<'ctx>(
                 let chan_val = as_i64(ctx, ctx.get_register(args.start.0)?, "chan_i64")?;
                 ctx.builder()
                     .build_call(close_fn, &[chan_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -11957,7 +11957,7 @@ fn lower_call<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(len_fn, &[chan_val.into()], "chan_len_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -11980,7 +11980,7 @@ fn lower_call<'ctx>(
                         &[chan_val.into(), value.into()],
                         "chan_try_send_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -12009,7 +12009,7 @@ fn lower_call<'ctx>(
         let hash_result = ctx
             .builder()
             .build_call(generic_hash_fn, &[recv.into()], "call_generic_hash")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("verum_generic_hash: no return value"))?;
@@ -12048,7 +12048,7 @@ fn lower_call<'ctx>(
                                 return Ok(ctx
                                     .builder()
                                     .build_signed_int_to_float(iv, ft, &format!("arg{}_itof", i))
-                                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                    .or_llvm_err()?
                                     .into());
                             }
                         }
@@ -12067,7 +12067,7 @@ fn lower_call<'ctx>(
     let call_site = ctx
         .builder()
         .build_call(llvm_fn, &arg_vals, "call_result")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         ctx.set_register(dst.0, ret_val);
         // Track register types based on function return type
@@ -12241,11 +12241,11 @@ fn lower_call_method<'ctx>(
                     let recv_ptr = ctx
                         .builder()
                         .build_int_to_ptr(recv_i64, ptr_type, "recv_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let type_id_val = ctx
                         .builder()
                         .build_load(i64_type, recv_ptr, "type_id")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value();
 
                     // Build arguments: (receiver, args...)
@@ -12276,13 +12276,13 @@ fn lower_call_method<'ctx>(
 
                     ctx.builder()
                         .build_switch(type_id_val, default_bb, &cases)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Default: return 0
                     ctx.builder().position_at_end(default_bb);
                     ctx.builder()
                         .build_unconditional_branch(merge_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
                     incoming.push((i64_type.const_zero().into(), default_bb));
@@ -12346,7 +12346,7 @@ fn lower_call_method<'ctx>(
                         let result = ctx
                             .builder()
                             .build_call(target_fn, &call_args, "dyn_call")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
 
                         let ret_val = result
                             .try_as_basic_value()
@@ -12369,7 +12369,7 @@ fn lower_call_method<'ctx>(
 
                         ctx.builder()
                             .build_unconditional_branch(merge_bb)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
 
                         incoming.push((ret_i64, *bb));
                     }
@@ -12379,7 +12379,7 @@ fn lower_call_method<'ctx>(
                     let phi = ctx
                         .builder()
                         .build_phi(i64_type, "dyn_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     for (val, bb) in &incoming {
                         phi.add_incoming(&[(&(*val), *bb)]);
@@ -12406,7 +12406,7 @@ fn lower_call_method<'ctx>(
                 let hash_result = ctx
                     .builder()
                     .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -12429,7 +12429,7 @@ fn lower_call_method<'ctx>(
                 let eq_result = ctx
                     .builder()
                     .build_call(generic_eq_fn, &[lhs.into(), rhs.into()], "dyn_generic_eq")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -12447,11 +12447,11 @@ fn lower_call_method<'ctx>(
                 let ne = ctx
                     .builder()
                     .build_int_compare(IntPredicate::NE, lhs, rhs, "dyn_ne_cmp")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_int_z_extend(ne, i64_type, "dyn_ne_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
             }
@@ -12477,7 +12477,7 @@ fn lower_call_method<'ctx>(
         let result = ctx
             .builder()
             .build_call(chan_new_fn, &[cap_val.into()], "chan_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -12548,7 +12548,7 @@ fn lower_call_method<'ctx>(
                 let hash_result = ctx
                     .builder()
                     .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -12565,15 +12565,15 @@ fn lower_call_method<'ctx>(
                 let is_neg = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SLT, val, zero, "is_neg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let neg_val = ctx
                     .builder()
                     .build_int_neg(val, "neg_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_select(is_neg, neg_val, val, "abs_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
                 return Ok(());
             }
@@ -12590,11 +12590,11 @@ fn lower_call_method<'ctx>(
                 let a_le_b = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SLE, val, other, "a_le_b")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_select(a_le_b, val, other, "min_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
                 return Ok(());
             }
@@ -12604,11 +12604,11 @@ fn lower_call_method<'ctx>(
                 let a_ge_b = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SGE, val, other, "a_ge_b")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_select(a_ge_b, val, other, "max_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
                 return Ok(());
             }
@@ -12620,21 +12620,21 @@ fn lower_call_method<'ctx>(
                 let v_lt_lo = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SLT, val, lo, "v_lt_lo")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let lifted = ctx
                     .builder()
                     .build_select(v_lt_lo, lo, val, "clamp_lifted")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // min(lifted, hi)
                 let l_gt_hi = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SGT, lifted, hi, "l_gt_hi")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_select(l_gt_hi, hi, lifted, "clamp_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
                 return Ok(());
             }
@@ -12672,12 +12672,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // Load backing ptr from LIST_PTR_OFFSET
                 // SAFETY: GEP into the List object (NewG layout) to read the backing data pointer at LIST_PTR_OFFSET (24)
@@ -12689,17 +12689,17 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                             "ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let backing_i64 = ctx
                     .builder()
                     .build_load(i64_type, ptr_slot, "backing_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let backing_ptr = ctx
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Loop: i=0; while i<len { if data[i]==val return 1; i++; } return 0;
                 let current_fn = ctx.function();
                 let entry_bb = ctx
@@ -12726,67 +12726,67 @@ fn lower_call_method<'ctx>(
                     .append_basic_block(current_fn, "contains_merge");
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Loop header: phi i, check i < len
                 ctx.builder().position_at_end(loop_bb);
                 let phi_i = ctx
                     .builder()
                     .build_phi(i64_type, "i")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let i_val = phi_i.as_basic_value().into_int_value();
                 let cmp_done = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SLT, i_val, len, "cmp_done")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_done, body_bb, not_found_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Body: load data[i], compare
                 ctx.builder().position_at_end(body_bb);
                 // SAFETY: GEP into the list backing array to access element at loop index i; i is bounded by list length via the loop condition
                 let elem_ptr = unsafe {
                     ctx.builder()
                         .build_in_bounds_gep(i64_type, backing_ptr, &[i_val], "elem_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let elem = ctx
                     .builder()
                     .build_load(i64_type, elem_ptr, "elem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let cmp_eq = ctx
                     .builder()
                     .build_int_compare(IntPredicate::EQ, elem, search_val, "cmp_eq")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_eq, found_bb, inc_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Increment: i++ → loop
                 ctx.builder().position_at_end(inc_bb);
                 let i_next = ctx
                     .builder()
                     .build_int_add(i_val, i64_type.const_int(1, false), "i_next")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi_i.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&i_next, inc_bb)]);
                 // Found
                 ctx.builder().position_at_end(found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Not found
                 ctx.builder().position_at_end(not_found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Merge
                 ctx.builder().position_at_end(merge_bb);
                 let phi_result = ctx
                     .builder()
                     .build_phi(i64_type, "contains_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi_result.add_incoming(&[
                     (&i64_type.const_int(1, false), found_bb),
                     (&i64_type.const_zero(), not_found_bb),
@@ -12811,12 +12811,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // SAFETY: GEP into the list object header to access the data pointer field at a fixed offset; the list pointer is non-null and valid
                 let ptr_slot = unsafe {
@@ -12827,17 +12827,17 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                             "ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let backing_i64 = ctx
                     .builder()
                     .build_load(i64_type, ptr_slot, "backing_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let backing_ptr = ctx
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let current_fn = ctx.function();
                 let entry_bb = ctx
                     .builder()
@@ -12863,62 +12863,62 @@ fn lower_call_method<'ctx>(
                     .append_basic_block(current_fn, "idxof_merge");
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder().position_at_end(loop_bb);
                 let phi_i = ctx
                     .builder()
                     .build_phi(i64_type, "i")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let i_val = phi_i.as_basic_value().into_int_value();
                 let cmp_done = ctx
                     .builder()
                     .build_int_compare(IntPredicate::SLT, i_val, len, "cmp_done")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_done, body_bb, not_found_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder().position_at_end(body_bb);
                 // SAFETY: GEP into the list backing array to access element at loop index i; i is bounded by list length via the loop condition
                 let elem_ptr = unsafe {
                     ctx.builder()
                         .build_in_bounds_gep(i64_type, backing_ptr, &[i_val], "elem_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let elem = ctx
                     .builder()
                     .build_load(i64_type, elem_ptr, "elem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let cmp_eq = ctx
                     .builder()
                     .build_int_compare(IntPredicate::EQ, elem, search_val, "cmp_eq")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(cmp_eq, found_bb, inc_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Increment: i++ → loop
                 ctx.builder().position_at_end(inc_bb);
                 let i_next = ctx
                     .builder()
                     .build_int_add(i_val, i64_type.const_int(1, false), "i_next")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi_i.add_incoming(&[(&i64_type.const_zero(), entry_bb), (&i_next, inc_bb)]);
                 ctx.builder().position_at_end(found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder().position_at_end(not_found_bb);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder().position_at_end(merge_bb);
                 let phi_result = ctx
                     .builder()
                     .build_phi(i64_type, "idxof_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi_result.add_incoming(&[
                     (&i_val, found_bb),
                     (&i64_type.const_int(u64::MAX, true), not_found_bb), // -1
@@ -12941,12 +12941,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // SAFETY: GEP into the list object header to access the data pointer field at a fixed offset; the list pointer is non-null and valid
                 let ptr_slot = unsafe {
@@ -12957,17 +12957,17 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                             "ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let backing_i64 = ctx
                     .builder()
                     .build_load(i64_type, ptr_slot, "backing_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let backing_ptr = ctx
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Sort via LLVM IR helper (emitted by define_list_ir_helpers)
                 let module = ctx.get_module();
                 let sort_fn = module.get_function("verum_list_sort").unwrap_or_else(|| {
@@ -12979,7 +12979,7 @@ fn lower_call_method<'ctx>(
                 });
                 ctx.builder()
                     .build_call(sort_fn, &[backing_ptr.into(), len.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13000,7 +13000,7 @@ fn lower_call_method<'ctx>(
                 });
                 ctx.builder()
                     .build_call(extend_fn, &[dst_ptr.into(), src_ptr.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13023,12 +13023,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let is_notempty = ctx
                     .builder()
@@ -13038,7 +13038,7 @@ fn lower_call_method<'ctx>(
                         i64_type.const_zero(),
                         "is_notempty",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let entry_bb = ctx
                     .builder()
                     .get_insert_block()
@@ -13054,7 +13054,7 @@ fn lower_call_method<'ctx>(
                     .append_basic_block(current_fn, "first_merge");
                 ctx.builder()
                     .build_conditional_branch(is_notempty, some_bb, none_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Some path: load element, wrap in Some variant
                 ctx.builder().position_at_end(some_bb);
                 let some_ptr = runtime.lower_make_variant(ctx.builder(), &module, 1, 1)?;
@@ -13067,46 +13067,46 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                             "ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let backing_i64 = ctx
                     .builder()
                     .build_load(i64_type, ptr_slot, "backing_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let backing_ptr = ctx
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let elem = ctx
                     .builder()
                     .build_load(i64_type, backing_ptr, "first_elem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, elem)?;
                 let some_int = ctx
                     .builder()
                     .build_ptr_to_int(some_ptr, i64_type, "some_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // None path: create None variant
                 ctx.builder().position_at_end(none_bb);
                 let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, 0, 0)?;
                 let none_int = ctx
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Merge with phi
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "first_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
@@ -13130,12 +13130,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let is_notempty = ctx
                     .builder()
@@ -13145,7 +13145,7 @@ fn lower_call_method<'ctx>(
                         i64_type.const_zero(),
                         "is_notempty",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let entry_bb = ctx
                     .builder()
                     .get_insert_block()
@@ -13161,14 +13161,14 @@ fn lower_call_method<'ctx>(
                     .append_basic_block(current_fn, "last_merge");
                 ctx.builder()
                     .build_conditional_branch(is_notempty, some_bb, none_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Some path: load last element, wrap in Some variant
                 ctx.builder().position_at_end(some_bb);
                 let some_ptr = runtime.lower_make_variant(ctx.builder(), &module, 1, 1)?;
                 let idx = ctx
                     .builder()
                     .build_int_sub(len, i64_type.const_int(1, false), "last_idx")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the list object header to access the data pointer field at a fixed offset; the list pointer is non-null and valid
                 let ptr_slot = unsafe {
                     ctx.builder()
@@ -13178,52 +13178,52 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                             "ptr_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let backing_i64 = ctx
                     .builder()
                     .build_load(i64_type, ptr_slot, "backing_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let backing_ptr = ctx
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
                 let elem_ptr = unsafe {
                     ctx.builder()
                         .build_in_bounds_gep(i64_type, backing_ptr, &[idx], "last_elem_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let elem = ctx
                     .builder()
                     .build_load(i64_type, elem_ptr, "last_elem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, elem)?;
                 let some_int = ctx
                     .builder()
                     .build_ptr_to_int(some_ptr, i64_type, "some_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // None path: create None variant
                 ctx.builder().position_at_end(none_bb);
                 let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, 0, 0)?;
                 let none_int = ctx
                     .builder()
                     .build_ptr_to_int(none_ptr, i64_type, "none_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Merge with phi
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "last_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
@@ -13243,7 +13243,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(clone_fn, &[list_ptr.into()], "cloned_list")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_zero().into());
@@ -13252,7 +13252,7 @@ fn lower_call_method<'ctx>(
                     BasicValueEnum::PointerValue(pv) => ctx
                         .builder()
                         .build_ptr_to_int(pv, i64_type, "clone_ptr_to_i64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into(),
                     other => other,
                 };
@@ -13274,11 +13274,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                             "len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(len_slot, i64_type.const_zero())
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13303,7 +13303,7 @@ fn lower_call_method<'ctx>(
                 let sep_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[sep_i64.into()], "sep_cptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
@@ -13315,7 +13315,7 @@ fn lower_call_method<'ctx>(
                 let char_result = ctx
                     .builder()
                     .build_call(join_fn, &[list_ptr.into(), sep_ptr.into()], "str_join")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| ptr_type.const_null().into());
@@ -13330,7 +13330,7 @@ fn lower_call_method<'ctx>(
                 let text_result = ctx
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "join_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| LlvmLoweringError::internal("text_from_cstr: no value"))?;
@@ -13401,7 +13401,7 @@ fn lower_call_method<'ctx>(
                         &[list_ptr.into(), index.into(), val_i64.into()],
                         "",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13419,7 +13419,7 @@ fn lower_call_method<'ctx>(
                 let removed = ctx
                     .builder()
                     .build_call(remove_fn, &[list_ptr.into(), index.into()], "list_remove")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_zero().into());
@@ -13440,7 +13440,7 @@ fn lower_call_method<'ctx>(
                     });
                 ctx.builder()
                     .build_call(reverse_fn, &[list_ptr.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13459,7 +13459,7 @@ fn lower_call_method<'ctx>(
                 });
                 ctx.builder()
                     .build_call(swap_fn, &[list_ptr.into(), idx_a.into(), idx_b.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -13594,12 +13594,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::TEXT_LEN_OFFSET, false)],
                             "text_len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "text_len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, len);
             }
             "is_empty" => {
@@ -13613,21 +13613,21 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::TEXT_LEN_OFFSET, false)],
                             "text_len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "text_len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let is_empty = ctx
                     .builder()
                     .build_int_compare(IntPredicate::EQ, len, i64_type.const_zero(), "is_empty")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_int_z_extend(is_empty, i64_type, "is_empty_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.mark_bool_register(dst.0);
             }
@@ -13642,12 +13642,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::TEXT_CAP_OFFSET, false)],
                             "text_cap_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let cap = ctx
                     .builder()
                     .build_load(i64_type, cap_slot, "text_cap")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, cap);
             }
             _ => unreachable!(),
@@ -13700,12 +13700,12 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(len_offset, false)],
                                 "coll_len_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let len = ctx
                         .builder()
                         .build_load(i64_type, len_slot, "coll_len")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, len);
                 }
                 "is_empty" => {
@@ -13718,21 +13718,21 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(len_offset, false)],
                                 "coll_len_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let len = ctx
                         .builder()
                         .build_load(i64_type, len_slot, "coll_len")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value();
                     let is_empty = ctx
                         .builder()
                         .build_int_compare(IntPredicate::EQ, len, i64_type.const_zero(), "is_empty")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let result = ctx
                         .builder()
                         .build_int_z_extend(is_empty, i64_type, "is_empty_i64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, result.into());
                     ctx.mark_bool_register(dst.0);
                 }
@@ -13753,12 +13753,12 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(cap_offset, false)],
                                 "coll_cap_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let cap = ctx
                         .builder()
                         .build_load(i64_type, cap_slot, "coll_cap")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, cap);
                 }
                 _ => {}
@@ -13873,7 +13873,7 @@ fn lower_call_method<'ctx>(
         let recv_ptr = ctx
             .builder()
             .build_int_to_ptr(recv_val, ptr_type, "atomic_recv_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         // Pointer to the `value` field at offset 24
         // SAFETY: GEP past the 24-byte object header to access the atomic value field; the object was allocated with 32 bytes (24 header + 8 value)
         let field_ptr = unsafe {
@@ -13884,7 +13884,7 @@ fn lower_call_method<'ctx>(
                     &[i64_type.const_int(24, false).into()],
                     "atomic_field_ptr",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
 
         match bare_method_early {
@@ -13909,15 +13909,15 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(24, false).into()],
                             "atomic_val_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(val_ptr, val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_ptr_to_int(obj, i64_type, "atomic_obj_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.mark_atomic_int_register(dst.0);
                 ctx.set_obj_register_type(
@@ -13937,7 +13937,7 @@ fn lower_call_method<'ctx>(
                 let load = ctx
                     .builder()
                     .build_load(i64_type, field_ptr.into(), "atomic_load")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 load.as_instruction_value()
                     .ok_or_else(|| LlvmLoweringError::internal("Load is not an instruction"))?
                     .set_atomic_ordering(AtomicOrdering::SequentiallyConsistent)
@@ -13953,7 +13953,7 @@ fn lower_call_method<'ctx>(
                 let store = ctx
                     .builder()
                     .build_store(field_ptr, val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 store
                     .set_atomic_ordering(AtomicOrdering::SequentiallyConsistent)
                     .map_err(|_| {
@@ -13977,13 +13977,13 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 if bare_method_early == "increment" {
                     // increment returns new value = old + 1
                     let new_val = ctx
                         .builder()
                         .build_int_add(result, i64_type.const_int(1, false), "inc_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, new_val.into());
                 } else {
                     ctx.set_register(dst.0, result.into());
@@ -14005,13 +14005,13 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 if bare_method_early == "decrement" {
                     // decrement returns new value = old - 1
                     let new_val = ctx
                         .builder()
                         .build_int_sub(result, i64_type.const_int(1, false), "dec_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, new_val.into());
                 } else {
                     ctx.set_register(dst.0, result.into());
@@ -14028,7 +14028,7 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
             }
@@ -14042,7 +14042,7 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
             }
@@ -14056,7 +14056,7 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
             }
@@ -14071,7 +14071,7 @@ fn lower_call_method<'ctx>(
                         val,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
             }
@@ -14089,16 +14089,16 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::SequentiallyConsistent,
                         AtomicOrdering::SequentiallyConsistent,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let old_val = ctx
                     .builder()
                     .build_extract_value(cmpxchg, 0, "cas_old")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let success = ctx
                     .builder()
                     .build_extract_value(cmpxchg, 1, "cas_success")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // Build Result variant: Ok(old) if success, Err(actual) if failure
                 // Variant layout: 24-byte header + tag at offset 24 + payload at offset 32
@@ -14114,7 +14114,7 @@ fn lower_call_method<'ctx>(
                         i64_type.const_int(1, false),
                         "cas_tag",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 // Store tag at offset 24 (VARIANT_TAG_OFFSET)
                 // SAFETY: GEP to write the variant tag (Ok=0, Err=1) at offset 24 in a 40-byte CAS Result variant object
@@ -14126,11 +14126,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(24, false).into()],
                             "cas_tag_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(tag_ptr, tag_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Store payload (old_val) at offset 32 (VARIANT_PAYLOAD_OFFSET)
                 // SAFETY: GEP to write the old value as payload at offset 32 in the CAS Result variant object
                 let payload_ptr = unsafe {
@@ -14141,15 +14141,15 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(32, false).into()],
                             "cas_payload_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(payload_ptr, old_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result_i64 = ctx
                     .builder()
                     .build_ptr_to_int(result_obj, i64_type, "cas_result_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result_i64.into());
                 return Ok(());
             }
@@ -14165,12 +14165,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(24, false).into()],
                             "result_tag_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let tag = ctx
                     .builder()
                     .build_load(i64_type, tag_ptr.into(), "result_tag")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let result = if bare_method_early == "is_ok" {
                     ctx.builder()
@@ -14180,7 +14180,7 @@ fn lower_call_method<'ctx>(
                             i64_type.const_int(0, false),
                             "is_ok",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 } else {
                     ctx.builder()
                         .build_int_compare(
@@ -14189,12 +14189,12 @@ fn lower_call_method<'ctx>(
                             i64_type.const_int(0, false),
                             "is_err",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let result_i64 = ctx
                     .builder()
                     .build_int_z_extend(result, i64_type, "is_result_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result_i64.into());
                 return Ok(());
             }
@@ -14230,14 +14230,14 @@ fn lower_call_method<'ctx>(
                         &[i64_type.const_int(24, false).into()],
                         "ai_val_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(val_ptr, val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_ptr_to_int(obj, i64_type, "ai_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         };
 
         // Helper: atomic load from AtomicInt pointer (i64) → value
@@ -14248,7 +14248,7 @@ fn lower_call_method<'ctx>(
             let ai_ptr = ctx
                 .builder()
                 .build_int_to_ptr(ai_i64, ptr_type, "ai_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP past the 24-byte object header to access the AtomicInt value field; the object was allocated with 32 bytes (24 header + 8 value)
             let field_ptr = unsafe {
                 ctx.builder()
@@ -14258,12 +14258,12 @@ fn lower_call_method<'ctx>(
                         &[i64_type.const_int(24, false).into()],
                         "ai_field",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let val = ctx
                 .builder()
                 .build_load(i64_type, field_ptr.into(), "ai_load")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             val.as_instruction_value()
                 .ok_or_else(|| LlvmLoweringError::internal("not an instruction"))?
                 .set_atomic_ordering(AtomicOrdering::SequentiallyConsistent)
@@ -14279,7 +14279,7 @@ fn lower_call_method<'ctx>(
             let ai_ptr = ctx
                 .builder()
                 .build_int_to_ptr(ai_i64, ptr_type, "ai_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP past the 24-byte object header to access the AtomicInt value field for atomic fetch_add
             let field_ptr = unsafe {
                 ctx.builder()
@@ -14289,7 +14289,7 @@ fn lower_call_method<'ctx>(
                         &[i64_type.const_int(24, false).into()],
                         "ai_field",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let old = ctx
                 .builder()
@@ -14299,7 +14299,7 @@ fn lower_call_method<'ctx>(
                     delta,
                     AtomicOrdering::SequentiallyConsistent,
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(old)
         };
 
@@ -14315,7 +14315,7 @@ fn lower_call_method<'ctx>(
             let ai_ptr = ctx
                 .builder()
                 .build_int_to_ptr(ai_i64, ptr_type, "ai_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP past the 24-byte object header to access the AtomicInt value field for compare-and-swap
             let field_ptr = unsafe {
                 ctx.builder()
@@ -14325,7 +14325,7 @@ fn lower_call_method<'ctx>(
                         &[i64_type.const_int(24, false).into()],
                         "ai_field",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let cmpxchg = ctx
                 .builder()
@@ -14336,16 +14336,16 @@ fn lower_call_method<'ctx>(
                     AtomicOrdering::SequentiallyConsistent,
                     AtomicOrdering::SequentiallyConsistent,
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let old_val = ctx
                 .builder()
                 .build_extract_value(cmpxchg, 0, "cas_old")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             let success = ctx
                 .builder()
                 .build_extract_value(cmpxchg, 1, "cas_ok")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             Ok((success, old_val))
         };
@@ -14358,7 +14358,7 @@ fn lower_call_method<'ctx>(
             let sem_ptr = ctx
                 .builder()
                 .build_int_to_ptr(sem_i64, ptr_type, "sem_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let offset = 24 + field * 8; // header + field_idx * 8
             // SAFETY: GEP into the Semaphore object (48 bytes: 24B header + permits, max_permits, waiters) to read an AtomicInt pointer field
             let field_ptr = unsafe {
@@ -14369,12 +14369,12 @@ fn lower_call_method<'ctx>(
                         &[i64_type.const_int(offset, false).into()],
                         "sem_field_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let val = ctx
                 .builder()
                 .build_load(i64_type, field_ptr.into(), "sem_field")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             Ok(val)
         };
@@ -14408,17 +14408,17 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(offset, false).into()],
                                 "sem_f_ptr",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     ctx.builder()
                         .build_store(fp, ai_val)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
 
                 let result = ctx
                     .builder()
                     .build_ptr_to_int(sem_obj, i64_type, "sem_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.set_obj_register_type(dst.0, WKT::Semaphore.as_str().to_string());
                 return Ok(());
@@ -14432,7 +14432,7 @@ fn lower_call_method<'ctx>(
                 let is_positive = ctx
                     .builder()
                     .build_int_compare(verum_llvm::IntPredicate::SGT, current, zero, "has_permits")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Branch: only attempt CAS when permits > 0
                 let func = ctx
                     .builder()
@@ -14445,7 +14445,7 @@ fn lower_call_method<'ctx>(
                 let merge_bb = ctx.llvm_context().append_basic_block(func, "try_acq_merge");
                 ctx.builder()
                     .build_conditional_branch(is_positive, cas_bb, fail_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // CAS path: try to decrement
                 ctx.builder().position_at_end(cas_bb);
@@ -14453,29 +14453,29 @@ fn lower_call_method<'ctx>(
                 let decremented = ctx
                     .builder()
                     .build_int_sub(current, one, "dec")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let (cas_ok, _) = atomic_cas(ctx, ai_permits, current, decremented)?;
                 let cas_result = ctx
                     .builder()
                     .build_int_z_extend(cas_ok, i64_type, "cas_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Fail path: return false
                 ctx.builder().position_at_end(fail_bb);
                 let fail_val = i64_type.const_int(0, false);
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Merge: phi
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "try_acq_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&cas_result, cas_bb), (&fail_val, fail_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 ctx.mark_bool_register(dst.0);
@@ -14507,10 +14507,10 @@ fn lower_call_method<'ctx>(
                 let is_neg = ctx
                     .builder()
                     .build_int_compare(verum_llvm::IntPredicate::SLT, val, zero, "is_neg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx.builder()
                 .build_select::<verum_llvm::values::BasicValueEnum, verum_llvm::values::IntValue>(is_neg, zero.into(), val.into(), "max0")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
                 ctx.set_register(dst.0, result.into());
                 return Ok(());
@@ -14540,7 +14540,7 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.builder().position_at_end(loop_bb);
                 let current = atomic_load_from(ctx, ai_permits)?;
@@ -14548,27 +14548,27 @@ fn lower_call_method<'ctx>(
                 let has_permits = ctx
                     .builder()
                     .build_int_compare(verum_llvm::IntPredicate::SGT, current, zero, "has")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(has_permits, try_bb, spin_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.builder().position_at_end(try_bb);
                 let one = i64_type.const_int(1, false);
                 let decremented = ctx
                     .builder()
                     .build_int_sub(current, one, "dec")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let (cas_ok, _) = atomic_cas(ctx, ai_permits, current, decremented)?;
                 ctx.builder()
                     .build_conditional_branch(cas_ok, done_bb, loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.builder().position_at_end(spin_bb);
                 // Yield hint (pause instruction)
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.builder().position_at_end(done_bb);
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
@@ -14628,11 +14628,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "rw_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(state_ptr, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // data at offset 32
                 // SAFETY: GEP into the RwLock object to write the data field at index 4 (offset 32)
                 let data_ptr = unsafe {
@@ -14643,11 +14643,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(4, false)],
                             "rw_data_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(data_ptr, data_val)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // poisoned at offset 40
                 // SAFETY: GEP into the RwLock object to write the poisoned field at index 5 (offset 40)
                 let poison_ptr = unsafe {
@@ -14658,15 +14658,15 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(5, false)],
                             "rw_poison_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(poison_ptr, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_ptr_to_int(raw_ptr, i64_type, "rw_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.set_obj_register_type(dst.0, WKT::RwLock.as_str().to_string());
                 return Ok(());
@@ -14677,7 +14677,7 @@ fn lower_call_method<'ctx>(
                 let obj_ptr = ctx
                     .builder()
                     .build_int_to_ptr(recv_val, ptr_type, "rw_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the RwLock object to access the state field at index 3 (offset 24) for atomic read-lock CAS
                 let state_ptr = unsafe {
                     ctx.builder()
@@ -14687,7 +14687,7 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "rw_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
 
                 let func = ctx
@@ -14703,14 +14703,14 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // loop_bb: load state
                 ctx.builder().position_at_end(loop_bb);
                 let state = ctx
                     .builder()
                     .build_load(i64_type, state_ptr, "rw_state")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let state_int = state.into_int_value();
                 let can_read = ctx
                     .builder()
@@ -14720,17 +14720,17 @@ fn lower_call_method<'ctx>(
                         i64_type.const_int(0, false),
                         "can_read",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(can_read, try_bb, spin_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // try_bb: CAS state → state+1
                 ctx.builder().position_at_end(try_bb);
                 let new_state = ctx
                     .builder()
                     .build_int_add(state_int, i64_type.const_int(1, false), "new_state")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let cas_result = ctx
                     .builder()
                     .build_cmpxchg(
@@ -14740,14 +14740,14 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::AcquireRelease,
                         AtomicOrdering::Acquire,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let success = ctx
                     .builder()
                     .build_extract_value(cas_result, 1, "cas_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(success.into_int_value(), done_bb, loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // spin_bb: for try_read, immediately fail; for read, loop
                 ctx.builder().position_at_end(spin_bb);
@@ -14757,7 +14757,7 @@ fn lower_call_method<'ctx>(
                 }
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // done_bb: load data
                 ctx.builder().position_at_end(done_bb);
@@ -14770,18 +14770,18 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(4, false)],
                             "rw_data_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let data = ctx
                     .builder()
                     .build_load(i64_type, data_ptr, "rw_data")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Release read lock immediately (simplified — no guard)
                 let state2 = ctx
                     .builder()
                     .build_load(i64_type, state_ptr, "rw_st2")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let dec_state = ctx
                     .builder()
                     .build_int_sub(
@@ -14789,10 +14789,10 @@ fn lower_call_method<'ctx>(
                         i64_type.const_int(1, false),
                         "dec_state",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(state_ptr, dec_state)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.set_register(dst.0, data);
                 return Ok(());
@@ -14803,7 +14803,7 @@ fn lower_call_method<'ctx>(
                 let obj_ptr = ctx
                     .builder()
                     .build_int_to_ptr(recv_val, ptr_type, "rw_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the RwLock object to access the state field at index 3 (offset 24) for atomic write-lock CAS
                 let state_ptr = unsafe {
                     ctx.builder()
@@ -14813,7 +14813,7 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "rw_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
 
                 let func = ctx
@@ -14827,7 +14827,7 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_unconditional_branch(loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // loop_bb: CAS 0 → -1
                 ctx.builder().position_at_end(loop_bb);
@@ -14841,14 +14841,14 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::AcquireRelease,
                         AtomicOrdering::Acquire,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let success = ctx
                     .builder()
                     .build_extract_value(cas_result, 1, "cas_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(success.into_int_value(), done_bb, loop_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // done_bb: write data + release
                 ctx.builder().position_at_end(done_bb);
@@ -14863,16 +14863,16 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(4, false)],
                                 "rw_data_ptr",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     ctx.builder()
                         .build_store(data_ptr, new_data)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 // Release write lock
                 ctx.builder()
                     .build_store(state_ptr, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -14881,7 +14881,7 @@ fn lower_call_method<'ctx>(
                 let obj_ptr = ctx
                     .builder()
                     .build_int_to_ptr(recv_val, ptr_type, "rw_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the RwLock object to read the poisoned field at index 5 (offset 40)
                 let poison_ptr = unsafe {
                     ctx.builder()
@@ -14891,12 +14891,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(5, false)],
                             "rw_poison_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let val = ctx
                     .builder()
                     .build_load(i64_type, poison_ptr, "rw_poisoned")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, val);
                 return Ok(());
             }
@@ -14930,15 +14930,15 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "once_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(state_ptr, i64_type.const_int(0, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_ptr_to_int(raw_ptr, i64_type, "once_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.set_obj_register_type(dst.0, "Once".to_string());
                 return Ok(());
@@ -14949,7 +14949,7 @@ fn lower_call_method<'ctx>(
                 let obj_ptr = ctx
                     .builder()
                     .build_int_to_ptr(recv_val, ptr_type, "once_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the Once object to access the state field at index 3 (offset 24) for CAS (0=init, 1=running, 2=done)
                 let state_ptr = unsafe {
                     ctx.builder()
@@ -14959,7 +14959,7 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "once_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
 
                 let func = ctx
@@ -14974,7 +14974,7 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_unconditional_branch(try_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // try_bb: CAS 0 → 1
                 ctx.builder().position_at_end(try_bb);
@@ -14987,14 +14987,14 @@ fn lower_call_method<'ctx>(
                         AtomicOrdering::AcquireRelease,
                         AtomicOrdering::Acquire,
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let success = ctx
                     .builder()
                     .build_extract_value(cas_result, 1, "cas_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_conditional_branch(success.into_int_value(), run_bb, done_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // run_bb: call the closure, then set state=2
                 ctx.builder().position_at_end(run_bb);
@@ -15004,7 +15004,7 @@ fn lower_call_method<'ctx>(
                     let closure_ptr = ctx
                         .builder()
                         .build_int_to_ptr(closure_i64, ptr_type, "once_fn_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Load function pointer from closure object: offset 24 (after header)
                     // SAFETY: GEP past the 24-byte object header to load the function pointer from the closure object at field 0
                     let fn_ptr_ptr = unsafe {
@@ -15015,19 +15015,19 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(3, false)],
                                 "once_fnptr_ptr",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let fn_ptr_i64 = ctx
                         .builder()
                         .build_load(i64_type, fn_ptr_ptr, "once_fnptr_i64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Closure's function signature: fn(closure_env) -> void
                     let void_type = ctx.llvm_context().void_type();
                     let fn_type = void_type.fn_type(&[i64_type.into()], false);
                     let fn_ptr_typed = ctx
                         .builder()
                         .build_int_to_ptr(fn_ptr_i64.into_int_value(), ptr_type, "once_fn")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Call with closure env as arg (the closure pointer itself)
                     ctx.builder()
                         .build_indirect_call(
@@ -15036,15 +15036,15 @@ fn lower_call_method<'ctx>(
                             &[closure_i64.into()],
                             "once_call",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 // Set state = COMPLETE (2)
                 ctx.builder()
                     .build_store(state_ptr, i64_type.const_int(2, false))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(done_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // done_bb
                 ctx.builder().position_at_end(done_bb);
@@ -15056,7 +15056,7 @@ fn lower_call_method<'ctx>(
                 let obj_ptr = ctx
                     .builder()
                     .build_int_to_ptr(recv_val, ptr_type, "once_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the Once object to read the state field at index 3 (offset 24); checking if state == 2 (completed)
                 let state_ptr = unsafe {
                     ctx.builder()
@@ -15066,12 +15066,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(3, false)],
                             "once_state_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let state = ctx
                     .builder()
                     .build_load(i64_type, state_ptr, "once_state")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let is_done = ctx
                     .builder()
                     .build_int_compare(
@@ -15080,11 +15080,11 @@ fn lower_call_method<'ctx>(
                         i64_type.const_int(2, false),
                         "once_done",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_int_z_extend(is_done, i64_type, "once_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result.into());
                 ctx.mark_bool_register(dst.0);
                 return Ok(());
@@ -15127,7 +15127,7 @@ fn lower_call_method<'ctx>(
                 let fd = ctx
                     .builder()
                     .build_call(connect_fn, &[addr_i64.into(), port.into()], "tcp_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15149,7 +15149,7 @@ fn lower_call_method<'ctx>(
                 let fd = ctx
                     .builder()
                     .build_call(listen_fn, &[addr_i64.into()], "tcp_listen_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15165,7 +15165,7 @@ fn lower_call_method<'ctx>(
                 let client_fd = ctx
                     .builder()
                     .build_call(accept_fn, &[recv_val.into()], "tcp_client_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15193,7 +15193,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(send_fn, &[recv_val.into(), data_val.into()], "tcp_sent")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15221,7 +15221,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[recv_val.into(), max_len.into()], "tcp_recvd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15237,7 +15237,7 @@ fn lower_call_method<'ctx>(
                 });
                 ctx.builder()
                     .build_call(close_fn, &[recv_val.into()], "tcp_closed")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -15259,7 +15259,7 @@ fn lower_call_method<'ctx>(
                 let fd = ctx
                     .builder()
                     .build_call(bind_fn, &[addr_val.into()], "udp_fd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15300,7 +15300,7 @@ fn lower_call_method<'ctx>(
                         &[recv_val.into(), data_val.into(), addr_val.into()],
                         "udp_sent",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15328,7 +15328,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[recv_val.into(), max_len.into()], "udp_recvd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -15344,7 +15344,7 @@ fn lower_call_method<'ctx>(
                 });
                 ctx.builder()
                     .build_call(close_fn, &[recv_val.into()], "udp_closed")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -15390,7 +15390,7 @@ fn lower_call_method<'ctx>(
         let hash_result = ctx
             .builder()
             .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("verum_generic_hash: no return value"))?;
@@ -15851,11 +15851,11 @@ fn lower_call_method<'ctx>(
         let is_null = ctx
             .builder()
             .build_is_null(ptr, "ptr_is_null")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let result = ctx
             .builder()
             .build_int_z_extend(is_null, ctx.types().i64_type(), "isnull_ext")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, result.into());
         ctx.mark_bool_register(dst.0);
         return Ok(());
@@ -15890,7 +15890,7 @@ fn lower_call_method<'ctx>(
                 let is_null = ctx
                     .builder()
                     .build_is_null(variant_ptr, "maybe_is_null")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 let current_bb = ctx
                     .builder()
@@ -15905,7 +15905,7 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_conditional_branch(is_null, then_bb, else_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Null = None: is_some=false, is_none=true
                 ctx.builder().position_at_end(then_bb);
@@ -15916,7 +15916,7 @@ fn lower_call_method<'ctx>(
                 };
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Non-null: read tag from variant object
                 ctx.builder().position_at_end(else_bb);
@@ -15925,10 +15925,10 @@ fn lower_call_method<'ctx>(
                 let tag_ext = ctx
                     .builder()
                     .build_int_z_extend(tag_result, ctx.types().i64_type(), "tag_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let else_end = ctx
                     .builder()
                     .get_insert_block()
@@ -15938,7 +15938,7 @@ fn lower_call_method<'ctx>(
                 let phi = ctx
                     .builder()
                     .build_phi(ctx.types().i64_type(), "maybe_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&null_result, then_bb), (&tag_ext, else_end)]);
 
                 ctx.set_register(dst.0, phi.as_basic_value());
@@ -15996,11 +15996,11 @@ fn lower_call_method<'ctx>(
                 let is_some_i1 = ctx
                     .builder()
                     .build_int_truncate(is_some, ctx.types().bool_type(), "is_some_i1")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result_val = ctx
                     .builder()
                     .build_select(is_some_i1, payload, default_val, "unwrap_or_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result_val.into());
                 return Ok(());
             }
@@ -16043,7 +16043,7 @@ fn lower_call_method<'ctx>(
                 let i64_val = as_i64(ctx, val, concat!($name, "_i64"))?;
                 ctx.builder()
                     .build_call(text_get_ptr_fn, &[i64_val.into()], $name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -16076,12 +16076,12 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(super::runtime::TEXT_LEN_OFFSET, false)],
                             "text_len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len = ctx
                     .builder()
                     .build_load(i64_type, len_slot, "text_len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, len);
                 resolved_func_name = Some("__inline_text_len".to_string());
             }
@@ -16104,7 +16104,7 @@ fn lower_call_method<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(parse_fn, &[str_ptr.into()], "parse_int")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16125,7 +16125,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(to_int_fn, &[coerced.into()], "to_int_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16151,7 +16151,7 @@ fn lower_call_method<'ctx>(
                     let result = ctx
                         .builder()
                         .build_call(parse_fn, &[str_ptr.into()], "parse_float")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16173,7 +16173,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(to_float_fn, &[coerced.into()], "to_float_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16197,14 +16197,14 @@ fn lower_call_method<'ctx>(
                 let char_result = ctx
                     .builder()
                     .build_call(join_fn, &[list_ptr.into(), sep_ptr.into()], "str_join")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| ptr_type.const_null().into());
                 let text_result = ctx
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "join_text")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -16239,7 +16239,7 @@ fn lower_call_method<'ctx>(
                         &[chan_val.into(), value.into()],
                         "chan_send_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16257,7 +16257,7 @@ fn lower_call_method<'ctx>(
                 let ok_alloca = ctx
                     .builder()
                     .build_alloca(i64_type, "chan_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let recv_val = ctx
                     .builder()
                     .build_call(
@@ -16265,7 +16265,7 @@ fn lower_call_method<'ctx>(
                         &[chan_val.into(), ok_alloca.into()],
                         "chan_recv_val",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16273,12 +16273,12 @@ fn lower_call_method<'ctx>(
                 let ok_val = ctx
                     .builder()
                     .build_load(i64_type, ok_alloca, "ok_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let is_some = ctx
                     .builder()
                     .build_int_compare(IntPredicate::NE, ok_val, i64_type.const_zero(), "is_some")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 let current_bb = ctx
                     .builder()
@@ -16293,7 +16293,7 @@ fn lower_call_method<'ctx>(
 
                 ctx.builder()
                     .build_conditional_branch(is_some, some_bb, none_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Some: allocate variant with tag=1, set field 0 to value
                 ctx.builder().position_at_end(some_bb);
@@ -16308,10 +16308,10 @@ fn lower_call_method<'ctx>(
                 let some_result = ctx
                     .builder()
                     .build_ptr_to_int(some_variant, i64_type, "some_as_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let some_end = ctx
                     .builder()
                     .get_insert_block()
@@ -16322,7 +16322,7 @@ fn lower_call_method<'ctx>(
                 let none_result = i64_type.const_zero();
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let none_end = ctx
                     .builder()
                     .get_insert_block()
@@ -16333,7 +16333,7 @@ fn lower_call_method<'ctx>(
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "chan_recv_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&some_result, some_end), (&none_result, none_end)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
                 return Ok(());
@@ -16347,7 +16347,7 @@ fn lower_call_method<'ctx>(
                 let chan_val = as_i64(ctx, ctx.get_register(receiver.0)?, "chan_i64")?;
                 ctx.builder()
                     .build_call(close_fn, &[chan_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -16360,7 +16360,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(len_fn, &[chan_val.into()], "chan_len_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16383,7 +16383,7 @@ fn lower_call_method<'ctx>(
                         &[chan_val.into(), value.into()],
                         "chan_try_send_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16404,7 +16404,7 @@ fn lower_call_method<'ctx>(
                 let ok_alloca = ctx
                     .builder()
                     .build_alloca(i64_type, "chan_try_ok")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let result = ctx
                     .builder()
                     .build_call(
@@ -16412,7 +16412,7 @@ fn lower_call_method<'ctx>(
                         &[chan_val.into(), ok_alloca.into()],
                         "chan_try_recv_result",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16470,11 +16470,11 @@ fn lower_call_method<'ctx>(
                 let tag_alloca = ctx
                     .builder()
                     .build_alloca(i64_type, "gen_tag_out")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let val_alloca = ctx
                     .builder()
                     .build_alloca(i64_type, "gen_val_out")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Call verum_gen_next_maybe(handle, &tag, &value)
                 ctx.builder()
@@ -16483,17 +16483,17 @@ fn lower_call_method<'ctx>(
                         &[gen_val.into(), tag_alloca.into(), val_alloca.into()],
                         "",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 let tag_i64 = ctx
                     .builder()
                     .build_load(i64_type, tag_alloca, "gen_tag")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
                 let val_i64 = ctx
                     .builder()
                     .build_load(i64_type, val_alloca, "gen_value")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_int_value();
 
                 // Allocate variant: header(24) + tag(4) + pad(4) + payload(8) = 40 bytes
@@ -16511,13 +16511,13 @@ fn lower_call_method<'ctx>(
                         ],
                         "clear",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Store tag at offset 24 (i32)
                 let tag_i32 = ctx
                     .builder()
                     .build_int_truncate(tag_i64, i32_type, "tag_i32")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP to write the variant tag at VARIANT_TAG_OFFSET (24) in a 40-byte Maybe variant object
                 let tag_ptr = unsafe {
                     ctx.builder()
@@ -16527,11 +16527,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(24, false)],
                             "tag_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(tag_ptr, tag_i32)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 // Store payload at offset 32
                 // SAFETY: GEP to write the variant payload at VARIANT_PAYLOAD_OFFSET (32) in a 40-byte Maybe variant object
@@ -16543,11 +16543,11 @@ fn lower_call_method<'ctx>(
                             &[i64_type.const_int(32, false)],
                             "payload_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_store(payload_ptr, val_i64)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 ctx.set_register(dst.0, variant_ptr.into());
                 return Ok(());
@@ -16563,7 +16563,7 @@ fn lower_call_method<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(has_next_fn, &[gen_val.into()], "gen_has_next_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -16579,7 +16579,7 @@ fn lower_call_method<'ctx>(
                 let gen_val = ctx.get_register(receiver.0)?;
                 ctx.builder()
                     .build_call(close_fn, &[gen_val.into()], "gen_close_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 return Ok(());
             }
@@ -16614,11 +16614,11 @@ fn lower_call_method<'ctx>(
         let byte_offset = ctx
             .builder()
             .build_int_mul(idx_i64, stride, "byte_off")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let result = ctx
             .builder()
             .build_int_add(ptr_i64, byte_offset, "ptr_offset")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, result.into());
         // Mark result as inline struct if element is a multi-field struct
         if stride_val > 8 {
@@ -16689,12 +16689,12 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(len_offset, false)],
                                 "coll_len_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let len = ctx
                         .builder()
                         .build_load(i64_type, len_slot, "coll_len")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, len);
                 }
                 "is_empty" => {
@@ -16707,21 +16707,21 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(len_offset, false)],
                                 "coll_len_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let len = ctx
                         .builder()
                         .build_load(i64_type, len_slot, "coll_len")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value();
                     let is_empty = ctx
                         .builder()
                         .build_int_compare(IntPredicate::EQ, len, i64_type.const_zero(), "is_empty")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let result = ctx
                         .builder()
                         .build_int_z_extend(is_empty, i64_type, "is_empty_i64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, result.into());
                     ctx.mark_bool_register(dst.0);
                 }
@@ -16742,12 +16742,12 @@ fn lower_call_method<'ctx>(
                                 &[i64_type.const_int(cap_offset, false)],
                                 "coll_cap_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let cap = ctx
                         .builder()
                         .build_load(i64_type, cap_slot, "coll_cap")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, cap);
                 }
                 _ => {}
@@ -16782,7 +16782,7 @@ fn lower_call_method<'ctx>(
         let adjusted = ctx
             .builder()
             .build_int_sub(recv_i64, header, "inline_adj")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         receiver_val = adjusted.into();
     }
 
@@ -16825,7 +16825,7 @@ fn lower_call_method<'ctx>(
     let call_site = ctx
         .builder()
         .build_call(llvm_fn, &call_args, "method_call")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     if let Some(ret_val) = call_site.try_as_basic_value().basic() {
         // Normalize pointer return values to i64 for VBC register compatibility.
         // Compiled stdlib functions may return ptr type (e.g., generic T compiled
@@ -16835,7 +16835,7 @@ fn lower_call_method<'ctx>(
                 let i64_val = ctx
                     .builder()
                     .build_ptr_to_int(pv, ctx.types().i64_type(), "ptr_to_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 BasicValueEnum::IntValue(i64_val)
             }
             other => other,
@@ -16864,7 +16864,7 @@ fn lower_call_method<'ctx>(
             let is_some_i1 = ctx
                 .builder()
                 .build_int_truncate(is_some, ctx.types().bool_type(), "is_some_i1")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Map.get returns Maybe<&V> — payload is a pointer to V.
             // Must use conditional branch to avoid dereferencing null for None.
             if is_map_maybe_method && bare_method_early == "get" {
@@ -16878,28 +16878,28 @@ fn lower_call_method<'ctx>(
                     .or_internal("no insert block")?;
                 ctx.builder()
                     .build_conditional_branch(is_some_i1, some_bb, merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Some branch: dereference the pointer
                 ctx.builder().position_at_end(some_bb);
                 let ptr_type = ctx.types().ptr_type();
                 let p_ptr = ctx
                     .builder()
                     .build_int_to_ptr(payload, ptr_type, "map_get_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let loaded = ctx
                     .builder()
                     .build_load(i64_type, p_ptr, "map_get_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let loaded_i64 = as_i64(ctx, loaded, "map_get_i64")?;
                 ctx.builder()
                     .build_unconditional_branch(merge_bb)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Merge with phi
                 ctx.builder().position_at_end(merge_bb);
                 let phi = ctx
                     .builder()
                     .build_phi(i64_type, "map_get_result")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 phi.add_incoming(&[(&loaded_i64, some_bb), (&i64_type.const_zero(), none_bb)]);
                 ctx.set_register(dst.0, phi.as_basic_value());
             } else {
@@ -16911,7 +16911,7 @@ fn lower_call_method<'ctx>(
                 let unwrapped = ctx
                     .builder()
                     .build_select(is_some_i1, payload, none_val, "maybe_unwrapped")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, unwrapped.into());
             }
         } else {
@@ -17258,23 +17258,23 @@ fn lower_arith_extended<'ctx>(
             let is_zero = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, b, zero, "div_zero")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a_is_min = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, a, int_min, "div_a_is_min")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let b_is_neg_one = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, b, neg_one, "div_b_is_neg_one")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let signed_overflow = ctx
                 .builder()
                 .build_and(a_is_min, b_is_neg_one, "div_signed_overflow")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_none = ctx
                 .builder()
                 .build_or(is_zero, signed_overflow, "div_is_none")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Compute a guarded divisor so the `sdiv` itself doesn't
             // hit UB — `select(is_none, 1, b)` keeps the divisor in
@@ -17283,12 +17283,12 @@ fn lower_arith_extended<'ctx>(
             let safe_b = ctx
                 .builder()
                 .build_select(is_none, one, b, "div_safe_b")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             let div_result = ctx
                 .builder()
                 .build_int_signed_div(a, safe_b, "checked_div_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             let result = build_maybe_int_wrap(ctx, div_result, is_none, "checked_div")?;
             ctx.set_register(dst, result);
@@ -17306,7 +17306,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_add(a, b, "wrap_add")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17320,7 +17320,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_sub(a, b, "wrap_sub")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17334,7 +17334,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_mul(a, b, "wrap_mul")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17347,7 +17347,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_neg(a, "wrap_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17374,7 +17374,7 @@ fn lower_arith_extended<'ctx>(
             let is_min = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, a, i64_min, "checked_unary_min")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let entry_bb = ctx
                 .builder()
                 .get_insert_block()
@@ -17393,7 +17393,7 @@ fn lower_arith_extended<'ctx>(
                 .append_basic_block(current_fn, "checked_unary_merge");
             ctx.builder()
                 .build_conditional_branch(is_min, panic_bb, ok_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Panic path — call runtime trap; control flow doesn't
             // reach the merge from here.
             ctx.builder().position_at_end(panic_bb);
@@ -17417,37 +17417,37 @@ fn lower_arith_extended<'ctx>(
                 });
             ctx.builder()
                 .build_call(panic_fn, &[], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_unreachable()
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // OK path — compute the operation, branch to merge.
             ctx.builder().position_at_end(ok_bb);
             let computed = match sub {
                 Some(ArithSubOpcode::CheckedNeg) => ctx
                     .builder()
                     .build_int_neg(a, "checked_neg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => {
                     // CheckedAbs = if a < 0 then -a else a
                     let zero = i64_type.const_zero();
                     let is_neg = ctx
                         .builder()
                         .build_int_compare(IntPredicate::SLT, a, zero, "abs_is_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_a = ctx
                         .builder()
                         .build_int_neg(a, "abs_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_select(is_neg, neg_a, a, "checked_abs")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value()
                 }
             };
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder().position_at_end(merge_bb);
             ctx.set_register(dst, computed.into());
             Ok(())
@@ -17469,32 +17469,32 @@ fn lower_arith_extended<'ctx>(
             let is_min = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, a, i64_min, "sat_unary_min")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let computed = match sub {
                 Some(ArithSubOpcode::SaturatingNeg) => ctx
                     .builder()
                     .build_int_neg(a, "sat_neg")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 _ => {
                     let zero = i64_type.const_zero();
                     let is_neg = ctx
                         .builder()
                         .build_int_compare(IntPredicate::SLT, a, zero, "sabs_is_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_a = ctx
                         .builder()
                         .build_int_neg(a, "sabs_neg")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_select(is_neg, neg_a, a, "sat_abs")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value()
                 }
             };
             let saturated = ctx
                 .builder()
                 .build_select(is_min, i64_max, computed, "sat_unary_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             ctx.set_register(dst, saturated.into());
             Ok(())
@@ -17509,7 +17509,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_left_shift(a, b, "wrap_shl")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17523,7 +17523,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_right_shift(a, b, true, "wrap_shr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17585,31 +17585,31 @@ fn lower_arith_extended<'ctx>(
             let call_result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "sat_mul_ovf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("sat_mul: expected return value"))?;
             let overflow_flag = ctx
                 .builder()
                 .build_extract_value(call_result.into_struct_value(), 1, "sat_mul_flag")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // If overflow: clamp to INT_MAX or INT_MIN based on sign of result
             // XOR signs: if a^b < 0 then result is negative → INT_MIN, else INT_MAX
             let xor_signs = ctx
                 .builder()
                 .build_xor(a, b, "sign_xor")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let zero = i64_type.const_int(0, false);
             let is_neg = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, xor_signs, zero, "is_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let int_max = i64_type.const_int(i64::MAX as u64, false);
             let int_min = i64_type.const_int(i64::MIN as u64, true);
             let clamp_val = ctx
                 .builder()
                 .build_select(is_neg, int_min, int_max, "clamp_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_select(
@@ -17618,7 +17618,7 @@ fn lower_arith_extended<'ctx>(
                     mul_val.into(),
                     "sat_mul_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17707,7 +17707,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_s_extend(a, i64_ty, "sext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17720,7 +17720,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_z_extend(a, i64_ty, "zext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17734,11 +17734,11 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_trunc(a, f32_ty, "fptrunc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let extended = ctx
                 .builder()
                 .build_float_ext(result, ctx.types().f64_type(), "fpext_back")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, extended.into());
             Ok(())
         }
@@ -17838,7 +17838,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_add(a, b, "poly_add")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17852,7 +17852,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_sub(a, b, "poly_sub")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17866,7 +17866,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_mul(a, b, "poly_mul")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17891,7 +17891,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_sub(zero, a, "poly_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -17907,17 +17907,17 @@ fn lower_arith_extended<'ctx>(
             let is_neg = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, a, zero, "is_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let neg = ctx
                 .builder()
                 .build_int_sub(zero, a, "neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let neg_bv: BasicValueEnum = neg.into();
             let a_bv: BasicValueEnum = a.into();
             let result = ctx
                 .builder()
                 .build_select(is_neg, neg_bv, a_bv, "abs")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -17947,22 +17947,22 @@ fn lower_arith_extended<'ctx>(
             let is_pos = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, a, zero, "is_pos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_neg = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, a, zero, "is_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let neg_one_bv: BasicValueEnum = neg_one.into();
             let zero_bv: BasicValueEnum = zero.into();
             let one_bv: BasicValueEnum = one.into();
             let neg_or_zero: BasicValueEnum = ctx
                 .builder()
                 .build_select(is_neg, neg_one_bv, zero_bv, "neg_or_zero")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result: BasicValueEnum = ctx
                 .builder()
                 .build_select(is_pos, one_bv, neg_or_zero, "signum")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -17977,13 +17977,13 @@ fn lower_arith_extended<'ctx>(
             let cmp = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, a, b, "min_cmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a_bv: BasicValueEnum = a.into();
             let b_bv: BasicValueEnum = b.into();
             let result: BasicValueEnum = ctx
                 .builder()
                 .build_select(cmp, a_bv, b_bv, "poly_min")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -17997,13 +17997,13 @@ fn lower_arith_extended<'ctx>(
             let cmp = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, a, b, "max_cmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a_bv: BasicValueEnum = a.into();
             let b_bv: BasicValueEnum = b.into();
             let result: BasicValueEnum = ctx
                 .builder()
                 .build_select(cmp, a_bv, b_bv, "poly_max")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -18020,25 +18020,25 @@ fn lower_arith_extended<'ctx>(
             let cmp_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, val, hi, "cmp_hi")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let val_bv: BasicValueEnum = val.into();
             let hi_bv: BasicValueEnum = hi.into();
             let min_val: BasicValueEnum = ctx
                 .builder()
                 .build_select(cmp_hi, val_bv, hi_bv, "min_hi")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // max(lo, min_val)
             let min_int = min_val.into_int_value();
             let cmp_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, lo, min_int, "cmp_lo")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lo_bv: BasicValueEnum = lo.into();
             let min_bv: BasicValueEnum = min_int.into();
             let result: BasicValueEnum = ctx
                 .builder()
                 .build_select(cmp_lo, lo_bv, min_bv, "poly_clamp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -18066,7 +18066,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "atan2")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("atan2: expected return value"))?;
@@ -18093,7 +18093,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "hypot")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("hypot: expected return value"))?;
@@ -18117,7 +18117,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "copysign")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("copysign: expected return value"))?;
@@ -18141,7 +18141,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "pow")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("pow: expected return value"))?;
@@ -18165,7 +18165,7 @@ fn lower_arith_extended<'ctx>(
             let log_a = ctx
                 .builder()
                 .build_call(log_func, &[a.into()], "log_a")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -18175,7 +18175,7 @@ fn lower_arith_extended<'ctx>(
             let log_b = ctx
                 .builder()
                 .build_call(log_func, &[b.into()], "log_b")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -18185,7 +18185,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_div(log_a, log_b, "logbase")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -18200,7 +18200,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_rem(a, b, "fmod")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -18221,7 +18221,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "remainder")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("remainder: expected return value"))?;
@@ -18239,18 +18239,18 @@ fn lower_arith_extended<'ctx>(
             let diff = ctx
                 .builder()
                 .build_float_sub(a, b, "fdim_diff")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let zero = ctx.types().f64_type().const_float(0.0);
             let is_pos = ctx
                 .builder()
                 .build_float_compare(FloatPredicate::OGT, diff, zero, "fdim_pos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let diff_bv: BasicValueEnum = diff.into();
             let zero_bv: BasicValueEnum = zero.into();
             let result: BasicValueEnum = ctx
                 .builder()
                 .build_select(is_pos, diff_bv, zero_bv, "fdim")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -18269,7 +18269,7 @@ fn lower_arith_extended<'ctx>(
             let f32_val = ctx
                 .builder()
                 .build_float_trunc(a, f32_ty, "fptrunc_f32")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Bitcast f32 to i32
             let i32_val = ctx
                 .builder()
@@ -18282,7 +18282,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_int_z_extend(i32_val, i64_ty, "f32bits_zext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -18304,7 +18304,7 @@ fn lower_arith_extended<'ctx>(
             let i32_val = ctx
                 .builder()
                 .build_int_truncate(a, i32_ty, "trunc_i32")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Bitcast i32 to f32
             let f32_val = ctx
                 .builder()
@@ -18317,7 +18317,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_float_ext(f32_val, f64_ty, "fpext_f64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -18350,7 +18350,7 @@ fn lower_arith_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_and(val, mask, "int_trunc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, result.into());
             } else {
                 // 64-bit or unknown width — identity
@@ -18478,7 +18478,7 @@ fn lower_fma_via_f64<'ctx>(
     let result = ctx
         .builder()
         .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("FMA: expected return value"))?;
@@ -18502,7 +18502,7 @@ fn lower_fmod_via_frem<'ctx>(
     let result = ctx
         .builder()
         .build_float_rem(a, b, "fmod")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())
 }
@@ -18521,11 +18521,11 @@ fn lower_is_nan_f64<'ctx>(
     let is_nan = ctx
         .builder()
         .build_float_compare(FloatPredicate::UNO, a, a, "is_nan")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result = ctx
         .builder()
         .build_int_z_extend(is_nan, ctx.types().i64_type(), "is_nan_i64")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())
 }
@@ -18550,7 +18550,7 @@ fn lower_is_inf_f64<'ctx>(
     let abs_val = ctx
         .builder()
         .build_call(abs_fn, &[a.into()], "fabs")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
@@ -18559,11 +18559,11 @@ fn lower_is_inf_f64<'ctx>(
     let is_inf = ctx
         .builder()
         .build_float_compare(FloatPredicate::OEQ, abs_val, inf, "is_inf")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result = ctx
         .builder()
         .build_int_z_extend(is_inf, ctx.types().i64_type(), "is_inf_i64")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())
 }
@@ -18588,7 +18588,7 @@ fn lower_is_finite_f64<'ctx>(
     let abs_val = ctx
         .builder()
         .build_call(abs_fn, &[a.into()], "fabs_finite")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
@@ -18597,19 +18597,19 @@ fn lower_is_finite_f64<'ctx>(
     let is_not_inf = ctx
         .builder()
         .build_float_compare(FloatPredicate::ONE, abs_val, inf, "not_inf")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_ord = ctx
         .builder()
         .build_float_compare(FloatPredicate::ORD, a, a, "is_ord")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_finite = ctx
         .builder()
         .build_and(is_not_inf, is_ord, "is_finite")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result = ctx
         .builder()
         .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finite_i64")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())
 }
@@ -18651,7 +18651,7 @@ fn lower_text_extended<'ctx>(
                     &[ptr_val.into(), null_ptr.into(), base_10.into()],
                     "parse_int",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("ParseInt: expected return value"))?;
@@ -18681,7 +18681,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(strtod_fn, &[ptr_val.into(), null_ptr.into()], "parse_float")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("ParseFloat: expected return value"))?;
@@ -18709,7 +18709,7 @@ fn lower_text_extended<'ctx>(
                 let ptr_field = ctx
                     .builder()
                     .build_load(i64_ty, text_ptr, "text_data_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // SAFETY: GEP into the Text object (flat layout {ptr, len, cap}) to read the length field at offset 8
                 let len_slot = unsafe {
                     ctx.builder()
@@ -18719,17 +18719,17 @@ fn lower_text_extended<'ctx>(
                             &[i64_ty.const_int(8, false)],
                             "text_len_slot",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let len_field = ctx
                     .builder()
                     .build_load(i64_ty, len_slot, "text_len_val")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let ptr_type = ctx.types().ptr_type();
                 let data_ptr = ctx
                     .builder()
                     .build_int_to_ptr(ptr_field.into_int_value(), ptr_type, "data_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 (data_ptr.into(), len_field)
             };
             let module = ctx.get_module();
@@ -18742,7 +18742,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(from_fn, &[ptr.into(), len.into()], "text_from_static")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("FromStatic: expected return value"))?;
@@ -18776,7 +18776,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(to_text_fn, &[coerced.into()], "int_to_text")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("IntToText: expected return value"))?;
@@ -18786,7 +18786,7 @@ fn lower_text_extended<'ctx>(
                     let i64_val = ctx
                         .builder()
                         .build_ptr_to_int(pv, i64_ty, "int_text_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     BasicValueEnum::IntValue(i64_val)
                 }
                 other => other,
@@ -18824,7 +18824,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(to_text_fn, &[coerced.into()], "float_to_text")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("FloatToText: expected return value"))?;
@@ -18834,7 +18834,7 @@ fn lower_text_extended<'ctx>(
                     let i64_val = ctx
                         .builder()
                         .build_ptr_to_int(pv, i64_ty, "float_text_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     BasicValueEnum::IntValue(i64_val)
                 }
                 other => other,
@@ -18859,7 +18859,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(strlen_fn, &[src.into()], "byte_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("ByteLen: expected return value"))?;
@@ -18887,7 +18887,7 @@ fn lower_text_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(charlen_fn, &[src.into()], "char_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("CharLen: expected return value"))?;
@@ -18910,7 +18910,7 @@ fn lower_text_extended<'ctx>(
             let len = ctx
                 .builder()
                 .build_call(strlen_fn, &[src.into()], "str_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("IsEmpty: expected return value"))?;
@@ -18922,11 +18922,11 @@ fn lower_text_extended<'ctx>(
                     i64_ty.const_zero(),
                     "is_empty",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let extended = ctx
                 .builder()
                 .build_int_z_extend(is_zero, i64_ty, "empty_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, extended.into());
             Ok(())
         }
@@ -18971,7 +18971,7 @@ fn lower_text_extended<'ctx>(
             let bytes_ptr_val = ctx
                 .builder()
                 .build_call(get_ptr_fn, &[text_i64.into()], "text_bytes_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -18981,13 +18981,13 @@ fn lower_text_extended<'ctx>(
             let ptr_as_i64 = ctx
                 .builder()
                 .build_ptr_to_int(bytes_ptr, i64_ty, "text_bytes_ptr_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // len = Text.len, read directly from the struct at offset 8.
             let text_struct_ptr = ctx
                 .builder()
                 .build_int_to_ptr(text_i64, ptr_ty, "text_struct_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: Text layout is {ptr:i64, len:i64, cap:i64}; offset 8 is the `len` field.
             let len_slot = unsafe {
                 ctx.builder()
@@ -18997,12 +18997,12 @@ fn lower_text_extended<'ctx>(
                         &[i64_ty.const_int(8, false)],
                         "text_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len_val = ctx
                 .builder()
                 .build_load(i64_ty, len_slot, "text_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
 
             // Pack (ptr, len) into the standard slice object used by Len/GetE.
@@ -19056,22 +19056,22 @@ fn lower_cbgr_extended<'ctx>(
                         &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                         "rle_backing_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let backing_int = ctx
                 .builder()
                 .build_load(i64_type, backing_slot, "rle_backing_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             let backing_ptr = ctx
                 .builder()
                 .build_int_to_ptr(backing_int, ptr_type, "rle_backing_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             let elem_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_type, backing_ptr, &[index], "rle_elem_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
 
             // Load the stored Value directly — for struct elements the
@@ -19088,7 +19088,7 @@ fn lower_cbgr_extended<'ctx>(
             let loaded = ctx
                 .builder()
                 .build_load(i64_type, elem_ptr, "rle_elem_loaded")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, loaded);
             // Track that this register originated from an interior list
             // ref so downstream passes can special-case if needed.
@@ -19134,23 +19134,23 @@ fn lower_cbgr_extended<'ctx>(
                         .build_int_add(
                             ctx.builder()
                                 .build_ptr_to_int(ptr_as_pv, ctx.types().i64_type(), "ptr_int")
-                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                                .or_llvm_err()?,
                             header_offset,
                             "header_off",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                        .or_llvm_err()?,
                     ctx.types().ptr_type(),
                     "header_ptr",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gen_val = ctx
                 .builder()
                 .build_load(ctx.llvm_context().i32_type(), header_ptr, "gen")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gen_i64 = ctx
                 .builder()
                 .build_int_z_extend(gen_val.into_int_value(), ctx.types().i64_type(), "gen_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, gen_i64.into());
             Ok(())
         }
@@ -19168,7 +19168,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(cur_epoch_fn, &[], "epoch")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19184,7 +19184,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(epoch_fn, &[], "epoch")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19207,7 +19207,7 @@ fn lower_cbgr_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_cbgr_epoch_begin", fn_type, None));
             ctx.builder()
                 .build_call(advance_fn, &[], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x42 => {
@@ -19226,7 +19226,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(is_valid_fn, &[ref_as_i64.into()], "cbgr_valid")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19235,7 +19235,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             } else {
                 // C fallback: verum_cbgr_check(void*) -> i32
@@ -19247,7 +19247,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19256,7 +19256,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             }
             Ok(())
@@ -19280,7 +19280,7 @@ fn lower_cbgr_extended<'ctx>(
             let offset = ctx
                 .builder()
                 .build_int_mul(start_i, i64_ty.const_int(8, false), "slice_off")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // VBC often loads values into i64 registers (NaN-boxed or raw
             // pointer-as-int) before we reach this sub-op. If the source
             // register is already an IntValue (`load i64 ...`) use it
@@ -19294,12 +19294,12 @@ fn lower_cbgr_extended<'ctx>(
             } else {
                 ctx.builder()
                     .build_ptr_to_int(src.into_pointer_value(), i64_ty, "base_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let new_base = ctx
                 .builder()
                 .build_int_add(base_int, offset, "new_base")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Allocate FatRef struct: {ptr: i64, len: i64}
             let module = ctx.get_module();
             let malloc_fn = module
@@ -19313,17 +19313,17 @@ fn lower_cbgr_extended<'ctx>(
             // Store base pointer
             ctx.builder()
                 .build_store(fat_ref, new_base)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Store length at offset 8
             // SAFETY: GEP into the 16-byte fat reference {base_ptr, len} to write the length at field 1 (offset 8)
             let len_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, fat_ref, &[i64_ty.const_int(1, false)], "len_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(len_ptr, len.into_int_value())
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, fat_ref.into());
             Ok(())
         }
@@ -19341,7 +19341,7 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx
                 .builder()
                 .build_ptr_to_int(base_pv, i64_ty, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let new_ptr = ctx
                 .builder()
                 .build_int_add(
@@ -19349,11 +19349,11 @@ fn lower_cbgr_extended<'ctx>(
                     i64_ty.const_int(field_offset * 8, false),
                     "field_ptr",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_int_to_ptr(new_ptr, ptr_ty, "interior_ref")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -19374,20 +19374,20 @@ fn lower_cbgr_extended<'ctx>(
                     i64_ty.const_int(8, false),
                     "elem_off",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let base_pv = as_ptr(ctx, base, "ref_elem_base")?;
             let base_int = ctx
                 .builder()
                 .build_ptr_to_int(base_pv, i64_ty, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let elem_int = ctx
                 .builder()
                 .build_int_add(base_int, offset, "elem_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_int_to_ptr(elem_int, ptr_ty, "elem_ref")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -19433,7 +19433,7 @@ fn lower_cbgr_extended<'ctx>(
                             &[i64_ty.const_int(ptr_offset, false)],
                             "slice_ptr_field",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 }
             } else {
                 fat_ref_ptr
@@ -19441,11 +19441,11 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx
                 .builder()
                 .build_load(i64_ty, field_ptr, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let base_ptr = ctx
                 .builder()
                 .build_int_to_ptr(base_int.into_int_value(), ptr_ty, "base_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, base_ptr.into());
             let _ = is_text; // suppress unused warning
             Ok(())
@@ -19478,12 +19478,12 @@ fn lower_cbgr_extended<'ctx>(
                         &[i64_ty.const_int(len_offset, false)],
                         "len_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_ty, len_ptr, "slice_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, len);
             Ok(())
         }
@@ -19504,11 +19504,11 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx
                 .builder()
                 .build_load(i64_ty, fat_ref_ptr, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let base_ptr = ctx
                 .builder()
                 .build_int_to_ptr(base_int.into_int_value(), ptr_ty, "base_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // The index register can be a PointerValue (e.g. when an
             // intermediate is a heap-tagged Int from a variant payload)
             // or an IntValue (the typical case). `as_i64` handles both
@@ -19521,12 +19521,12 @@ fn lower_cbgr_extended<'ctx>(
             let elem_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, base_ptr, &[index], "elem_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let elem = ctx
                 .builder()
                 .build_load(i64_ty, elem_ptr, "elem")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, elem);
             Ok(())
         }
@@ -19546,7 +19546,7 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx
                 .builder()
                 .build_load(i64_ty, src_ptr, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Defensive: start/end can arrive as PointerValue (heap-tagged
             // Int from a variant payload) — same shape as the SliceGet
             // fix (4f649325). Route through `as_i64` so both Pointer and
@@ -19557,16 +19557,16 @@ fn lower_cbgr_extended<'ctx>(
             let offset = ctx
                 .builder()
                 .build_int_mul(start, i64_ty.const_int(8, false), "sub_off")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let new_base = ctx
                 .builder()
                 .build_int_add(base_int.into_int_value(), offset, "sub_base")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Compute new len = end - start
             let new_len = ctx
                 .builder()
                 .build_int_sub(end, start, "sub_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Allocate new fat ref
             let module = ctx.get_module();
             let malloc_fn = module
@@ -19579,16 +19579,16 @@ fn lower_cbgr_extended<'ctx>(
                 checked_malloc_instr(ctx, module, i64_ty.const_int(16, false), "sub_fat")?;
             ctx.builder()
                 .build_store(fat_ref, new_base)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP into the 16-byte fat reference {base_ptr, len} to write the length at field 1 (offset 8)
             let len_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, fat_ref, &[i64_ty.const_int(1, false)], "len_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(len_ptr, new_len)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, fat_ref.into());
             Ok(())
         }
@@ -19610,7 +19610,7 @@ fn lower_cbgr_extended<'ctx>(
             let base_int = ctx
                 .builder()
                 .build_load(i64_ty, src_ptr, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP into the source fat reference {base_ptr, len} to read the total length at field 1 (offset 8)
             let len_ptr = unsafe {
                 ctx.builder()
@@ -19620,12 +19620,12 @@ fn lower_cbgr_extended<'ctx>(
                         &[i64_ty.const_int(1, false)],
                         "len_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let total_len = ctx
                 .builder()
                 .build_load(i64_ty, len_ptr, "total_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let mid_val = mid.into_int_value();
 
             let module = ctx.get_module();
@@ -19640,44 +19640,44 @@ fn lower_cbgr_extended<'ctx>(
             let fr1 = checked_malloc_instr(ctx, module, i64_ty.const_int(16, false), "split1")?;
             ctx.builder()
                 .build_store(fr1, base_int)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP into the first-half fat reference {base_ptr, len} to write the length (= mid) at field 1 (offset 8)
             let fr1_len_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, fr1, &[i64_ty.const_int(1, false)], "fr1_len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(fr1_len_ptr, mid_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst1, fr1.into());
 
             // Second half: [base + mid*8, total_len - mid)
             let offset = ctx
                 .builder()
                 .build_int_mul(mid_val, i64_ty.const_int(8, false), "mid_off")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let new_base = ctx
                 .builder()
                 .build_int_add(base_int.into_int_value(), offset, "split2_base")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let new_len = ctx
                 .builder()
                 .build_int_sub(total_len.into_int_value(), mid_val, "split2_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let fr2 = checked_malloc_instr(ctx, module, i64_ty.const_int(16, false), "split2")?;
             ctx.builder()
                 .build_store(fr2, new_base)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP into the second-half fat reference {base_ptr, len} to write the length (= total - mid) at field 1 (offset 8)
             let fr2_len_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, fr2, &[i64_ty.const_int(1, false)], "fr2_len")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(fr2_len_ptr, new_len)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst2, fr2.into());
             Ok(())
         }
@@ -19786,19 +19786,19 @@ fn lower_cbgr_extended<'ctx>(
             let ptr_as_int = ctx
                 .builder()
                 .build_ptr_to_int(src_pv, i64_ty, "ptr_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(fat, ptr_as_int)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // SAFETY: GEP into the 16-byte fat reference {ptr, metadata} to write the metadata/length at field 1 (offset 8)
             let meta_ptr = unsafe {
                 ctx.builder()
                     .build_in_bounds_gep(i64_ty, fat, &[i64_ty.const_int(1, false)], "meta_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_store(meta_ptr, metadata.into_int_value())
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, fat.into());
             Ok(())
         }
@@ -19815,11 +19815,11 @@ fn lower_cbgr_extended<'ctx>(
             let ptr_int = ctx
                 .builder()
                 .build_load(i64_ty, fat_pv, "ptr_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let thin = ctx
                 .builder()
                 .build_int_to_ptr(ptr_int.into_int_value(), ptr_ty, "thin_ref")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, thin.into());
             Ok(())
         }
@@ -19877,7 +19877,7 @@ fn lower_cbgr_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(refcount_fn, &[src.into()], "refcount")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("RefCount: expected return value"))?;
@@ -19901,7 +19901,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(is_valid_fn, &[ref_as_i64.into()], "cbgr_fat_valid")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19910,7 +19910,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_fat_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             } else {
                 // C fallback: verum_cbgr_check_fat(FatRef*) -> i32
@@ -19927,12 +19927,12 @@ fn lower_cbgr_extended<'ctx>(
                 } else {
                     ctx.builder()
                         .build_int_to_ptr(src.into_int_value(), ptr_ty, "fat_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let result = ctx
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check_fat")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19941,7 +19941,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_fat_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             }
             Ok(())
@@ -19965,7 +19965,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(can_write_fn, &[ref_as_i64.into()], "cbgr_can_write")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -19974,7 +19974,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_write_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             } else {
                 // C fallback: verum_cbgr_check_write(ThinRef*) -> i32
@@ -19993,12 +19993,12 @@ fn lower_cbgr_extended<'ctx>(
                 } else {
                     ctx.builder()
                         .build_int_to_ptr(src.into_int_value(), ptr_ty, "thin_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let result = ctx
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check_write")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -20007,7 +20007,7 @@ fn lower_cbgr_extended<'ctx>(
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_write_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, extended.into());
             }
             Ok(())
@@ -20031,7 +20031,7 @@ fn lower_cbgr_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(newgen_fn, &[], "new_gen")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -20054,7 +20054,7 @@ fn lower_cbgr_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_cbgr_invalidate", fn_type, None));
             ctx.builder()
                 .build_call(invalidate_fn, &[src.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x52 => {
@@ -20073,7 +20073,7 @@ fn lower_cbgr_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(caps_fn, &[ref_as_i64.into()], "caps")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -20082,7 +20082,7 @@ fn lower_cbgr_extended<'ctx>(
                 let caps_i64 = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "caps_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, caps_i64.into());
             } else {
                 // Direct memory read fallback (original implementation)
@@ -20090,25 +20090,25 @@ fn lower_cbgr_extended<'ctx>(
                 let base_int = ctx
                     .builder()
                     .build_ptr_to_int(src.into_pointer_value(), i64_ty, "src_int")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let caps_ptr = ctx
                     .builder()
                     .build_int_to_ptr(
                         ctx.builder()
                             .build_int_add(base_int, header_offset, "caps_off")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                            .or_llvm_err()?,
                         ctx.types().ptr_type(),
                         "caps_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let caps_val = ctx
                     .builder()
                     .build_load(ctx.llvm_context().i32_type(), caps_ptr, "epoch_caps")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let caps_i64 = ctx
                     .builder()
                     .build_int_z_extend(caps_val.into_int_value(), i64_ty, "caps_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst, caps_i64.into());
             }
             Ok(())
@@ -20142,7 +20142,7 @@ fn lower_cbgr_extended<'ctx>(
                 // Call revoke — return value (Result) is ignored
                 ctx.builder()
                     .build_call(revoke_fn, &[ref_as_i64.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             } else {
                 // C fallback: verum_cbgr_revoke(void* ptr) -> void
                 let ptr_ty = ctx.types().ptr_type();
@@ -20155,11 +20155,11 @@ fn lower_cbgr_extended<'ctx>(
                 } else {
                     ctx.builder()
                         .build_int_to_ptr(src.into_int_value(), ptr_ty, "revoke_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.builder()
                     .build_call(revoke_fn, &[ptr_val.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             Ok(())
         }
@@ -20181,11 +20181,11 @@ fn lower_cbgr_extended<'ctx>(
             } else {
                 ctx.builder()
                     .build_int_to_ptr(src.into_int_value(), ptr_ty, "root_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.builder()
                 .build_call(root_fn, &[ptr_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -20215,14 +20215,14 @@ fn lower_cbgr_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(f, &[size.into()], "alloc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("Alloc: expected return value"))?;
             let ptr_as_i64 = ctx
                 .builder()
                 .build_ptr_to_int(result.into_pointer_value(), i64_ty, "alloc_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, ptr_as_i64.into());
             Ok(())
         }
@@ -20251,7 +20251,7 @@ fn lower_cbgr_extended<'ctx>(
             let ptr_val = as_ptr(ctx, ptr, "dealloc_ptr")?;
             ctx.builder()
                 .build_call(f, &[ptr_val.into(), size.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x63 => {
@@ -20279,7 +20279,7 @@ fn lower_cbgr_extended<'ctx>(
             let ptr_val = as_ptr(ctx, ptr, "sz_ptr")?;
             ctx.builder()
                 .build_call(f, &[ptr_val.into(), size.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -20323,7 +20323,7 @@ fn lower_mem_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "mem_alloc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("MemAlloc: expected return value"))?;
@@ -20346,7 +20346,7 @@ fn lower_mem_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "mem_alloc_zeroed")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -20358,11 +20358,11 @@ fn lower_mem_extended<'ctx>(
                 BasicValueEnum::IntValue(iv) => ctx
                     .builder()
                     .build_int_to_ptr(iv, ptr_ty, "alloc_z_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 other => ctx
                     .builder()
                     .build_int_to_ptr(as_i64(ctx, other, "alloc_z_val")?, ptr_ty, "alloc_z_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
             };
             let i8_ty = ctx.llvm_context().i8_type();
             let memset_fn_type = ctx.types().void_type().fn_type(
@@ -20388,7 +20388,7 @@ fn lower_mem_extended<'ctx>(
                     ],
                     "",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -20409,7 +20409,7 @@ fn lower_mem_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_cbgr_deallocate", fn_type, None));
             ctx.builder()
                 .build_call(free_fn, &[ptr_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x03 => {
@@ -20436,7 +20436,7 @@ fn lower_mem_extended<'ctx>(
                     &[ptr_val.into(), new_size.into()],
                     "mem_realloc",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("MemRealloc: expected return value"))?;
@@ -20457,17 +20457,17 @@ fn lower_mem_extended<'ctx>(
             let a_val = ctx
                 .builder()
                 .build_load(i64_ty, a_ptr, "swap_a_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let b_val = ctx
                 .builder()
                 .build_load(i64_ty, b_ptr, "swap_b_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(a_ptr, b_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(b_ptr, a_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x05 => {
@@ -20483,10 +20483,10 @@ fn lower_mem_extended<'ctx>(
             let old_val = ctx
                 .builder()
                 .build_load(i64_ty, ptr_val, "old_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(ptr_val, new_val)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, old_val);
             Ok(())
         }
@@ -20520,7 +20520,7 @@ fn lower_mem_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(alloc_fn, &[cap_i64.into()], "byte_list_packed")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -20559,136 +20559,136 @@ fn lower_char_extended<'ctx>(
             let upper_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(65, false), "ge_A")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let upper_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(90, false), "le_Z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_upper = ctx
                 .builder()
                 .build_and(upper_lo, upper_hi, "is_upper")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lower_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(97, false), "ge_a")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lower_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(122, false), "le_z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_lower = ctx
                 .builder()
                 .build_and(lower_lo, lower_hi, "is_lower")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(is_upper, is_lower, "is_alpha")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x01 => {
             // IsDigit: ch >= '0' && ch <= '9'
             let lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(48, false), "ge_0")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(57, false), "le_9")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_and(lo, hi, "is_digit")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x02 => {
             // IsAlphanumeric: IsAlpha || IsDigit
             let upper_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(65, false), "ge_A")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let upper_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(90, false), "le_Z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_upper = ctx
                 .builder()
                 .build_and(upper_lo, upper_hi, "is_upper")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lower_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(97, false), "ge_a")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lower_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(122, false), "le_z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_lower = ctx
                 .builder()
                 .build_and(lower_lo, lower_hi, "is_lower")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_alpha = ctx
                 .builder()
                 .build_or(is_upper, is_lower, "is_alpha")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let dig_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(48, false), "ge_0")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let dig_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(57, false), "le_9")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_dig = ctx
                 .builder()
                 .build_and(dig_lo, dig_hi, "is_dig")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(is_alpha, is_dig, "is_alnum")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x03 => {
             // IsWhitespace: ch == 32 || ch == 9 || ch == 10 || ch == 13 || ch == 12 || ch == 11
             let is_space = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(32, false), "is_sp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_tab = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(9, false), "is_tab")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_nl = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(10, false), "is_nl")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_cr = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(13, false), "is_cr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_ff = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(12, false), "is_ff")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_vt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, ch, i64_ty.const_int(11, false), "is_vt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a = ctx
                 .builder()
                 .build_or(is_space, is_tab, "ws1")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let b = ctx
                 .builder()
                 .build_or(is_nl, is_cr, "ws2")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let c = ctx
                 .builder()
                 .build_or(is_ff, is_vt, "ws3")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ab = ctx
                 .builder()
                 .build_or(a, b, "ws12")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(ab, c, "is_ws")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x04 => {
             // IsControl: ch <= 0x1F || ch == 0x7F
@@ -20700,7 +20700,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x1F, false),
                     "le_1f",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let del = ctx
                 .builder()
                 .build_int_compare(
@@ -20709,10 +20709,10 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x7F, false),
                     "is_del",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(lo, del, "is_ctrl")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x05 => {
             // IsPunctuation: IsGraphic && !IsAlphanumeric && !IsSpace
@@ -20725,7 +20725,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x21, false),
                     "ge_21",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r1_hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20734,11 +20734,11 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x2F, false),
                     "le_2f",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r1 = ctx
                 .builder()
                 .build_and(r1_lo, r1_hi, "r1")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r2_lo = ctx
                 .builder()
                 .build_int_compare(
@@ -20747,7 +20747,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x3A, false),
                     "ge_3a",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r2_hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20756,11 +20756,11 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x40, false),
                     "le_40",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r2 = ctx
                 .builder()
                 .build_and(r2_lo, r2_hi, "r2")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r3_lo = ctx
                 .builder()
                 .build_int_compare(
@@ -20769,7 +20769,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x5B, false),
                     "ge_5b",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r3_hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20778,11 +20778,11 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x60, false),
                     "le_60",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r3 = ctx
                 .builder()
                 .build_and(r3_lo, r3_hi, "r3")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r4_lo = ctx
                 .builder()
                 .build_int_compare(
@@ -20791,7 +20791,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x7B, false),
                     "ge_7b",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r4_hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20800,22 +20800,22 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x7E, false),
                     "le_7e",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let r4 = ctx
                 .builder()
                 .build_and(r4_lo, r4_hi, "r4")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a = ctx
                 .builder()
                 .build_or(r1, r2, "p12")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let b = ctx
                 .builder()
                 .build_or(r3, r4, "p34")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(a, b, "is_punct")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x06 => {
             // IsGraphic: ch >= 0x21 && ch <= 0x7E (visible ASCII)
@@ -20827,7 +20827,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x21, false),
                     "ge_21",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20836,98 +20836,98 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x7E, false),
                     "le_7e",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_and(lo, hi, "is_graphic")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x07 => {
             // IsHexDigit: IsDigit || (ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f')
             let dig_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(48, false), "ge_0")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let dig_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(57, false), "le_9")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_dig = ctx
                 .builder()
                 .build_and(dig_lo, dig_hi, "is_dig")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let uf_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(65, false), "ge_A")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let uf_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(70, false), "le_F")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_uf = ctx
                 .builder()
                 .build_and(uf_lo, uf_hi, "is_uf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lf_lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(97, false), "ge_a")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let lf_hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(102, false), "le_f")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_lf = ctx
                 .builder()
                 .build_and(lf_lo, lf_hi, "is_lf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let a = ctx
                 .builder()
                 .build_or(is_dig, is_uf, "hex12")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_or(a, is_lf, "is_hex")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x08 => {
             // IsLowercase: ch >= 'a' && ch <= 'z'
             let lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(97, false), "ge_a")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(122, false), "le_z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_and(lo, hi, "is_lower")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x09 => {
             // IsUppercase: ch >= 'A' && ch <= 'Z'
             let lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(65, false), "ge_A")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(90, false), "le_Z")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_and(lo, hi, "is_upper")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x0A => {
             // IsAscii: ch >= 0 && ch <= 127
             let lo = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGE, ch, i64_ty.const_int(0, false), "ge_0")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let hi = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLE, ch, i64_ty.const_int(127, false), "le_7f")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_and(lo, hi, "is_ascii")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
         0x10 | 0x11 => {
             // ToUppercase (0x10) / ToLowercase (0x11) — return converted char as i64
@@ -20944,7 +20944,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(src_lo, false),
                     "ge_src",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let in_range_hi = ctx
                 .builder()
                 .build_int_compare(
@@ -20953,25 +20953,25 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(src_hi, false),
                     "le_src",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let in_range = ctx
                 .builder()
                 .build_and(in_range_lo, in_range_hi, "in_range")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let delta_val = i64_ty.const_int(delta, false);
             let converted = if sub_op == 0x10 {
                 ctx.builder()
                     .build_int_sub(ch, delta_val, "to_upper")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 ctx.builder()
                     .build_int_add(ch, delta_val, "to_lower")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let result = ctx
                 .builder()
                 .build_select(in_range, converted, ch, "case_conv")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             ctx.set_register(dst, result.into());
             return Ok(());
@@ -21009,19 +21009,19 @@ fn lower_char_extended<'ctx>(
             let alpha_bool = ctx
                 .builder()
                 .build_int_compare(IntPredicate::NE, alpha, i64_ty.const_zero(), "alpha_nz")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let num_bool = ctx
                 .builder()
                 .build_int_compare(IntPredicate::NE, numeric, i64_ty.const_zero(), "num_nz")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let either = ctx
                 .builder()
                 .build_or(alpha_bool, num_bool, "alnum")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_int_z_extend(either, i64_ty, "alnum_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             return Ok(());
         }
@@ -21035,7 +21035,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x1F, false),
                     "le_1f",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ge_7f = ctx
                 .builder()
                 .build_int_compare(
@@ -21044,7 +21044,7 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x7F, false),
                     "ge_7f",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let le_9f = ctx
                 .builder()
                 .build_int_compare(
@@ -21053,19 +21053,19 @@ fn lower_char_extended<'ctx>(
                     i64_ty.const_int(0x9F, false),
                     "le_9f",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let c1 = ctx
                 .builder()
                 .build_and(ge_7f, le_9f, "c1_range")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_ctrl = ctx
                 .builder()
                 .build_or(le_1f, c1, "is_ctrl")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_int_z_extend(is_ctrl, i64_ty, "ctrl_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             return Ok(());
         }
@@ -21096,7 +21096,7 @@ fn lower_char_extended<'ctx>(
                     let pack_ptr = ctx
                         .builder()
                         .build_int_to_ptr(bytes_val, ptr_type, "pack_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // SAFETY: GEP into the Pack/slice object to read the backing data pointer at offset 24 (past the 24-byte object header)
                     let backing_slot = unsafe {
                         ctx.builder()
@@ -21106,20 +21106,20 @@ fn lower_char_extended<'ctx>(
                                 &[i64_ty.const_int(24, false)],
                                 "backing_slot",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let backing_int = ctx
                         .builder()
                         .build_load(i64_ty, backing_slot, "backing_int")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value();
                     ctx.builder()
                         .build_int_to_ptr(backing_int, ptr_type, "bytes_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 } else {
                     ctx.builder()
                         .build_int_to_ptr(bytes_val, ptr_type, "bytes_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 // Inline LLVM IR decode — no C runtime dependency
                 let result = super::unicode_data::emit_utf8_decode_inline(ctx, bytes_ptr, idx_val)?;
@@ -21144,7 +21144,7 @@ fn lower_char_extended<'ctx>(
     let extended = ctx
         .builder()
         .build_int_z_extend(result, i64_ty, "char_ext")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, extended.into());
     Ok(())
 }
@@ -21207,23 +21207,23 @@ fn lower_simd_extended<'ctx>(
         // ====================================================================
         Some(SimdSubOpcode::Add) => lower_simd_binary_f64(ctx, operands, "fadd", |b, a, bv| {
             b.build_float_add(a, bv, "simd_add")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::Sub) => lower_simd_binary_f64(ctx, operands, "fsub", |b, a, bv| {
             b.build_float_sub(a, bv, "simd_sub")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::Mul) => lower_simd_binary_f64(ctx, operands, "fmul", |b, a, bv| {
             b.build_float_mul(a, bv, "simd_mul")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::Div) => lower_simd_binary_f64(ctx, operands, "fdiv", |b, a, bv| {
             b.build_float_div(a, bv, "simd_div")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::Rem) => lower_simd_binary_f64(ctx, operands, "frem", |b, a, bv| {
             b.build_float_rem(a, bv, "simd_rem")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
 
         // ====================================================================
@@ -21231,7 +21231,7 @@ fn lower_simd_extended<'ctx>(
         // ====================================================================
         Some(SimdSubOpcode::Neg) => lower_simd_unary_f64(ctx, operands, |b, v| {
             b.build_float_neg(v, "simd_neg")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::Abs)
         | Some(SimdSubOpcode::Sqrt)
@@ -21256,7 +21256,7 @@ fn lower_simd_extended<'ctx>(
                         });
                     ctx.builder()
                         .build_call(func, &[val.into()], "simd_abs")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("fabs returned void"))?
@@ -21271,7 +21271,7 @@ fn lower_simd_extended<'ctx>(
                         });
                     ctx.builder()
                         .build_call(func, &[val.into()], "simd_sqrt")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("sqrt returned void"))?
@@ -21280,7 +21280,7 @@ fn lower_simd_extended<'ctx>(
                     let one = f64_ty.const_float(1.0);
                     ctx.builder()
                         .build_float_div(one, val, "simd_recip")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into()
                 }
                 SimdSubOpcode::Rsqrt => {
@@ -21294,14 +21294,14 @@ fn lower_simd_extended<'ctx>(
                     let sqrt_val = ctx
                         .builder()
                         .build_call(func, &[val.into()], "sqrt_tmp")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .ok_or_else(|| LlvmLoweringError::internal("sqrt returned void"))?;
                     let one = f64_ty.const_float(1.0);
                     ctx.builder()
                         .build_float_div(one, sqrt_val.into_float_value(), "simd_rsqrt")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into()
                 }
                 _ => unreachable!(),
@@ -21328,7 +21328,7 @@ fn lower_simd_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into(), c.into()], "simd_fma")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("fma returned void"))?;
@@ -21340,19 +21340,19 @@ fn lower_simd_extended<'ctx>(
         Some(SimdSubOpcode::Min) => lower_simd_binary_f64(ctx, operands, "fmin", |b, a, bv| {
             let cmp = b
                 .build_float_compare(verum_llvm::FloatPredicate::OLT, a, bv, "min_cmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let sel = b
                 .build_select(cmp, a, bv, "simd_min")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(sel.into_float_value())
         }),
         Some(SimdSubOpcode::Max) => lower_simd_binary_f64(ctx, operands, "fmax", |b, a, bv| {
             let cmp = b
                 .build_float_compare(verum_llvm::FloatPredicate::OGT, a, bv, "max_cmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let sel = b
                 .build_select(cmp, a, bv, "simd_max")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(sel.into_float_value())
         }),
 
@@ -21408,11 +21408,11 @@ fn lower_simd_extended<'ctx>(
             let cond = ctx
                 .builder()
                 .build_int_compare(IntPredicate::NE, mask, zero, "sel_cond")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_select(cond, a, b, "simd_select")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -21422,15 +21422,15 @@ fn lower_simd_extended<'ctx>(
         // ====================================================================
         Some(SimdSubOpcode::BitwiseAnd) => lower_simd_binary_i64(ctx, operands, |b, a, bv| {
             b.build_and(a, bv, "simd_and")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::BitwiseOr) => lower_simd_binary_i64(ctx, operands, |b, a, bv| {
             b.build_or(a, bv, "simd_or")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::BitwiseXor) => lower_simd_binary_i64(ctx, operands, |b, a, bv| {
             b.build_xor(a, bv, "simd_xor")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::BitwiseNot) => {
             if operands.len() < 2 {
@@ -21441,17 +21441,17 @@ fn lower_simd_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_not(src, "simd_not")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
         Some(SimdSubOpcode::ShiftLeft) => lower_simd_binary_i64(ctx, operands, |b, a, bv| {
             b.build_left_shift(a, bv, "simd_shl")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
         Some(SimdSubOpcode::ShiftRight) => lower_simd_binary_i64(ctx, operands, |b, a, bv| {
             b.build_right_shift(a, bv, false, "simd_shr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }),
 
         // ====================================================================
@@ -21528,11 +21528,11 @@ fn lower_simd_extended<'ctx>(
             let not_b = ctx
                 .builder()
                 .build_xor(b, neg_one, "andnot_notb")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let res = ctx
                 .builder()
                 .build_and(a, not_b, "andnot_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, res.into());
             Ok(())
         }
@@ -21576,13 +21576,13 @@ fn lower_simd_extended<'ctx>(
                 let bits = as_i64(ctx, src, "ftoi_bits")?;
                 ctx.builder()
                     .build_bit_cast(bits, ctx.types().f64_type(), "ftoi_cast")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into_float_value()
             };
             let res = ctx
                 .builder()
                 .build_float_to_signed_int(f64_val, i64_ty, "simd_ftoi")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, res.into());
             Ok(())
         }
@@ -21596,7 +21596,7 @@ fn lower_simd_extended<'ctx>(
             let res = ctx
                 .builder()
                 .build_signed_int_to_float(i, f64_ty, "simd_itof")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, res.into());
             Ok(())
         }
@@ -21625,11 +21625,11 @@ fn lower_simd_extended<'ctx>(
             let is_zero = ctx
                 .builder()
                 .build_int_compare(IntPredicate::EQ, src, zero, "mft_zero")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let result = ctx
                 .builder()
                 .build_select(is_zero, neg_one, zero, "mft_result")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -21658,7 +21658,7 @@ fn lower_simd_extended<'ctx>(
             let res = ctx
                 .builder()
                 .build_right_shift(a, b, true, "simd_asr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst, res.into());
             Ok(())
         }
@@ -21756,11 +21756,11 @@ fn lower_simd_cmp_f64<'ctx>(
     let cmp = ctx
         .builder()
         .build_float_compare(pred, a, b, "simd_cmp")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let result = ctx
         .builder()
         .build_int_z_extend(cmp, ctx.types().i64_type(), "simd_cmp_i64")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.set_register(dst, result.into());
     Ok(())
 }
@@ -21792,7 +21792,7 @@ fn lower_log_extended<'ctx>(
             let level = i64_ty.const_int(sub_op as u64, false);
             ctx.builder()
                 .build_call(log_fn, &[level.into(), val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x10 => {
@@ -21814,7 +21814,7 @@ fn lower_log_extended<'ctx>(
             let level = i64_ty.const_int(0, false); // Info level
             ctx.builder()
                 .build_call(log_fn, &[level.into(), val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x20 => {
@@ -21826,7 +21826,7 @@ fn lower_log_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_log_flush", fn_type, None));
             ctx.builder()
                 .build_call(flush_fn, &[], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x21 => {
@@ -21843,7 +21843,7 @@ fn lower_log_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_log_set_level", fn_type, None));
             ctx.builder()
                 .build_call(set_fn, &[val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         0x22 => {
@@ -21861,7 +21861,7 @@ fn lower_log_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(get_fn, &[], "log_level")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("GetLevel: expected return value"))?;
@@ -21947,10 +21947,10 @@ fn lower_extended<'ctx>(
             };
             ctx.builder()
                 .build_call(exit_fn, &[code_i64.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_unreachable()
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
         Some(ExtendedSubOpcode::MakeVariantTyped) => {
@@ -22155,7 +22155,7 @@ fn lower_cubical_extended<'ctx>(
     let call_site = ctx
         .builder()
         .build_call(cubical_fn, &arg_vals, "cubical_call")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     if let Some(ret) = call_site.try_as_basic_value().basic() {
         ctx.set_register(dst.0, ret);
@@ -22192,7 +22192,7 @@ fn build_tensor_shape_array<'ctx>(
     let alloca = ctx
         .builder()
         .build_alloca(array_ty, name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     for (i, reg) in shape.iter().enumerate() {
         let v = as_i64(ctx, ctx.get_register(reg.0)?, &format!("{name}_{i}"))?;
         let idx = i64_ty.const_int(i as u64, false);
@@ -22205,16 +22205,16 @@ fn build_tensor_shape_array<'ctx>(
                     &[i64_ty.const_zero(), idx],
                     &format!("{name}_gep{i}"),
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         ctx.builder()
             .build_store(gep, v)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
     }
     let ptr_as_i64 = ctx
         .builder()
         .build_ptr_to_int(alloca, i64_ty, &format!("{name}_ptr_i64"))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok((ptr_as_i64, len_val))
 }
 
@@ -22236,7 +22236,7 @@ fn build_tensor_perm_array<'ctx>(
     let alloca = ctx
         .builder()
         .build_alloca(array_ty, name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     for (i, byte) in perm.iter().enumerate() {
         let v = i8_ty.const_int(*byte as u64, false);
         let idx = i64_ty.const_int(i as u64, false);
@@ -22249,16 +22249,16 @@ fn build_tensor_perm_array<'ctx>(
                     &[i64_ty.const_zero(), idx],
                     &format!("{name}_gep{i}"),
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         ctx.builder()
             .build_store(gep, v)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
     }
     let ptr_as_i64 = ctx
         .builder()
         .build_ptr_to_int(alloca, i64_ty, &format!("{name}_ptr_i64"))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok((ptr_as_i64, len_val))
 }
 
@@ -22315,7 +22315,7 @@ fn lower_tensor_simple_call<'ctx>(
     let result = ctx
         .builder()
         .build_call(f, &args, fn_name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -22341,11 +22341,11 @@ fn lower_tensor_multi_result<'ctx>(
     let slots = ctx
         .builder()
         .build_alloca(slot_array_ty, &format!("{fn_name}_slots"))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let slots_i64 = ctx
         .builder()
         .build_ptr_to_int(slots, i64_ty, &format!("{fn_name}_slots_i64"))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
         Vec::with_capacity(regs.len() + scalars.len() + 1);
@@ -22367,7 +22367,7 @@ fn lower_tensor_multi_result<'ctx>(
         .unwrap_or_else(|| module.add_function(fn_name, fn_type, None));
     ctx.builder()
         .build_call(f, &args, "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Read each slot back into its dst register.
     for (i, dst) in dsts.iter().enumerate() {
@@ -22380,12 +22380,12 @@ fn lower_tensor_multi_result<'ctx>(
                     &[i64_ty.const_zero(), i64_ty.const_int(i as u64, false)],
                     &format!("{fn_name}_slot{i}_gep"),
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let v = ctx
             .builder()
             .build_load(i64_ty, gep, &format!("{fn_name}_slot{i}"))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, v);
     }
     Ok(())
@@ -22416,7 +22416,7 @@ fn lower_tensor_n_inputs<'ctx>(
             &[tensors_ptr.into(), tensors_len.into(), scalar_val.into()],
             fn_name,
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .unwrap_or_else(|| i64_ty.const_zero().into());
@@ -22482,18 +22482,18 @@ fn build_overflow_intrinsic_pair<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("overflow intrinsic: expected return value"))?;
     let value = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 0, &format!("{}_val", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let flag_basic = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 1, &format!("{}_flag", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok((value, flag_basic.into_int_value()))
 }
 
@@ -22541,7 +22541,7 @@ fn build_maybe_int_wrap<'ctx>(
     // Branch: is_none → None, !is_none → Some.
     ctx.builder()
         .build_conditional_branch(is_none, none_bb, some_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Some path: alloc Maybe.Some(tag=1, field_count=1) + store payload.
     ctx.builder().position_at_end(some_bb);
@@ -22550,10 +22550,10 @@ fn build_maybe_int_wrap<'ctx>(
     let some_int = ctx
         .builder()
         .build_ptr_to_int(some_ptr, i64_ty, &format!("{}_some_int", label))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // None path: alloc Maybe.None(tag=0, field_count=0).
     ctx.builder().position_at_end(none_bb);
@@ -22561,17 +22561,17 @@ fn build_maybe_int_wrap<'ctx>(
     let none_int = ctx
         .builder()
         .build_ptr_to_int(none_ptr, i64_ty, &format!("{}_none_int", label))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_unconditional_branch(merge_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Merge: phi node selects Some/None.
     ctx.builder().position_at_end(merge_bb);
     let phi = ctx
         .builder()
         .build_phi(i64_ty, &format!("{}_result", label))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     phi.add_incoming(&[(&some_int, some_bb), (&none_int, none_bb)]);
     Ok(phi.as_basic_value())
 }
@@ -22598,7 +22598,7 @@ fn build_overflowing_tuple<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -22607,16 +22607,16 @@ fn build_overflowing_tuple<'ctx>(
     let val = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 0, &format!("{}_val", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let flag = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 1, &format!("{}_flag", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     // Zero-extend i1 flag to i64
     let flag_i64 = ctx
         .builder()
         .build_int_z_extend(flag.into_int_value(), i64_ty, &format!("{}_flag_ext", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     // Allocate 2-element tuple: malloc(16)
     let ptr_type = ctx.types().ptr_type();
     let alloc_fn = module.get_function("verum_alloc").unwrap_or_else(|| {
@@ -22630,7 +22630,7 @@ fn build_overflowing_tuple<'ctx>(
             &[i64_ty.const_int(16, false).into()],
             &format!("{}_tuple", name),
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("verum_alloc: expected return value"))?
@@ -22638,7 +22638,7 @@ fn build_overflowing_tuple<'ctx>(
     // Store value at offset 0
     ctx.builder()
         .build_store(tuple_ptr, val.into_int_value())
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     // Store flag at offset 1 (8 bytes)
     // SAFETY: GEP into the 16-byte result pair {value, flag} to write the success/failure flag at field 1 (offset 8)
     let flag_slot = unsafe {
@@ -22649,16 +22649,16 @@ fn build_overflowing_tuple<'ctx>(
                 &[i64_ty.const_int(1, false)],
                 &format!("{}_flag_slot", name),
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     };
     ctx.builder()
         .build_store(flag_slot, flag_i64)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     // Return pointer as i64
     let ptr_val = ctx
         .builder()
         .build_ptr_to_int(tuple_ptr, i64_ty, &format!("{}_ptr", name))
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok(ptr_val.into())
 }
 
@@ -22679,7 +22679,7 @@ fn build_binary_intrinsic<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -22704,7 +22704,7 @@ fn build_unary_intrinsic<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -22732,7 +22732,7 @@ fn build_unary_intrinsic_with_poison<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into(), is_zero_poison.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -22756,7 +22756,7 @@ fn as_f64<'ctx>(
             let bitcast = ctx
                 .builder()
                 .build_bit_cast(i, f64_ty, name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(bitcast.into_float_value())
         }
         BasicValueEnum::PointerValue(p) => {
@@ -22774,11 +22774,11 @@ fn as_f64<'ctx>(
             let as_int = ctx
                 .builder()
                 .build_ptr_to_int(p, i64_ty, &format!("{}_p2i", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let bitcast = ctx
                 .builder()
                 .build_bit_cast(as_int, f64_ty, name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(bitcast.into_float_value())
         }
         BasicValueEnum::StructValue(s) => {
@@ -22791,7 +22791,7 @@ fn as_f64<'ctx>(
             let field0 = ctx
                 .builder()
                 .build_extract_value(s, 0, &format!("{}_struct_f0", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Recurse — field 0 may itself be Float/Int/Pointer.
             return as_f64(ctx, field0, name);
         }
@@ -22852,13 +22852,13 @@ fn coerce_value<'ctx>(
                         Ok(ctx
                             .builder()
                             .build_int_z_extend(i, target_int, name)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                             .into())
                     } else if src_bits > dst_bits {
                         Ok(ctx
                             .builder()
                             .build_int_truncate(i, target_int, name)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                             .into())
                     } else {
                         Ok(val)
@@ -22867,7 +22867,7 @@ fn coerce_value<'ctx>(
                 BVE::PointerValue(p) => Ok(ctx
                     .builder()
                     .build_ptr_to_int(p, target_int, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into()),
                 BVE::FloatValue(f) => {
                     // Use bitcast (not fptosi) to preserve float bit pattern.
@@ -22878,14 +22878,14 @@ fn coerce_value<'ctx>(
                         Ok(ctx
                             .builder()
                             .build_bit_cast(f, target_int, name)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                             .into_int_value()
                             .into())
                     } else {
                         Ok(ctx
                             .builder()
                             .build_float_to_signed_int(f, target_int, name)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                             .into())
                     }
                 }
@@ -22898,12 +22898,12 @@ fn coerce_value<'ctx>(
                     let ptr_val = ctx
                         .builder()
                         .build_extract_value(s, 0, "cbgr_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     if let BasicValueEnum::PointerValue(p) = ptr_val {
                         Ok(ctx
                             .builder()
                             .build_ptr_to_int(p, target_int, name)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                             .into())
                     } else {
                         Ok(target_int.const_zero().into())
@@ -22929,7 +22929,7 @@ fn coerce_value<'ctx>(
                     Ok(ctx
                         .builder()
                         .build_bit_cast(i, target_float, name)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?)
+                        .or_llvm_err()?)
                 }
                 _ => Ok(target_float.const_float(0.0).into()),
             }
@@ -22940,7 +22940,7 @@ fn coerce_value<'ctx>(
                 BVE::IntValue(i) => Ok(ctx
                     .builder()
                     .build_int_to_ptr(i, target_ptr, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into()),
                 BVE::StructValue(s) => {
                     // CBGR ref struct {ptr, i32, i32} — extract the pointer (field 0)
@@ -22948,7 +22948,7 @@ fn coerce_value<'ctx>(
                         let ptr_val = ctx
                             .builder()
                             .build_extract_value(s, 0, &format!("{}_cbgr_ptr", name))
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         if let BasicValueEnum::PointerValue(_) = ptr_val {
                             Ok(ptr_val)
                         } else {
@@ -22994,7 +22994,7 @@ fn lower_math_unary_f64<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -23034,7 +23034,7 @@ fn lower_math_binary_f64<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -23178,7 +23178,7 @@ fn lower_ffi_extended<'ctx>(
             let result_i64 = ctx
                 .builder()
                 .build_int_s_extend(result, i64_type, "memcmp_sext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             ctx.set_register(dst_reg, result_i64.into());
             Ok(())
@@ -23256,7 +23256,7 @@ fn lower_ffi_extended<'ctx>(
             let errno_i64 = ctx
                 .builder()
                 .build_int_s_extend(errno_val, i64_type, "errno_sext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             ctx.set_register(dst_reg, errno_i64.into());
             Ok(())
@@ -23278,7 +23278,7 @@ fn lower_ffi_extended<'ctx>(
             let value_i32 = if value.get_type().get_bit_width() > 32 {
                 ctx.builder()
                     .build_int_truncate(value, i32_type, "errno_trunc")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 value
             };
@@ -23342,7 +23342,7 @@ fn lower_ffi_extended<'ctx>(
                     BasicValueEnum::PointerValue(pv) => ctx
                         .builder()
                         .build_ptr_to_int(pv, ctx.types().i64_type(), "deref_generic")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into(),
                     _ => val, // Already i64 (from alloca load) — pass through
                 };
@@ -23376,7 +23376,7 @@ fn lower_ffi_extended<'ctx>(
             let value_i64 = if value.get_type().get_bit_width() < 64 {
                 ctx.builder()
                     .build_int_s_extend(value, i64_type, "deref_sext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 value
             };
@@ -23599,7 +23599,7 @@ fn lower_ffi_extended<'ctx>(
                                 let cast = ctx
                                     .builder()
                                     .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
-                                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                                    .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
                                 let it = expected_ty.into_int_type();
@@ -23630,7 +23630,7 @@ fn lower_ffi_extended<'ctx>(
                                 let cast = ctx
                                     .builder()
                                     .build_bit_cast(arg_val, ft, "ffi_bitcast_f")
-                                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                                    .or_llvm_err()?;
                                 cast
                             } else {
                                 arg_val
@@ -23667,7 +23667,7 @@ fn lower_ffi_extended<'ctx>(
             let builder = ctx.builder();
             let call_site = builder
                 .build_call(llvm_fn, &args, "ffi_call")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Set calling convention on call site
             call_site.set_call_convention(calling_convention);
@@ -23769,7 +23769,7 @@ fn lower_ffi_extended<'ctx>(
                                 let cast = ctx
                                     .builder()
                                     .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
-                                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                                    .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
                                 let it = expected_ty.into_int_type();
@@ -23814,7 +23814,7 @@ fn lower_ffi_extended<'ctx>(
             let builder = ctx.builder();
             let call_site = builder
                 .build_call(llvm_fn, &args, "ffi_variadic_call")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Store return value
             if let Some(ret_val) = call_site.try_as_basic_value().basic() {
@@ -23896,7 +23896,7 @@ fn lower_ffi_extended<'ctx>(
                                 let cast = ctx
                                     .builder()
                                     .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
-                                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                                    .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
                                 let it = expected_ty.into_int_type();
@@ -23941,7 +23941,7 @@ fn lower_ffi_extended<'ctx>(
             let builder = ctx.builder();
             let call_site = builder
                 .build_indirect_call(fn_type, fn_ptr, &args, "ffi_indirect_call")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Set C calling convention (default for indirect)
             call_site.set_call_convention(ffi_subop_to_calling_convention(SystemSubOpcode::CallFfiC));
@@ -24184,7 +24184,7 @@ fn lower_ffi_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(get_last_error_fn, &[], "win_last_error")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -24200,7 +24200,7 @@ fn lower_ffi_extended<'ctx>(
                         i64_ty,
                         "last_error_i64",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst_reg, extended.into());
                 return Ok(());
             }
@@ -24231,7 +24231,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(rand_fn, &[], "random_u64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("RandomU64: expected return value"))?;
@@ -24256,7 +24256,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(rand_fn, &[], "random_float")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("RandomFloat: expected return value"))?;
@@ -24283,7 +24283,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "new_byte_array")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24308,7 +24308,7 @@ fn lower_ffi_extended<'ctx>(
             let elem_ptr = unsafe {
                 ctx.builder()
                     .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_elem_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.set_register(dst_reg, elem_ptr.into());
             Ok(())
@@ -24329,17 +24329,17 @@ fn lower_ffi_extended<'ctx>(
             let elem_ptr = unsafe {
                 ctx.builder()
                     .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_load_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let byte_val = ctx
                 .builder()
                 .build_load(i8_ty, elem_ptr, "ba_byte")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i64_ty = ctx.types().i64_type();
             let extended = ctx
                 .builder()
                 .build_int_z_extend(byte_val.into_int_value(), i64_ty, "ba_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst_reg, extended.into());
             Ok(())
         }
@@ -24359,15 +24359,15 @@ fn lower_ffi_extended<'ctx>(
             let elem_ptr = unsafe {
                 ctx.builder()
                     .build_gep(i8_ty, base_ptr, &[index.into_int_value()], "ba_store_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let truncated = ctx
                 .builder()
                 .build_int_truncate(value.into_int_value(), i8_ty, "ba_trunc")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(elem_ptr, truncated)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -24396,7 +24396,7 @@ fn lower_ffi_extended<'ctx>(
                 let result = ctx
                     .builder()
                     .build_call(alloc_fn, &[size.into()], "new_typed_array")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -24412,7 +24412,7 @@ fn lower_ffi_extended<'ctx>(
                 let elem_ptr = unsafe {
                     ctx.builder()
                         .build_gep(i64_ty, base_ptr, &[index.into_int_value()], "ta_elem_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 ctx.set_register(dst_reg, elem_ptr.into());
             }
@@ -24454,7 +24454,7 @@ fn lower_ffi_extended<'ctx>(
             let field_ptr = unsafe {
                 ctx.builder()
                     .build_gep(i8_ty, obj_ptr, &[offset_const], "sf_field_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             ctx.set_register(dst_reg, field_ptr.into());
             Ok(())
@@ -24497,7 +24497,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(time_fn, &[], "mono_nanos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24523,7 +24523,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(time_fn, &[], "real_nanos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24552,7 +24552,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(time_fn, &[], "raw_nanos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24575,7 +24575,7 @@ fn lower_ffi_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
             ctx.builder()
                 .build_call(sleep_fn, &[nanos.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -24598,7 +24598,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(time_fn, &[], "cpu_nanos")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24625,7 +24625,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(pid_fn, &[], "getpid")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("SysGetpid: expected return value"))?;
@@ -24649,7 +24649,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(tid_fn, &[], "gettid")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("SysGettid: expected return value"))?;
@@ -24692,7 +24692,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(mmap_fn, &args, "mmap")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("SysMmap: expected return value"))?;
@@ -24719,7 +24719,7 @@ fn lower_ffi_extended<'ctx>(
                 .unwrap_or_else(|| module.add_function("verum_sys_munmap", fn_type, None));
             ctx.builder()
                 .build_call(munmap_fn, &[addr.into(), length.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             Ok(())
         }
 
@@ -24745,7 +24745,7 @@ fn lower_ffi_extended<'ctx>(
                     &[addr.into(), length.into(), advice.into()],
                     "madvise",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("SysMadvise: expected return value"))?;
@@ -24776,7 +24776,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(getentropy_fn, &[buf.into(), length.into()], "getentropy")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -24834,7 +24834,7 @@ fn lower_ffi_extended<'ctx>(
             let ptr = ctx
                 .builder()
                 .build_call(alloc_fn, &[size_val.into()], "cbgr_alloc_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("cbgr_alloc returned no value"))?;
@@ -24865,7 +24865,7 @@ fn lower_ffi_extended<'ctx>(
             let ptr_val = as_ptr(ctx, raw, "cbgr_dealloc_ptr")?;
             ctx.builder()
                 .build_call(dealloc_fn, &[ptr_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let _ = i64_ty;
             Ok(())
         }
@@ -24908,7 +24908,7 @@ fn lower_ffi_extended<'ctx>(
                     &[addr_val.into(), expected_val.into(), timeout_val.into()],
                     "futex_wait",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -24939,7 +24939,7 @@ fn lower_ffi_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(wake_fn, &[addr_val.into(), count_val.into()], "futex_wake")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -24967,7 +24967,7 @@ fn lower_ffi_extended<'ctx>(
             let addr_val = as_i64(ctx, ctx.get_register(addr_reg)?, "spinlock_addr")?;
             ctx.builder()
                 .build_call(lock_fn, &[addr_val.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst_reg, i64_type.const_int(0, false).into());
             Ok(())
         }
@@ -25056,7 +25056,7 @@ fn safe_int_div<'ctx>(
     let is_zero = ctx
         .builder()
         .build_int_compare(verum_llvm::IntPredicate::EQ, rhs, zero, "div_zero_check")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let parent = ctx
         .builder()
@@ -25072,7 +25072,7 @@ fn safe_int_div<'ctx>(
 
     ctx.builder()
         .build_conditional_branch(is_zero, panic_bb, safe_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Panic block: puts("...") + _exit(1) — unified with interpreter
     ctx.builder().position_at_end(panic_bb);
@@ -25096,23 +25096,23 @@ fn safe_int_div<'ctx>(
     let msg_ptr = ctx
         .builder()
         .build_global_string_ptr("panic: integer division by zero", "div_zero_msg")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Safe block: do the division
     ctx.builder().position_at_end(safe_bb);
     let result = ctx
         .builder()
         .build_int_signed_div(lhs, rhs, name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     Ok(result)
 }
@@ -25132,7 +25132,7 @@ fn safe_int_rem<'ctx>(
     let is_zero = ctx
         .builder()
         .build_int_compare(verum_llvm::IntPredicate::EQ, rhs, zero, "rem_zero_check")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let parent = ctx
         .builder()
@@ -25148,7 +25148,7 @@ fn safe_int_rem<'ctx>(
 
     ctx.builder()
         .build_conditional_branch(is_zero, panic_bb, safe_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Panic block
     ctx.builder().position_at_end(panic_bb);
@@ -25172,23 +25172,23 @@ fn safe_int_rem<'ctx>(
     let msg_ptr = ctx
         .builder()
         .build_global_string_ptr("panic: integer remainder by zero", "rem_zero_msg")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     ctx.builder()
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Safe block
     ctx.builder().position_at_end(safe_bb);
     let result = ctx
         .builder()
         .build_int_signed_rem(lhs, rhs, name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     Ok(result)
 }
@@ -25225,20 +25225,20 @@ fn lower_int_pow<'ctx>(
     let is_neg = ctx
         .builder()
         .build_int_compare(IntPredicate::SLT, exp, zero, "exp_neg")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // For negative exponents, go directly to exit with result = 0
     // This matches interpreter semantics where negative int powers give 0
     ctx.builder()
         .build_conditional_branch(is_neg, exit_block, loop_block)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Exit block phi for negative case
     ctx.builder().position_at_end(exit_block);
     let phi_result = ctx
         .builder()
         .build_phi(i64_type, "pow_result")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     phi_result.add_incoming(&[(&zero, entry_block)]);
 
     // Loop header: check if exp > 0
@@ -25246,15 +25246,15 @@ fn lower_int_pow<'ctx>(
     let result_phi = ctx
         .builder()
         .build_phi(i64_type, "result")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let base_phi = ctx
         .builder()
         .build_phi(i64_type, "base_cur")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let exp_phi = ctx
         .builder()
         .build_phi(i64_type, "exp_cur")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Initial values from entry
     result_phi.add_incoming(&[(&one, entry_block)]);
@@ -25269,11 +25269,11 @@ fn lower_int_pow<'ctx>(
     let exp_positive = ctx
         .builder()
         .build_int_compare(IntPredicate::SGT, exp_val, zero, "exp_pos")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.builder()
         .build_conditional_branch(exp_positive, body_block, exit_block)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Add incoming edge for loop exit
     phi_result.add_incoming(&[(&result_val, loop_block)]);
@@ -25283,42 +25283,42 @@ fn lower_int_pow<'ctx>(
     let exp_and_one = ctx
         .builder()
         .build_and(exp_val, one, "exp_and_1")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let is_odd = ctx
         .builder()
         .build_int_compare(IntPredicate::NE, exp_and_one, zero, "is_odd")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let new_result_if_odd = ctx
         .builder()
         .build_int_mul(result_val, base_val, "result_mul")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     let new_result = ctx
         .builder()
         .build_select(is_odd, new_result_if_odd, result_val, "result_select")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .into_int_value();
 
     ctx.builder()
         .build_unconditional_branch(square_block)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Square block: base *= base; exp >>= 1
     ctx.builder().position_at_end(square_block);
     let new_base = ctx
         .builder()
         .build_int_mul(base_val, base_val, "base_squared")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let new_exp = ctx
         .builder()
         .build_right_shift(exp_val, one, false, "exp_shr")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Loop back
     ctx.builder()
         .build_unconditional_branch(loop_block)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Add incoming edges from body/square
     result_phi.add_incoming(&[(&new_result, square_block)]);
@@ -25353,7 +25353,7 @@ fn lower_float_pow<'ctx>(
     let result = ctx
         .builder()
         .build_call(pow_fn, &[base.into(), exp.into()], "pow_call")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal("llvm.pow.f64 should return f64"))?
@@ -25384,14 +25384,14 @@ fn lower_throw<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, error_reg: Reg) -> Res
         if iv.get_type().get_bit_width() != 64 {
             ctx.builder()
                 .build_int_z_extend(iv, i64_type, "throw_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         } else {
             iv
         }
     } else if error_value.is_pointer_value() {
         ctx.builder()
             .build_ptr_to_int(error_value.into_pointer_value(), i64_type, "throw_p2i")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     } else {
         i64_type.const_zero()
     };
@@ -25409,12 +25409,12 @@ fn lower_throw<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, error_reg: Reg) -> Res
 
     ctx.builder()
         .build_call(throw_fn, &[throw_val.into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Mark as unreachable (longjmp never returns)
     ctx.builder()
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     Ok(())
 }
@@ -25458,7 +25458,7 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 
     ctx.builder()
         .build_call(pop_fn, &[], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     Ok(())
 }
@@ -25481,7 +25481,7 @@ fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> R
     let exception_value = ctx
         .builder()
         .build_call(get_fn, &[], "exception_value")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .or_internal("exception_get returned void")?;
@@ -25527,7 +25527,7 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
         let result = ctx
             .builder()
             .build_call(bridge_fn, &[slot_val.into()], "ctx_value")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("bridge ctx_get: expected return value"))?;
@@ -25570,7 +25570,7 @@ fn lower_ctx_provide<'ctx>(
         let slot_val = i64_type.const_int(ctx_type as u64, false);
         ctx.builder()
             .build_call(bridge_fn, &[slot_val.into(), value_val.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         // Still track provide depth for fallback CtxEnd compatibility
         ctx.increment_ctx_provide_depth();
         return Ok(());
@@ -25613,7 +25613,7 @@ fn lower_ctx_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
     {
         ctx.builder()
             .build_call(bridge_fn, &[stack_depth.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         return Ok(());
     }
 
@@ -25651,7 +25651,7 @@ fn lower_ctx_check_negative<'ctx>(
             let slot_val = i64_type.const_int(ctx_type as u64, false);
             ctx.builder()
                 .build_call(bridge_fn, &[slot_val.into()], "neg_ctx_check")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_zero().into())
@@ -25671,7 +25671,7 @@ fn lower_ctx_check_negative<'ctx>(
             i64_type.const_zero(),
             "ctx_neg_violation",
         )
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Step 3: Conditional branch -- if present, panic; otherwise continue
     let current_fn = ctx.function();
@@ -25680,7 +25680,7 @@ fn lower_ctx_check_negative<'ctx>(
 
     ctx.builder()
         .build_conditional_branch(is_present, panic_bb, continue_bb)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Step 4: Panic block -- build error message and call abort/panic
     ctx.builder().position_at_end(panic_bb);
@@ -25720,19 +25720,19 @@ fn lower_ctx_check_negative<'ctx>(
     let msg_val = ctx
         .builder()
         .build_global_string_ptr(&msg, "neg_ctx_msg")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.builder()
         .build_call(puts_fn, &[msg_val.as_pointer_value().into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.builder()
         .build_call(exit_fn, &[i32_type.const_int(1, false).into()], "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.builder()
         .build_unreachable()
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     // Step 5: Continue block -- context not present, constraint satisfied
     ctx.builder().position_at_end(continue_bb);
@@ -26110,16 +26110,16 @@ fn lower_get_element<'ctx>(
                     &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                     "backing_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let backing_int = ctx
             .builder()
             .build_load(i64_type, backing_slot, "backing_int")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         ctx.builder()
             .build_int_to_ptr(backing_int, ptr_type, "backing_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     } else if is_slice {
         // Slice: arr_ptr points to a Pack object with 24-byte header.
         // Field 0 (ptr) is at offset 24 (OBJECT_HEADER_SIZE).
@@ -26134,16 +26134,16 @@ fn lower_get_element<'ctx>(
                     &[i64_type.const_int(24, false)],
                     "slice_ptr_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let ptr_val = ctx
             .builder()
             .build_load(i64_type, ptr_slot, "slice_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         ctx.builder()
             .build_int_to_ptr(ptr_val, ptr_type, "slice_data_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     } else {
         arr_ptr
     };
@@ -26155,17 +26155,17 @@ fn lower_get_element<'ctx>(
         let byte_ptr = unsafe {
             ctx.builder()
                 .build_in_bounds_gep(i8_type, data_ptr, &[index], "byte_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let byte_val = ctx
             .builder()
             .build_load(i8_type, byte_ptr, "byte_load")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let element = ctx
             .builder()
             .build_int_z_extend(byte_val, i64_type, "byte_zext")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, element.into());
         return Ok(());
     }
@@ -26175,13 +26175,13 @@ fn lower_get_element<'ctx>(
     let elem_ptr = unsafe {
         ctx.builder()
             .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     };
 
     let element = ctx
         .builder()
         .build_load(i64_type, elem_ptr, "elem_load")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     ctx.set_register(dst.0, element);
     // Save element pointer for Ref — enables references into heap-allocated
@@ -26238,16 +26238,16 @@ fn lower_set_element<'ctx>(
                     &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
                     "backing_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let backing_int = ctx
             .builder()
             .build_load(i64_type, backing_slot, "backing_int")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         ctx.builder()
             .build_int_to_ptr(backing_int, ptr_type, "backing_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     } else {
         arr_ptr
     };
@@ -26257,12 +26257,12 @@ fn lower_set_element<'ctx>(
     let elem_ptr = unsafe {
         ctx.builder()
             .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     };
 
     ctx.builder()
         .build_store(elem_ptr, val)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     Ok(())
 }
@@ -26306,12 +26306,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                         "list_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "list_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26329,12 +26329,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(super::runtime::MAP_LEN_OFFSET, false)],
                         "map_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "map_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26354,17 +26354,17 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
                         "set_inner_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let inner_i64 = ctx
                 .builder()
                 .build_load(i64_type, inner_slot, "set_inner_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
             let inner_ptr = ctx
                 .builder()
                 .build_int_to_ptr(inner_i64, ctx.types().ptr_type(), "inner_map_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Step 2: read len from inner Map's field 1
             // SAFETY: GEP into the inner Map object (NewG layout) to read the length at MAP_LEN_OFFSET (32)
             let len_slot = unsafe {
@@ -26375,12 +26375,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(super::runtime::MAP_LEN_OFFSET, false)],
                         "map_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "set_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26397,12 +26397,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(super::runtime::DEQUE_LEN_OFFSET, false)],
                         "deque_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "deque_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26419,12 +26419,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(super::runtime::TEXT_LEN_OFFSET, false)],
                         "text_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "text_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26434,7 +26434,7 @@ fn lower_len<'ctx>(
             let len = ctx
                 .builder()
                 .build_load(i64_type, arr_ptr, "chan_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26451,12 +26451,12 @@ fn lower_len<'ctx>(
                         &[i64_type.const_int(32, false)],
                         "slice_len_slot",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let len = ctx
                 .builder()
                 .build_load(i64_type, len_slot, "slice_len")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, len);
             return Ok(());
         }
@@ -26481,12 +26481,12 @@ fn lower_len<'ctx>(
                     &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
                     "len_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let len = ctx
             .builder()
             .build_load(i64_type, len_slot, "arr_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26506,12 +26506,12 @@ fn lower_len<'ctx>(
                     &[i64_type.const_int(32, false)],
                     "slice_len_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let len = ctx
             .builder()
             .build_load(i64_type, len_slot, "slice_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26522,7 +26522,7 @@ fn lower_len<'ctx>(
         let len = ctx
             .builder()
             .build_load(i64_type, arr_ptr, "arr_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26545,12 +26545,12 @@ fn lower_len<'ctx>(
                     &[i64_type.const_int(super::runtime::MAP_LEN_OFFSET, false)],
                     "coll_len_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let len = ctx
             .builder()
             .build_load(i64_type, len_slot, "arr_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26568,12 +26568,12 @@ fn lower_len<'ctx>(
                     &[i64_type.const_int(super::runtime::DEQUE_LEN_OFFSET, false)],
                     "deque_len_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let len = ctx
             .builder()
             .build_load(i64_type, len_slot, "deque_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26592,12 +26592,12 @@ fn lower_len<'ctx>(
                     &[i64_type.const_int(super::runtime::TEXT_LEN_OFFSET, false)],
                     "text_len_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let len = ctx
             .builder()
             .build_load(i64_type, len_slot, "text_len")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.set_register(dst.0, len);
         return Ok(());
     }
@@ -26614,7 +26614,7 @@ fn lower_len<'ctx>(
     let result = ctx
         .builder()
         .build_call(generic_len_fn, &[arr_i64.into()], "generic_len")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     let len = result
         .try_as_basic_value()
         .basic()
@@ -26708,7 +26708,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_error = ctx
                         .builder()
                         .build_int_compare(IntPredicate::EQ, ret_int, neg_one, "ffi_negone_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     let current_fn = ctx.function();
                     let err_bb = ctx.llvm_context().append_basic_block(current_fn, "ffi_err");
@@ -26719,7 +26719,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
 
                     ctx.builder()
                         .build_conditional_branch(is_error, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Error path: read errno → negate → use as result
                     ctx.builder().position_at_end(err_bb);
@@ -26732,14 +26732,14 @@ fn emit_ffi_error_protocol_check<'ctx>(
                             ctx.llvm_context().i64_type(),
                             "ffi_errno_ext",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_errno = ctx
                         .builder()
                         .build_int_neg(errno_i64, "ffi_neg_errno")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Success path: widen result to i64
                     ctx.builder().position_at_end(ok_bb);
@@ -26750,20 +26750,20 @@ fn emit_ffi_error_protocol_check<'ctx>(
                                 ctx.llvm_context().i64_type(),
                                 "ffi_ok_ext",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         ret_int
                     };
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Continuation: phi selects between error and success values
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&neg_errno, err_bb), (&ok_val, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -26783,7 +26783,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_null = ctx
                         .builder()
                         .build_is_null(ret_ptr, "ffi_null_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     let current_fn = ctx.function();
                     let err_bb = ctx
@@ -26798,7 +26798,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
 
                     ctx.builder()
                         .build_conditional_branch(is_null, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Error: read errno, store as negative i64
                     ctx.builder().position_at_end(err_bb);
@@ -26811,31 +26811,31 @@ fn emit_ffi_error_protocol_check<'ctx>(
                             ctx.llvm_context().i64_type(),
                             "ffi_errno_ext",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_errno = ctx
                         .builder()
                         .build_int_neg(errno_i64, "ffi_neg_errno")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Success: ptrtoint to i64
                     ctx.builder().position_at_end(ok_bb);
                     let ptr_as_int = ctx
                         .builder()
                         .build_ptr_to_int(ret_ptr, ctx.llvm_context().i64_type(), "ffi_ptr_int")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Continuation: phi
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&neg_errno, err_bb), (&ptr_as_int, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -26856,7 +26856,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_error = ctx
                         .builder()
                         .build_int_compare(IntPredicate::NE, ret_int, zero, "ffi_zero_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     let current_fn = ctx.function();
                     let err_bb = ctx
@@ -26869,7 +26869,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
 
                     ctx.builder()
                         .build_conditional_branch(is_error, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Error: negate the error code
                     ctx.builder().position_at_end(err_bb);
@@ -26880,31 +26880,31 @@ fn emit_ffi_error_protocol_check<'ctx>(
                                 ctx.llvm_context().i64_type(),
                                 "ffi_err_ext",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         ret_int
                     };
                     let neg_err = ctx
                         .builder()
                         .build_int_neg(err_i64, "ffi_neg_err")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Success: store 0
                     ctx.builder().position_at_end(ok_bb);
                     let zero_i64 = ctx.llvm_context().i64_type().const_zero();
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Continuation: phi
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&neg_err, err_bb), (&zero_i64, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -26924,7 +26924,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_error = ctx
                         .builder()
                         .build_int_compare(IntPredicate::SLT, ret_int, zero, "ffi_hresult_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let current_fn = ctx.function();
                     let err_bb = ctx
                         .llvm_context()
@@ -26937,7 +26937,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                         .append_basic_block(current_fn, "ffi_hrcont");
                     ctx.builder()
                         .build_conditional_branch(is_error, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Error: store HRESULT as negative i64
                     ctx.builder().position_at_end(err_bb);
                     let err_i64 = if ret_int.get_type().get_bit_width() < 64 {
@@ -26947,24 +26947,24 @@ fn emit_ffi_error_protocol_check<'ctx>(
                                 ctx.llvm_context().i64_type(),
                                 "ffi_hr_ext",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         ret_int
                     };
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Success: store 0
                     ctx.builder().position_at_end(ok_bb);
                     let zero_i64 = ctx.llvm_context().i64_type().const_zero();
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_hr_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&err_i64, err_bb), (&zero_i64, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -26986,7 +26986,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_error = ctx
                         .builder()
                         .build_int_compare(IntPredicate::EQ, ret_int, sentinel, "ffi_pattern_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let current_fn = ctx.function();
                     let err_bb = ctx
                         .llvm_context()
@@ -26997,7 +26997,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                         .append_basic_block(current_fn, "ffi_pcont");
                     ctx.builder()
                         .build_conditional_branch(is_error, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Error: read errno for the error code
                     ctx.builder().position_at_end(err_bb);
                     let mut ffi_helper = FfiLowering::new(ctx.llvm_context());
@@ -27009,14 +27009,14 @@ fn emit_ffi_error_protocol_check<'ctx>(
                             ctx.llvm_context().i64_type(),
                             "ffi_errno_ext",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_errno = ctx
                         .builder()
                         .build_int_neg(errno_i64, "ffi_neg_errno")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Success: widen to i64
                     ctx.builder().position_at_end(ok_bb);
                     let ok_val = if ret_int.get_type().get_bit_width() < 64 {
@@ -27026,18 +27026,18 @@ fn emit_ffi_error_protocol_check<'ctx>(
                                 ctx.llvm_context().i64_type(),
                                 "ffi_pok_ext",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     } else {
                         ret_int
                     };
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_p_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&neg_errno, err_bb), (&ok_val, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -27058,7 +27058,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                     let is_null = ctx
                         .builder()
                         .build_is_null(ret_ptr, "ffi_sentinel_chk")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let current_fn = ctx.function();
                     let err_bb = ctx
                         .llvm_context()
@@ -27069,7 +27069,7 @@ fn emit_ffi_error_protocol_check<'ctx>(
                         .append_basic_block(current_fn, "ffi_scont");
                     ctx.builder()
                         .build_conditional_branch(is_null, err_bb, ok_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder().position_at_end(err_bb);
                     let mut ffi_helper = FfiLowering::new(ctx.llvm_context());
                     let errno_val = ffi_helper.lower_get_errno(ctx.builder(), ctx.get_module())?;
@@ -27080,27 +27080,27 @@ fn emit_ffi_error_protocol_check<'ctx>(
                             ctx.llvm_context().i64_type(),
                             "ffi_errno_ext",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let neg_errno = ctx
                         .builder()
                         .build_int_neg(errno_i64, "ffi_neg_errno")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder().position_at_end(ok_bb);
                     let ptr_as_int = ctx
                         .builder()
                         .build_ptr_to_int(ret_ptr, ctx.llvm_context().i64_type(), "ffi_ptr_int")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_unconditional_branch(cont_bb)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder().position_at_end(cont_bb);
                     let phi = ctx
                         .builder()
                         .build_phi(ctx.llvm_context().i64_type(), "ffi_s_result")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     phi.add_incoming(&[(&neg_errno, err_bb), (&ptr_as_int, ok_bb)]);
                     ctx.set_register(ret_reg, phi.as_basic_value());
                 } else {
@@ -27372,7 +27372,7 @@ fn call_tensor_runtime_i64<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &call_args, result_name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| LlvmLoweringError::internal(format!("{}: expected return value", fn_name)))?
@@ -27396,7 +27396,7 @@ fn call_tensor_runtime_void<'ctx>(
     let call_args: Vec<BasicMetadataValueEnum> = args.iter().map(|a| (*a).into()).collect();
     ctx.builder()
         .build_call(func, &call_args, "")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
     Ok(())
 }
 
@@ -27419,7 +27419,7 @@ fn call_tensor_runtime_f64<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &call_args, result_name)
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .or_llvm_err()?
         .try_as_basic_value()
         .basic()
         .ok_or_else(|| {
@@ -27472,15 +27472,15 @@ fn lower_tensor_extended<'ctx>(
             let shape_alloca = ctx
                 .builder()
                 .build_alloca(i64_ty, "shape_1d")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(shape_alloca, shape_size)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Convert shape pointer to i64 — all verum_tensor_new params are i64
             let shape_i64 = ctx
                 .builder()
                 .build_ptr_to_int(shape_alloca, i64_ty, "shape_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ndim = i64_ty.const_int(1, false);
             let fn_type = i64_ty.fn_type(&[i64_ty.into(), i64_ty.into(), i64_ty.into()], false);
             let f = ctx
@@ -27493,7 +27493,7 @@ fn lower_tensor_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_call(f, &[ndim.into(), shape_i64.into(), dtype.into()], "tnew")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("NewFromArgs: expected return value"))?;
@@ -27508,15 +27508,15 @@ fn lower_tensor_extended<'ctx>(
             let shape_alloca = ctx
                 .builder()
                 .build_alloca(i64_ty, "fslice_shape")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(shape_alloca, shape_size)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Convert shape pointer to i64 — all verum_tensor_new params are i64
             let shape_i64 = ctx
                 .builder()
                 .build_ptr_to_int(shape_alloca, i64_ty, "fslice_shape_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ndim = i64_ty.const_int(1, false);
             let fn_type_new = i64_ty.fn_type(&[i64_ty.into(), i64_ty.into(), i64_ty.into()], false);
             let f_new = ctx
@@ -27533,7 +27533,7 @@ fn lower_tensor_extended<'ctx>(
                     &[ndim.into(), shape_i64.into(), dtype.into()],
                     "fslice_new",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -27555,7 +27555,7 @@ fn lower_tensor_extended<'ctx>(
             let data_f64 = ctx
                 .builder()
                 .build_signed_int_to_float(data_val, f64_ty, "data_f64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(
                     f_set,
@@ -27566,7 +27566,7 @@ fn lower_tensor_extended<'ctx>(
                     ],
                     "",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst_reg, tensor);
         }
         Some(TensorSubOpcode::BinopFromArgs) => {
@@ -27609,20 +27609,20 @@ fn lower_tensor_extended<'ctx>(
             let shape_alloca = ctx
                 .builder()
                 .build_alloca(i64_ty, "fill_shape")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(shape_alloca, shape_size)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ndim = i64_ty.const_int(1, false);
             let value_f64 = ctx
                 .builder()
                 .build_signed_int_to_float(fill_value, f64_ty, "fill_f64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Shape pointer → i64 to match verum_tensor_fill(ndim, shape_i64, value_f64, dtype)
             let shape_i64 = ctx
                 .builder()
                 .build_ptr_to_int(shape_alloca, i64_ty, "shape_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let fn_type = i64_ty.fn_type(
                 &[i64_ty.into(), i64_ty.into(), f64_ty.into(), i64_ty.into()],
                 false,
@@ -27646,7 +27646,7 @@ fn lower_tensor_extended<'ctx>(
                     ],
                     "tfill",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -27672,10 +27672,10 @@ fn lower_tensor_extended<'ctx>(
             let shape_alloca = ctx
                 .builder()
                 .build_alloca(i64_ty, "reshape_shape")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(shape_alloca, new_size)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let ndim = i64_ty.const_int(1, false);
             let fn_type = i64_ty.fn_type(&[i64_ty.into(), i64_ty.into(), ptr_ty.into()], false);
             let f = ctx
@@ -27692,7 +27692,7 @@ fn lower_tensor_extended<'ctx>(
                     &[tensor.into(), ndim.into(), shape_alloca.into()],
                     "reshape",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| {
@@ -27727,10 +27727,10 @@ fn lower_tensor_extended<'ctx>(
             let val_f64 = ctx
                 .builder()
                 .build_signed_int_to_float(val, f64_ty, "val_f64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(f, &[tensor.into(), idx.into(), val_f64.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst_reg, tensor.into());
         }
 
@@ -28362,10 +28362,10 @@ fn lower_tensor_extended<'ctx>(
             let val_f64 = ctx
                 .builder()
                 .build_signed_int_to_float(val, f64_ty, "val_f64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_call(f, &[tensor.into(), idx.into(), val_f64.into()], "")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst_reg, i64_ty.const_zero().into());
         }
         Some(TensorSubOpcode::Contiguous) => {
@@ -29637,7 +29637,7 @@ fn lower_load_const<'ctx>(
                 let data_global = ctx
                     .builder()
                     .build_global_string_ptr(s, &format!("verum_text_data_{}", const_id))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 let data_ptr_as_i64 = data_global
                     .as_pointer_value()
                     .const_to_int(i64_type);
@@ -29773,7 +29773,7 @@ fn lower_cmp_generic<'ctx>(
         let i64_type = ctx.types().i64_type();
         ctx.builder()
             .build_ptr_to_int(lhs.into_pointer_value(), i64_type, "cmpg_a_p2i")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into()
     } else {
         lhs
@@ -29782,7 +29782,7 @@ fn lower_cmp_generic<'ctx>(
         let i64_type = ctx.types().i64_type();
         ctx.builder()
             .build_ptr_to_int(rhs.into_pointer_value(), i64_type, "cmpg_b_p2i")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into()
     } else {
         rhs
@@ -29807,7 +29807,7 @@ fn lower_cmp_generic<'ctx>(
         let lhs_ptr_result = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[lhs_i64.into()], "cmp_a_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let lhs_ptr = lhs_ptr_result
             .try_as_basic_value()
             .basic()
@@ -29818,7 +29818,7 @@ fn lower_cmp_generic<'ctx>(
         let rhs_ptr_result = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[rhs_i64.into()], "cmp_b_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let rhs_ptr = rhs_ptr_result
             .try_as_basic_value()
             .basic()
@@ -29832,7 +29832,7 @@ fn lower_cmp_generic<'ctx>(
         let cmp_result = ctx
             .builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("strcmp: expected return value"))?;
@@ -29841,14 +29841,14 @@ fn lower_cmp_generic<'ctx>(
         if eq {
             ctx.builder()
                 .build_int_compare(IntPredicate::EQ, cmp_int, zero_i32, "streq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             let i64_type = ctx.types().i64_type();
             let cmp64 = ctx
                 .builder()
                 .build_int_s_extend(cmp_int, i64_type, "strcmp_ext")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             cmp64.into()
         }
     } else if lhs.is_int_value() && rhs.is_int_value() {
@@ -29863,13 +29863,13 @@ fn lower_cmp_generic<'ctx>(
                 lhs_int = ctx
                     .builder()
                     .build_int_z_extend(lhs_int, wider, "cmpg_lext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             if rw < 64 {
                 rhs_int = ctx
                     .builder()
                     .build_int_z_extend(rhs_int, wider, "cmpg_rext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
         }
         // Check if either operand has known type info — if not, use runtime
@@ -29899,7 +29899,7 @@ fn lower_cmp_generic<'ctx>(
                     &[lhs_int.into(), rhs_int.into()],
                     "generic_eq",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| LlvmLoweringError::internal("verum_generic_eq: no return value"))?
@@ -29907,13 +29907,13 @@ fn lower_cmp_generic<'ctx>(
             let zero_i64 = i64_type.const_zero();
             ctx.builder()
                 .build_int_compare(IntPredicate::NE, eq_result, zero_i64, "geq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else if eq {
             // Eq protocol: return bool (i1)
             ctx.builder()
                 .build_int_compare(IntPredicate::EQ, lhs_int, rhs_int, "geq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             // Ord protocol: return ordering as i64 (-1, 0, 1)
@@ -29921,11 +29921,11 @@ fn lower_cmp_generic<'ctx>(
             let lt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, lhs_int, rhs_int, "lt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, lhs_int, rhs_int, "gt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i64_type = ctx.types().i64_type();
             let neg_one = i64_type.const_int((-1i64) as u64, true);
             let zero = i64_type.const_int(0, false);
@@ -29934,11 +29934,11 @@ fn lower_cmp_generic<'ctx>(
             let gt_val = ctx
                 .builder()
                 .build_select(gt, one, zero, "gt_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Select: lt ? -1 : gt_val
             ctx.builder()
                 .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
     } else if lhs.is_float_value() && rhs.is_float_value() {
         let lhs_float = lhs.into_float_value();
@@ -29946,17 +29946,17 @@ fn lower_cmp_generic<'ctx>(
         if eq {
             ctx.builder()
                 .build_float_compare(FloatPredicate::OEQ, lhs_float, rhs_float, "geq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             let lt = ctx
                 .builder()
                 .build_float_compare(FloatPredicate::OLT, lhs_float, rhs_float, "lt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gt = ctx
                 .builder()
                 .build_float_compare(FloatPredicate::OGT, lhs_float, rhs_float, "gt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i64_type = ctx.types().i64_type();
             let neg_one = i64_type.const_int((-1i64) as u64, true);
             let zero = i64_type.const_int(0, false);
@@ -29964,10 +29964,10 @@ fn lower_cmp_generic<'ctx>(
             let gt_val = ctx
                 .builder()
                 .build_select(gt, one, zero, "gt_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
     } else if lhs.is_pointer_value() && rhs.is_pointer_value() {
         // Pointer comparison: extract char* via verum_text_get_ptr before strcmp.
@@ -29982,11 +29982,11 @@ fn lower_cmp_generic<'ctx>(
         let lhs_i64 = ctx
             .builder()
             .build_ptr_to_int(lhs_ptr_raw, i64_type, "cmpg_p2i_a")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let rhs_i64 = ctx
             .builder()
             .build_ptr_to_int(rhs_ptr_raw, i64_type, "cmpg_p2i_b")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let text_get_ptr_fn = ctx
             .get_module()
@@ -30000,7 +30000,7 @@ fn lower_cmp_generic<'ctx>(
         let lhs_ptr = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[lhs_i64.into()], "cmpg_ptr_a")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: expected return value"))?
@@ -30008,7 +30008,7 @@ fn lower_cmp_generic<'ctx>(
         let rhs_ptr = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[rhs_i64.into()], "cmpg_ptr_b")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: expected return value"))?
@@ -30022,7 +30022,7 @@ fn lower_cmp_generic<'ctx>(
         let cmp_result = ctx
             .builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("strcmp: expected return value"))?;
@@ -30032,7 +30032,7 @@ fn lower_cmp_generic<'ctx>(
         if eq {
             ctx.builder()
                 .build_int_compare(IntPredicate::EQ, cmp_int, zero_i32, "streq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             let neg_one = i64_type.const_int((-1i64) as u64, true);
@@ -30041,18 +30041,18 @@ fn lower_cmp_generic<'ctx>(
             let lt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, cmp_int, zero_i32, "str_lt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, cmp_int, zero_i32, "str_gt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gt_val: BasicValueEnum = ctx
                 .builder()
                 .build_select(gt, one, zero, "gt_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
     } else {
         // Fallback: convert both to i64 and do raw bit comparison
@@ -30061,17 +30061,17 @@ fn lower_cmp_generic<'ctx>(
         if eq {
             ctx.builder()
                 .build_int_compare(IntPredicate::EQ, lhs_i64, rhs_i64, "geq")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             let lt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SLT, lhs_i64, rhs_i64, "lt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let gt = ctx
                 .builder()
                 .build_int_compare(IntPredicate::SGT, lhs_i64, rhs_i64, "gt")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i64_type = ctx.types().i64_type();
             let neg_one = i64_type.const_int((-1i64) as u64, true);
             let zero = i64_type.const_int(0, false);
@@ -30079,10 +30079,10 @@ fn lower_cmp_generic<'ctx>(
             let gt_val: BasicValueEnum = ctx
                 .builder()
                 .build_select(gt, one, zero, "gt_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_select(lt, neg_one, gt_val.into_int_value(), "ord_sel")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         }
     };
     ctx.set_register(dst.0, result);
@@ -30106,7 +30106,7 @@ fn lower_get_field<'ctx>(
             let result = ctx
                 .builder()
                 .build_extract_value(sv, field_idx, &format!("field_{}", field_idx))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result);
         }
         BasicValueEnum::StructValue(sv) => {
@@ -30114,10 +30114,10 @@ fn lower_get_field<'ctx>(
             let ptr = ctx
                 .builder()
                 .build_alloca(sv.get_type(), "struct_tmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(ptr, sv)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i8_type = ctx.types().i8_type();
             let i64_type = ctx.types().i64_type();
             // SAFETY: GEP into a stack-allocated struct copy at field_idx * 8 bytes; the struct was just stored to this alloca and the field index is within bounds
@@ -30129,13 +30129,13 @@ fn lower_get_field<'ctx>(
                         &[i64_type.const_int(field_idx as u64 * 8, false)],
                         &format!("field_{}_ptr", field_idx),
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let i64_ty: BasicTypeEnum = i64_type.into();
             let result = ctx
                 .builder()
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result);
         }
         BasicValueEnum::PointerValue(ptr) => {
@@ -30162,13 +30162,13 @@ fn lower_get_field<'ctx>(
                         &[i64_type.const_int(offset, false)],
                         &format!("field_{}_ptr", field_idx),
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let i64_ty: BasicTypeEnum = i64_type.into();
             let result = ctx
                 .builder()
                 .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(dst.0, result);
         }
         BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 64 => {
@@ -30222,7 +30222,7 @@ fn lower_get_field<'ctx>(
                     let f64_val = ctx
                         .builder()
                         .build_bit_cast(iv, ctx.types().f64_type(), "newtype_f64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, f64_val);
                     ctx.mark_float_register(dst.0);
                 } else {
@@ -30237,7 +30237,7 @@ fn lower_get_field<'ctx>(
                 let mut ptr = ctx
                     .builder()
                     .build_int_to_ptr(iv, ptr_type, "i2p_getf")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 // Interior reference produced by `&list[i]` — the pointer
                 // addresses a List slot whose content is a Value. Load the
                 // slot once to recover the real heap pointer before reading
@@ -30247,12 +30247,12 @@ fn lower_get_field<'ctx>(
                     let slot_val = ctx
                         .builder()
                         .build_load(i64_type, ptr, "ilr_slot")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .into_int_value();
                     ptr = ctx
                         .builder()
                         .build_int_to_ptr(slot_val, ptr_type, "ilr_deref")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 let is_text = ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0);
                 let is_inline = ctx.is_inline_struct_register(obj.0);
@@ -30270,13 +30270,13 @@ fn lower_get_field<'ctx>(
                             &[i64_type.const_int(offset, false)],
                             &format!("field_{}_ptr", field_idx),
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                 };
                 let i64_ty: BasicTypeEnum = i64_type.into();
                 let result = ctx
                     .builder()
                     .build_load(i64_ty, field_ptr, &format!("field_{}", field_idx))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, result);
             } // end else (not newtype)
         }
@@ -30620,7 +30620,7 @@ fn lower_set_field<'ctx>(
                 let ptr = ctx
                     .builder()
                     .build_extract_value(sv, 0, "ref_ptr")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 if let BasicValueEnum::PointerValue(obj_ptr) = ptr {
                     let i8_type = ctx.types().i8_type();
                     let i64_type = ctx.types().i64_type();
@@ -30634,19 +30634,19 @@ fn lower_set_field<'ctx>(
                                 &[i64_type.const_int(offset, false)],
                                 &format!("ref_field_{}_ptr", field_idx),
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let val_i64 = as_i64(ctx, new_val, "setf_ref_val")?;
                     ctx.builder()
                         .build_store(field_ptr, val_i64)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
             } else {
                 // Stack struct with enough fields: use insert_value
                 let result = ctx
                     .builder()
                     .build_insert_value(sv, new_val, field_idx, &format!("field_{}", field_idx))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 use verum_llvm::values::BasicValue;
                 ctx.set_register(obj.0, result.as_basic_value_enum());
             }
@@ -30656,10 +30656,10 @@ fn lower_set_field<'ctx>(
             let ptr = ctx
                 .builder()
                 .build_alloca(sv.get_type(), "struct_tmp")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_store(ptr, sv)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let i8_type = ctx.types().i8_type();
             let i64_type = ctx.types().i64_type();
             // SAFETY: GEP into a stack-allocated struct copy at field_idx * 8 bytes to write a new field value; the alloca holds the full struct
@@ -30671,18 +30671,18 @@ fn lower_set_field<'ctx>(
                         &[i64_type.const_int(field_idx as u64 * 8, false)],
                         &format!("field_{}_ptr", field_idx),
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let val_i64 = as_i64(ctx, new_val, "set_f_val")?;
             ctx.builder()
                 .build_store(field_ptr, val_i64)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             // Reload the struct
             let struct_ty: BasicTypeEnum = sv.get_type().into();
             let reloaded = ctx
                 .builder()
                 .build_load(struct_ty, ptr, "reloaded")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.set_register(obj.0, reloaded);
         }
         BasicValueEnum::PointerValue(ptr) => {
@@ -30708,7 +30708,7 @@ fn lower_set_field<'ctx>(
                         &[i64_type.const_int(offset, false)],
                         &format!("field_{}_ptr", field_idx),
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             // Coerce value to i64 for storage
             let store_val: BasicValueEnum = match new_val {
@@ -30748,7 +30748,7 @@ fn lower_set_field<'ctx>(
             let ptr = ctx
                 .builder()
                 .build_int_to_ptr(iv, ptr_type, "i2p_setf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             let is_text = ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0);
             let is_inline = ctx.is_inline_struct_register(obj.0);
             let offset = if is_text || is_inline {
@@ -30765,7 +30765,7 @@ fn lower_set_field<'ctx>(
                         &[i64_type.const_int(offset, false)],
                         &format!("field_{}_ptr", field_idx),
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let store_val = as_i64(ctx, new_val, "setf_val")?;
             let _ = ctx.builder().build_store(field_ptr, store_val);
@@ -30823,17 +30823,17 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(1, false)],
                     "map_ptr_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let map_val = ctx
             .builder()
             .build_load(i64_type, f1, "map_val")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let map_ptr = ctx
             .builder()
             .build_int_to_ptr(map_val, ptr_type, "map_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Load current slot index from iter[2]
         // SAFETY: GEP into the 24-byte map iterator struct to read the current slot index at field 2 (offset 16)
@@ -30845,12 +30845,12 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(2, false)],
                     "slot_field",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let slot_idx = ctx
             .builder()
             .build_load(i64_type, f2, "slot_idx")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // Load entries_ptr from map[24] and cap from map[40]
@@ -30863,17 +30863,17 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(24, false)],
                     "entries_gep",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let entries_i64 = ctx
             .builder()
             .build_load(i64_type, entries_gep, "entries_i64")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let entries_ptr = ctx
             .builder()
             .build_int_to_ptr(entries_i64, ptr_type, "entries_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         // SAFETY: GEP into the Map object (NewG layout) to read the capacity at MAP_CAP_OFFSET (40)
         let cap_gep = unsafe {
             ctx.builder()
@@ -30883,12 +30883,12 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(40, false)],
                     "cap_gep",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let cap = ctx
             .builder()
             .build_load(i64_type, cap_gep, "cap")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // Call __verum_map_iter_next helper (emitted in runtime.rs)
@@ -30912,11 +30912,11 @@ fn lower_iter_next<'ctx>(
         let out_key = ctx
             .builder()
             .build_alloca(i64_type, "out_key")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let out_value = ctx
             .builder()
             .build_alloca(i64_type, "out_value")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let next_slot = ctx
             .builder()
@@ -30931,7 +30931,7 @@ fn lower_iter_next<'ctx>(
                 ],
                 "next_slot",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::internal("__verum_map_iter_next should return i64"))?
@@ -30940,29 +30940,29 @@ fn lower_iter_next<'ctx>(
         // Store updated slot back
         ctx.builder()
             .build_store(f2, next_slot)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // has_more = next_slot >= 0
         let neg_one = i64_type.const_int(u64::MAX, true); // -1
         let has_element = ctx
             .builder()
             .build_int_compare(verum_llvm::IntPredicate::NE, next_slot, neg_one, "has_elem")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let has_more = ctx
             .builder()
             .build_int_z_extend(has_element, i64_type, "has_more")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Load key and value
         let key = ctx
             .builder()
             .build_load(i64_type, out_key, "key")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let val = ctx
             .builder()
             .build_load(i64_type, out_value, "val")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // Create a 2-tuple object: [24-byte header][key: i64][value: i64] = 40 bytes
@@ -30980,11 +30980,11 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(16, false)],
                     "hdr_fc",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         ctx.builder()
             .build_store(hdr_fc, i64_type.const_int(2, false))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         // Store key at offset 24
         // SAFETY: GEP into the 40-byte key-value tuple to write the key at offset 24 (past the 24-byte header)
         let key_slot = unsafe {
@@ -30995,11 +30995,11 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(24, false)],
                     "key_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         ctx.builder()
             .build_store(key_slot, key)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         // Store value at offset 32
         // SAFETY: GEP into the 40-byte key-value tuple to write the value at offset 32 (second field after header)
         let val_slot = unsafe {
@@ -31010,24 +31010,24 @@ fn lower_iter_next<'ctx>(
                     &[i64_type.const_int(32, false)],
                     "val_slot",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         ctx.builder()
             .build_store(val_slot, val)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Convert tuple_ptr to i64 for register storage
         let tuple_as_int = ctx
             .builder()
             .build_ptr_to_int(tuple_ptr, i64_type, "tuple_int")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Return unit if no element, tuple otherwise
         let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = ctx
             .builder()
             .build_select(has_element, tuple_as_int, unit_tag, "iter_value")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         ctx.set_register(dst.0, value.into());
@@ -31050,27 +31050,27 @@ fn lower_iter_next<'ctx>(
         let tag_alloca = ctx
             .builder()
             .build_alloca(i64_type, "gen_iter_tag")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let val_alloca = ctx
             .builder()
             .build_alloca(i64_type, "gen_iter_val")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.builder()
             .build_call(
                 next_maybe_fn,
                 &[gen_val.into(), tag_alloca.into(), val_alloca.into()],
                 "",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let tag = ctx
             .builder()
             .build_load(i64_type, tag_alloca, "gen_tag")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         let value = ctx
             .builder()
             .build_load(i64_type, val_alloca, "gen_value")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
         ctx.set_register(dst.0, value.into());
         ctx.set_register(has_next.0, tag.into()); // tag: 1=Some (has more), 0=None (done)
@@ -31094,7 +31094,7 @@ fn lower_iter_next<'ctx>(
         let iter_as_i64 = ctx
             .builder()
             .build_ptr_to_int(iter_ptr, i64_type, "iter_self")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let has_next_name = format!("{}.has_next", type_name);
         let next_name = format!("{}.next", type_name);
@@ -31104,7 +31104,7 @@ fn lower_iter_next<'ctx>(
             let has_next_raw = ctx
                 .builder()
                 .build_call(has_next_fn, &[iter_as_i64.into()], "has_next_raw")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into())
@@ -31113,7 +31113,7 @@ fn lower_iter_next<'ctx>(
             let has_next_result = if has_next_raw.get_type().get_bit_width() == 1 {
                 ctx.builder()
                     .build_int_z_extend(has_next_raw, i64_type, "has_next_i64")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             } else {
                 has_next_raw
             };
@@ -31126,7 +31126,7 @@ fn lower_iter_next<'ctx>(
                     i64_type.const_int(0, false),
                     "has_next_bool",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             let entry_bb = ctx
                 .builder()
@@ -31141,7 +31141,7 @@ fn lower_iter_next<'ctx>(
 
             ctx.builder()
                 .build_conditional_branch(has_next_bool, then_bb, merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             ctx.builder().position_at_end(then_bb);
             let next_fn = module.get_function(&next_name).ok_or_else(|| {
@@ -31153,20 +31153,20 @@ fn lower_iter_next<'ctx>(
             let next_val = ctx
                 .builder()
                 .build_call(next_fn, &[iter_as_i64.into()], "next_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into())
                 .into_int_value();
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             ctx.builder().position_at_end(merge_bb);
             let phi = ctx
                 .builder()
                 .build_phi(i64_type, "iter_value")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             phi.add_incoming(&[
                 (&next_val, then_bb),
                 (&i64_type.const_int(0, false), entry_bb),
@@ -31205,7 +31205,7 @@ fn lower_iter_next<'ctx>(
             let maybe_val = ctx
                 .builder()
                 .build_call(next_fn, &[iter_as_i64.into()], "maybe_val")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into())
@@ -31216,7 +31216,7 @@ fn lower_iter_next<'ctx>(
             let maybe_ptr = ctx
                 .builder()
                 .build_int_to_ptr(maybe_val, ptr_type, "maybe_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             // Read tag at VARIANT_TAG_OFFSET (24): 0=None, 1=Some
             // SAFETY: GEP to access the variant tag at VARIANT_TAG_OFFSET (24 bytes); the Maybe object uses the standard variant layout with tag at this fixed offset
@@ -31228,12 +31228,12 @@ fn lower_iter_next<'ctx>(
                         &[i64_type.const_int(RuntimeLowering::VARIANT_TAG_OFFSET, false)],
                         "tag_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let tag = ctx
                 .builder()
                 .build_load(i64_type, tag_gep, "maybe_tag")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
 
             // Read payload at VARIANT_PAYLOAD_OFFSET (32): the value inside Some
@@ -31246,12 +31246,12 @@ fn lower_iter_next<'ctx>(
                         &[i64_type.const_int(RuntimeLowering::VARIANT_PAYLOAD_OFFSET, false)],
                         "payload_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
             };
             let payload = ctx
                 .builder()
                 .build_load(i64_type, payload_gep, "maybe_payload")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into_int_value();
 
             // tag=1 means Some (has_next=true), tag=0 means None (done)
@@ -31337,7 +31337,7 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                 let ptr_as_i64 = ctx
                     .builder()
                     .build_ptr_to_int(elem_ptr, ctx.types().i64_type(), "ref_elem")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, ptr_as_i64.into());
             } else {
                 // Create a fresh alloca and copy the current value into it.
@@ -31349,14 +31349,14 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                     let alloca = ctx
                         .builder()
                         .build_alloca(ctx.types().i64_type(), "ref_prim")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_store(alloca, iv)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let ptr_as_i64 = ctx
                         .builder()
                         .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, ptr_as_i64.into());
                 } else if let BasicValueEnum::PointerValue(pv) = val {
                     // PointerValue that's NOT a heap type — this is a generic
@@ -31368,18 +31368,18 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                     let iv = ctx
                         .builder()
                         .build_ptr_to_int(pv, ctx.types().i64_type(), "ref_ptrval")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let alloca = ctx
                         .builder()
                         .build_alloca(ctx.types().i64_type(), "ref_prim")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.builder()
                         .build_store(alloca, iv)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     let ptr_as_i64 = ctx
                         .builder()
                         .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     ctx.set_register(dst.0, ptr_as_i64.into());
                 } else {
                     // Float/other — pass through as fallback.
@@ -31420,19 +31420,19 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                 let alloca = ctx
                     .builder()
                     .build_alloca(ctx.types().i64_type(), "ref_prim")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(alloca, iv)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 alloca
             } else if let BasicValueEnum::FloatValue(fv) = src_val {
                 let alloca = ctx
                     .builder()
                     .build_alloca(ctx.types().f64_type(), "ref_prim_f")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(alloca, fv)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 alloca
             } else {
                 as_ptr(ctx, src_val, "ptr")?
@@ -31530,7 +31530,7 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
                 let slot_i64 = ctx
                     .builder()
                     .build_ptr_to_int(alloca_ptr, ctx.types().i64_type(), "refmut_alloca")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.set_register(dst.0, slot_i64.into());
             } else {
                 let ptr = as_ptr(ctx, ctx.get_register(src.0)?, "ptr")?;
@@ -31564,19 +31564,19 @@ fn lower_ref_mut<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) 
                 let alloca = ctx
                     .builder()
                     .build_alloca(ctx.types().i64_type(), "refmut_prim")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(alloca, iv)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 alloca
             } else if let BasicValueEnum::FloatValue(fv) = src_val {
                 let alloca = ctx
                     .builder()
                     .build_alloca(ctx.types().f64_type(), "refmut_prim_f")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_store(alloca, fv)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 alloca
             } else {
                 as_ptr(ctx, src_val, "ptr")?
@@ -31663,11 +31663,11 @@ fn lower_binary_generic<'ctx>(
             BinaryGenericOp::Mul => ctx.builder().build_float_mul(lhs_f, rhs_f, "gmul"),
             BinaryGenericOp::Div => ctx.builder().build_float_div(lhs_f, rhs_f, "gdiv"),
         }
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
         // Bitcast f64 to i64 for alloca storage
         ctx.builder()
             .build_bit_cast(val, i64_type, "gf2i")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
     } else if lhs.is_int_value() && rhs.is_int_value() {
         let lhs_int = lhs.into_int_value();
         let rhs_int = rhs.into_int_value();
@@ -31675,15 +31675,15 @@ fn lower_binary_generic<'ctx>(
             BinaryGenericOp::Add => ctx
                 .builder()
                 .build_int_add(lhs_int, rhs_int, "gadd")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                .or_llvm_err()?,
             BinaryGenericOp::Sub => ctx
                 .builder()
                 .build_int_sub(lhs_int, rhs_int, "gsub")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                .or_llvm_err()?,
             BinaryGenericOp::Mul => ctx
                 .builder()
                 .build_int_mul(lhs_int, rhs_int, "gmul")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                .or_llvm_err()?,
             BinaryGenericOp::Div => safe_int_div(ctx, lhs_int, rhs_int, "gdiv")?,
         };
         val.into()
@@ -31696,7 +31696,7 @@ fn lower_binary_generic<'ctx>(
             BinaryGenericOp::Mul => ctx.builder().build_float_mul(lhs_float, rhs_float, "gmul"),
             BinaryGenericOp::Div => ctx.builder().build_float_div(lhs_float, rhs_float, "gdiv"),
         }
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
         val.into()
     } else {
         // Protocol dispatch: look up method in VBC module by protocol_id
@@ -31776,7 +31776,7 @@ fn lower_binary_generic<'ctx>(
                     &[lhs_i64.into(), rhs_i64.into()],
                     "gproto_result",
                 )
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -31796,15 +31796,15 @@ fn lower_binary_generic<'ctx>(
                 BinaryGenericOp::Add => ctx
                     .builder()
                     .build_int_add(lhs_i64, rhs_i64, "gadd")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryGenericOp::Sub => ctx
                     .builder()
                     .build_int_sub(lhs_i64, rhs_i64, "gsub")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryGenericOp::Mul => ctx
                     .builder()
                     .build_int_mul(lhs_i64, rhs_i64, "gmul")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+                    .or_llvm_err()?,
                 BinaryGenericOp::Div => safe_int_div(ctx, lhs_i64, rhs_i64, "gdiv")?,
             };
             val.into()
@@ -31858,7 +31858,7 @@ fn lower_spawn<'ctx>(
                         i64_type,
                         "spawn_fn_ptr",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
 
                 if args.count <= 1 {
                     // Fast path: single-arg spawn via global thread pool
@@ -31885,7 +31885,7 @@ fn lower_spawn<'ctx>(
                             &[fn_ptr.into(), arg_i64.into()],
                             "pool_handle",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -31910,7 +31910,7 @@ fn lower_spawn<'ctx>(
                             &[i64_type.const_int(pack_size, false).into()],
                             "pack",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| ptr_type.const_null().into())
@@ -31919,7 +31919,7 @@ fn lower_spawn<'ctx>(
                     // Store func_ptr at offset 0
                     ctx.builder()
                         .build_store(pack_ptr, fn_ptr)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Store count at offset 8
                     // SAFETY: GEP into the thread spawn pack {fn_ptr, count, args...} to write the argument count at offset 8
                     let count_p = unsafe {
@@ -31930,11 +31930,11 @@ fn lower_spawn<'ctx>(
                                 &[i64_type.const_int(8, false)],
                                 "count_p",
                             )
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     ctx.builder()
                         .build_store(count_p, i64_type.const_int(count, false))
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     // Store args at offset 16+
                     for i in 0..args.count {
                         let reg_val = ctx.get_register(args.start.0 + i as u16)?;
@@ -31954,18 +31954,18 @@ fn lower_spawn<'ctx>(
                                     &[i64_type.const_int(arg_off, false)],
                                     &format!("arg_p_{}", i),
                                 )
-                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                .or_llvm_err()?
                         };
                         ctx.builder()
                             .build_store(arg_p, val_i64)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                     }
 
                     // Convert pack_ptr to i64 for pool submission
                     let pack_i64 = ctx
                         .builder()
                         .build_ptr_to_int(pack_ptr, i64_type, "pack_i64")
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Get trampoline function (verum_thread_spawn_multi handles
                     // unpacking args, calling func, and freeing the pack)
@@ -31982,7 +31982,7 @@ fn lower_spawn<'ctx>(
                             i64_type,
                             "tramp_ptr",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Submit trampoline(pack) to pool
                     let pool_submit_fn = module
@@ -31999,7 +31999,7 @@ fn lower_spawn<'ctx>(
                             &[tramp_ptr.into(), pack_i64.into()],
                             "pool_handle_multi",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                        .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
                         .unwrap_or_else(|| i64_type.const_int(0, false).into());
@@ -32037,7 +32037,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
         let ptr_result = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[text_i64.into()], "debug_str_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let ptr_val = ptr_result
             .try_as_basic_value()
             .basic()
@@ -32045,18 +32045,18 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             .unwrap_or(ptr_type.const_null());
         ctx.builder()
             .build_call(puts_fn, &[ptr_val.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
     } else if ctx.is_bool_register(value.0) {
         // Bool register: print "true" or "false"
         let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
         let true_str = ctx
             .builder()
             .build_global_string_ptr("true", "debug_bool_true")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let false_str = ctx
             .builder()
             .build_global_string_ptr("false", "debug_bool_false")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let bool_val = match val {
             BasicValueEnum::IntValue(v) => v,
             _ => i64_type.const_zero(),
@@ -32065,7 +32065,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
         let cond = ctx
             .builder()
             .build_int_truncate(bool_val, i1_type, "debug_bool_cond")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let selected = ctx
             .builder()
             .build_select(
@@ -32074,10 +32074,10 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                 false_str.as_pointer_value(),
                 "debug_bool_str",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.builder()
             .build_call(puts_fn, &[selected.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
     } else if ctx.is_float_register(value.0) {
         // Float register: use printf("%g\n", val)
         let f64_type = ctx.types().f64_type();
@@ -32089,14 +32089,14 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
         let fmt = ctx
             .builder()
             .build_global_string_ptr("%g\n", "fmt_float_debug")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         ctx.builder()
             .build_call(
                 printf_fn,
                 &[fmt.as_pointer_value().into(), f64_val.into()],
                 "",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
     } else {
         match val {
             BasicValueEnum::PointerValue(v) => {
@@ -32104,7 +32104,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                 let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
                 ctx.builder()
                     .build_call(puts_fn, &[v.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             BasicValueEnum::FloatValue(v) => {
                 // SSA mode — float is directly available as FloatValue
@@ -32115,10 +32115,10 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                 let fmt = ctx
                     .builder()
                     .build_global_string_ptr("%g\n", "fmt_float_debug2")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_call(printf_fn, &[fmt.as_pointer_value().into(), v.into()], "")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
             _ => {
                 // Integer debug: use printf("%ld\n", val)
@@ -32133,7 +32133,7 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                         } else {
                             ctx.builder()
                                 .build_int_z_extend(v, i64_type, "debug_ext")
-                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                .or_llvm_err()?
                         }
                     }
                     _ => i64_type.const_int(0, false),
@@ -32141,14 +32141,14 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
                 let fmt = ctx
                     .builder()
                     .build_global_string_ptr("%ld\n", "fmt_int_debug")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 ctx.builder()
                     .build_call(
                         printf_fn,
                         &[fmt.as_pointer_value().into(), i64_val.into()],
                         "",
                     )
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
             }
         }
     }
@@ -32195,7 +32195,7 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         let result = ctx
             .builder()
             .build_call(text_from_float_fn, &[f64_val.into()], "ftotext_result")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         if let Some(ret_val) = result.try_as_basic_value().basic() {
             ctx.set_register(dst.0, ret_val);
@@ -32214,11 +32214,11 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         let true_str = ctx
             .builder()
             .build_global_string_ptr("true", "bool_true_str")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let false_str = ctx
             .builder()
             .build_global_string_ptr("false", "bool_false_str")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Allocate Text objects for both
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
@@ -32238,7 +32238,7 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
                 ],
                 "true_text",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let false_text = ctx
             .builder()
             .build_call(
@@ -32250,7 +32250,7 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
                 ],
                 "false_text",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let true_val = true_text
             .try_as_basic_value()
@@ -32271,11 +32271,11 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         let cond = ctx
             .builder()
             .build_int_truncate(bool_val, i1_type, "bool_cond")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let result_val = ctx
             .builder()
             .build_select(cond, true_val, false_val, "bool_text")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         ctx.set_register(dst.0, result_val.into_int_value().into());
         ctx.mark_text_register(dst.0);
@@ -32295,14 +32295,14 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         BasicValueEnum::IntValue(v) => ctx
             .builder()
             .build_int_s_extend(v, i64_type, "tostr_ext")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
+            .or_llvm_err()?,
         _ => i64_type.const_int(0, false),
     };
 
     let result = ctx
         .builder()
         .build_call(text_from_int_fn, &[i64_val.into()], "itotext_result")
-        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+        .or_llvm_err()?;
 
     if let Some(ret_val) = result.try_as_basic_value().basic() {
         ctx.set_register(dst.0, ret_val);

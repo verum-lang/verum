@@ -55,7 +55,7 @@ use verum_llvm::module::Module;
 use verum_llvm::types::{BasicTypeEnum, IntType, PointerType, StructType};
 use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
 
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::types::RefTier;
 
 /// CBGR lowering context.
@@ -183,15 +183,15 @@ impl<'ctx> CbgrLowering<'ctx> {
         let ref_val = self.thin_ref_type.const_zero();
         let ref_val = builder
             .build_insert_value(ref_val, ptr, 0, "ref.ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, generation, 1, "ref.gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, epoch_caps, 2, "ref.caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
 
         Ok(ref_val)
@@ -230,15 +230,15 @@ impl<'ctx> CbgrLowering<'ctx> {
         let ref_val = self.thin_ref_type.const_zero();
         let ref_val = builder
             .build_insert_value(ref_val, ptr, 0, "ref.ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, zero_gen, 1, "ref.gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, zero_caps, 2, "ref.caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
 
         Ok(ref_val)
@@ -275,13 +275,13 @@ impl<'ctx> CbgrLowering<'ctx> {
         let header_ptr = unsafe {
             builder
                 .build_gep(i8_type, user_ptr, &[neg_32], "cbgr.header_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
 
         // 2. Load generation (i32) from header offset 0
         let generation = builder
             .build_load(i32_type, header_ptr, "cbgr.alloc_gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // 3. Load epoch (i16) from header offset 4
@@ -290,31 +290,31 @@ impl<'ctx> CbgrLowering<'ctx> {
         let epoch_ptr = unsafe {
             builder
                 .build_gep(i8_type, header_ptr, &[four], "cbgr.epoch_ptr")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
         };
         let epoch = builder
             .build_load(i16_type, epoch_ptr, "cbgr.alloc_epoch")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // 4. Pack epoch into epoch_and_caps (epoch in low 16 bits, caps = 0)
         let epoch_and_caps = builder
             .build_int_z_extend(epoch, i32_type, "cbgr.epoch_caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // 5. Build the ThinRef struct { ptr, generation, epoch_and_caps }
         let ref_val = self.thin_ref_type.const_zero();
         let ref_val = builder
             .build_insert_value(ref_val, user_ptr, 0, "thinref.ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, generation, 1, "thinref.gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
         let ref_val = builder
             .build_insert_value(ref_val, epoch_and_caps, 2, "thinref.caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_struct_value();
 
         Ok(ref_val)
@@ -345,46 +345,46 @@ impl<'ctx> CbgrLowering<'ctx> {
         // 1. Extract the user pointer (field 0)
         let user_ptr = builder
             .build_extract_value(ref_val, 0, "cbgr.user_ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_pointer_value();
 
         // 2. Extract generation (field 1, i32) and epoch_caps (field 2, i32)
         let generation = builder
             .build_extract_value(ref_val, 1, "cbgr.gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         let epoch_caps = builder
             .build_extract_value(ref_val, 2, "cbgr.epoch_caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // 3. Extract epoch from epoch_caps (low 16 bits)
         let epoch_mask = i32_type.const_int(0xFFFF, false);
         let epoch_i32 = builder
             .build_and(epoch_caps, epoch_mask, "cbgr.epoch_i32")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // 4. Pack: generation (low 32) | epoch (bits 32..47)
         //  packed = zext(generation) | (zext(epoch_i32) << 32)
         let gen_i64 = builder
             .build_int_z_extend(generation, i64_type, "cbgr.gen_i64")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let epoch_i64 = builder
             .build_int_z_extend(epoch_i32, i64_type, "cbgr.epoch_i64")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let shift_amt = i64_type.const_int(32, false);
         let epoch_shifted = builder
             .build_left_shift(epoch_i64, shift_amt, "cbgr.epoch_shifted")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let packed = builder
             .build_or(gen_i64, epoch_shifted, "cbgr.packed_gen_epoch")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // 5. Convert user pointer to i64 for the call
         let user_ptr_i64 = builder
             .build_ptr_to_int(user_ptr, i64_type, "cbgr.ptr_i64")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // 6. Get or declare verum_cbgr_validate_ref(i64, i64) -> i1
         let validate_fn = module
@@ -401,7 +401,7 @@ impl<'ctx> CbgrLowering<'ctx> {
                 &[user_ptr_i64.into(), packed.into()],
                 "cbgr.valid",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         let is_valid = call_result
             .try_as_basic_value()
@@ -418,7 +418,7 @@ impl<'ctx> CbgrLowering<'ctx> {
 
         builder
             .build_conditional_branch(is_valid, valid_bb, invalid_bb)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Invalid path: call panic handler and unreachable
         builder.position_at_end(invalid_bb);
@@ -433,19 +433,19 @@ impl<'ctx> CbgrLowering<'ctx> {
                 "CBGR: use-after-free detected (generation mismatch)",
                 "cbgr_panic_msg",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder
             .build_call(panic_fn, &[panic_msg.as_pointer_value().into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         builder
             .build_unreachable()
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Valid path: branch to merge
         builder.position_at_end(valid_bb);
         builder
             .build_unconditional_branch(merge_bb)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Merge: return the (validated) pointer
         builder.position_at_end(merge_bb);
@@ -475,7 +475,7 @@ impl<'ctx> CbgrLowering<'ctx> {
         // Extract pointer directly
         let ptr = builder
             .build_extract_value(ref_val, 0, "ref.ptr")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_pointer_value();
 
         Ok(ptr)
@@ -515,7 +515,7 @@ impl<'ctx> CbgrLowering<'ctx> {
         // Extract generation from reference
         let generation = builder
             .build_extract_value(ref_val, 1, "ref.gen")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // For now, check that generation is non-zero (valid reference)
@@ -524,17 +524,17 @@ impl<'ctx> CbgrLowering<'ctx> {
         let zero = self.context.i32_type().const_zero();
         let is_valid = builder
             .build_int_compare(IntPredicate::NE, generation, zero, "cbgr.valid")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // If we have a check function, call it for validation failure handling
         if let Some(check_fn) = self.check_fn {
             let ptr = builder
                 .build_extract_value(ref_val, 0, "ref.ptr.validate")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             builder
                 .build_call(check_fn, &[is_valid.into(), ptr.into()], "cbgr.validate")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
         }
 
         Ok(())
@@ -550,14 +550,14 @@ impl<'ctx> CbgrLowering<'ctx> {
         // Extract epoch_caps
         let caps = builder
             .build_extract_value(ref_val, 2, "ref.caps")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .or_llvm_err()?
             .into_int_value();
 
         // Check if capability bit is set
         let cap_mask = self.context.i32_type().const_int(capability as u64, false);
         let masked = builder
             .build_and(caps, cap_mask, "cap.masked")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let has_cap = builder
             .build_int_compare(
                 IntPredicate::NE,
@@ -565,7 +565,7 @@ impl<'ctx> CbgrLowering<'ctx> {
                 self.context.i32_type().const_zero(),
                 "cap.check",
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(has_cap)
     }

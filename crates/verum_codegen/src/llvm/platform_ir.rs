@@ -99,7 +99,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = self.context.i32_type();
         builder
             .build_int_truncate(fd, i32_type, "fd_i32")
-            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+            .or_llvm_err()
     }
 
     /// **ABI bridge: extend POSIX-i32 return to Verum-i64.** (#96)
@@ -116,7 +116,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = self.context.i64_type();
         builder
             .build_int_s_extend(ret_i32, i64_type, "ret_i64")
-            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+            .or_llvm_err()
     }
 
     /// **Adaptive call helper — Verum-ABI ⇄ POSIX-ABI bridge.** (#96)
@@ -210,7 +210,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 // Int → Pointer: inttoptr
                 (BasicValueEnum::IntValue(iv), BasicTypeEnum::PointerType(pt)) => builder
                     .build_int_to_ptr(iv, pt, &format!("{}_a{}_i2p", name, i))
-                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into(),
                 // Pointer → Pointer: pass through (LLVM opaque ptrs)
                 (BasicValueEnum::PointerValue(pv), BasicTypeEnum::PointerType(_)) => pv.into(),
@@ -218,7 +218,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 (BasicValueEnum::PointerValue(pv), BasicTypeEnum::IntType(pt)) => {
                     let as_i64 = builder
                         .build_ptr_to_int(pv, i64_type, &format!("{}_a{}_p2i", name, i))
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     if pt.get_bit_width() == 64 {
                         as_i64.into()
                     } else {
@@ -243,7 +243,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let _ = fn_ty; // reserved for future arity-collision diagnostics
         let call_site = builder
             .build_call(func, &coerced, &format!("{}_call", name))
-            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Coerce return to i64.
         let ret_ty = func.get_type().get_return_type();
@@ -270,11 +270,11 @@ impl<'ctx> PlatformIR<'ctx> {
                     // Sign-extend so POSIX `-1` errors stay `-1` in i64 slots.
                     builder
                         .build_int_s_extend(raw, i64_type, &format!("{}_ret_sext", name))
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+                        .or_llvm_err()
                 } else {
                     builder
                         .build_int_truncate(raw, i64_type, &format!("{}_ret_trunc", name))
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+                        .or_llvm_err()
                 }
             }
             Some(BasicTypeEnum::PointerType(_)) => {
@@ -290,7 +290,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .into_pointer_value();
                 builder
                     .build_ptr_to_int(raw, i64_type, &format!("{}_ret_p2i", name))
-                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             }
             Some(other) => Err(super::error::LlvmLoweringError::internal(format!(
                 "call_native_i64({}): unsupported return type {:?}",
@@ -327,19 +327,19 @@ impl<'ctx> PlatformIR<'ctx> {
                 } else if bits < 64 {
                     let truncated = builder
                         .build_int_truncate(ret_i64, it, name_hint)
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     Ok(truncated.into())
                 } else {
                     let extended = builder
                         .build_int_z_extend(ret_i64, it, name_hint)
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                     Ok(extended.into())
                 }
             }
             Some(verum_llvm::types::BasicTypeEnum::PointerType(pt)) => {
                 let p = builder
                     .build_int_to_ptr(ret_i64, pt, name_hint)
-                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                    .or_llvm_err()?;
                 Ok(p.into())
             }
             // Float / aggregate return types aren't part of the POSIX
@@ -5433,7 +5433,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     }
                     verum_llvm::values::BasicValueEnum::PointerValue(pv) => builder
                         .build_ptr_to_int(pv, i64_type, &format!("p{}_addr", i))
-                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?,
+                        .or_llvm_err()?,
                     _ => {
                         return Err(super::error::LlvmLoweringError::internal(format!(
                             "{}: unsupported param type at {}",
@@ -5462,7 +5462,7 @@ impl<'ctx> PlatformIR<'ctx> {
             )?;
             builder
                 .build_return(Some(&ret_typed))
-                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
         } else {
             // libSystem indirection.  The libsys helper conforms to
             // the WRAPPER's signature so param/return shapes round-trip
@@ -5496,7 +5496,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let call_name = if wrapper_ret_ty.is_some() { "ret" } else { "" };
             let call_site = builder
                 .build_call(libsys, &args, call_name)
-                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
 
             match wrapper_ret_ty {
                 Some(_) => {

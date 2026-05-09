@@ -64,7 +64,7 @@ use verum_llvm::values::{BasicValueEnum, IntValue, PointerValue};
 
 use verum_ast::bitfield::{ByteOrder, ResolvedBitField, ResolvedBitLayout};
 
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 
 // =============================================================================
 // STATISTICS
@@ -188,7 +188,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
             let shift_amount = container.get_type().const_int(field.offset as u64, false);
             self.builder
                 .build_right_shift(swapped, shift_amount, false, &format!("{}_shr", name))
-                .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+                .or_llvm_err()?
         } else {
             swapped
         };
@@ -203,7 +203,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let result = self
             .builder
             .build_and(shifted, mask, name)
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
+            .or_llvm_err()?;
 
         Ok(result)
     }
@@ -254,7 +254,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let cleared = self
             .builder
             .build_and(swapped_container, clear_mask, &format!("{}_clear", name))
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
+            .or_llvm_err()?;
 
         // Mask the new value to ensure it fits
         let value_mask = container_type.const_int(mask_value, false);
@@ -264,11 +264,11 @@ impl<'ctx> BitfieldLowering<'ctx> {
             if new_value.get_type().get_bit_width() < container_type.get_bit_width() {
                 self.builder
                     .build_int_z_extend(new_value, container_type, &format!("{}_zext", name))
-                    .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+                    .or_llvm_err()?
             } else if new_value.get_type().get_bit_width() > container_type.get_bit_width() {
                 self.builder
                     .build_int_truncate(new_value, container_type, &format!("{}_trunc", name))
-                    .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+                    .or_llvm_err()?
             } else {
                 new_value
             };
@@ -276,14 +276,14 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let masked_value = self
             .builder
             .build_and(extended_value, value_mask, &format!("{}_mask", name))
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
+            .or_llvm_err()?;
 
         // Shift the value to its position
         let shifted_value = if field.offset > 0 {
             let shift_amount = container_type.const_int(field.offset as u64, false);
             self.builder
                 .build_left_shift(masked_value, shift_amount, &format!("{}_shl", name))
-                .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+                .or_llvm_err()?
         } else {
             masked_value
         };
@@ -292,7 +292,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let updated = self
             .builder
             .build_or(cleared, shifted_value, &format!("{}_or", name))
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
+            .or_llvm_err()?;
 
         // Apply byte swap back if needed
         let result = if self.needs_byte_swap(layout.byte_order) {
@@ -320,7 +320,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let loaded = self
             .builder
             .build_load(int_type, ptr, name)
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+            .or_llvm_err()?
             .into_int_value();
 
         Ok(loaded)
@@ -334,7 +334,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
     ) -> Result<()> {
         self.builder
             .build_store(ptr, value)
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -375,7 +375,7 @@ impl<'ctx> BitfieldLowering<'ctx> {
         let result = self
             .builder
             .build_call(intrinsic, &[value.into()], name)
-            .map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))?
+            .or_llvm_err()?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::InvalidType("bswap should return a value".into()))?

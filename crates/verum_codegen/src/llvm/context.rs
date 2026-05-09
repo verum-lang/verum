@@ -25,7 +25,7 @@ pub struct ExceptionHandler<'ctx> {
 }
 
 use super::cbgr::CbgrLowering;
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::register_types::{MethodDispatchTable, RegisterType, RegisterTypeMap};
 use super::types::{RefTier, TypeLowering};
 use std::sync::Arc;
@@ -1848,7 +1848,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     .unwrap_or(BasicTypeEnum::IntType(self.types.i64_type()));
                 self.builder
                     .build_load(load_type, alloca_ptr, &format!("r{}", reg))
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             } else {
                 // Register not yet allocated — return zero
                 Ok(self.types.i64_type().const_zero().into())
@@ -2165,7 +2165,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let slot = self
             .builder
             .build_alloca(ty, name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         self.register_slots.insert(reg, slot);
         Ok(slot)
@@ -2195,7 +2195,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         self.builder
             .build_load(ty, *slot, &format!("r{}", reg))
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+            .or_llvm_err()
     }
 
     /// Store a value to a register's stack slot.
@@ -2207,7 +2207,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         self.builder
             .build_store(*slot, value)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -2310,13 +2310,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let slot = self
             .builder
             .build_alloca(i64_type, "exception_value")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Initialize to zero
         let zero = i64_type.const_zero();
         self.builder
             .build_store(slot, zero)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Restore position
         if let Some(block) = current_block {
@@ -2337,7 +2337,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             if iv.get_type().get_bit_width() != 64 {
                 self.builder
                     .build_int_z_extend(iv, i64_type, "exc_ext")
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .or_llvm_err()?
                     .into()
             } else {
                 value
@@ -2345,14 +2345,14 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         } else if value.is_pointer_value() {
             self.builder
                 .build_ptr_to_int(value.into_pointer_value(), i64_type, "exc_ptr2int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .or_llvm_err()?
                 .into()
         } else {
             value
         };
         self.builder
             .build_store(slot, store_val)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         Ok(())
     }
 
@@ -2362,7 +2362,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let i64_type = self.types.i64_type();
         self.builder
             .build_load(i64_type, slot, "exception_load")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+            .or_llvm_err()
     }
 
     /// Clear the current exception value (set to zero).
@@ -2371,7 +2371,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         let zero = self.types.i64_type().const_zero();
         self.builder
             .build_store(slot, zero)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         Ok(())
     }
 }
