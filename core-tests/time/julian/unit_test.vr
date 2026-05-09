@@ -1,0 +1,260 @@
+// =============================================================================
+// core-tests/time/julian/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.julian` — Julian Day ↔ Unix / Gregorian
+// conversions.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.julian.{
+    JD_UNIX_EPOCH, JD_J2000, JD_MJD_EPOCH,
+    SECS_PER_DAY, MILLIS_PER_DAY,
+    julian_from_unix_ms, unix_ms_from_julian,
+    julian_from_unix_secs, unix_secs_from_julian,
+    julian_from_ymd, ymd_from_julian,
+    time_fraction_from_hms, hms_from_julian,
+    julian_from_gregorian, gregorian_from_julian,
+    mjd_from_julian, julian_from_mjd,
+};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_jd_unix_epoch_is_2440587_5() {
+    // Canonical value: JD of 1970-01-01T00:00:00Z
+    let eps: Float64 = 1e-9;
+    assert((JD_UNIX_EPOCH - 2440587.5).abs() < eps);
+}
+
+@test
+fn test_jd_j2000_is_2451545() {
+    let eps: Float64 = 1e-9;
+    assert((JD_J2000 - 2451545.0).abs() < eps);
+}
+
+@test
+fn test_jd_mjd_epoch_is_2400000_5() {
+    let eps: Float64 = 1e-9;
+    assert((JD_MJD_EPOCH - 2400000.5).abs() < eps);
+}
+
+@test
+fn test_secs_per_day_is_86400() {
+    assert_eq(SECS_PER_DAY, 86400);
+}
+
+@test
+fn test_millis_per_day_is_86400000() {
+    assert_eq(MILLIS_PER_DAY, 86400000);
+}
+
+// =============================================================================
+// Section 2: Julian Day ↔ Unix milliseconds
+// =============================================================================
+
+@test
+fn test_julian_from_unix_ms_epoch() {
+    let jd = julian_from_unix_ms(0);
+    let eps: Float64 = 1e-9;
+    assert((jd - JD_UNIX_EPOCH).abs() < eps);
+}
+
+@test
+fn test_julian_from_unix_ms_one_day() {
+    // 86400000 ms = 1 day → JD increases by 1
+    let jd = julian_from_unix_ms(86400000);
+    let eps: Float64 = 1e-9;
+    assert((jd - (JD_UNIX_EPOCH + 1.0)).abs() < eps);
+}
+
+@test
+fn test_unix_ms_from_julian_epoch() {
+    let ms = unix_ms_from_julian(JD_UNIX_EPOCH);
+    assert_eq(ms, 0);
+}
+
+@test
+fn test_unix_ms_round_trip() {
+    let original: Int64 = 1_700_000_000_000;
+    let jd = julian_from_unix_ms(original);
+    let recovered = unix_ms_from_julian(jd);
+    // Round-trip should be within 1ms due to float rounding
+    assert((recovered - original).abs() <= 1);
+}
+
+// =============================================================================
+// Section 3: Julian Day ↔ Unix seconds
+// =============================================================================
+
+@test
+fn test_julian_from_unix_secs_epoch() {
+    let jd = julian_from_unix_secs(0);
+    let eps: Float64 = 1e-9;
+    assert((jd - JD_UNIX_EPOCH).abs() < eps);
+}
+
+@test
+fn test_unix_secs_from_julian_epoch() {
+    let s = unix_secs_from_julian(JD_UNIX_EPOCH);
+    assert_eq(s, 0);
+}
+
+@test
+fn test_unix_secs_round_trip() {
+    let original: Int64 = 1_700_000_000;
+    let jd = julian_from_unix_secs(original);
+    let recovered = unix_secs_from_julian(jd);
+    assert((recovered - original).abs() <= 1);
+}
+
+// =============================================================================
+// Section 4: Gregorian → Julian Day
+// =============================================================================
+
+@test
+fn test_julian_from_ymd_unix_epoch() {
+    let jd = julian_from_ymd(1970, 1, 1);
+    let eps: Float64 = 1e-9;
+    assert((jd - JD_UNIX_EPOCH).abs() < eps);
+}
+
+@test
+fn test_julian_from_ymd_j2000_noon_minus_half() {
+    // 2000-01-01 at midnight = JD_J2000 - 0.5
+    let jd = julian_from_ymd(2000, 1, 1);
+    let eps: Float64 = 1e-9;
+    assert((jd - (JD_J2000 - 0.5)).abs() < eps);
+}
+
+@test
+fn test_julian_from_ymd_consecutive_days_differ_by_1() {
+    let jd1 = julian_from_ymd(2000, 3, 1);
+    let jd2 = julian_from_ymd(2000, 3, 2);
+    let eps: Float64 = 1e-9;
+    assert((jd2 - jd1 - 1.0).abs() < eps);
+}
+
+// =============================================================================
+// Section 5: Julian Day → Gregorian
+// =============================================================================
+
+@test
+fn test_ymd_from_julian_unix_epoch() {
+    let (y, m, d) = ymd_from_julian(JD_UNIX_EPOCH);
+    assert_eq(y, 1970);
+    assert_eq(m, 1);
+    assert_eq(d, 1);
+}
+
+@test
+fn test_ymd_from_julian_j2000_minus_half() {
+    let (y, m, d) = ymd_from_julian(JD_J2000 - 0.5);
+    assert_eq(y, 2000);
+    assert_eq(m, 1);
+    assert_eq(d, 1);
+}
+
+@test
+fn test_ymd_round_trip() {
+    let (y, m, d) = (2026, 5, 9);
+    let jd = julian_from_ymd(y, m, d);
+    let (y2, m2, d2) = ymd_from_julian(jd);
+    assert_eq(y2, y);
+    assert_eq(m2, m);
+    assert_eq(d2, d);
+}
+
+// =============================================================================
+// Section 6: Time-of-day fractions
+// =============================================================================
+
+@test
+fn test_time_fraction_midnight_is_zero() {
+    let f = time_fraction_from_hms(0, 0, 0, 0);
+    let eps: Float64 = 1e-12;
+    assert(f.abs() < eps);
+}
+
+@test
+fn test_time_fraction_noon_is_half() {
+    let f = time_fraction_from_hms(12, 0, 0, 0);
+    let eps: Float64 = 1e-12;
+    assert((f - 0.5).abs() < eps);
+}
+
+@test
+fn test_hms_from_julian_midnight() {
+    let jd = julian_from_ymd(2000, 1, 1); // midnight UTC
+    let (h, m, s, ms) = hms_from_julian(jd);
+    assert_eq(h, 0);
+    assert_eq(m, 0);
+    assert_eq(s, 0);
+    assert_eq(ms, 0);
+}
+
+@test
+fn test_hms_from_julian_noon() {
+    // Noon = midnight + 0.5 JD
+    let jd = julian_from_ymd(2000, 1, 1) + 0.5;
+    let (h, m, s, _) = hms_from_julian(jd);
+    assert_eq(h, 12);
+    assert_eq(m, 0);
+    assert_eq(s, 0);
+}
+
+// =============================================================================
+// Section 7: Full Gregorian round-trip
+// =============================================================================
+
+@test
+fn test_gregorian_round_trip_midnight() {
+    let jd = julian_from_gregorian(2026, 1, 15, 0, 0, 0, 0);
+    let (y, m, d, h, mi, s, ms) = gregorian_from_julian(jd);
+    assert_eq(y, 2026);
+    assert_eq(m, 1);
+    assert_eq(d, 15);
+    assert_eq(h, 0);
+    assert_eq(mi, 0);
+    assert_eq(s, 0);
+    assert_eq(ms, 0);
+}
+
+@test
+fn test_gregorian_round_trip_afternoon() {
+    let jd = julian_from_gregorian(2000, 6, 21, 14, 30, 45, 500);
+    let (y, m, d, h, mi, s, ms) = gregorian_from_julian(jd);
+    assert_eq(y, 2000);
+    assert_eq(m, 6);
+    assert_eq(d, 21);
+    assert_eq(h, 14);
+    assert_eq(mi, 30);
+    assert_eq(s, 45);
+    // ms may have ±1 due to float rounding
+    assert((ms - 500).abs() <= 1);
+}
+
+// =============================================================================
+// Section 8: Modified Julian Day
+// =============================================================================
+
+@test
+fn test_mjd_from_julian_epoch() {
+    let mjd = mjd_from_julian(JD_UNIX_EPOCH);
+    // MJD = JD - 2400000.5 = 2440587.5 - 2400000.5 = 40587.0
+    let eps: Float64 = 1e-9;
+    assert((mjd - 40587.0).abs() < eps);
+}
+
+@test
+fn test_julian_from_mjd_round_trip() {
+    let jd = JD_UNIX_EPOCH;
+    let mjd = mjd_from_julian(jd);
+    let recovered = julian_from_mjd(mjd);
+    let eps: Float64 = 1e-9;
+    assert((recovered - jd).abs() < eps);
+}
+
+fn main() {}

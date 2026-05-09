@@ -1,0 +1,109 @@
+// =============================================================================
+// core-tests/time/system_time/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for SystemTime.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.system_time.{SystemTime, SystemTimeError, now_unix_ns, now_unix_ms, now_unix_s};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  from_timestamp ∘ timestamp = id
+// =============================================================================
+
+@test
+fn law_from_timestamp_round_trip() {
+    let cases: List<Int> = [0, 1, 1_000_000, 1_700_000_000];
+    for &ts in cases.iter() {
+        assert_eq(SystemTime.from_timestamp(ts).timestamp(), ts);
+    }
+}
+
+@test
+fn law_from_timestamp_millis_round_trip() {
+    let cases: List<Int> = [0, 1000, 1_500, 1_700_000_000_000];
+    for &ms in cases.iter() {
+        assert_eq(SystemTime.from_timestamp_millis(ms).timestamp_millis(), ms);
+    }
+}
+
+// =============================================================================
+// §B  duration_since is antisymmetric
+// =============================================================================
+
+@test
+fn law_duration_since_antisymmetric() {
+    let cases: List<(Int, Int)> = [
+        (0, 0), (100, 200), (1_000_000, 2_000_000),
+    ];
+    for &(a_ts, b_ts) in cases.iter() {
+        let a = SystemTime.from_timestamp(a_ts);
+        let b = SystemTime.from_timestamp(b_ts);
+        if a_ts <= b_ts {
+            // b.duration_since(a) = Ok
+            assert(b.duration_since(&a).is_ok());
+        }
+        if a_ts > b_ts {
+            // a.duration_since(b) = Err
+            assert(a.duration_since(&b).is_err());
+        }
+    }
+}
+
+// =============================================================================
+// §C  checked_add ∘ checked_sub round-trip
+// =============================================================================
+
+@test
+fn law_add_sub_round_trip() {
+    let t = SystemTime.from_timestamp(10000);
+    let d = Duration.secs(500);
+    let t2 = t.checked_add(d).unwrap();
+    let restored = t2.checked_sub(d).unwrap();
+    assert_eq(restored, t);
+}
+
+// =============================================================================
+// §D  duration_since_epoch + UNIX_EPOCH.duration_since = same duration
+// =============================================================================
+
+@test
+fn law_duration_since_epoch_consistency() {
+    let t = SystemTime.from_timestamp(7200); // 2 hours after epoch
+    let d = t.duration_since_epoch();
+    assert_eq(d.as_secs(), 7200);
+}
+
+// =============================================================================
+// §E  now_unix_* free functions return consistent values
+// =============================================================================
+
+@test
+fn law_now_unix_functions_consistent() {
+    let ns = now_unix_ns();
+    let ms = now_unix_ms();
+    let s  = now_unix_s();
+    // All represent the same moment; ms = ns / 1_000_000 ± rounding
+    // Allow 1 second slack for concurrent read
+    assert(ns / 1_000_000_000 >= s - 1);
+    assert(ns / 1_000_000_000 <= s + 1);
+    assert(ms / 1000 >= s - 1);
+    assert(ms / 1000 <= s + 1);
+}
+
+// =============================================================================
+// §F  @test_case — timestamp_nanos truth table
+// =============================================================================
+
+@test_case(SystemTime { secs: 0, nanos: 0 }, 0)
+@test_case(SystemTime { secs: 1, nanos: 0 }, 1_000_000_000)
+@test_case(SystemTime { secs: 0, nanos: 500_000_000 }, 500_000_000)
+@test_case(SystemTime { secs: 2, nanos: 250_000_000 }, 2_250_000_000)
+fn parametrised_timestamp_nanos(st: SystemTime, expected: Int) {
+    assert_eq(st.timestamp_nanos(), expected);
+}
+
+fn main() {}

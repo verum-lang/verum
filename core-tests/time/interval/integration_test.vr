@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/time/interval/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Interval and AsyncInterval: construction patterns,
+// duration_parse interop, and scheduler-simulation use cases.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.time.duration.{Duration};
+mount core.time.duration_parse.{parse};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Config-driven Interval construction
+// =============================================================================
+
+@test
+fn test_interval_from_parsed_500ms() {
+    let d = parse(&"500ms".to_text()).unwrap();
+    let timer = Interval.new(d);
+    assert_eq(timer.period().as_millis(), 500);
+}
+
+@test
+fn test_interval_from_parsed_1_minute() {
+    let d = parse(&"1m".to_text()).unwrap();
+    let timer = Interval.new(d);
+    assert_eq(timer.period().as_secs(), 60);
+}
+
+@test
+fn test_interval_from_parsed_iso_pt5m() {
+    let d = parse(&"PT5M".to_text()).unwrap();
+    let timer = Interval.new(d);
+    assert_eq(timer.period().as_secs(), 300);
+}
+
+// =============================================================================
+// Section 2: AsyncInterval from parsed duration
+// =============================================================================
+
+@test
+fn test_async_interval_from_parsed_100ms() {
+    let d = parse(&"100ms".to_text()).unwrap();
+    let ai = interval(d);
+    assert_eq(ai.period_ns, 100_000_000);
+}
+
+@test
+fn test_async_interval_from_parsed_1s() {
+    let d = parse(&"1s".to_text()).unwrap();
+    let ai = interval(d);
+    assert_eq(ai.period_ns, 1_000_000_000);
+}
+
+// =============================================================================
+// Section 3: Multiple intervals have independent periods
+// =============================================================================
+
+@test
+fn test_multiple_intervals_independent_periods() {
+    let fast = Interval.new(Duration.millis(100));
+    let slow = Interval.new(Duration.secs(1));
+    let batch = Interval.new(Duration.mins(5));
+
+    assert_eq(fast.period().as_millis(), 100);
+    assert_eq(slow.period().as_secs(), 1);
+    assert_eq(batch.period().as_secs(), 300);
+}
+
+// =============================================================================
+// Section 4: Reset preserves period
+// =============================================================================
+
+@test
+fn test_reset_preserves_period() {
+    let mut timer = Interval.new(Duration.millis(250));
+    let original_period = timer.period();
+    timer.reset();
+    assert_eq(timer.period(), original_period);
+}
+
+@test
+fn test_async_reset_preserves_period_ns() {
+    let d = Duration.millis(75);
+    let mut ai = AsyncInterval.new(d);
+    let original_period_ns = ai.period_ns;
+    ai.reset();
+    assert_eq(ai.period_ns, original_period_ns);
+}
+
+// =============================================================================
+// Section 5: interval_ms convenience for common patterns
+// =============================================================================
+
+@test
+fn test_heartbeat_100ms_period() {
+    let heartbeat = interval_ms(100);
+    assert_eq(heartbeat.period_ns, Duration.millis(100).as_nanos());
+}
+
+@test
+fn test_polling_interval_250ms() {
+    let poller = interval_ms(250);
+    assert_eq(poller.period_ns, Duration.millis(250).as_nanos());
+}
+
+@test
+fn test_slow_interval_60000ms_equals_1_minute() {
+    let slow = interval_ms(60000);
+    assert_eq(slow.period_ns, Duration.mins(1).as_nanos());
+}
+
+// =============================================================================
+// Section 6: Immediate interval fires first tick immediately
+// =============================================================================
+
+@test
+fn test_immediate_interval_has_correct_period() {
+    let timer = Interval.immediate(Duration.secs(10));
+    assert_eq(timer.period().as_secs(), 10);
+}
+
+fn main() {}

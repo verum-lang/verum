@@ -1,0 +1,205 @@
+// =============================================================================
+// core-tests/time/cron/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.cron.CronExpr` — 5-field crontab parser
+// and next-fire-time evaluator.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.cron.{CronExpr, CronError};
+
+// Every-minute, every-hour, every-day, every-month, every-weekday wildcard
+// 1970-01-01T00:00:00Z = unix 0; next minute = 60.
+const EPOCH_UNIX: Int = 0;
+
+// =============================================================================
+// Section 1: Parse valid expressions
+// =============================================================================
+
+@test
+fn test_parse_all_wildcards() {
+    let r = CronExpr.parse(&"* * * * *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_specific_time_of_day() {
+    let r = CronExpr.parse(&"30 8 * * *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_range_expression() {
+    let r = CronExpr.parse(&"0 9-17 * * *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_step_expression() {
+    let r = CronExpr.parse(&"*/5 * * * *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_comma_list() {
+    let r = CronExpr.parse(&"0,30 * * * *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_textual_dow_mon_fri() {
+    let r = CronExpr.parse(&"0 9 * * MON-FRI".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_textual_month_jan() {
+    let r = CronExpr.parse(&"0 0 1 JAN *".to_text());
+    assert(r.is_ok());
+}
+
+@test
+fn test_parse_textual_dow_sun() {
+    let r = CronExpr.parse(&"0 12 * * SUN".to_text());
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// Section 2: Parse errors
+// =============================================================================
+
+@test
+fn test_parse_too_few_fields_is_error() {
+    let r = CronExpr.parse(&"* * *".to_text());
+    assert(r.is_err());
+    match r.unwrap_err() {
+        CronError.WrongFieldCount(n) => assert_eq(n, 3),
+        _ => assert(false, "expected WrongFieldCount"),
+    }
+}
+
+@test
+fn test_parse_too_many_fields_is_error() {
+    let r = CronExpr.parse(&"* * * * * *".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_minute_out_of_range() {
+    let r = CronExpr.parse(&"60 * * * *".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_hour_out_of_range() {
+    let r = CronExpr.parse(&"* 24 * * *".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_month_out_of_range() {
+    let r = CronExpr.parse(&"* * * 13 *".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_dow_out_of_range() {
+    let r = CronExpr.parse(&"* * * * 7".to_text());
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 3: next_after_unix correctness
+// =============================================================================
+
+@test
+fn test_every_minute_next_after_epoch() {
+    let c = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let next = c.next_after_unix(EPOCH_UNIX).unwrap();
+    assert_eq(next, 60); // first minute boundary after unix=0
+}
+
+@test
+fn test_every_minute_next_strictly_after_input() {
+    let c = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let input = 3600;
+    let next = c.next_after_unix(input).unwrap();
+    assert(next > input);
+}
+
+@test
+fn test_every_hour_at_minute_0() {
+    // "0 * * * *" fires at minute 0 of each hour
+    let c = CronExpr.parse(&"0 * * * *".to_text()).unwrap();
+    // Start at unix=1800 (0:30 on 1970-01-01), next = 3600 (1:00)
+    let next = c.next_after_unix(1800).unwrap();
+    assert_eq(next, 3600);
+}
+
+@test
+fn test_daily_at_midnight() {
+    // "0 0 * * *" fires at midnight each day
+    let c = CronExpr.parse(&"0 0 * * *".to_text()).unwrap();
+    // Start at unix=86399 (23:59:59 on day 0), next = 86400 (midnight day 1)
+    let next = c.next_after_unix(86399).unwrap();
+    assert_eq(next, 86400);
+}
+
+@test
+fn test_every_5_minutes_next_after_zero() {
+    // "*/5 * * * *" fires at minute 0, 5, 10, ... of each hour
+    let c = CronExpr.parse(&"*/5 * * * *".to_text()).unwrap();
+    let next = c.next_after_unix(0).unwrap();
+    // At unix=0 it's minute 0 on 1970-01-01; next 5-min boundary = minute 5 = 300
+    assert_eq(next, 300);
+}
+
+// =============================================================================
+// Section 4: next_after_unix is always strictly greater than input
+// =============================================================================
+
+@test
+fn test_next_always_strictly_after_input() {
+    let exprs: List<Text> = [
+        "* * * * *".to_text(),
+        "0 * * * *".to_text(),
+        "0 0 * * *".to_text(),
+        "*/15 * * * *".to_text(),
+    ];
+    for spec in exprs.iter() {
+        let c = CronExpr.parse(spec).unwrap();
+        let inputs: List<Int> = [0, 3599, 86399, 1_000_000];
+        for &t in inputs.iter() {
+            let next = c.next_after_unix(t).unwrap();
+            assert(next > t, f"next_after({t}) for '{spec}' must be > input, got {next}");
+        }
+    }
+}
+
+// =============================================================================
+// Section 5: dom_constrained / dow_constrained flags
+// =============================================================================
+
+@test
+fn test_full_wildcard_not_constrained() {
+    let c = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    assert(!c.dom_constrained);
+    assert(!c.dow_constrained);
+}
+
+@test
+fn test_explicit_dom_is_constrained() {
+    let c = CronExpr.parse(&"0 0 15 * *".to_text()).unwrap();
+    assert(c.dom_constrained);
+    assert(!c.dow_constrained);
+}
+
+@test
+fn test_explicit_dow_is_constrained() {
+    let c = CronExpr.parse(&"0 9 * * MON".to_text()).unwrap();
+    assert(!c.dom_constrained);
+    assert(c.dow_constrained);
+}
+
+fn main() {}

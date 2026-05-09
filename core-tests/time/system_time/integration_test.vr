@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/time/system_time/integration_test.vr
+// =============================================================================
+//
+// Integration scenarios for SystemTime: timestamp arithmetic chains,
+// comparison sorting, and consistency with Duration.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.system_time.{SystemTime, SystemTimeError, now_unix_s, now_unix_ms};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Constructed timestamp sequence
+// =============================================================================
+
+@test
+fn test_timestamps_sort_chronologically() {
+    let t1 = SystemTime.from_timestamp(1000);
+    let t2 = SystemTime.from_timestamp(2000);
+    let t3 = SystemTime.from_timestamp(500);
+
+    let mut ts: List<SystemTime> = [t1, t2, t3];
+    ts.sort();
+
+    assert(ts[0].timestamp() <= ts[1].timestamp());
+    assert(ts[1].timestamp() <= ts[2].timestamp());
+}
+
+// =============================================================================
+// Section 2: Elapsed-time computation via duration_since
+// =============================================================================
+
+@test
+fn test_two_hour_span() {
+    let start = SystemTime.from_timestamp(0);
+    let end   = SystemTime.from_timestamp(7200);
+    let span  = end.duration_since(&start).unwrap();
+    assert_eq(span.as_secs(), 7200);
+    assert_eq(span.as_millis(), 7_200_000);
+}
+
+@test
+fn test_sub_second_precision_in_duration_since() {
+    // start has 250ms sub-second, end has 750ms sub-second
+    let start = SystemTime { secs: 0, nanos: 250_000_000 };
+    let end   = SystemTime { secs: 1, nanos: 750_000_000 };
+    let span  = end.duration_since(&start).unwrap();
+    assert_eq(span.as_nanos(), 1_500_000_000);
+}
+
+// =============================================================================
+// Section 3: Add and subtract Duration chains
+// =============================================================================
+
+@test
+fn test_add_subtract_chain_returns_to_origin() {
+    let origin = SystemTime.from_timestamp(86400);
+    let offset = Duration.hours(12);
+    let advanced = origin + offset;
+    let returned = advanced - offset;
+    assert_eq(returned, origin);
+}
+
+@test
+fn test_add_sub_second_duration() {
+    let t = SystemTime.from_timestamp(1000);
+    let t2 = t + Duration.millis(500);
+    assert_eq(t2.secs, 1000);
+    assert_eq(t2.nanos, 500_000_000);
+}
+
+// =============================================================================
+// Section 4: now() sanity — basic calendar bounds
+// =============================================================================
+
+@test
+fn test_now_unix_s_is_after_epoch() {
+    let s = now_unix_s();
+    // Minimum sanity: should be after 2020-01-01 = 1577836800
+    assert(s > 1_577_836_800,
+        "system clock appears to be before 2020 — likely a test environment issue");
+}
+
+@test
+fn test_now_unix_ms_consistent_with_seconds() {
+    let ms = now_unix_ms();
+    let s  = now_unix_s();
+    assert(ms / 1000 >= s - 1);
+    assert(ms / 1000 <= s + 1);
+}
+
+// =============================================================================
+// Section 5: WentBackwards error carries the gap
+// =============================================================================
+
+@test
+fn test_went_backwards_gap_is_difference() {
+    let t1 = SystemTime.from_timestamp(1000);
+    let t2 = SystemTime.from_timestamp(500);
+    let err = t2.duration_since(&t1).unwrap_err();
+    // Gap = t1 - t2 = 500 seconds
+    assert_eq(err.duration().as_secs(), 500);
+}
+
+// =============================================================================
+// Section 6: Eq and Clone
+// =============================================================================
+
+@test
+fn test_clone_equals_original() {
+    let t = SystemTime.from_timestamp(123456);
+    assert_eq(t, t.clone());
+}
+
+@test
+fn test_eq_compares_nanos_too() {
+    let a = SystemTime { secs: 1, nanos: 0 };
+    let b = SystemTime { secs: 1, nanos: 1 };
+    assert(a != b);
+}
+
+fn main() {}

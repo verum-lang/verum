@@ -1,0 +1,138 @@
+// =============================================================================
+// core-tests/time/duration_parse/integration_test.vr
+// =============================================================================
+//
+// Integration tests for duration_parse: config-file-like usage patterns,
+// edge cases from real deployments, and interaction with Interval.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration_parse.{parse, DurationParseError};
+mount core.time.duration.{Duration};
+mount core.time.interval.{Interval};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Config-file patterns
+// =============================================================================
+
+@test
+fn test_config_timeout_5m30s() {
+    let d = parse(&"5m30s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 330);
+}
+
+@test
+fn test_config_keepalive_30s() {
+    let d = parse(&"30s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 30);
+}
+
+@test
+fn test_config_cache_ttl_1h() {
+    let d = parse(&"1h".to_text()).unwrap();
+    assert_eq(d.as_secs(), 3600);
+}
+
+@test
+fn test_config_retry_backoff_500ms() {
+    let d = parse(&"500ms".to_text()).unwrap();
+    assert_eq(d.as_millis(), 500);
+}
+
+// =============================================================================
+// Section 2: Interval construction from parsed duration
+// =============================================================================
+
+@test
+fn test_interval_from_parsed_100ms() {
+    let d = parse(&"100ms".to_text()).unwrap();
+    let timer = Interval.new(d);
+    assert_eq(timer.period().as_millis(), 100);
+}
+
+@test
+fn test_interval_from_parsed_1s() {
+    let d = parse(&"1s".to_text()).unwrap();
+    let timer = Interval.new(d);
+    assert_eq(timer.period().as_secs(), 1);
+}
+
+// =============================================================================
+// Section 3: ISO 8601 config patterns
+// =============================================================================
+
+@test
+fn test_iso_timeout_pt30s() {
+    let d = parse(&"PT30S".to_text()).unwrap();
+    assert_eq(d.as_secs(), 30);
+}
+
+@test
+fn test_iso_session_pt1h() {
+    let d = parse(&"PT1H".to_text()).unwrap();
+    assert_eq(d.as_secs(), 3600);
+}
+
+@test
+fn test_iso_cleanup_p7d() {
+    let d = parse(&"P7D".to_text()).unwrap();
+    assert_eq(d, Duration.from_weeks(1));
+}
+
+// =============================================================================
+// Section 4: Multi-component parsing stress
+// =============================================================================
+
+@test
+fn test_all_units_combined() {
+    // 1w + 1d + 1h + 1m + 1s
+    let expected = Duration.from_weeks(1)
+                 + Duration.from_days(1)
+                 + Duration.hours(1)
+                 + Duration.mins(1)
+                 + Duration.secs(1);
+    let parsed = parse(&"1w1d1h1m1s".to_text()).unwrap();
+    assert_eq(parsed, expected);
+}
+
+@test
+fn test_whitespace_between_all_components() {
+    let parsed = parse(&"1h 30m 15s".to_text()).unwrap();
+    let expected = Duration.hours(1) + Duration.mins(30) + Duration.secs(15);
+    assert_eq(parsed, expected);
+}
+
+// =============================================================================
+// Section 5: Error discrimination
+// =============================================================================
+
+@test
+fn test_empty_string_error_variant() {
+    let r = parse(&"".to_text()).unwrap_err();
+    match r {
+        DurationParseError.Empty => {},
+        _ => assert(false, "expected Empty error"),
+    }
+}
+
+@test
+fn test_unknown_unit_error_variant() {
+    let r = parse(&"5xyz".to_text()).unwrap_err();
+    match r {
+        DurationParseError.UnknownUnit(_) => {},
+        _ => assert(false, "expected UnknownUnit error"),
+    }
+}
+
+@test
+fn test_too_long_error_variant() {
+    let long_input: Text = "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111s".to_text();
+    let r = parse(&long_input).unwrap_err();
+    match r {
+        DurationParseError.InputTooLong { .. } => {},
+        _ => assert(false, "expected InputTooLong error"),
+    }
+}
+
+fn main() {}

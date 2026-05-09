@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/time/duration/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for Duration.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Constructor ↔ accessor round-trip laws
+// =============================================================================
+
+@test
+fn law_nanos_round_trip() {
+    let cases: List<Int> = [0, 1, 999, 1_000, 1_000_000, 1_000_000_000];
+    for &n in cases.iter() {
+        assert_eq(Duration.nanos(n).as_nanos(), n);
+    }
+}
+
+@test
+fn law_millis_round_trip() {
+    let cases: List<Int> = [0, 1, 100, 1000, 60000];
+    for &n in cases.iter() {
+        assert_eq(Duration.millis(n).as_millis(), n);
+    }
+}
+
+@test
+fn law_secs_round_trip() {
+    let cases: List<Int> = [0, 1, 60, 3600, 86400];
+    for &n in cases.iter() {
+        assert_eq(Duration.secs(n).as_secs(), n);
+    }
+}
+
+// =============================================================================
+// §B  Unit consistency laws
+// =============================================================================
+
+@test
+fn law_one_sec_eq_1000_millis() {
+    assert_eq(Duration.secs(1), Duration.millis(1000));
+}
+
+@test
+fn law_one_min_eq_60_secs() {
+    assert_eq(Duration.mins(1), Duration.secs(60));
+}
+
+@test
+fn law_one_hour_eq_60_mins() {
+    assert_eq(Duration.hours(1), Duration.mins(60));
+}
+
+@test
+fn law_one_day_eq_24_hours() {
+    assert_eq(Duration.from_days(1), Duration.hours(24));
+}
+
+@test
+fn law_one_week_eq_7_days() {
+    assert_eq(Duration.from_weeks(1), Duration.from_days(7));
+}
+
+// =============================================================================
+// §C  Commutativity and associativity of checked_add
+// =============================================================================
+
+@test
+fn law_checked_add_commutative() {
+    let a = Duration.millis(300);
+    let b = Duration.secs(2);
+    let ab = a.checked_add(b).unwrap();
+    let ba = b.checked_add(a).unwrap();
+    assert_eq(ab, ba);
+}
+
+@test
+fn law_checked_add_associative() {
+    let a = Duration.millis(100);
+    let b = Duration.millis(200);
+    let c = Duration.millis(300);
+    let left  = a.checked_add(b).unwrap().checked_add(c).unwrap();
+    let right = a.checked_add(b.checked_add(c).unwrap()).unwrap();
+    assert_eq(left, right);
+}
+
+@test
+fn law_add_zero_is_identity() {
+    let d = Duration.secs(5);
+    assert_eq(d + Duration.zero(), d);
+    assert_eq(Duration.zero() + d, d);
+}
+
+// =============================================================================
+// §D  Subsec decomposition: as_secs * NANOS + subsec_nanos = as_nanos
+// =============================================================================
+
+@test
+fn law_subsec_decomposition() {
+    let cases: List<Int> = [0, 1, 999_999_999, 1_000_000_000, 2_500_000_000];
+    for &n in cases.iter() {
+        let d = Duration.nanos(n);
+        let reconstructed = d.as_secs() * 1_000_000_000 + d.subsec_nanos();
+        assert_eq(reconstructed, n);
+    }
+}
+
+// =============================================================================
+// §E  saturating_sub(x, x) = zero for all x
+// =============================================================================
+
+@test
+fn law_saturating_sub_self_is_zero() {
+    let cases: List<Duration> = [
+        Duration.zero(),
+        Duration.millis(1),
+        Duration.secs(100),
+    ];
+    for d in cases.iter() {
+        assert(d.saturating_sub(*d).is_zero());
+    }
+}
+
+// =============================================================================
+// §F  @property — auto-generated round-trip for positive values
+// =============================================================================
+
+@property
+fn prop_nanos_round_trip(n: Int) {
+    // Duration.nanos clamps negatives to 0; only test non-negative
+    let input = if n < 0 { -n } else { n };
+    assert_eq(Duration.nanos(input).as_nanos(), input);
+}
+
+@property
+fn prop_millis_round_trip(n: Int) {
+    let input = if n < 0 { -n } else { n };
+    assert_eq(Duration.millis(input).as_millis(), input);
+}
+
+// =============================================================================
+// §G  @test_case — constructor ↔ as_nanos truth table
+// =============================================================================
+
+@test_case(Duration.nanos(0),      0)
+@test_case(Duration.micros(1),     1_000)
+@test_case(Duration.millis(1),     1_000_000)
+@test_case(Duration.secs(1),       1_000_000_000)
+@test_case(Duration.mins(1),       60_000_000_000)
+@test_case(Duration.hours(1),      3_600_000_000_000)
+fn parametrised_constructor_nanos(d: Duration, expected_ns: Int) {
+    assert_eq(d.as_nanos(), expected_ns);
+}
+
+fn main() {}

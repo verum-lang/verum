@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/time/cron/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for CronExpr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.cron.{CronExpr, CronError};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  next_after_unix(t) is always strictly greater than t
+// =============================================================================
+
+@test
+fn law_next_always_strictly_greater() {
+    let schedules: List<Text> = [
+        "* * * * *".to_text(),
+        "0 * * * *".to_text(),
+        "0 0 * * *".to_text(),
+        "*/10 * * * *".to_text(),
+        "0 8-18 * * MON-FRI".to_text(),
+    ];
+    let points: List<Int> = [0, 60, 3600, 86400, 1_000_000_000];
+    for spec in schedules.iter() {
+        let c = CronExpr.parse(spec).unwrap();
+        for &t in points.iter() {
+            let next = c.next_after_unix(t);
+            assert(next.is_ok());
+            assert(next.unwrap() > t);
+        }
+    }
+}
+
+// =============================================================================
+// §B  next_after_unix(next_after_unix(t) - 1) = next_after_unix(t)
+//     (the fire-time is a fixed point of next_after(fire_time - 1))
+// =============================================================================
+
+@test
+fn law_fire_time_is_exact_minute_boundary() {
+    let c = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let t = 1000;
+    let n1 = c.next_after_unix(t).unwrap();
+    let n2 = c.next_after_unix(n1 - 1).unwrap();
+    assert_eq(n1, n2);
+}
+
+// =============================================================================
+// §C  Spacing between fires equals the period for uniform schedules
+// =============================================================================
+
+@test
+fn law_every_minute_consecutive_fires_spaced_60s() {
+    let c = CronExpr.parse(&"* * * * *".to_text()).unwrap();
+    let t0 = c.next_after_unix(0).unwrap();
+    let t1 = c.next_after_unix(t0).unwrap();
+    let t2 = c.next_after_unix(t1).unwrap();
+    assert_eq(t1 - t0, 60);
+    assert_eq(t2 - t1, 60);
+}
+
+@test
+fn law_every_5_minutes_consecutive_fires_spaced_300s() {
+    let c = CronExpr.parse(&"*/5 * * * *".to_text()).unwrap();
+    let t0 = c.next_after_unix(0).unwrap();
+    let t1 = c.next_after_unix(t0).unwrap();
+    assert_eq(t1 - t0, 300);
+}
+
+@test
+fn law_every_hour_at_0_fires_spaced_3600s() {
+    let c = CronExpr.parse(&"0 * * * *".to_text()).unwrap();
+    let t0 = c.next_after_unix(0).unwrap();
+    let t1 = c.next_after_unix(t0).unwrap();
+    assert_eq(t1 - t0, 3600);
+}
+
+// =============================================================================
+// §D  @test_case — parse succeeds iff field count = 5
+// =============================================================================
+
+@test_case("* * * * *",          true)
+@test_case("0 * * * *",          true)
+@test_case("0 8 * * MON-FRI",    true)
+@test_case("* * *",              false)
+@test_case("* * * * * *",        false)
+fn parametrised_parse_validity(spec: &Text, should_succeed: Bool) {
+    let r = CronExpr.parse(spec);
+    assert_eq(r.is_ok(), should_succeed);
+}
+
+fn main() {}

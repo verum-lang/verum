@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/time/instant/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for Instant.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Monotonicity: sequential Instant.now() calls never decrease
+// =============================================================================
+
+@test
+fn law_sequential_instants_non_decreasing() {
+    let instants: List<Instant> = [
+        Instant.now(), Instant.now(), Instant.now(),
+        Instant.now(), Instant.now(),
+    ];
+    let mut prev = instants[0].as_nanos();
+    let mut i = 1;
+    while i < instants.len() {
+        assert(instants[i].as_nanos() >= prev,
+            "monotonic clock went backwards");
+        prev = instants[i].as_nanos();
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §B  duration_since antisymmetry: if b > a then a.duration_since(b) = None
+// =============================================================================
+
+@test
+fn law_duration_since_none_when_earlier_is_later() {
+    let a = Instant.now();
+    let b = a + Duration.nanos(1);
+    // a is before b, so a.duration_since(b) should be None
+    assert(a.duration_since(b).is_none());
+}
+
+@test
+fn law_duration_since_some_when_later() {
+    let a = Instant.now();
+    let b = a + Duration.millis(500);
+    let d = b.duration_since(a);
+    assert(d.is_some());
+    assert_eq(d.unwrap(), Duration.millis(500));
+}
+
+// =============================================================================
+// §C  checked_add then subtract round-trip
+// =============================================================================
+
+@test
+fn law_add_then_sub_round_trip() {
+    let t = Instant.now();
+    let offset = Duration.secs(30);
+    let future = t.checked_add(offset).unwrap();
+    let restored = future.checked_sub(offset).unwrap();
+    assert_eq(restored, t);
+}
+
+// =============================================================================
+// §D  (b - a) = b.duration_since(a) for b >= a
+// =============================================================================
+
+@test
+fn law_sub_operator_equals_duration_since() {
+    let a = Instant.now();
+    let d = Duration.millis(250);
+    let b = a + d;
+    let via_op: Duration = b - a;
+    let via_method = b.duration_since(a).unwrap();
+    assert_eq(via_op, via_method);
+}
+
+// =============================================================================
+// §E  elapsed() returns a Duration >= zero always
+// =============================================================================
+
+@test
+fn law_elapsed_always_non_negative() {
+    let t = Instant.now();
+    let e = t.elapsed();
+    assert(e.as_nanos() >= 0);
+}
+
+// =============================================================================
+// §F  @test_case — checked_sub by own addition restores original
+// =============================================================================
+
+@test_case(Duration.nanos(1))
+@test_case(Duration.millis(100))
+@test_case(Duration.secs(3600))
+fn parametrised_add_sub_inverse(d: Duration) {
+    let t = Instant.now();
+    let t2 = t + d;
+    let restored = t2 - d;
+    assert_eq(restored, t);
+}
+
+fn main() {}

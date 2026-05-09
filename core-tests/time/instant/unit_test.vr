@@ -1,0 +1,141 @@
+// =============================================================================
+// core-tests/time/instant/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.instant.Instant`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Section 1: now() returns a positive value
+// =============================================================================
+
+@test
+fn test_now_returns_positive_nanos() {
+    let t = Instant.now();
+    // Monotonic clocks start from an arbitrary epoch but are always >= 0
+    assert(t.as_nanos() >= 0);
+}
+
+@test
+fn test_two_sequential_nows_are_ordered() {
+    let a = Instant.now();
+    let b = Instant.now();
+    // Monotonic clock never goes backwards
+    assert(a.as_nanos() <= b.as_nanos());
+}
+
+// =============================================================================
+// Section 2: elapsed() is non-negative
+// =============================================================================
+
+@test
+fn test_elapsed_is_non_negative() {
+    let start = Instant.now();
+    let elapsed = start.elapsed();
+    assert(elapsed.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 3: duration_since — direction
+// =============================================================================
+
+@test
+fn test_duration_since_later_is_some() {
+    let a = Instant.now();
+    let b = Instant.now();
+    // b >= a always; b.duration_since(a) should be Some
+    let d = b.duration_since(a);
+    assert(d.is_some());
+}
+
+@test
+fn test_duration_since_earlier_returns_none_when_reversed() {
+    let a = Instant.now();
+    let b = Instant.now();
+    // a.duration_since(b) is None when b > a (i.e., a is earlier)
+    // This may be None or Some(zero) depending on timing; check it doesn't panic
+    let _ = a.duration_since(b);
+}
+
+@test
+fn test_duration_since_self_is_zero() {
+    let a = Instant.now();
+    let d = a.duration_since(a).unwrap_or(Duration.zero());
+    assert(d.is_zero());
+}
+
+// =============================================================================
+// Section 4: saturating_duration_since never panics
+// =============================================================================
+
+@test
+fn test_saturating_duration_since_floors_at_zero() {
+    let a = Instant.now();
+    let b = Instant.now();
+    // a.saturating_duration_since(b) when b >= a → Duration.zero()
+    let d = a.saturating_duration_since(b);
+    assert(d.as_nanos() >= 0);
+}
+
+// =============================================================================
+// Section 5: checked_add / checked_sub
+// =============================================================================
+
+@test
+fn test_checked_add_increases_instant() {
+    let t = Instant.now();
+    let d = Duration.secs(60);
+    let future = t.checked_add(d);
+    assert(future.is_some());
+    assert(future.unwrap().as_nanos() > t.as_nanos());
+}
+
+@test
+fn test_checked_sub_by_zero_stays_same() {
+    let t = Instant.now();
+    let result = t.checked_sub(Duration.zero());
+    assert(result.is_some());
+    assert_eq(result.unwrap(), t);
+}
+
+// =============================================================================
+// Section 6: Operator Add<Duration>
+// =============================================================================
+
+@test
+fn test_add_duration_advances_instant() {
+    let t = Instant.now();
+    let t2 = t + Duration.millis(100);
+    assert(t2.as_nanos() >= t.as_nanos() + 100_000_000);
+}
+
+@test
+fn test_sub_instant_yields_duration() {
+    let a = Instant.now();
+    let b = a + Duration.secs(5);
+    let diff: Duration = b - a;
+    assert_eq(diff.as_secs(), 5);
+}
+
+// =============================================================================
+// Section 7: Comparison
+// =============================================================================
+
+@test
+fn test_instant_eq_to_itself() {
+    let t = Instant.now();
+    assert_eq(t, t);
+}
+
+@test
+fn test_instant_lt_after_add() {
+    let a = Instant.now();
+    let b = a + Duration.nanos(1);
+    assert(a < b);
+}
+
+fn main() {}

@@ -1,0 +1,238 @@
+// =============================================================================
+// core-tests/time/duration_parse/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.duration_parse` — compact and ISO 8601 parser.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration_parse.{parse, DurationParseError, MAX_DURATION_INPUT_BYTES};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Section 1: Compact single-unit forms
+// =============================================================================
+
+@test
+fn test_parse_nanoseconds() {
+    let d = parse(&"100ns".to_text()).unwrap();
+    assert_eq(d.as_nanos(), 100);
+}
+
+@test
+fn test_parse_microseconds_us() {
+    let d = parse(&"250us".to_text()).unwrap();
+    assert_eq(d.as_nanos(), 250_000);
+}
+
+@test
+fn test_parse_milliseconds() {
+    let d = parse(&"500ms".to_text()).unwrap();
+    assert_eq(d.as_millis(), 500);
+}
+
+@test
+fn test_parse_seconds() {
+    let d = parse(&"30s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 30);
+}
+
+@test
+fn test_parse_minutes() {
+    let d = parse(&"5m".to_text()).unwrap();
+    assert_eq(d.as_secs(), 300);
+}
+
+@test
+fn test_parse_hours() {
+    let d = parse(&"2h".to_text()).unwrap();
+    assert_eq(d.as_secs(), 7200);
+}
+
+@test
+fn test_parse_days() {
+    let d = parse(&"1d".to_text()).unwrap();
+    assert_eq(d.as_secs(), 86400);
+}
+
+@test
+fn test_parse_weeks() {
+    let d = parse(&"1w".to_text()).unwrap();
+    assert_eq(d.as_secs(), 604800);
+}
+
+// =============================================================================
+// Section 2: Composite compact form
+// =============================================================================
+
+@test
+fn test_parse_1h30m() {
+    let d = parse(&"1h30m".to_text()).unwrap();
+    assert_eq(d.as_secs(), 5400);
+}
+
+@test
+fn test_parse_5m30s() {
+    let d = parse(&"5m30s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 330);
+}
+
+@test
+fn test_parse_1h15m20s() {
+    let d = parse(&"1h15m20s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 4520);
+}
+
+// =============================================================================
+// Section 3: Whitespace tolerance
+// =============================================================================
+
+@test
+fn test_parse_with_space_between_components() {
+    let d = parse(&"2h 30m".to_text()).unwrap();
+    assert_eq(d.as_secs(), 9000);
+}
+
+@test
+fn test_parse_with_leading_whitespace() {
+    let d = parse(&"  1s".to_text()).unwrap();
+    assert_eq(d.as_secs(), 1);
+}
+
+@test
+fn test_parse_with_trailing_whitespace() {
+    let d = parse(&"1s  ".to_text()).unwrap();
+    assert_eq(d.as_secs(), 1);
+}
+
+// =============================================================================
+// Section 4: Fractional values
+// =============================================================================
+
+@test
+fn test_parse_fractional_seconds_1_5s() {
+    let d = parse(&"1.5s".to_text()).unwrap();
+    assert_eq(d.as_millis(), 1500);
+}
+
+@test
+fn test_parse_fractional_milliseconds() {
+    // 1.5ms = 1_500_000ns
+    let d = parse(&"1.5ms".to_text()).unwrap();
+    assert_eq(d.as_nanos(), 1_500_000);
+}
+
+@test
+fn test_parse_fractional_minutes() {
+    // 0.5m = 30s
+    let d = parse(&"0.5m".to_text()).unwrap();
+    assert_eq(d.as_secs(), 30);
+}
+
+// =============================================================================
+// Section 5: Negative durations
+// =============================================================================
+
+@test
+fn test_parse_negative_minutes() {
+    let d = parse(&"-15m".to_text()).unwrap();
+    // Negative durations: as_nanos() returns the underlying negative value
+    assert(d.as_nanos() < 0);
+}
+
+@test
+fn test_parse_negative_hours() {
+    let d = parse(&"-1h".to_text()).unwrap();
+    assert(d.as_nanos() < 0);
+}
+
+// =============================================================================
+// Section 6: ISO 8601 form
+// =============================================================================
+
+@test
+fn test_parse_iso_5_minutes() {
+    let d = parse(&"PT5M".to_text()).unwrap();
+    assert_eq(d.as_secs(), 300);
+}
+
+@test
+fn test_parse_iso_1h30m() {
+    let d = parse(&"PT1H30M".to_text()).unwrap();
+    assert_eq(d.as_secs(), 5400);
+}
+
+@test
+fn test_parse_iso_1_day() {
+    let d = parse(&"P1D".to_text()).unwrap();
+    assert_eq(d.as_secs(), 86400);
+}
+
+@test
+fn test_parse_iso_fractional_seconds() {
+    // PT0.5S = 500ms
+    let d = parse(&"PT0.5S".to_text()).unwrap();
+    assert_eq(d.as_millis(), 500);
+}
+
+@test
+fn test_parse_iso_1_week() {
+    let d = parse(&"P1W".to_text()).unwrap();
+    assert_eq(d.as_secs(), 604800);
+}
+
+@test
+fn test_parse_iso_lowercase_designators() {
+    let d = parse(&"pt5m".to_text()).unwrap();
+    assert_eq(d.as_secs(), 300);
+}
+
+// =============================================================================
+// Section 7: Errors
+// =============================================================================
+
+@test
+fn test_parse_empty_is_error() {
+    let r = parse(&"".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_whitespace_only_is_error() {
+    let r = parse(&"   ".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_unknown_unit_is_error() {
+    let r = parse(&"5years".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_too_long_is_error() {
+    // 257 characters
+    let mut long: Text = "".to_text();
+    let mut i = 0;
+    while i < 257 { long = f"{long}1"; i = i + 1; }
+    let long_input = f"{long}s";
+    let r = parse(&long_input);
+    assert(r.is_err());
+}
+
+@test
+fn test_parse_digits_only_no_unit_is_error() {
+    let r = parse(&"42".to_text());
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Section 8: MAX_DURATION_INPUT_BYTES constant
+// =============================================================================
+
+@test
+fn test_max_bytes_constant_is_256() {
+    assert_eq(MAX_DURATION_INPUT_BYTES, 256);
+}
+
+fn main() {}

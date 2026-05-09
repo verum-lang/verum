@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/time/interval/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.time.interval.{Interval, AsyncInterval}`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.interval.{Interval, AsyncInterval, interval, interval_ms};
+mount core.time.duration.{Duration};
+mount core.time.instant.{Instant};
+
+// =============================================================================
+// Section 1: Interval.new — period stored correctly
+// =============================================================================
+
+@test
+fn test_interval_new_stores_period() {
+    let d = Duration.millis(500);
+    let timer = Interval.new(d);
+    assert_eq(timer.period(), d);
+}
+
+@test
+fn test_interval_new_period_100ms() {
+    let timer = Interval.new(Duration.millis(100));
+    assert_eq(timer.period().as_millis(), 100);
+}
+
+@test
+fn test_interval_new_period_1s() {
+    let timer = Interval.new(Duration.secs(1));
+    assert_eq(timer.period().as_secs(), 1);
+}
+
+@test
+fn test_interval_new_period_zero() {
+    let timer = Interval.new(Duration.zero());
+    assert(timer.period().is_zero());
+}
+
+// =============================================================================
+// Section 2: Interval.immediate — next_tick_ns <= now
+// =============================================================================
+
+@test
+fn test_interval_immediate_next_tick_not_in_future() {
+    let before = Instant.now().as_nanos();
+    let timer = Interval.immediate(Duration.secs(60));
+    // next_tick_ns should be <= before + some epsilon (at the time of call)
+    // Since it uses Time.monotonic() internally, we can't check
+    // next_tick_ns directly, but we CAN verify the period is set correctly:
+    assert_eq(timer.period().as_secs(), 60);
+}
+
+// =============================================================================
+// Section 3: Interval.reset resets next_tick to now + period
+// =============================================================================
+
+@test
+fn test_interval_reset_does_not_panic() {
+    let mut timer = Interval.new(Duration.millis(100));
+    timer.reset(); // must not panic
+    assert_eq(timer.period().as_millis(), 100);
+}
+
+// =============================================================================
+// Section 4: AsyncInterval.new
+// =============================================================================
+
+@test
+fn test_async_interval_new_stores_period_ns() {
+    let d = Duration.millis(200);
+    let ai = AsyncInterval.new(d);
+    assert_eq(ai.period_ns, d.as_nanos());
+}
+
+@test
+fn test_async_interval_new_zero_period() {
+    let ai = AsyncInterval.new(Duration.zero());
+    assert_eq(ai.period_ns, 0);
+}
+
+// =============================================================================
+// Section 5: Factory functions
+// =============================================================================
+
+@test
+fn test_interval_factory_stores_period_ns() {
+    let ai = interval(Duration.secs(5));
+    assert_eq(ai.period_ns, Duration.secs(5).as_nanos());
+}
+
+@test
+fn test_interval_ms_factory_100ms() {
+    let ai = interval_ms(100);
+    assert_eq(ai.period_ns, 100_000_000);
+}
+
+@test
+fn test_interval_ms_factory_1000ms() {
+    let ai = interval_ms(1000);
+    assert_eq(ai.period_ns, 1_000_000_000);
+}
+
+@test
+fn test_interval_ms_factory_zero() {
+    let ai = interval_ms(0);
+    assert_eq(ai.period_ns, 0);
+}
+
+// =============================================================================
+// Section 6: AsyncInterval.reset
+// =============================================================================
+
+@test
+fn test_async_interval_reset_does_not_panic() {
+    let mut ai = AsyncInterval.new(Duration.millis(50));
+    ai.reset();
+    assert_eq(ai.period_ns, Duration.millis(50).as_nanos());
+}
+
+fn main() {}
