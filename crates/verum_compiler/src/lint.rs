@@ -73,12 +73,12 @@ impl LintLevel {
     }
 
     /// Check if this level should emit a diagnostic.
-    pub fn should_emit(self) -> bool {
+    pub const fn should_emit(self) -> bool {
         !matches!(self, LintLevel::Allow)
     }
 
     /// Check if this level causes compilation failure.
-    pub fn is_error(self) -> bool {
+    pub const fn is_error(self) -> bool {
         matches!(self, LintLevel::Deny | LintLevel::Forbid)
     }
 }
@@ -104,96 +104,190 @@ pub enum IntrinsicLint {
     Unstable,
 }
 
+// =========================================================================
+// Shared lint metadata — single source of truth for the IntrinsicLint /
+// StagedMetaLint / StdlibLint families.
+//
+// Each lint enum exposes the same parallel surface — `name()` /
+// `from_str()` / `all_names()` / `default_level()` / `warning_code()` /
+// `error_code()` / `code_for_level()` — historically maintained as
+// independent match statements per enum.  Three concrete drift risks:
+//
+//   * `name()` ↔ `from_str()` round-trip: the two tables are written
+//     by hand and could go out of sync silently when a variant is
+//     renamed.
+//   * `all_names()` ↔ enum variant list: a hardcoded `&[&'static
+//     str; N]` that has to be edited by hand whenever a new variant
+//     lands.
+//   * `warning_code()` / `error_code()` legacy `_ => "W0900"` /
+//     `"E0900"` catch-alls hide per-variant codes.
+//
+// `LintMeta` collapses every reference-data field into one struct and
+// each enum's `meta()` is the sole match site mapping variant →
+// metadata.  All sibling accessors become single-line projections;
+// `from_str` derives from `ALL.iter().find(name == s)`; `all_names`
+// derives from `ALL.iter().map(name)`.  Drift-pin tests assert the
+// round-trip on every variant.
+//
+// Same drift-collapse pattern as the verum_vbc sub-opcode meta()
+// series (commits 4b2792881 / 60b4cc3b9 / dd84a929b / 79369267d /
+// 06d64018d / ae5bc5896 / 8e6c4cb93 / cbaf0b9d8 / d45d7ace5 /
+// 9fc5ce6cd) and the verum_kernel KernelRule.meta() / AntiPatternCode
+// .meta() / Lifecycle.meta() consolidations.
+// =========================================================================
+
+/// Co-located metadata for one variant of any lint enum
+/// (`IntrinsicLint` / `StagedMetaLint` / `StdlibLint`).
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; each enum's `meta()` method is the only site that constructs
+/// values of this type, so a single match keeps every accessor
+/// consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct LintMeta {
+    /// Short lint name as it appears in CLI flags (`-A`, `-W`, `-D`,
+    /// `-F`) and the `[lint]` section of `Verum.toml`.
+    pub name: &'static str,
+    /// Default severity when no explicit override is configured.
+    pub default_level: LintLevel,
+    /// `Wxxxx` code rendered when the lint is emitted at warn-level.
+    pub warning_code: &'static str,
+    /// `Exxxx` code rendered when the lint is emitted at deny-level.
+    pub error_code: &'static str,
+}
+
+impl LintMeta {
+    /// Pick the warning- or error-spelling of the lint code based
+    /// on the severity it is being emitted at.
+    #[inline]
+    pub const fn code_for_level(&self, level: LintLevel) -> &'static str {
+        if level.is_error() {
+            self.error_code
+        } else {
+            self.warning_code
+        }
+    }
+}
+
 impl IntrinsicLint {
-    /// Get the lint name for CLI/config.
-    pub fn name(self) -> &'static str {
+    /// All variants in stable order — the canonical iteration source
+    /// for `from_str` / `all_names` / drift-pin tests.  Adding a new
+    /// variant requires exactly one entry here plus one `meta()` arm.
+    pub const ALL: &'static [Self] = &[
+        Self::MissingImplementation,
+        Self::ArgumentCount,
+        Self::ArgumentType,
+        Self::ProtocolBound,
+        Self::PlatformNotSupported,
+        Self::ConstEvalFailed,
+        Self::Deprecated,
+        Self::Unstable,
+    ];
+
+    /// Returns co-located metadata for this lint.  Single source of
+    /// truth for `name` / `default_level` / `warning_code` /
+    /// `error_code`.
+    pub const fn meta(self) -> LintMeta {
+        // Variants without a natural warning-code pairing (errors-by-
+        // default) keep the legacy `"W0900"` generic; variants
+        // without a natural error-code pairing (warnings-by-default)
+        // keep the legacy `"E0900"` generic.  The non-generic codes
+        // form a 901-906 sequence indexed by the variant's primary
+        // diagnostic role.
         match self {
-            IntrinsicLint::MissingImplementation => "missing_intrinsic",
-            IntrinsicLint::ArgumentCount => "intrinsic_arg_count",
-            IntrinsicLint::ArgumentType => "intrinsic_arg_type",
-            IntrinsicLint::ProtocolBound => "intrinsic_protocol_bound",
-            IntrinsicLint::PlatformNotSupported => "intrinsic_platform",
-            IntrinsicLint::ConstEvalFailed => "intrinsic_const_eval",
-            IntrinsicLint::Deprecated => "intrinsic_deprecated",
-            IntrinsicLint::Unstable => "intrinsic_unstable",
+            Self::MissingImplementation => LintMeta {
+                name: "missing_intrinsic",
+                default_level: LintLevel::Warn,
+                warning_code: "W0901",
+                error_code:   "E0901",
+            },
+            Self::ArgumentCount => LintMeta {
+                name: "intrinsic_arg_count",
+                default_level: LintLevel::Deny,
+                warning_code: "W0900",
+                error_code:   "E0902",
+            },
+            Self::ArgumentType => LintMeta {
+                name: "intrinsic_arg_type",
+                default_level: LintLevel::Deny,
+                warning_code: "W0900",
+                error_code:   "E0903",
+            },
+            Self::ProtocolBound => LintMeta {
+                name: "intrinsic_protocol_bound",
+                default_level: LintLevel::Deny,
+                warning_code: "W0900",
+                error_code:   "E0904",
+            },
+            Self::PlatformNotSupported => LintMeta {
+                name: "intrinsic_platform",
+                default_level: LintLevel::Deny,
+                warning_code: "W0900",
+                error_code:   "E0905",
+            },
+            Self::ConstEvalFailed => LintMeta {
+                name: "intrinsic_const_eval",
+                default_level: LintLevel::Deny,
+                warning_code: "W0900",
+                error_code:   "E0906",
+            },
+            Self::Deprecated => LintMeta {
+                name: "intrinsic_deprecated",
+                default_level: LintLevel::Warn,
+                warning_code: "W0902",
+                error_code:   "E0900",
+            },
+            Self::Unstable => LintMeta {
+                name: "intrinsic_unstable",
+                default_level: LintLevel::Warn,
+                warning_code: "W0903",
+                error_code:   "E0900",
+            },
         }
     }
 
-    /// Parse lint from string name.
+    /// Get the lint name for CLI/config.
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse lint from string name.  Derived from `Self::ALL` so the
+    /// name → variant table cannot drift from the variant → name
+    /// table (`name()`).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "missing_intrinsic" => Some(IntrinsicLint::MissingImplementation),
-            "intrinsic_arg_count" => Some(IntrinsicLint::ArgumentCount),
-            "intrinsic_arg_type" => Some(IntrinsicLint::ArgumentType),
-            "intrinsic_protocol_bound" => Some(IntrinsicLint::ProtocolBound),
-            "intrinsic_platform" => Some(IntrinsicLint::PlatformNotSupported),
-            "intrinsic_const_eval" => Some(IntrinsicLint::ConstEvalFailed),
-            "intrinsic_deprecated" => Some(IntrinsicLint::Deprecated),
-            "intrinsic_unstable" => Some(IntrinsicLint::Unstable),
-            _ => None,
-        }
+        Self::ALL.iter().copied().find(|v| v.name() == s)
     }
 
-    /// Get all lint names for help text.
-    pub fn all_names() -> &'static [&'static str] {
-        &[
-            "missing_intrinsic",
-            "intrinsic_arg_count",
-            "intrinsic_arg_type",
-            "intrinsic_protocol_bound",
-            "intrinsic_platform",
-            "intrinsic_const_eval",
-            "intrinsic_deprecated",
-            "intrinsic_unstable",
-        ]
+    /// Get all lint names for help text.  Derived from `Self::ALL`
+    /// so the slice cannot drift from the variant list when new
+    /// lints are added.
+    pub fn all_names() -> Vec<&'static str> {
+        Self::ALL.iter().map(|v| v.name()).collect()
     }
 
     /// Get the default level for this lint.
-    pub fn default_level(self) -> LintLevel {
-        match self {
-            // Type errors are always errors
-            IntrinsicLint::ArgumentCount
-            | IntrinsicLint::ArgumentType
-            | IntrinsicLint::ProtocolBound => LintLevel::Deny,
-            // Platform and const eval are errors
-            IntrinsicLint::PlatformNotSupported | IntrinsicLint::ConstEvalFailed => LintLevel::Deny,
-            // Missing intrinsics are warnings by default
-            IntrinsicLint::MissingImplementation => LintLevel::Warn,
-            // Deprecation/unstable are warnings
-            IntrinsicLint::Deprecated | IntrinsicLint::Unstable => LintLevel::Warn,
-        }
+    #[inline]
+    pub const fn default_level(self) -> LintLevel {
+        self.meta().default_level
     }
 
     /// Get the warning code for this lint.
-    pub fn warning_code(self) -> &'static str {
-        match self {
-            IntrinsicLint::MissingImplementation => "W0901",
-            IntrinsicLint::Deprecated => "W0902",
-            IntrinsicLint::Unstable => "W0903",
-            _ => "W0900", // Generic warning
-        }
+    #[inline]
+    pub const fn warning_code(self) -> &'static str {
+        self.meta().warning_code
     }
 
     /// Get the error code for this lint.
-    pub fn error_code(self) -> &'static str {
-        match self {
-            IntrinsicLint::MissingImplementation => "E0901",
-            IntrinsicLint::ArgumentCount => "E0902",
-            IntrinsicLint::ArgumentType => "E0903",
-            IntrinsicLint::ProtocolBound => "E0904",
-            IntrinsicLint::PlatformNotSupported => "E0905",
-            IntrinsicLint::ConstEvalFailed => "E0906",
-            _ => "E0900", // Generic error
-        }
+    #[inline]
+    pub const fn error_code(self) -> &'static str {
+        self.meta().error_code
     }
 
     /// Get the appropriate code based on severity.
-    pub fn code_for_level(self, level: LintLevel) -> &'static str {
-        if level.is_error() {
-            self.error_code()
-        } else {
-            self.warning_code()
-        }
+    #[inline]
+    pub const fn code_for_level(self, level: LintLevel) -> &'static str {
+        self.meta().code_for_level(level)
     }
 }
 
@@ -661,88 +755,106 @@ pub enum StagedMetaLint {
 }
 
 impl StagedMetaLint {
-    /// Get the lint name for CLI/config.
-    pub fn name(self) -> &'static str {
+    /// All variants in stable order — see `IntrinsicLint::ALL`.
+    pub const ALL: &'static [Self] = &[
+        Self::StageMismatch,
+        Self::CrossStageCall,
+        Self::StageOverflow,
+        Self::CyclicStage,
+        Self::InvalidStageEscape,
+        Self::UnusedStage,
+        Self::StageDowngrade,
+    ];
+
+    /// Returns co-located metadata for this lint.  Single source of
+    /// truth.  Codes form a 1001-1005 sequence for the stage-coherence
+    /// errors (E10xx) and a 1001-1002 sequence for the warnings
+    /// (W10xx).
+    pub const fn meta(self) -> LintMeta {
         match self {
-            StagedMetaLint::StageMismatch => "stage_mismatch",
-            StagedMetaLint::CrossStageCall => "cross_stage_call",
-            StagedMetaLint::StageOverflow => "stage_overflow",
-            StagedMetaLint::CyclicStage => "cyclic_stage",
-            StagedMetaLint::InvalidStageEscape => "invalid_stage_escape",
-            StagedMetaLint::UnusedStage => "unused_stage",
-            StagedMetaLint::StageDowngrade => "stage_downgrade",
+            Self::StageMismatch => LintMeta {
+                name: "stage_mismatch",
+                default_level: LintLevel::Deny,
+                warning_code: "W1000",
+                error_code:   "E1001",
+            },
+            Self::CrossStageCall => LintMeta {
+                name: "cross_stage_call",
+                default_level: LintLevel::Deny,
+                warning_code: "W1000",
+                error_code:   "E1002",
+            },
+            Self::StageOverflow => LintMeta {
+                name: "stage_overflow",
+                default_level: LintLevel::Deny,
+                warning_code: "W1000",
+                error_code:   "E1003",
+            },
+            Self::CyclicStage => LintMeta {
+                name: "cyclic_stage",
+                default_level: LintLevel::Deny,
+                warning_code: "W1000",
+                error_code:   "E1004",
+            },
+            Self::InvalidStageEscape => LintMeta {
+                name: "invalid_stage_escape",
+                default_level: LintLevel::Deny,
+                warning_code: "W1000",
+                error_code:   "E1005",
+            },
+            Self::UnusedStage => LintMeta {
+                name: "unused_stage",
+                default_level: LintLevel::Warn,
+                warning_code: "W1001",
+                error_code:   "E1000",
+            },
+            Self::StageDowngrade => LintMeta {
+                name: "stage_downgrade",
+                default_level: LintLevel::Warn,
+                warning_code: "W1002",
+                error_code:   "E1000",
+            },
         }
     }
 
-    /// Parse lint from string name.
+    /// Get the lint name for CLI/config.
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse lint from string name (derived from `ALL`).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "stage_mismatch" => Some(StagedMetaLint::StageMismatch),
-            "cross_stage_call" => Some(StagedMetaLint::CrossStageCall),
-            "stage_overflow" => Some(StagedMetaLint::StageOverflow),
-            "cyclic_stage" => Some(StagedMetaLint::CyclicStage),
-            "invalid_stage_escape" => Some(StagedMetaLint::InvalidStageEscape),
-            "unused_stage" => Some(StagedMetaLint::UnusedStage),
-            "stage_downgrade" => Some(StagedMetaLint::StageDowngrade),
-            _ => None,
-        }
+        Self::ALL.iter().copied().find(|v| v.name() == s)
     }
 
-    /// Get all lint names for help text.
-    pub fn all_names() -> &'static [&'static str] {
-        &[
-            "stage_mismatch",
-            "cross_stage_call",
-            "stage_overflow",
-            "cyclic_stage",
-            "invalid_stage_escape",
-            "unused_stage",
-            "stage_downgrade",
-        ]
+    /// Get all lint names for help text (derived from `ALL`).
+    pub fn all_names() -> Vec<&'static str> {
+        Self::ALL.iter().map(|v| v.name()).collect()
     }
 
     /// Get the default level for this lint.
-    pub fn default_level(self) -> LintLevel {
-        match self {
-            // Stage coherence errors are always errors
-            StagedMetaLint::StageMismatch
-            | StagedMetaLint::CrossStageCall
-            | StagedMetaLint::StageOverflow
-            | StagedMetaLint::CyclicStage
-            | StagedMetaLint::InvalidStageEscape => LintLevel::Deny,
-            // Unused and downgrade are warnings
-            StagedMetaLint::UnusedStage | StagedMetaLint::StageDowngrade => LintLevel::Warn,
-        }
+    #[inline]
+    pub const fn default_level(self) -> LintLevel {
+        self.meta().default_level
     }
 
     /// Get the warning code for this lint.
-    pub fn warning_code(self) -> &'static str {
-        match self {
-            StagedMetaLint::UnusedStage => "W1001",
-            StagedMetaLint::StageDowngrade => "W1002",
-            _ => "W1000", // Generic warning
-        }
+    #[inline]
+    pub const fn warning_code(self) -> &'static str {
+        self.meta().warning_code
     }
 
     /// Get the error code for this lint.
-    pub fn error_code(self) -> &'static str {
-        match self {
-            StagedMetaLint::StageMismatch => "E1001",
-            StagedMetaLint::CrossStageCall => "E1002",
-            StagedMetaLint::StageOverflow => "E1003",
-            StagedMetaLint::CyclicStage => "E1004",
-            StagedMetaLint::InvalidStageEscape => "E1005",
-            _ => "E1000", // Generic error
-        }
+    #[inline]
+    pub const fn error_code(self) -> &'static str {
+        self.meta().error_code
     }
 
     /// Get the appropriate code based on severity.
-    pub fn code_for_level(self, level: LintLevel) -> &'static str {
-        if level.is_error() {
-            self.error_code()
-        } else {
-            self.warning_code()
-        }
+    #[inline]
+    pub const fn code_for_level(self, level: LintLevel) -> &'static str {
+        self.meta().code_for_level(level)
     }
 }
 
@@ -1118,37 +1230,55 @@ pub enum StdlibLint {
 }
 
 impl StdlibLint {
-    /// The short lint name (for CLI `-A<name>` / `-W<name>`).
-    pub fn name(self) -> &'static str {
+    /// All variants in stable order — see `IntrinsicLint::ALL`.
+    pub const ALL: &'static [Self] = &[
+        Self::MapGetHazard,
+    ];
+
+    /// Returns co-located metadata for this lint.  Single source of
+    /// truth.  All stdlib hazards default to `Warn` so existing call
+    /// sites remain buildable; users can `-Dmap_get_hazard` in CI
+    /// to tighten.  Stdlib hazards have no natural error code (they
+    /// are warnings by design); the `error_code` slot uses the
+    /// generic `E0500` for the rare case a user demotes via `-D`.
+    pub const fn meta(self) -> LintMeta {
         match self {
-            Self::MapGetHazard => "map_get_hazard",
+            Self::MapGetHazard => LintMeta {
+                name: "map_get_hazard",
+                default_level: LintLevel::Warn,
+                warning_code: "W0505",
+                error_code:   "E0500",
+            },
         }
     }
 
-    /// Parse a lint name from the CLI.
+    /// The short lint name (for CLI `-A<name>` / `-W<name>`).
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a lint name from the CLI (derived from `ALL`).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "map_get_hazard" => Some(Self::MapGetHazard),
-            _ => None,
-        }
+        Self::ALL.iter().copied().find(|v| v.name() == s)
     }
 
     /// The W-code rendered in diagnostics.
-    pub fn warning_code(self) -> &'static str {
-        match self {
-            Self::MapGetHazard => "W0505",
-        }
+    #[inline]
+    pub const fn warning_code(self) -> &'static str {
+        self.meta().warning_code
     }
 
     /// Default severity — all stdlib hazards default to Warn
     /// so existing call sites remain buildable; users can
     /// `-Dmap_get_hazard` in CI to tighten.
-    pub fn default_level(self) -> LintLevel {
-        LintLevel::Warn
+    #[inline]
+    pub const fn default_level(self) -> LintLevel {
+        self.meta().default_level
     }
 
     /// One-line hazard summary used in the diagnostic message.
-    pub fn summary(self) -> &'static str {
+    pub const fn summary(self) -> &'static str {
         match self {
             Self::MapGetHazard => {
                 "`Map::get(key)` returns a zero value on miss, silently \
@@ -1192,6 +1322,127 @@ pub fn detect_stdlib_hazard(method_name: &str, receiver_type_name: &str) -> Opti
         Some(StdlibLint::MapGetHazard)
     } else {
         None
+    }
+}
+
+// =========================================================================
+// LintMeta drift-pin tests — validate the meta() consolidation invariants
+// across IntrinsicLint, StagedMetaLint, and StdlibLint.
+// =========================================================================
+
+#[cfg(test)]
+mod lint_meta_drift_pins {
+    use super::*;
+
+    /// Every variant in `IntrinsicLint::ALL` round-trips through
+    /// `name()` ↔ `from_str()`.  Catches drift between the meta()
+    /// table (source of `name()`) and the variant list (source of
+    /// `from_str()`).
+    #[test]
+    fn intrinsic_lint_name_from_str_round_trip() {
+        for &variant in IntrinsicLint::ALL {
+            let name = variant.name();
+            assert_eq!(IntrinsicLint::from_str(name), Some(variant),
+                "round-trip drift on {:?}: name={:?}", variant, name);
+        }
+    }
+
+    #[test]
+    fn intrinsic_lint_all_names_matches_all() {
+        let names = IntrinsicLint::all_names();
+        assert_eq!(names.len(), IntrinsicLint::ALL.len(),
+            "all_names() length must match ALL");
+        for (i, &v) in IntrinsicLint::ALL.iter().enumerate() {
+            assert_eq!(names[i], v.name(),
+                "all_names[{}] mismatch on variant {:?}", i, v);
+        }
+    }
+
+    /// `meta().warning_code` and `meta().error_code` follow the
+    /// `Wxxxx` / `Exxxx` shape (4 digits).
+    #[test]
+    fn intrinsic_lint_codes_well_formed() {
+        for &v in IntrinsicLint::ALL {
+            let m = v.meta();
+            assert!(m.warning_code.starts_with('W') && m.warning_code.len() == 5,
+                "{:?}: warning_code {:?} not Wxxxx-shaped", v, m.warning_code);
+            assert!(m.error_code.starts_with('E') && m.error_code.len() == 5,
+                "{:?}: error_code {:?} not Exxxx-shaped", v, m.error_code);
+        }
+    }
+
+    /// `code_for_level` is a thin projection: at error levels
+    /// (Deny/Forbid) it returns `error_code`; otherwise
+    /// `warning_code`.
+    #[test]
+    fn intrinsic_lint_code_for_level_dispatch() {
+        for &v in IntrinsicLint::ALL {
+            assert_eq!(v.code_for_level(LintLevel::Deny), v.error_code());
+            assert_eq!(v.code_for_level(LintLevel::Forbid), v.error_code());
+            assert_eq!(v.code_for_level(LintLevel::Warn), v.warning_code());
+            assert_eq!(v.code_for_level(LintLevel::Allow), v.warning_code());
+        }
+    }
+
+    #[test]
+    fn intrinsic_lint_count_pinned_at_eight() {
+        assert_eq!(IntrinsicLint::ALL.len(), 8,
+            "IntrinsicLint variant count drift: expected 8");
+    }
+
+    // === StagedMetaLint ===
+
+    #[test]
+    fn staged_meta_lint_name_from_str_round_trip() {
+        for &variant in StagedMetaLint::ALL {
+            let name = variant.name();
+            assert_eq!(StagedMetaLint::from_str(name), Some(variant),
+                "round-trip drift on {:?}: name={:?}", variant, name);
+        }
+    }
+
+    #[test]
+    fn staged_meta_lint_all_names_matches_all() {
+        let names = StagedMetaLint::all_names();
+        assert_eq!(names.len(), StagedMetaLint::ALL.len());
+        for (i, &v) in StagedMetaLint::ALL.iter().enumerate() {
+            assert_eq!(names[i], v.name());
+        }
+    }
+
+    #[test]
+    fn staged_meta_lint_codes_well_formed() {
+        for &v in StagedMetaLint::ALL {
+            let m = v.meta();
+            assert!(m.warning_code.starts_with('W') && m.warning_code.len() == 5);
+            assert!(m.error_code.starts_with('E') && m.error_code.len() == 5);
+        }
+    }
+
+    #[test]
+    fn staged_meta_lint_count_pinned_at_seven() {
+        assert_eq!(StagedMetaLint::ALL.len(), 7,
+            "StagedMetaLint variant count drift: expected 7");
+    }
+
+    // === StdlibLint ===
+
+    #[test]
+    fn stdlib_lint_name_from_str_round_trip() {
+        for &variant in StdlibLint::ALL {
+            let name = variant.name();
+            assert_eq!(StdlibLint::from_str(name), Some(variant),
+                "round-trip drift on {:?}: name={:?}", variant, name);
+        }
+    }
+
+    #[test]
+    fn stdlib_lint_codes_well_formed() {
+        for &v in StdlibLint::ALL {
+            let m = v.meta();
+            assert!(m.warning_code.starts_with('W') && m.warning_code.len() == 5);
+            assert!(m.error_code.starts_with('E') && m.error_code.len() == 5);
+        }
     }
 }
 
