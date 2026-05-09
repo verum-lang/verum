@@ -2135,7 +2135,12 @@ impl RefinementChecker {
             ExprKind::Unary {
                 op: verum_ast::expr::UnOp::Neg,
                 expr: inner,
-            } => Self::try_extract_int_value(inner).map(|val| -val),
+            } => Self::try_extract_int_value(inner).and_then(|val| {
+                match val.checked_neg() {
+                    Some(negated) => Maybe::Some(negated),
+                    None => Maybe::None,
+                }
+            }),
             ExprKind::Paren(inner) => Self::try_extract_int_value(inner),
             // `<literal-list>.len()` / `<byte-string>.len()` / `"text".len()`
             // — common in refinement predicates where the bound variable

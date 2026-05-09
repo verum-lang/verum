@@ -17,8 +17,10 @@
 //!
 //! Usage from the CLI:
 //!
-//!     cargo run -p vtest -- run --differential vcs/specs/L2-standard/shell/multi.vr
-//!     cargo run -p vtest -- differential --backend-set unix-only --filter shell
+//! ```text
+//! cargo run -p vtest -- run --differential vcs/specs/L2-standard/shell/multi.vr
+//! cargo run -p vtest -- differential --backend-set unix-only --filter shell
+//! ```
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
