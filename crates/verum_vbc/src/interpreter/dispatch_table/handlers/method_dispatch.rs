@@ -6435,10 +6435,16 @@ pub(super) fn dispatch_variant_method(
         return Ok(None);
     }
 
-    // Check TypeId — variant objects use 0x8000+ range
+    // Check TypeId — variant objects use the synthetic-id range
+    // `[SYNTHETIC_VARIANT_TYPE_ID_BASE..)`. The 4096-tag buffer above
+    // the record-fallback sentinel (`0xA000`) bounds the variant range
+    // so a record with the synthetic `0x9000` id doesn't false-trigger
+    // variant-method dispatch.
     let header = unsafe { &*(base_ptr as *const heap::ObjectHeader) };
     let type_id_val = header.type_id.0;
-    if !(0x8000..0xA000).contains(&type_id_val) {
+    if !verum_common::layout::is_synthetic_variant_type_id(type_id_val)
+        || type_id_val >= 0xA000
+    {
         return Ok(None); // Not a variant object
     }
 
@@ -7606,12 +7612,13 @@ pub(super) fn make_result_variant(
 
 /// Allocate a 1-field variant with `tag` and `payload`.
 ///
-/// Uses the canonical synthetic-TypeId formula `0x8000 + tag` —
-/// matches `pattern_matching::alloc_variant_into` for `MakeVariant`,
-/// so values produced here are bit-equivalent to those from the
-/// canonical opcode path. The single shared implementation eliminates
-/// the parallel alloc-with-init blocks `make_some_value` /
-/// `make_result_variant` previously each carried.
+/// Uses the canonical synthetic-TypeId formula via
+/// `verum_common::layout::synthetic_variant_type_id` — matches
+/// `pattern_matching::alloc_variant_into` for `MakeVariant`, so values
+/// produced here are bit-equivalent to those from the canonical opcode
+/// path. The single shared implementation eliminates the parallel
+/// alloc-with-init blocks `make_some_value` / `make_result_variant`
+/// previously each carried.
 #[inline]
 pub(super) fn alloc_variant_with_payload(
     state: &mut InterpreterState,
@@ -7619,7 +7626,7 @@ pub(super) fn alloc_variant_with_payload(
     payload: Value,
 ) -> InterpreterResult<Value> {
     let data_size = 8 + std::mem::size_of::<Value>();
-    let type_id = TypeId(0x8000 + tag);
+    let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
         let tag_ptr = data.as_mut_ptr() as *mut u32;
         unsafe {
@@ -7648,7 +7655,7 @@ pub(super) fn alloc_unit_variant(
     tag: u32,
 ) -> InterpreterResult<Value> {
     let data_size = 8;
-    let type_id = TypeId(0x8000 + tag);
+    let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
         let tag_ptr = data.as_mut_ptr() as *mut u32;
         unsafe {

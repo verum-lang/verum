@@ -3186,12 +3186,13 @@ pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -
         let ptr = val.as_ptr::<u8>();
         if !ptr.is_null() {
             let header_size = super::super::super::heap::OBJECT_HEADER_SIZE;
-            // Check if variant (type_id >= 0x8000)
+            // Check if synthetic-id variant — see
+            // `verum_common::layout::is_synthetic_variant_type_id`.
             // SAFETY: `val.is_ptr()` and `!ptr.is_null()` checked above;
             // the pointer refers to a live heap object with ObjectHeader
             // as its prefix.
             let header = unsafe { &*(ptr as *const super::super::super::heap::ObjectHeader) };
-            if header.type_id.0 >= 0x8000 {
+            if verum_common::layout::is_synthetic_variant_type_id(header.type_id.0) {
                 // Variant: extract payload[0]
                 let payload_offset = header_size + 8; // skip tag + padding
                 // SAFETY: Variant objects are laid out as [header, tag:u64,

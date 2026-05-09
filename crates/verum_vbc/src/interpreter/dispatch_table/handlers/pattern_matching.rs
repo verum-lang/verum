@@ -276,12 +276,13 @@ pub(in super::super) fn alloc_variant_into(
     field_count: u32,
 ) -> InterpreterResult<()> {
     // Legacy `MakeVariant` path — no parent-type info available, so
-    // we fall back to the synthetic `0x8000+tag` sentinel that
-    // downstream consumers (`format_variant_for_print_depth`,
+    // we fall back to the synthetic `SYNTHETIC_VARIANT_TYPE_ID_BASE+tag`
+    // sentinel that downstream consumers (`format_variant_for_print_depth`,
     // pattern-match dispatch) recognise as "tag is meaningful but
     // type_id is not". Prefer `alloc_variant_into_with_type_id`
     // when the codegen knows the parent sum-type id.
-    alloc_variant_into_with_type_id(state, dst, tag, field_count, TypeId(0x8000 + tag))
+    let synthetic_id = verum_common::layout::synthetic_variant_type_id(tag);
+    alloc_variant_into_with_type_id(state, dst, tag, field_count, TypeId(synthetic_id))
 }
 
 /// Same as `alloc_variant_into` but the caller supplies the concrete

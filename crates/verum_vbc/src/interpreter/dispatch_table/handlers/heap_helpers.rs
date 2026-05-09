@@ -56,9 +56,11 @@ use crate::value::Value;
 ///
 
 /// Returns `None` when the type isn't loaded — caller falls back to
-/// the synthetic-id pattern (`TypeId(0x9000)` for records,
-/// `TypeId(0x8000 + tag)` for variants) which the interpreter accepts
-/// at a slight semantic cost.
+/// the synthetic-id pattern: `verum_common::layout::SYNTHETIC_RECORD_TYPE_ID`
+/// for records and `verum_common::layout::synthetic_variant_type_id(tag)`
+/// for variants. The interpreter accepts both at a slight semantic cost
+/// (variant rendering falls through the global tag-scan in
+/// `format_variant_for_print_depth`).
 pub(super) fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
     state
         .module
@@ -84,7 +86,8 @@ pub(super) fn alloc_record_n_fields(
     fields: &[Value],
 ) -> InterpreterResult<Value> {
     use heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
+    let type_id = lookup_type_id_by_name(state, type_name)
+        .unwrap_or(TypeId(verum_common::layout::SYNTHETIC_RECORD_TYPE_ID));
     let payload_size = fields.len() * std::mem::size_of::<Value>();
     let obj = state.heap.alloc(type_id, payload_size)?;
     state.record_allocation();
@@ -107,7 +110,8 @@ pub(super) fn wrap_in_variant(
     fields: &[Value],
 ) -> InterpreterResult<Value> {
     use heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x8000 + tag));
+    let type_id = lookup_type_id_by_name(state, type_name)
+        .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag)));
     let field_count = fields.len() as u32;
     let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
     let obj = state.heap.alloc(type_id, data_size)?;
