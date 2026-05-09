@@ -8935,6 +8935,25 @@ impl VbcCodegen {
         let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
         self.ctx.match_scrutinee_type = scrutinee_type;
 
+        // When the scrutinee is a tuple expression `(a, b, …)`, record
+        // each element's type name so the tuple-pattern destructure
+        // path can set `match_scrutinee_type` per-element before
+        // recursing into sub-patterns.  Closes the bug where
+        // `match (self, other) { (Some(a), Some(b)) => a == b }`
+        // inside `impl Eq for Maybe<T>` lost `Maybe<T>` context for
+        // the inner element pattern; payload-type inference in
+        // `Some(a)` then registered `a` with no type → `a == b`
+        // codegen fell through to a primitive `CmpI` on the Maybe
+        // wrapper value (returning `false` for `Some(5) == Some(5)`).
+        let prev_tuple_types = self.ctx.match_tuple_element_types.take();
+        if let ExprKind::Tuple(elems) = &scrutinee.kind {
+            let elem_types: Vec<Option<String>> = elems
+                .iter()
+                .map(|e| self.extract_expr_type_name(e))
+                .collect();
+            self.ctx.match_tuple_element_types = Some(elem_types);
+        }
+
         // Heap<T>/Shared<T> are transparent wrappers in VBC — no actual heap indirection.
         // Heap.new(inner) passes through the inner value at LLVM level.
         // For variant matching, just update the scrutinee type to the inner type
@@ -9053,6 +9072,7 @@ impl VbcCodegen {
 
         // Restore previous scrutinee type
         self.ctx.match_scrutinee_type = prev_scrutinee_type;
+        self.ctx.match_tuple_element_types = prev_tuple_types;
 
         self.ctx.free_temp(scrutinee_reg);
 
@@ -10472,10 +10492,22 @@ impl VbcCodegen {
                         count: elements.len() as u8,
                     });
 
+                    // Snapshot per-element types recorded by `compile_match`
+                    // when the scrutinee was a tuple expression — used to
+                    // reset `match_scrutinee_type` per-element so payload-
+                    // type inference in nested variant patterns
+                    // (`Some(a)` against `&Maybe<T>` element) registers
+                    // `a` with the correct concrete type.
+                    let elem_types = self.ctx.match_tuple_element_types.clone();
+                    let prev_st = self.ctx.match_scrutinee_type.clone();
                     for (i, elem) in elements.iter().enumerate() {
                         let elem_reg = Reg(first_elem.0 + i as u16);
+                        if let Some(ref types) = elem_types {
+                            self.ctx.match_scrutinee_type = types.get(i).cloned().flatten();
+                        }
                         self.compile_pattern_bind(elem, elem_reg)?;
                     }
+                    self.ctx.match_scrutinee_type = prev_st;
 
                     // Note: We don't free these registers since alloc_fresh() doesn't
                     // participate in the free list recycling. The registers are consumed
