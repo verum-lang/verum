@@ -72,6 +72,7 @@ pub mod executor;
 pub mod filter;
 pub mod fuzz;
 pub mod isolation;
+pub mod mock;
 pub mod progress;
 pub mod report;
 pub mod snapshot;
