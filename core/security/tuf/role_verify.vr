@@ -55,7 +55,7 @@ module core.security.tuf.role_verify;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
-mount encoding.json.{JsonValue, JsonObject};
+mount encoding.json.{JsonValue};
 mount encoding.hex.{decode as hex_decode};
 mount encoding.der.{DerError};
 mount time.rfc3339.{Rfc3339Time, parse_rfc3339};
@@ -284,7 +284,7 @@ fn extract_keyval_public_hex(key: &TufKey) -> Result<Text, RoleVerifyError> {
         .ok_or_else(|| MalformedKey("keyval.public not a string".to_text()))
 }
 
-fn extract_rsa_public_key(key: &TufKey) -> Result<RsaVerifyKey, RoleVerifyError> {
+fn extract_rsa_public_key(key: &TufKey) -> Result<RsaPublicKey, RoleVerifyError> {
     let obj = key.keyval.as_object()
         .ok_or_else(|| MalformedKey("keyval not an object".to_text()))?;
     // TUF stores RSA keys as PEM-encoded SubjectPublicKeyInfo —

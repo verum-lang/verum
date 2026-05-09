@@ -73,6 +73,7 @@ fn record_field(name: &str, ty: Type, attrs: Vec<Attribute>) -> RecordField {
         default_value: Maybe::None,
         attributes: List::from(attrs),
         span: span(),
+        bit_spec: Maybe::None,
     }
 }
 
@@ -109,6 +110,7 @@ fn derive_emits_module_wrapper() {
         body: TypeDeclBody::Record(List::from(vec![bool_field])),
         meta_where_clause: Maybe::None,
         generic_where_clause: Maybe::None,
+        resource_modifier: Maybe::None,
         span: span(),
     };
 
@@ -162,6 +164,7 @@ fn derive_chain_starts_with_appbuilder_new() {
         body: TypeDeclBody::Record(List::from(vec![bool_field])),
         meta_where_clause: Maybe::None,
         generic_where_clause: Maybe::None,
+        resource_modifier: Maybe::None,
         span: span(),
     };
     let ctx = DeriveContext::from_type_decl(&decl, span()).expect("ctx");

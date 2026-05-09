@@ -149,7 +149,7 @@ public type SigstoreVerifyError is
     | InvalidPem(Text)
     | NoCertsInBundle
     | NoTlogEntries
-    | X509Failed(X509VerifyError)
+    | X509Failed(VerificationError)
     | RekorSetFailed(RekorError)
     | RekorInclusionFailed(RekorError)
     | EnvelopeNotInLog { computed_hash: Text }

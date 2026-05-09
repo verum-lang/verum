@@ -85,7 +85,7 @@ mount security.ecc.ed25519.{
     sign as ed25519_sign,
     public_key as ed25519_public_key,
 };
-mount security.ecc.p256.{P256, P256Seed, P256PublicKey, P256Signature};
+mount security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
 mount security.hash.sha256.{Sha256};
 mount security.x509.certificate.{X509Certificate, parse_certificate};
 mount security.sigstore.types.{
@@ -127,7 +127,7 @@ public fn fulcio_default_config() -> FulcioClientConfig {
 @derive(Clone, Debug)
 public type FulcioKey is
     | Ed25519(Ed25519Seed)
-    | EcdsaP256(P256Seed);
+    | EcdsaP256(P256PrivateKey);
 
 public fn fulcio_key_algorithm_text(k: &FulcioKey) -> Text {
     match k {

@@ -71,7 +71,7 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount time.rfc3339.{Rfc3339Time};
 mount configuration.value.{ConfigValue};
-mount configuration.error.{ConfigError as CfgError, ConfigErrorKind, format_id_toml};
+mount configuration.error.{ConfigError, ConfigErrorKind, format_id_toml};
 mount configuration.format.{
     ConfigFormat, FormatCapabilities, FormatOptions, FormatId,
     FormatRegistry, register_format, default_capabilities,
@@ -1477,7 +1477,7 @@ public fn to_config_value(t: &TomlValue) -> ConfigValue {
 // `from_config_value` is the right-inverse functor `ConfigValue → TomlValue`.
 // It is partial: ConfigValue features unrepresentable in TOML (Null, Bytes,
 // Duration, Tagged) raise `ConfigErrorKind.UnsupportedFeature`.
-public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, CfgError> {
+public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, ConfigError> {
     match v {
         ConfigValue.ConfigNull => Err(unsupported("null")),
         ConfigValue.ConfigBool(b)              => Ok(TomlValue.TomlBool(*b)),
@@ -1514,8 +1514,8 @@ public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, CfgError> {
     }
 }
 
-fn unsupported(feature: &str) -> CfgError {
-    CfgError {
+fn unsupported(feature: &str) -> ConfigError {
+    ConfigError {
         format_id:   format_id_toml(),
         kind:        ConfigErrorKind.UnsupportedFeature,
         line:        0,
@@ -1572,7 +1572,7 @@ implement ConfigFormat for TomlFormat {
         c
     }
 
-    fn parse(&self, source: &Text) -> Result<ConfigValue, CfgError> {
+    fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError> {
         let parsed = parse(source).map_err(toml_to_cfg_err)?;
         Ok(to_config_value(&parsed))
     }
@@ -1581,12 +1581,12 @@ implement ConfigFormat for TomlFormat {
         &self,
         source: &Text,
         _options: &FormatOptions,
-    ) -> Result<ConfigValue, CfgError> {
+    ) -> Result<ConfigValue, ConfigError> {
         // Phase 1: no options; ignore.
         self.parse(source)
     }
 
-    fn stringify(&self, value: &ConfigValue) -> Result<Text, CfgError> {
+    fn stringify(&self, value: &ConfigValue) -> Result<Text, ConfigError> {
         let toml_v = from_config_value(value)?;
         Ok(stringify_pretty(&toml_v))
     }
@@ -1595,13 +1595,13 @@ implement ConfigFormat for TomlFormat {
         &self,
         value: &ConfigValue,
         _options: &FormatOptions,
-    ) -> Result<Text, CfgError> {
+    ) -> Result<Text, ConfigError> {
         self.stringify(value)
     }
 }
 
 // Map TomlError → ConfigError.
-fn toml_to_cfg_err(e: TomlError) -> CfgError {
+fn toml_to_cfg_err(e: TomlError) -> ConfigError {
     let kind = match e.kind {
         UnexpectedEof          => ConfigErrorKind.UnexpectedEof,
         UnexpectedChar         => ConfigErrorKind.UnexpectedChar,
@@ -1620,7 +1620,7 @@ fn toml_to_cfg_err(e: TomlError) -> CfgError {
         RedefineSuperTable     => ConfigErrorKind.RedefineSuperTable,
         TypeMismatchInArray    => ConfigErrorKind.TypeMismatchInArray,
     };
-    CfgError {
+    ConfigError {
         format_id:   format_id_toml(),
         kind:        kind,
         line:        e.line,

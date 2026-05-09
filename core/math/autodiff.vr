@@ -128,23 +128,8 @@ implement<T: Numeric> Differentiable for DynTensor<T> {
     }
 }
 
-// Implement Differentiable for static tensors
-implement<T: Numeric, S: meta [USize]> Differentiable for Tensor<T, S> {
-    type Tangent = Tensor<T, S>;
-    type Cotangent = Tensor<T, S>;
-
-    fn zero_tangent() -> Tensor<T, S> {
-        zeros(&[])
-    }
-
-    fn add_tangent(a: Tensor<T, S>, b: Tensor<T, S>) -> Tensor<T, S> {
-        add(&a, &b)
-    }
-
-    fn scale_tangent(t: Tensor<T, S>, s: Float) -> Tensor<T, S> {
-        mul(&t, &full_like(&t, T.from_float(s)))
-    }
-}
+// Note: Tensor<T> is an alias for DynTensor<T> (Tensor no longer carries a static
+// shape parameter); the DynTensor<T> impl above already covers Tensor<T> uses.
 
 // Implement Differentiable for Vector
 implement Differentiable for Vector<Float> {

@@ -168,13 +168,13 @@ public type PositionStore is protocol {
 /// `Shared<Mutex<...>>`. Use for tests + ephemeral consumers
 /// that don't need restart safety.
 public type MemoryPositionStore is {
-    last: Shared<sync.mutex.Mutex<Maybe<TrackedPosition>>>,
+    last: Shared<Mutex<Maybe<TrackedPosition>>>,
 };
 
 implement MemoryPositionStore {
     public fn new() -> MemoryPositionStore {
         MemoryPositionStore {
-            last: Shared.new(sync.mutex.Mutex.new(None)),
+            last: Shared.new(Mutex.new(None)),
         }
     }
 
@@ -262,15 +262,15 @@ implement LsnTrackerConfig {
 }
 
 public type LsnTracker is {
-    state: Shared<sync.mutex.Mutex<TrackedPosition>>,
+    state: Shared<Mutex<TrackedPosition>>,
     store: Shared<dyn PositionStore>,
     repl: AsyncPgReplicationConnection,
     config: LsnTrackerConfig,
     shutdown_tx: Sender<()>,
-    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+    join: Shared<Mutex<Maybe<JoinHandle<()>>>>,
     /// Counter state — separate mutex from `state` so a metrics
     /// snapshot doesn't contend with the LSN tuple under load.
-    metrics: Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
+    metrics: Shared<Mutex<LsnTrackerMetrics>>,
 };
 
 implement LsnTracker {
@@ -426,8 +426,8 @@ public fn attach_tracker(
         Some(p) => p,
         None    => TrackedPosition.zero(),
     };
-    let state = Shared.new(sync.mutex.Mutex.new(initial));
-    let metrics = Shared.new(sync.mutex.Mutex.new(LsnTrackerMetrics.zero()));
+    let state = Shared.new(Mutex.new(initial));
+    let metrics = Shared.new(Mutex.new(LsnTrackerMetrics.zero()));
     let (shutdown_tx, shutdown_rx) = bounded_channel<()>(1);
 
     let state_for_watcher = state.clone();
@@ -448,7 +448,7 @@ public fn attach_tracker(
         repl: repl,
         config: config,
         shutdown_tx: shutdown_tx,
-        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+        join: Shared.new(Mutex.new(Some(join))),
         metrics: metrics,
     }
 }
@@ -469,8 +469,8 @@ public fn load_start_lsn(store: &Shared<dyn PositionStore>) -> Lsn {
 
 async fn run_watcher(
     repl: AsyncPgReplicationConnection,
-    state: Shared<sync.mutex.Mutex<TrackedPosition>>,
-    metrics: Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
+    state: Shared<Mutex<TrackedPosition>>,
+    metrics: Shared<Mutex<LsnTrackerMetrics>>,
     mut shutdown_rx: Receiver<()>,
     interval_ms: Int,
 ) {
@@ -504,14 +504,14 @@ async fn run_watcher(
 // Metrics helpers
 // =============================================================================
 
-fn bump_status_write(metrics: &Shared<sync.mutex.Mutex<LsnTrackerMetrics>>) {
+fn bump_status_write(metrics: &Shared<Mutex<LsnTrackerMetrics>>) {
     let mut g = metrics.lock().unwrap_or_else(|p| p.into_inner());
     g.status_writes = g.status_writes + 1;
     g.last_status_us = wall_clock_us();
 }
 
 fn record_flush_outcome(
-    metrics: &Shared<sync.mutex.Mutex<LsnTrackerMetrics>>,
+    metrics: &Shared<Mutex<LsnTrackerMetrics>>,
     outcome: &StoreOutcome,
 ) {
     let mut g = metrics.lock().unwrap_or_else(|p| p.into_inner());
