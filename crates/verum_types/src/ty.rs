@@ -1719,14 +1719,15 @@ impl Type {
                 return Some((args[0].clone(), args[1].clone()));
             }
         }
-        // Structural fallback: variant type with exactly Ok and Err constructors
+        // Structural fallback: shape-driven recognition via the canonical
+        // RESULT_VARIANT_LAYOUT (centralized in verum_common). The pair is
+        // returned in canonical order (Ok, Err), independent of map iteration.
         if let Type::Variant(variants) = self {
-            if variants.len() == 2 {
-                let ok = variants.get("Ok");
-                let err = variants.get("Err");
-                if let (Some(ok_ty), Some(err_ty)) = (ok, err) {
-                    return Some((ok_ty.clone(), err_ty.clone()));
-                }
+            use verum_common::well_known_types::variant_tags::{
+                extract_result_pair, is_result_shape,
+            };
+            if is_result_shape(variants.keys().map(|k| k.as_str())) {
+                return extract_result_pair(|name| variants.get(name).cloned());
             }
         }
         None
@@ -1734,20 +1735,22 @@ impl Type {
 
     /// Structural check: is this a `Maybe<T>` type?
     /// Returns `Some(T)` if so. Checks both nominal Maybe and variant types
-    /// with `Some`/`None` constructors (structural match).
+    /// with `Some`/`None` (or Haskell-alias `Just`/`Nothing`) constructors.
     pub fn as_maybe(&self) -> Option<Type> {
         if let Some(args) = self.match_named_type(WKT::Maybe.as_str()) {
             if args.len() == 1 {
                 return Some(args[0].clone());
             }
         }
-        // Structural fallback: variant type with exactly Some and None constructors
+        // Structural fallback: shape-driven recognition via the canonical
+        // MAYBE_VARIANT_LAYOUT (centralized in verum_common). Recognises
+        // both `Some`/`None` and the Haskell-style `Just`/`Nothing` aliases.
         if let Type::Variant(variants) = self {
-            if variants.len() == 2 && variants.contains_key("Some") && variants.contains_key("None")
-            {
-                if let Some(some_ty) = variants.get("Some") {
-                    return Some(some_ty.clone());
-                }
+            use verum_common::well_known_types::variant_tags::{
+                extract_maybe_inner, is_maybe_shape,
+            };
+            if is_maybe_shape(variants.keys().map(|k| k.as_str())) {
+                return extract_maybe_inner(|name| variants.get(name).cloned());
             }
         }
         None

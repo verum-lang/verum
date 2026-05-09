@@ -277,6 +277,128 @@ pub mod variant_tags {
     pub fn is_null_sentinel(name: &str) -> bool {
         matches!(name, "null" | NONE | "nil")
     }
+
+    /// Structural shape of a sum-type variant set.
+    ///
+    /// Identifies canonical Verum stdlib variant patterns by their constructor
+    /// names — independent of the nominal type name. Compiler code that needs
+    /// to recognize Result-like / Maybe-like values consults this enum rather
+    /// than hardcoding variant-name strings.
+    ///
+    /// **Why structural?** A user-defined `type MyEither<T,E> is Ok(T) | Err(E)`
+    /// or an FFI binding emitted as a Result-shaped sum benefits from the same
+    /// coercions and projections that apply to the canonical stdlib `Result`.
+    /// The shape is a structural concept ("two variants whose names match the
+    /// canonical Result layout"), and the canonical names live in this module's
+    /// `MAYBE_VARIANT_LAYOUT` / `RESULT_VARIANT_LAYOUT` constants — the same
+    /// source of truth used by VBC codegen and the runtime.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum VariantShape {
+        /// Two variants whose names are exactly `Ok` and `Err`.
+        Result,
+        /// Two variants whose names are exactly `Some` and `None`,
+        /// or the Haskell-style alias pair `Just`/`Nothing`.
+        Maybe,
+        /// Any other variant set — including singletons, larger sums,
+        /// or two-variant sums whose names don't match a canonical shape.
+        Other,
+    }
+
+    /// Returns the structural shape of a variant-name set.
+    ///
+    /// Accepts any iterable of variant constructor names. Order-insensitive;
+    /// counts the variants in a single pass and short-circuits on the first
+    /// non-canonical name. Allocation-free.
+    ///
+    /// Canonical-shape membership is derived from `MAYBE_VARIANT_LAYOUT` /
+    /// `RESULT_VARIANT_LAYOUT` (plus the `Just`/`Nothing` Haskell aliases
+    /// already recognized by [`is_maybe_constructor`]). Editing a layout
+    /// constant automatically retunes this classifier — no parallel list.
+    pub fn classify_variants<I, S>(names: I) -> VariantShape
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        // Bitfield of which canonical variant names we've seen, plus a
+        // `count` to enforce the "exactly N variants" arity check. A
+        // single non-canonical name aborts to Other immediately.
+        let (mut seen_some, mut seen_none) = (false, false);
+        let (mut seen_just, mut seen_nothing) = (false, false);
+        let (mut seen_ok, mut seen_err) = (false, false);
+        let mut count: u32 = 0;
+        for name in names {
+            count += 1;
+            if count > 2 {
+                return VariantShape::Other;
+            }
+            match name.as_ref() {
+                SOME => seen_some = true,
+                NONE => seen_none = true,
+                JUST => seen_just = true,
+                NOTHING => seen_nothing = true,
+                OK => seen_ok = true,
+                ERR => seen_err = true,
+                _ => return VariantShape::Other,
+            }
+        }
+        if count != 2 {
+            return VariantShape::Other;
+        }
+        if (seen_some && seen_none) || (seen_just && seen_nothing) {
+            VariantShape::Maybe
+        } else if seen_ok && seen_err {
+            VariantShape::Result
+        } else {
+            // Two variants but mixed-shape (e.g., `Some` + `Err`) — not
+            // canonical.
+            VariantShape::Other
+        }
+    }
+
+    /// Returns true iff `names` has exactly the Result-shape (`Ok` + `Err`).
+    pub fn is_result_shape<I, S>(names: I) -> bool
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        matches!(classify_variants(names), VariantShape::Result)
+    }
+
+    /// Returns true iff `names` has exactly the Maybe-shape (`Some`+`None`
+    /// or `Just`+`Nothing`).
+    pub fn is_maybe_shape<I, S>(names: I) -> bool
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        matches!(classify_variants(names), VariantShape::Maybe)
+    }
+
+    /// Extract the `(Ok, Err)` payload pair from a Result-shaped variant
+    /// set. Caller provides a getter `(name → Option<T>)` typically backed
+    /// by a `HashMap` / `Map`. Returns `None` if either canonical name is
+    /// absent.
+    ///
+    /// The returned pair is in **canonical order** (Ok first, Err second),
+    /// matching `RESULT_VARIANT_LAYOUT`.
+    pub fn extract_result_pair<T, F>(get: F) -> Option<(T, T)>
+    where
+        F: Fn(&str) -> Option<T>,
+    {
+        let ok = get(OK)?;
+        let err = get(ERR)?;
+        Some((ok, err))
+    }
+
+    /// Extract the `Some` payload from a Maybe-shaped variant set.
+    /// Tries `Some` first, then the Haskell alias `Just`. Returns `None`
+    /// if neither is present.
+    pub fn extract_maybe_inner<T, F>(get: F) -> Option<T>
+    where
+        F: Fn(&str) -> Option<T>,
+    {
+        get(SOME).or_else(|| get(JUST))
+    }
 }
 
 /// Canonical layout of the variants of `core::base::maybe::Maybe<T>`.
@@ -674,6 +796,181 @@ mod ordering_layout_tests {
         assert_eq!(varerror_not_present_tag(), 0);
         assert_eq!(varerror_not_unicode_tag(), 1);
         assert_ne!(varerror_not_present_tag(), varerror_not_unicode_tag());
+    }
+
+    // =========================================================================
+    // VariantShape — structural variant-set classifier
+    //
+    // The shape classifier replaces hardcoded `variants.contains_key("Ok")` /
+    // `... ("Err")` / `... ("Some")` / `... ("None")` checks scattered across
+    // unify.rs / ty.rs. Tests below pin both the recognition contract and the
+    // canonical-order guarantees relied on by extract_result_pair /
+    // extract_maybe_inner.
+    // =========================================================================
+
+    use super::variant_tags::{
+        VariantShape, classify_variants, extract_maybe_inner, extract_result_pair,
+        is_maybe_shape, is_result_shape,
+    };
+
+    #[test]
+    fn classify_recognizes_result_shape() {
+        assert_eq!(
+            classify_variants(["Ok", "Err"].iter().copied()),
+            VariantShape::Result
+        );
+        // Order-insensitive
+        assert_eq!(
+            classify_variants(["Err", "Ok"].iter().copied()),
+            VariantShape::Result
+        );
+    }
+
+    #[test]
+    fn classify_recognizes_maybe_shape_canonical() {
+        assert_eq!(
+            classify_variants(["Some", "None"].iter().copied()),
+            VariantShape::Maybe
+        );
+        assert_eq!(
+            classify_variants(["None", "Some"].iter().copied()),
+            VariantShape::Maybe
+        );
+    }
+
+    #[test]
+    fn classify_recognizes_maybe_haskell_alias() {
+        // Just / Nothing are recognized as the same shape as Some / None
+        // because is_maybe_constructor accepts them as aliases.
+        assert_eq!(
+            classify_variants(["Just", "Nothing"].iter().copied()),
+            VariantShape::Maybe
+        );
+    }
+
+    #[test]
+    fn classify_rejects_mixed_shapes() {
+        // Two valid canonical names but cross-shape — not a canonical pair.
+        assert_eq!(
+            classify_variants(["Some", "Err"].iter().copied()),
+            VariantShape::Other
+        );
+        assert_eq!(
+            classify_variants(["Ok", "None"].iter().copied()),
+            VariantShape::Other
+        );
+        // Same-family but wrong pair (Some/Just instead of Some/None).
+        assert_eq!(
+            classify_variants(["Some", "Just"].iter().copied()),
+            VariantShape::Other
+        );
+    }
+
+    #[test]
+    fn classify_rejects_non_canonical_names() {
+        // User-defined types with arbitrary variant names are not recognized.
+        assert_eq!(
+            classify_variants(["Cons", "Nil"].iter().copied()),
+            VariantShape::Other
+        );
+        assert_eq!(
+            classify_variants(["Left", "Right"].iter().copied()),
+            VariantShape::Other
+        );
+    }
+
+    #[test]
+    fn classify_rejects_arity_mismatch() {
+        // Singleton — wrong arity.
+        assert_eq!(
+            classify_variants(["Ok"].iter().copied()),
+            VariantShape::Other
+        );
+        // Three variants — wrong arity even with two canonical names.
+        assert_eq!(
+            classify_variants(["Ok", "Err", "Pending"].iter().copied()),
+            VariantShape::Other
+        );
+        // Empty — wrong arity.
+        let empty: [&str; 0] = [];
+        assert_eq!(classify_variants(empty.iter().copied()), VariantShape::Other);
+    }
+
+    #[test]
+    fn is_result_shape_predicate() {
+        assert!(is_result_shape(["Ok", "Err"].iter().copied()));
+        assert!(!is_result_shape(["Some", "None"].iter().copied()));
+        assert!(!is_result_shape(["Cons", "Nil"].iter().copied()));
+    }
+
+    #[test]
+    fn is_maybe_shape_predicate() {
+        assert!(is_maybe_shape(["Some", "None"].iter().copied()));
+        assert!(is_maybe_shape(["Just", "Nothing"].iter().copied()));
+        assert!(!is_maybe_shape(["Ok", "Err"].iter().copied()));
+        assert!(!is_maybe_shape(["Cons", "Nil"].iter().copied()));
+    }
+
+    #[test]
+    fn extract_result_pair_canonical_order() {
+        // The pair always returns (Ok, Err) regardless of the underlying
+        // map iteration order — matching RESULT_VARIANT_LAYOUT.
+        let map = std::collections::HashMap::from([
+            ("Err", "ErrType"),
+            ("Ok", "OkType"),
+        ]);
+        let pair = extract_result_pair(|name| map.get(name).copied());
+        assert_eq!(pair, Some(("OkType", "ErrType")));
+    }
+
+    #[test]
+    fn extract_result_pair_returns_none_on_missing() {
+        // Missing one half of the pair → None (not a partial extraction).
+        let map = std::collections::HashMap::from([("Ok", 1)]);
+        let pair = extract_result_pair(|name| map.get(name).copied());
+        assert_eq!(pair, None);
+    }
+
+    #[test]
+    fn extract_maybe_inner_prefers_some() {
+        // When both Some and Just exist (degenerate but possible), Some wins.
+        let map = std::collections::HashMap::from([
+            ("Some", "SomeT"),
+            ("Just", "JustT"),
+        ]);
+        let inner = extract_maybe_inner(|name| map.get(name).copied());
+        assert_eq!(inner, Some("SomeT"));
+    }
+
+    #[test]
+    fn extract_maybe_inner_falls_back_to_just() {
+        // Only Just present (Haskell-style declarations) — extracted.
+        let map = std::collections::HashMap::from([("Just", "JustT")]);
+        let inner = extract_maybe_inner(|name| map.get(name).copied());
+        assert_eq!(inner, Some("JustT"));
+    }
+
+    #[test]
+    fn extract_maybe_inner_returns_none_when_absent() {
+        let map = std::collections::HashMap::<&str, i32>::new();
+        let inner = extract_maybe_inner(|name| map.get(name).copied());
+        assert_eq!(inner, None);
+    }
+
+    /// Layout / classifier consistency: a variant set populated from
+    /// MAYBE_VARIANT_LAYOUT / RESULT_VARIANT_LAYOUT must classify as
+    /// Maybe / Result respectively. This is the load-bearing contract
+    /// that lets compiler code recognize canonical stdlib types
+    /// without naming them.
+    #[test]
+    fn classifier_consistent_with_canonical_layouts() {
+        let maybe_names: Vec<&'static str> =
+            MAYBE_VARIANT_LAYOUT.iter().map(|&(n, _)| n).collect();
+        assert!(is_maybe_shape(maybe_names.iter().copied()));
+
+        let result_names: Vec<&'static str> =
+            RESULT_VARIANT_LAYOUT.iter().map(|&(n, _)| n).collect();
+        assert!(is_result_shape(result_names.iter().copied()));
     }
 }
 

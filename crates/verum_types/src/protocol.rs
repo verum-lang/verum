@@ -5574,7 +5574,19 @@ impl ProtocolChecker {
         }
     }
 
-    /// Check if a name looks like a type parameter (single uppercase letter or common names)
+    /// Check if a name looks like a type parameter or associated type
+    /// (single uppercase letter or common idiomatic names).
+    ///
+    /// Used as a structural heuristic when a `Named` type with no arguments
+    /// appears in a position where either a concrete type or a type parameter
+    /// would be valid. Names recognized here are the canonical type-parameter
+    /// and associated-type identifiers used by stdlib protocols (`Iterator::Item`,
+    /// `Future::Output`, `From<T>::Target`, etc.).
+    ///
+    /// **Excludes stdlib variant constructors** (`Ok`/`Err`/`Some`/`None`):
+    /// those are values, not types, and a user type literally named `Ok` —
+    /// reachable as `path::to::Ok` in a type position — must be treated as
+    /// concrete, not as a fresh type parameter.
     fn looks_like_type_param(&self, name: &Text) -> bool {
         let s = name.as_str();
         // Single uppercase letter (T, U, V, A, B, etc.)
@@ -5586,7 +5598,15 @@ impl ProtocolChecker {
         {
             return true;
         }
-        // Common type parameter names
+        // Stdlib variant constructors must NEVER be treated as type parameters.
+        // The canonical variant-name set is the single source of truth in
+        // `verum_common::well_known_types::variant_tags`.
+        if verum_common::well_known_types::variant_tags::is_maybe_constructor(s)
+            || verum_common::well_known_types::variant_tags::is_result_constructor(s)
+        {
+            return false;
+        }
+        // Common idiomatic associated-type / type-parameter names.
         matches!(
             s,
             "T" | "U"
@@ -5603,7 +5623,6 @@ impl ProtocolChecker {
                 | "Key"
                 | "Value"
                 | "Error"
-                | "Ok"
                 | "Output"
                 | "Input"
                 | "Target"

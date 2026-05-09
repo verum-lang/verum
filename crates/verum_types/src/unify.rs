@@ -4177,31 +4177,24 @@ impl Unifier {
                 }
             }
 
-            // Int ↔ Variant coercion for FFI wrappers
+            // Int ↔ Variant coercion for FFI wrappers.
+            //
             // FFI functions return Int (error codes) while Verum wrappers return
-            // success/failure variant types. This uses STRUCTURAL checks on the
-            // variant constructor names (not nominal type names) to determine if
-            // the variant looks like an error-code wrapper (has Ok/Err constructors)
-            // or an optional value (has None/Some constructors).
-            // This is stdlib-agnostic: ANY user-defined sum type with these variant
-            // names gets the coercion, which is the correct behavior.
+            // a Result-shaped or Maybe-shaped sum type. This uses structural
+            // recognition (variant_tags::classify_variants) — order-insensitive,
+            // arity-checked, and driven by the canonical RESULT/MAYBE_VARIANT_LAYOUT
+            // constants in verum_common. Stdlib-agnostic: any user-defined sum
+            // type with the canonical Result/Maybe shape participates in the
+            // same coercion.
             (Int, Variant(variants)) | (Variant(variants), Int) => {
-                let has_ok = variants.contains_key(&verum_common::Text::from("Ok"));
-                let has_err = variants.contains_key(&verum_common::Text::from("Err"));
-                if has_ok || has_err {
-                    Ok(Substitution::new())
-                } else {
-                    let has_none = variants.contains_key(&verum_common::Text::from("None"));
-                    let has_some = variants.contains_key(&verum_common::Text::from("Some"));
-                    if has_none || has_some {
-                        Ok(Substitution::new())
-                    } else {
-                        Err(TypeError::Mismatch {
-                            expected: t2.to_text(),
-                            actual: t1.to_text(),
-                            span,
-                        })
-                    }
+                use verum_common::well_known_types::variant_tags::{classify_variants, VariantShape};
+                match classify_variants(variants.keys().map(|k| k.as_str())) {
+                    VariantShape::Result | VariantShape::Maybe => Ok(Substitution::new()),
+                    VariantShape::Other => Err(TypeError::Mismatch {
+                        expected: t2.to_text(),
+                        actual: t1.to_text(),
+                        span,
+                    }),
                 }
             }
 
