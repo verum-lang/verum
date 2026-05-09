@@ -142,13 +142,14 @@ fn check_ffi_permission(state: &mut InterpreterState, symbol_idx: u32) -> Interp
     Ok(())
 }
 
-/// Maximum allowed allocation/copy size for FFI memory operations (1 GiB).
+/// Maximum allowed allocation/copy size for FFI memory operations.
 ///
-
 /// This cap prevents denial-of-service and memory-safety issues when untrusted
 /// register values are passed as sizes to raw memory operations
-/// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).
-const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
+/// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).  Same 1 GiB
+/// ceiling as every other heap path in the toolchain — single source
+/// of truth is `verum_common::layout::MAX_ALLOCATION_SIZE`.
+const MAX_FFI_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
 
 // Extended opcode handlers
 
@@ -702,13 +703,13 @@ pub(in super::super) fn handle_ffi_extended(
             let total_size = count.checked_mul(elem_size).ok_or({
                 InterpreterError::OutOfMemory {
                     requested: usize::MAX,
-                    available: 1 << 30,
+                    available: MAX_FFI_ALLOCATION_SIZE,
                 }
             })?;
-            if total_size > (1 << 30) {
+            if total_size > MAX_FFI_ALLOCATION_SIZE {
                 return Err(InterpreterError::OutOfMemory {
                     requested: total_size,
-                    available: 1 << 30,
+                    available: MAX_FFI_ALLOCATION_SIZE,
                 });
             }
 
@@ -1428,13 +1429,13 @@ pub(in super::super) fn handle_ffi_extended(
                 let buf_size = count.checked_mul(elem_size).ok_or({
                     InterpreterError::AllocationTooLarge {
                         requested: usize::MAX,
-                        max_allowed: 1 << 30,
+                        max_allowed: MAX_FFI_ALLOCATION_SIZE,
                     }
                 })?;
-                if buf_size > (1 << 30) {
+                if buf_size > MAX_FFI_ALLOCATION_SIZE {
                     return Err(InterpreterError::OutOfMemory {
                         requested: buf_size,
-                        available: 1 << 30,
+                        available: MAX_FFI_ALLOCATION_SIZE,
                     });
                 }
                 let layout = std::alloc::Layout::from_size_align(buf_size.max(8), elem_size.max(8))
@@ -2965,7 +2966,10 @@ pub(in super::super) fn handle_ffi_extended(
             // the same "Err(OutOfMemory)" shape the stdlib would — the
             // caller can then surface an allocation failure instead of
             // the interpreter panicking on LayoutError.
-            const MAX_ALLOC: i64 = 1 << 30; // 1 GiB cap in the interpreter
+            // 1 GiB cap — same `verum_common::layout::MAX_ALLOCATION_SIZE`
+            // ceiling as every other heap path; here cast to i64 since
+            // `raw_size` arrives as i64 from the Verum register file.
+            const MAX_ALLOC: i64 = verum_common::layout::MAX_ALLOCATION_SIZE as i64;
             if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
                 // Build an Err(nil) variant via the canonical Result
                 // builder so the layout matches `MakeVariant` exactly
