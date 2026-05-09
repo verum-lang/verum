@@ -194,16 +194,12 @@ impl<'ctx> PlatformIR<'ctx> {
                     } else if src_bits > dst_bits {
                         builder
                             .build_int_truncate(iv, pt, &format!("{}_a{}_trunc", name, i))
-                            .map_err(|e| {
-                                super::error::LlvmLoweringError::llvm_error(e.to_string())
-                            })?
+                            .or_llvm_err()?
                             .into()
                     } else {
                         builder
                             .build_int_z_extend(iv, pt, &format!("{}_a{}_zext", name, i))
-                            .map_err(|e| {
-                                super::error::LlvmLoweringError::llvm_error(e.to_string())
-                            })?
+                            .or_llvm_err()?
                             .into()
                     }
                 }
@@ -224,9 +220,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     } else {
                         builder
                             .build_int_truncate(as_i64, pt, &format!("{}_a{}_ptrtrunc", name, i))
-                            .map_err(|e| {
-                                super::error::LlvmLoweringError::llvm_error(e.to_string())
-                            })?
+                            .or_llvm_err()?
                             .into()
                     }
                 }
@@ -5424,9 +5418,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         if iv.get_type().get_bit_width() < 64 {
                             builder
                                 .build_int_z_extend(iv, i64_type, &format!("p{}_zext", i))
-                                .map_err(|e| {
-                                    super::error::LlvmLoweringError::llvm_error(e.to_string())
-                                })?
+                                .or_llvm_err()?
                         } else {
                             iv
                         }
@@ -5506,14 +5498,10 @@ impl<'ctx> PlatformIR<'ctx> {
                             name
                         ))
                     })?;
-                    builder.build_return(Some(&ret)).map_err(|e| {
-                        super::error::LlvmLoweringError::llvm_error(e.to_string())
-                    })?;
+                    builder.build_return(Some(&ret)).or_llvm_err()?;
                 }
                 None => {
-                    builder.build_return(None).map_err(|e| {
-                        super::error::LlvmLoweringError::llvm_error(e.to_string())
-                    })?;
+                    builder.build_return(None).or_llvm_err()?;
                 }
             }
         }

@@ -41,10 +41,6 @@ pub enum LlvmLoweringError {
     #[error("Module verification failed: {0}")]
     VerificationFailed(Text),
 
-    /// LLVM error from underlying library.
-    #[error("LLVM error: {0}")]
-    LlvmError(Text),
-
     /// Invalid constant pool reference.
     #[error("Invalid constant pool index: {0}")]
     InvalidConstant(u32),
@@ -224,11 +220,6 @@ impl LlvmLoweringError {
     /// Create a CBGR lowering error.
     pub fn cbgr_lowering(msg: impl Into<Text>) -> Self {
         LlvmLoweringError::CbgrLowering(msg.into())
-    }
-
-    /// Create an LLVM error.
-    pub fn llvm_error(msg: impl Into<Text>) -> Self {
-        LlvmLoweringError::LlvmError(msg.into())
     }
 
     /// Create an internal error.

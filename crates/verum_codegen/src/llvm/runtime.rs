@@ -332,7 +332,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else if value.is_float_value() {
             builder
                 .build_bit_cast(value.into_float_value(), i64_type, "val_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(format!("bitcast: {}", e)))?
+                .map_err(|e| LlvmLoweringError::BuilderError(format!("bitcast: {}", e).into()))?
                 .into_int_value()
         } else if value.is_pointer_value() {
             builder
