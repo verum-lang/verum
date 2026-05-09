@@ -128,9 +128,16 @@ pub struct TierSummary {
     pub avg_duration_ms: u64,
 }
 
+/// JSON schema version for the vtest report format.
+/// Increment when the `Report` structure changes in a backwards-incompatible way.
+pub const REPORT_SCHEMA_VERSION: u32 = 1;
+
 /// Complete report data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
+    /// Schema version — consumers must reject reports whose version they do not understand.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     /// Report timestamp
     pub timestamp: DateTime<Utc>,
     /// Compiler version
@@ -1257,6 +1264,10 @@ impl Reporter {
             0
         }
     }
+}
+
+fn default_schema_version() -> u32 {
+    REPORT_SCHEMA_VERSION
 }
 
 /// Escape HTML special characters.

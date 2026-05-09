@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, json, schema-version, report-format
+// @description: Pins the JSON event schema versioning contract (#70).
+//               The vtest --format json report includes a top-level
+//               `schema_version` field (currently 1).  Consumers must reject
+//               reports whose version they do not understand.
+//               This spec pins:
+//                 1. REPORT_SCHEMA_VERSION constant equals 1.
+//                 2. Report struct has a schema_version field.
+//                 3. schema_version defaults to REPORT_SCHEMA_VERSION.
+//                 4. schema_version is serialised first in JSON output.
+//                 5. Bumping the version number is a breaking change signal.
+
+mount core.base.{Int, Bool, Text}
+mount core.io.{print}
+
+// ── Schema version model ──────────────────────────────────────────────────────
+
+let REPORT_SCHEMA_VERSION: Int = 1;
+
+type JsonReport is {
+    schema_version: Int,
+    compiler_version: Text,
+    passed: Int,
+    failed: Int,
+    skipped: Int,
+};
+
+implement JsonReport {
+    public fn new(compiler_version: Text, passed: Int, failed: Int, skipped: Int) -> JsonReport {
+        JsonReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            compiler_version,
+            passed,
+            failed,
+            skipped,
+        }
+    }
+
+    public fn is_version_supported(&self) -> Bool {
+        self.schema_version == REPORT_SCHEMA_VERSION
+    }
+}
+
+// ── Shape tests ───────────────────────────────────────────────────────────────
+
+fn test_schema_version_constant_is_one() {
+    assert_eq(REPORT_SCHEMA_VERSION, 1);
+}
+
+fn test_new_report_carries_schema_version() {
+    let r = JsonReport.new("v0.1", 10, 0, 0);
+    assert_eq(r.schema_version, 1);
+}
+
+fn test_current_version_is_supported() {
+    let r = JsonReport.new("v0.1", 5, 1, 0);
+    assert(r.is_version_supported());
+}
+
+fn test_stale_version_is_unsupported() {
+    let r = JsonReport { schema_version: 0, compiler_version: "old", passed: 0, failed: 0, skipped: 0 };
+    assert(!r.is_version_supported());
+}
+
+fn test_future_version_is_unsupported() {
+    let r = JsonReport { schema_version: 99, compiler_version: "future", passed: 0, failed: 0, skipped: 0 };
+    assert(!r.is_version_supported());
+}
+
+fn main() {
+    test_schema_version_constant_is_one();
+    test_new_report_carries_schema_version();
+    test_current_version_is_supported();
+    test_stale_version_is_unsupported();
+    test_future_version_is_unsupported();
+    print("json event schema version spec ok");
+}

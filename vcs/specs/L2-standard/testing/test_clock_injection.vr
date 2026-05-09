@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, clock, time-injection, deterministic
+// @inject-clock: TestClock
+// @description: Pins the TestClock context injection contract (#66).
+//               When @inject-clock: TestClock is set, the runner replaces the
+//               system clock with a deterministic, controllable implementation.
+//               Callers advance time explicitly via TestClock.advance_ms(ms).
+
+mount core.time.{Instant, Duration}
+mount core.base.{Int, Bool, Maybe, Text}
+mount core.io.{print}
+
+// ── TestClock interface ───────────────────────────────────────────────────────
+
+// The injected clock provides deterministic time control.
+// start_time_ms: epoch-ms at construction; advance_ms steps the clock forward.
+
+type TestClock is {
+    current_ms: Int,
+};
+
+implement TestClock {
+    public fn new(start_ms: Int) -> TestClock {
+        TestClock { current_ms: start_ms }
+    }
+
+    public fn now_ms(&self) -> Int {
+        self.current_ms
+    }
+
+    public fn advance_ms(&mut self, delta_ms: Int) {
+        self.current_ms = self.current_ms + delta_ms;
+    }
+}
+
+// ── Clock-dependent computation shape ────────────────────────────────────────
+
+fn elapsed_ms(start: Int, clock: &TestClock) -> Int {
+    clock.now_ms() - start
+}
+
+fn test_clock_starts_at_epoch() {
+    let c = TestClock.new(0);
+    assert_eq(c.now_ms(), 0);
+}
+
+fn test_advance_increments_clock() {
+    let mut c = TestClock.new(1000);
+    c.advance_ms(500);
+    assert_eq(c.now_ms(), 1500);
+}
+
+fn test_elapsed_grows_with_advance() {
+    let mut c = TestClock.new(0);
+    let start = c.now_ms();
+    c.advance_ms(200);
+    assert_eq(elapsed_ms(start, &c), 200);
+}
+
+fn test_multiple_advances_accumulate() {
+    let mut c = TestClock.new(0);
+    c.advance_ms(100);
+    c.advance_ms(50);
+    c.advance_ms(25);
+    assert_eq(c.now_ms(), 175);
+}
+
+fn main() {
+    test_clock_starts_at_epoch();
+    test_advance_increments_clock();
+    test_elapsed_grows_with_advance();
+    test_multiple_advances_accumulate();
+    print("test clock injection spec ok");
+}

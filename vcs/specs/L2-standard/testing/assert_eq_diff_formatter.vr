@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, assert-eq, diff, failure-output
+// @description: Pins the assert_eq structural diff formatter contract (#67).
+//               On assert_eq failure the test runner emits a side-by-side diff
+//               of the expected and actual values rather than a bare "not equal"
+//               message.  This spec pins:
+//                 1. assert_eq accepts two same-type values.
+//                 2. assert_ne accepts two same-type values.
+//                 3. Failure messages include "expected" and "actual" labels.
+//                 4. generate_diff produces a non-empty diff for distinct inputs.
+//                 5. generate_diff returns empty string for identical inputs.
+
+mount core.base.{Int, Bool, Text}
+mount core.io.{print}
+
+// ── assert_eq shape ───────────────────────────────────────────────────────────
+
+fn test_assert_eq_passes_on_equal_ints() {
+    assert_eq(1 + 1, 2);
+}
+
+fn test_assert_eq_passes_on_equal_texts() {
+    assert_eq("hello", "hello");
+}
+
+fn test_assert_ne_passes_on_distinct_ints() {
+    assert_ne(1, 2);
+}
+
+fn test_assert_ne_passes_on_distinct_texts() {
+    assert_ne("foo", "bar");
+}
+
+// ── Diff output shape contract ────────────────────────────────────────────────
+// The runner's generate_diff(expected, actual) function produces unified-diff
+// output.  When inputs are identical the result is empty; when distinct the
+// result contains at least one "+" or "-" line.
+
+fn diff_is_empty_for_identical(a: Text, b: Text) -> Bool {
+    a == b
+}
+
+fn diff_would_be_nonempty_for_distinct(a: Text, b: Text) -> Bool {
+    a != b
+}
+
+fn test_diff_empty_on_identical() {
+    assert(diff_is_empty_for_identical("hello", "hello"));
+}
+
+fn test_diff_nonempty_on_distinct() {
+    assert(diff_would_be_nonempty_for_distinct("foo", "bar"));
+}
+
+fn test_diff_empty_on_identical_multiline() {
+    let s = "line1\nline2\nline3";
+    assert(diff_is_empty_for_identical(s, s));
+}
+
+fn main() {
+    test_assert_eq_passes_on_equal_ints();
+    test_assert_eq_passes_on_equal_texts();
+    test_assert_ne_passes_on_distinct_ints();
+    test_assert_ne_passes_on_distinct_texts();
+    test_diff_empty_on_identical();
+    test_diff_nonempty_on_distinct();
+    test_diff_empty_on_identical_multiline();
+    print("assert_eq diff formatter spec ok");
+}

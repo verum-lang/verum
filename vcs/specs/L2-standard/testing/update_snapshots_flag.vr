@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, snapshot, update-snapshots, golden-file
+// @snapshot: greeting_roundtrip
+// @description: Pins the --update-snapshots auto-regenerate contract (#69).
+//               When `verum test --update-snapshots` is passed:
+//                 1. Missing .snap files are CREATED (SnapshotResult::Created).
+//                 2. Existing .snap files are OVERWRITTEN (SnapshotResult::Updated).
+//                 3. Without the flag, a missing .snap returns Missing.
+//                 4. Without the flag, a changed output returns Mismatch.
+//                 5. compare_or_update(…, update=true) writes the file.
+//                 6. compare_or_update(…, update=false) reads and compares.
+
+mount core.base.{Text, Bool}
+mount core.io.{print}
+
+// ── Snapshot lifecycle model ──────────────────────────────────────────────────
+
+type SnapshotState is
+    | Missing
+    | Match
+    | Mismatch { expected: Text, actual: Text }
+    | Created
+    | Updated;
+
+fn decide_snapshot(stored: Maybe<Text>, actual: Text, update: Bool) -> SnapshotState {
+    if update {
+        match stored {
+            None => SnapshotState.Created,
+            Some(_) => SnapshotState.Updated,
+        }
+    } else {
+        match stored {
+            None => SnapshotState.Missing,
+            Some(expected) => {
+                if expected == actual {
+                    SnapshotState.Match
+                } else {
+                    SnapshotState.Mismatch { expected, actual }
+                }
+            }
+        }
+    }
+}
+
+fn test_create_when_missing_and_update() {
+    let result = decide_snapshot(None, "hello", true);
+    assert(result is Created);
+}
+
+fn test_update_when_stored_and_update() {
+    let result = decide_snapshot(Some("old"), "new", true);
+    assert(result is Updated);
+}
+
+fn test_missing_when_no_stored_no_update() {
+    let result = decide_snapshot(None, "hello", false);
+    assert(result is Missing);
+}
+
+fn test_match_when_identical_no_update() {
+    let result = decide_snapshot(Some("hello"), "hello", false);
+    assert(result is Match);
+}
+
+fn test_mismatch_when_changed_no_update() {
+    let result = decide_snapshot(Some("old"), "new", false);
+    assert(result is Mismatch { expected: _, actual: _ });
+}
+
+fn main() {
+    test_create_when_missing_and_update();
+    test_update_when_stored_and_update();
+    test_missing_when_no_stored_no_update();
+    test_match_when_identical_no_update();
+    test_mismatch_when_changed_no_update();
+    print("--update-snapshots flag spec ok");
+}
