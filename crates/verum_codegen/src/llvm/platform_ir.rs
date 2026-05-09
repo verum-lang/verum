@@ -462,6 +462,10 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(func)
     }
 
+    /// Emit a direct Linux syscall.  Thin delegation to the shared
+    /// `super::syscall_registry::emit_linux_syscall_inline` —
+    /// previously this method open-coded the inline-asm body
+    /// verbatim, duplicating `RuntimeLowering::emit_linux_syscall`.
     /// Cross-compilation correct: reads `module.get_triple()`, never
     /// host `#[cfg]`.
     fn emit_linux_syscall(
@@ -471,79 +475,9 @@ impl<'ctx> PlatformIR<'ctx> {
         sys_num: u64,
         args: &[verum_llvm::values::IntValue<'ctx>],
     ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-
-        let triple = module.get_triple();
-        let triple_str = triple.as_str().to_string_lossy();
-        let (asm_str, constraints) =
-            if triple_str.contains("aarch64") || triple_str.contains("arm64") {
-                (
-                    "svc #0",
-                    "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
-                )
-            } else if triple_str.contains("x86_64") {
-                (
-                    "syscall",
-                    "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
-                )
-            } else {
-                ("", "=r,r,r,r,r,r,r,r")
-            };
-
-        let fn_type = i64_type.fn_type(
-            &[
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-            ],
-            false,
-        );
-        let asm_fn = self.context.create_inline_asm(
-            fn_type,
-            asm_str.to_string(),
-            constraints.to_string(),
-            true,
-            true,
-            Some(verum_llvm::InlineAsmDialect::ATT),
-            false,
-        );
-
-        let zero = i64_type.const_zero();
-        let a0 = args.first().copied().unwrap_or(zero);
-        let a1 = args.get(1).copied().unwrap_or(zero);
-        let a2 = args.get(2).copied().unwrap_or(zero);
-        let a3 = args.get(3).copied().unwrap_or(zero);
-        let a4 = args.get(4).copied().unwrap_or(zero);
-        let a5 = args.get(5).copied().unwrap_or(zero);
-        let num_const = i64_type.const_int(sys_num, false);
-
-        let result = builder
-            .build_indirect_call(
-                fn_type,
-                asm_fn,
-                &[
-                    num_const.into(),
-                    a0.into(),
-                    a1.into(),
-                    a2.into(),
-                    a3.into(),
-                    a4.into(),
-                    a5.into(),
-                ],
-                "syscall_result",
-            )
-            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| {
-                super::error::LlvmLoweringError::internal("syscall returned void".to_string())
-            })?
-            .into_int_value();
-        Ok(result)
+        super::syscall_registry::emit_linux_syscall_inline(
+            builder, self.context, module, sys_num, args,
+        )
     }
 
     /// Create a new platform-IR emitter with the documented-default

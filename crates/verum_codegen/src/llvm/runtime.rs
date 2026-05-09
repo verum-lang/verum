@@ -5990,6 +5990,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// (set by `verum_codegen::llvm::vbc_lowering` from
     /// `CompilerOptions.target_triple`), so we read the architecture
     /// substring from `module.get_triple()`.
+    /// Emit a direct Linux syscall.  Thin delegation to the shared
+    /// `super::syscall_registry::emit_linux_syscall_inline` —
+    /// previously this method open-coded the inline-asm body
+    /// verbatim, duplicated by `PlatformIR::emit_linux_syscall`.
     fn emit_linux_syscall(
         &self,
         builder: &Builder<'ctx>,
@@ -5997,85 +6001,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         sys_num: u64,
         args: &[IntValue<'ctx>],
     ) -> Result<IntValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-
-        // Inspect the LLVM module's TARGET triple, NOT the compile
-        // host's `target_arch`. Cross-compilation safe: producing a
-        // Linux/aarch64 binary on x86_64-darwin emits ARM64 syscall
-        // conventions correctly.
-        let triple = module.get_triple();
-        let triple_str = triple.as_str().to_string_lossy();
-        let (asm_str, constraints) =
-            if triple_str.contains("aarch64") || triple_str.contains("arm64") {
-                (
-                    "svc #0",
-                    "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
-                )
-            } else if triple_str.contains("x86_64") {
-                (
-                    "syscall",
-                    "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
-                )
-            } else {
-                // Other archs (32-bit ARM, RISC-V, …): caller should
-                // route through the per-platform fallback rather than
-                // relying on this helper. Emit a stub that returns 0.
-                ("", "=r,r,r,r,r,r,r,r")
-            };
-
-        let fn_type = i64_type.fn_type(
-            &[
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-                i64_type.into(),
-            ],
-            false,
-        );
-        let asm_fn = self.context.create_inline_asm(
-            fn_type,
-            asm_str.to_string(),
-            constraints.to_string(),
-            true,
-            true,
-            Some(verum_llvm::InlineAsmDialect::ATT),
-            false,
-        );
-
-        // Pad args to 6, fill missing with zero.
-        let zero = i64_type.const_zero();
-        let a0 = args.first().copied().unwrap_or(zero);
-        let a1 = args.get(1).copied().unwrap_or(zero);
-        let a2 = args.get(2).copied().unwrap_or(zero);
-        let a3 = args.get(3).copied().unwrap_or(zero);
-        let a4 = args.get(4).copied().unwrap_or(zero);
-        let a5 = args.get(5).copied().unwrap_or(zero);
-        let num_const = i64_type.const_int(sys_num, false);
-
-        let result = builder
-            .build_indirect_call(
-                fn_type,
-                asm_fn,
-                &[
-                    num_const.into(),
-                    a0.into(),
-                    a1.into(),
-                    a2.into(),
-                    a3.into(),
-                    a4.into(),
-                    a5.into(),
-                ],
-                "syscall_result",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("syscall returned void")?
-            .into_int_value();
-        Ok(result)
+        super::syscall_registry::emit_linux_syscall_inline(
+            builder, self.context, module, sys_num, args,
+        )
     }
 
     /// Adapt argument types for a libc call: sext i32→i64 or trunc i64→i32 as needed.
