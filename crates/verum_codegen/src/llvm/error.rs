@@ -21,10 +21,6 @@ pub enum LlvmLoweringError {
     #[error("Type lowering error: {0}")]
     TypeLowering(Text),
 
-    /// CBGR lowering error.
-    #[error("CBGR lowering error: {0}")]
-    CbgrLowering(Text),
-
     /// Invalid register reference.
     #[error("Invalid register: r{0}")]
     InvalidRegister(u16),
@@ -41,21 +37,9 @@ pub enum LlvmLoweringError {
     #[error("Module verification failed: {0}")]
     VerificationFailed(Text),
 
-    /// Invalid constant pool reference.
-    #[error("Invalid constant pool index: {0}")]
-    InvalidConstant(u32),
-
-    /// Type mismatch during lowering.
-    #[error("Type mismatch: expected {expected}, got {actual}")]
-    TypeMismatch { expected: Text, actual: Text },
-
     /// Internal compiler error.
     #[error("Internal error: {0}")]
     Internal(Text),
-
-    /// LLVM intrinsic not found.
-    #[error("Intrinsic not found: {0}")]
-    IntrinsicNotFound(Text),
 
     /// Invalid type for operation.
     #[error("Invalid type: {0}")]
@@ -215,11 +199,6 @@ impl LlvmLoweringError {
     /// Create a type lowering error.
     pub fn type_lowering(msg: impl Into<Text>) -> Self {
         LlvmLoweringError::TypeLowering(msg.into())
-    }
-
-    /// Create a CBGR lowering error.
-    pub fn cbgr_lowering(msg: impl Into<Text>) -> Self {
-        LlvmLoweringError::CbgrLowering(msg.into())
     }
 
     /// Create an internal error.
