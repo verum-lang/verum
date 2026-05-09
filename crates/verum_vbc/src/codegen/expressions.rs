@@ -64,21 +64,21 @@ use verum_ast::{
 /// - Semantic names: Int8, Int16, Int32, Int64, Int128, ISize, UInt8, ..., USize
 /// - Compatibility aliases: i8, i16, i32, i64, i128, isize, u8, ..., usize
 fn resolve_numeric_type_alias(type_name: &str) -> Option<&'static str> {
-    match type_name {
-        // Unsigned integers (semantic names) -> Int
-        "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "USize" => Some("Int"),
-        // Signed integers (semantic names) -> Int
-        "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "ISize" => Some("Int"),
-        // Unsigned integers (compat aliases) -> Int
-        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => Some("Int"),
-        // Signed integers (compat aliases) -> Int
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => Some("Int"),
-        // Float aliases (semantic and compat) -> Float
-        "Float32" | "Float64" | "f32" | "f64" => Some("Float"),
-        // Byte is alias for UInt8 -> Int
-        "Byte" => Some("Int"),
-        // Not a numeric type alias
-        _ => None,
+    // Delegates to `type_names::numeric_category` — the canonical
+    // registry over every sized-numeric name.  Returns `None` for
+    // the canonical names `Int`/`Float` themselves, and for non-
+    // numeric types — only ALIASES are reported.  Used to be a
+    // 14-arm match duplicating the registry; eliminated as part of
+    // the canonical-type-info consolidation.
+    let category = type_names::numeric_category(type_name);
+    if category == type_name {
+        None
+    } else if category == type_names::INT {
+        Some(type_names::INT)
+    } else if category == type_names::FLOAT {
+        Some(type_names::FLOAT)
+    } else {
+        None
     }
 }
 
@@ -91,121 +91,52 @@ enum TypePropertyValue {
     Str(String),
 }
 
-/// Resolve compile-time type properties like `Int32.bits`, `Int8.size`, `Float64.name`.
+/// Resolve compile-time type properties like `Int32.bits`,
+/// `Int8.size`, `Float64.name`.
+///
+/// All numeric-type recognition (bits / signedness / float-vs-int)
+/// delegates to `verum_common::well_known_types::type_names` —
+/// the canonical registry.  This used to inline the same numeric-
+/// type lists 4× in this single function; consolidating eliminated
+/// ~80 lines of duplicate match arms.
 fn resolve_type_property(type_name: &str, property: &str) -> Option<TypePropertyValue> {
-    // Get bits for numeric types
-    let bits: Option<i64> = match type_name {
-        "Int" | "Int64" | "i64" => Some(64),
-        "Int8" | "i8" => Some(8),
-        "Int16" | "i16" => Some(16),
-        "Int32" | "i32" => Some(32),
-        "Int128" | "i128" => Some(128),
-        "IntSize" | "ISize" | "isize" => Some(64),
-        "UInt8" | "u8" | "Byte" => Some(8),
-        "UInt16" | "u16" => Some(16),
-        "UInt32" | "u32" => Some(32),
-        "UInt64" | "u64" => Some(64),
-        "UInt128" | "u128" => Some(128),
-        "UIntSize" | "USize" | "usize" => Some(64),
-        "Float" | "Float64" | "f64" => Some(64),
-        "Float32" | "f32" => Some(32),
-        "Bool" => Some(8),
-        "Char" => Some(32),
-        _ => None,
-    };
+    let bits: Option<i64> = type_names::numeric_bit_width(type_name)
+        .map(|b| b as i64)
+        .or_else(|| match type_name {
+            // Bool / Char are not in `numeric_bit_width` (they're not
+            // `is_numeric_type`), but their compile-time `bits`
+            // property is defined.
+            "Bool" => Some(8),
+            "Char" => Some(32),
+            _ => None,
+        });
 
     match property {
         "bits" => bits.map(TypePropertyValue::Int),
         "size" => bits.map(|b| TypePropertyValue::Int(b / 8)),
         "alignment" => bits.map(|b| {
             let size = b / 8;
-            // Alignment is min(size, 16) for most types
+            // Alignment is min(size, 16) for most types.
             TypePropertyValue::Int(size.min(16))
         }),
         "stride" => bits.map(|b| TypePropertyValue::Int(b / 8)),
         "name" => Some(TypePropertyValue::Str(type_name.to_string())),
         "min" => {
-            let is_signed = matches!(
-                type_name,
-                "Int"
-                    | "Int8"
-                    | "Int16"
-                    | "Int32"
-                    | "Int64"
-                    | "Int128"
-                    | "IntSize"
-                    | "i8"
-                    | "i16"
-                    | "i32"
-                    | "i64"
-                    | "i128"
-                    | "isize"
-            );
-            let is_unsigned = matches!(
-                type_name,
-                "UInt8"
-                    | "u8"
-                    | "Byte"
-                    | "UInt16"
-                    | "u16"
-                    | "UInt32"
-                    | "u32"
-                    | "UInt64"
-                    | "u64"
-                    | "UInt128"
-                    | "u128"
-                    | "UIntSize"
-                    | "USize"
-                    | "usize"
-            );
-            if is_unsigned {
+            if type_names::is_unsigned_integer_type(type_name) {
                 return Some(TypePropertyValue::Int(0));
             }
-            if is_signed {
+            if type_names::is_signed_integer_type(type_name) {
                 let b = bits?;
                 return Some(TypePropertyValue::Int(-(1i64 << (b - 1))));
             }
             None
         }
         "max" => {
-            let is_signed = matches!(
-                type_name,
-                "Int"
-                    | "Int8"
-                    | "Int16"
-                    | "Int32"
-                    | "Int64"
-                    | "Int128"
-                    | "IntSize"
-                    | "i8"
-                    | "i16"
-                    | "i32"
-                    | "i64"
-                    | "i128"
-                    | "isize"
-            );
-            let is_unsigned = matches!(
-                type_name,
-                "UInt8"
-                    | "u8"
-                    | "Byte"
-                    | "UInt16"
-                    | "u16"
-                    | "UInt32"
-                    | "u32"
-                    | "UInt64"
-                    | "u64"
-                    | "UInt128"
-                    | "u128"
-                    | "UIntSize"
-                    | "USize"
-                    | "usize"
-            );
-            if is_signed {
+            if type_names::is_signed_integer_type(type_name) {
                 let b = bits?;
                 return Some(TypePropertyValue::Int((1i64 << (b - 1)) - 1));
             }
-            if is_unsigned {
+            if type_names::is_unsigned_integer_type(type_name) {
                 let b = bits?;
                 if b >= 64 {
                     return Some(TypePropertyValue::UInt(u64::MAX));
@@ -214,78 +145,79 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
             }
             None
         }
-        "is_signed" => match type_name {
-            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize" | "i8" | "i16"
-            | "i32" | "i64" | "i128" | "isize" | "Float" | "Float32" | "Float64" | "f32"
-            | "f64" => Some(TypePropertyValue::Int(1)),
-            _ => Some(TypePropertyValue::Int(0)),
-        },
+        "is_signed" => {
+            // Signed = signed-integer OR float; everything else is
+            // unsigned (or non-numeric, in which case `is_signed = 0`
+            // is the long-standing fallback).
+            if type_names::is_signed_integer_type(type_name)
+                || type_names::is_float_type(type_name)
+            {
+                Some(TypePropertyValue::Int(1))
+            } else {
+                Some(TypePropertyValue::Int(0))
+            }
+        }
         _ => None,
     }
 }
 
 fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
-    // Get the (bits, is_signed) for numeric types
-    let (bits, is_signed) = match type_name {
-        "Int" | "Int64" | "i64" => (64, true),
-        "Int8" | "i8" => (8, true),
-        "Int16" | "i16" => (16, true),
-        "Int32" | "i32" => (32, true),
-        "Int128" | "i128" => (128, true),
-        "IntSize" | "ISize" | "isize" => (64, true), // assume 64-bit
-        "UInt8" | "u8" | "Byte" => (8, false),
-        "UInt16" | "u16" => (16, false),
-        "UInt32" | "u32" => (32, false),
-        "UInt64" | "u64" => (64, false),
-        "UInt128" | "u128" => (128, false),
-        "UIntSize" | "USize" | "usize" => (64, false),
-        "Float" | "Float64" | "f64" => {
-            return match method {
-                "MIN" | "min_value" => Some(f64::MIN.to_bits() as i128),
-                "MAX" | "max_value" => Some(f64::MAX.to_bits() as i128),
-                "BITS" => Some(64),
-                "EPSILON" | "epsilon" => Some(f64::EPSILON.to_bits() as i128),
-                "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
-                "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
-                "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
-                "MIN_POSITIVE" | "min_positive" => Some(f64::MIN_POSITIVE.to_bits() as i128),
-                "PI" | "pi" => Some(std::f64::consts::PI.to_bits() as i128),
-                "E" | "e" => Some(std::f64::consts::E.to_bits() as i128),
-                _ => None,
-            };
-        }
-        "Float32" | "f32" => {
-            return match method {
-                "MIN" | "min_value" => Some((f32::MIN as f64).to_bits() as i128),
-                "MAX" | "max_value" => Some((f32::MAX as f64).to_bits() as i128),
-                "BITS" => Some(32),
-                "EPSILON" | "epsilon" => Some((f32::EPSILON as f64).to_bits() as i128),
-                "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
-                "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
-                "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
-                _ => None,
-            };
-        }
-        "Duration" => {
-            return match method {
-                "ZERO" => Some(0),               // Duration stored as nanoseconds; zero = 0
-                "MAX" => Some(u64::MAX as i128), // Duration(UInt64.MAX) stored as bit pattern
-                _ => None,
-            };
-        }
-        _ => return None,
-    };
+    // Float types route through their own constant table (the
+    // language-defined `MIN_POSITIVE` / `EPSILON` / `PI` / etc. don't
+    // generalise to integers).  Integer width / signedness comes
+    // from the canonical `type_names` registry — no per-type match
+    // arms here.
+    if type_names::is_float_type(type_name) {
+        let bits = type_names::numeric_bit_width(type_name)?;
+        return match method {
+            "BITS" => Some(bits as i128),
+            // 64-bit float surface (every float constant is encoded
+            // as the f64 bit pattern; the interpreter / codegen
+            // narrows when storing into a 32-bit slot).
+            "MIN" | "min_value" if bits == 32 => Some((f32::MIN as f64).to_bits() as i128),
+            "MIN" | "min_value" => Some(f64::MIN.to_bits() as i128),
+            "MAX" | "max_value" if bits == 32 => Some((f32::MAX as f64).to_bits() as i128),
+            "MAX" | "max_value" => Some(f64::MAX.to_bits() as i128),
+            "EPSILON" | "epsilon" if bits == 32 => Some((f32::EPSILON as f64).to_bits() as i128),
+            "EPSILON" | "epsilon" => Some(f64::EPSILON.to_bits() as i128),
+            "INFINITY" | "infinity" => Some(f64::INFINITY.to_bits() as i128),
+            "NEG_INFINITY" | "neg_infinity" => Some(f64::NEG_INFINITY.to_bits() as i128),
+            "NAN" | "nan" => Some(f64::NAN.to_bits() as i128),
+            "MIN_POSITIVE" | "min_positive" if bits == 64 => {
+                Some(f64::MIN_POSITIVE.to_bits() as i128)
+            }
+            "PI" | "pi" if bits == 64 => Some(std::f64::consts::PI.to_bits() as i128),
+            "E" | "e" if bits == 64 => Some(std::f64::consts::E.to_bits() as i128),
+            _ => None,
+        };
+    }
 
+    // Stdlib newtype constants — Duration is a transparent newtype
+    // over `Int` so its `ZERO` / `MAX` evaluate at compile time to
+    // the wrapped integer's bit pattern.
+    if type_name == "Duration" {
+        return match method {
+            "ZERO" => Some(0),
+            "MAX" => Some(u64::MAX as i128),
+            _ => None,
+        };
+    }
+
+    // Integer types — width + signedness from the canonical registry.
+    let bits = type_names::numeric_bit_width(type_name)? as i128;
+    let is_signed = type_names::is_signed_integer_type(type_name);
+    let is_unsigned = type_names::is_unsigned_integer_type(type_name);
+    if !is_signed && !is_unsigned {
+        return None;
+    }
     match method {
         "MIN" | "min_value" => {
-            if is_signed {
-                if bits == 128 {
-                    Some(i128::MIN)
-                } else {
-                    Some(-(1i128 << (bits - 1)))
-                }
-            } else {
+            if !is_signed {
                 Some(0)
+            } else if bits == 128 {
+                Some(i128::MIN)
+            } else {
+                Some(-(1i128 << (bits - 1)))
             }
         }
         "MAX" | "max_value" => {
@@ -295,15 +227,13 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
                 } else {
                     Some((1i128 << (bits - 1)) - 1)
                 }
+            } else if bits == 128 {
+                Some(u128::MAX as i128)
             } else {
-                if bits == 128 {
-                    Some(u128::MAX as i128)
-                } else {
-                    Some((1i128 << bits) - 1)
-                }
+                Some((1i128 << bits) - 1)
             }
         }
-        "BITS" => Some(bits as i128),
+        "BITS" => Some(bits),
         _ => None,
     }
 }
@@ -392,25 +322,12 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
 /// handler doesn't sign-extend a high bit that was intentionally unsigned.
 ///
 
-/// The canonical set covers Verum's semantic primitive names, the
-/// Rust-style aliases, and `Byte` (which is u8). A generic type like
-/// `UInt32` that appears as a base in `UInt32<...>` (rare) is still
-/// matched via the `split('<')` at call sites — the base is what counts.
+/// Delegates to `verum_common::well_known_types::type_names::is_unsigned_integer_type`
+/// — the canonical registry of every `UInt8`..`UInt128` semantic name
+/// plus the `u8`..`u128` compat aliases plus `Byte`.  Adding a new
+/// unsigned integer type updates the registry once, never here.
 fn is_unsigned_int_type_name(name: &str) -> bool {
-    matches!(
-        name,
-        "UInt8"
-            | "u8"
-            | "Byte"
-            | "UInt16"
-            | "u16"
-            | "UInt32"
-            | "u32"
-            | "UInt64"
-            | "u64"
-            | "USize"
-            | "usize"
-    )
+    type_names::is_unsigned_integer_type(name)
 }
 
 /// Check if a name is a known type name (primitive or semantic numeric type).
@@ -7314,10 +7231,10 @@ impl VbcCodegen {
                 && let Some(value) = resolve_type_static_constant(&type_name, &method_name)
             {
                 let result = self.ctx.alloc_temp();
-                let is_float_type = matches!(
-                    type_name.as_str(),
-                    "Float" | "Float32" | "Float64" | "f32" | "f64"
-                );
+                // Float-typed constants encode the f64 bit pattern;
+                // emit `LoadF` so the value lands in a float slot.
+                // `BITS` is the one exception — always an integer.
+                let is_float_type = type_names::is_float_type(&type_name);
                 if is_float_type && method_name != "BITS" {
                     let f = f64::from_bits(value as u64);
                     self.ctx.emit(Instruction::LoadF {
