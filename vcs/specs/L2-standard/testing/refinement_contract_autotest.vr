@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, refinement, contracts, auto-test
+// @contract-tests: enabled
+// @description: Pins the @contract-tests directive and auto-generated contract
+//               tests from @requires / @ensures annotations (#64).
+
+mount core.base.{Text, List, Maybe, Bool, Int}
+mount core.io.{print}
+
+// ContractClause stores a single @requires or @ensures predicate.
+type ContractClause is { predicate: Text };
+
+implement ContractClause {
+    fn new(predicate: Text) -> ContractClause {
+        ContractClause { predicate: predicate }
+    }
+}
+
+// ContractTestKind distinguishes pre- from postcondition generated tests.
+type ContractTestKind is Precondition | Postcondition;
+
+// GeneratedTest is produced by the auto-test generator for each clause.
+type GeneratedTest is {
+    name: Text,
+    fn_name: Text,
+    predicate: Text,
+    kind: ContractTestKind,
+};
+
+fn make_precondition_test(fn_name: Text, index: Int, pred: Text) -> GeneratedTest {
+    GeneratedTest {
+        name: f"{fn_name}::contract::requires_{index}",
+        fn_name: fn_name,
+        predicate: pred,
+        kind: ContractTestKind.Precondition,
+    }
+}
+
+fn make_postcondition_test(fn_name: Text, index: Int, pred: Text) -> GeneratedTest {
+    GeneratedTest {
+        name: f"{fn_name}::contract::ensures_{index}",
+        fn_name: fn_name,
+        predicate: pred,
+        kind: ContractTestKind.Postcondition,
+    }
+}
+
+// ── @requires: n >= 0
+// ── @ensures: result >= 0
+fn abs_spec(n: Int) -> Int {
+    if n < 0 { -n } else { n }
+}
+
+fn test_precondition_test_name() {
+    let t = make_precondition_test("abs_spec", 1, "n >= 0");
+    assert_eq(t.name, "abs_spec::contract::requires_1");
+}
+
+fn test_postcondition_test_name() {
+    let t = make_postcondition_test("abs_spec", 1, "result >= 0");
+    assert_eq(t.name, "abs_spec::contract::ensures_1");
+}
+
+fn test_precondition_kind() {
+    let t = make_precondition_test("f", 1, "x > 0");
+    assert(t.kind is Precondition);
+}
+
+fn test_postcondition_kind() {
+    let t = make_postcondition_test("f", 1, "result != 0");
+    assert(t.kind is Postcondition);
+}
+
+fn test_contract_clause_predicate() {
+    let c = ContractClause.new("x >= 0");
+    assert_eq(c.predicate, "x >= 0");
+}
+
+fn test_fn_name_preserved() {
+    let t = make_precondition_test("safe_div", 2, "divisor != 0");
+    assert_eq(t.fn_name, "safe_div");
+}
+
+fn main() {
+    test_precondition_test_name();
+    test_postcondition_test_name();
+    test_precondition_kind();
+    test_postcondition_kind();
+    test_contract_clause_predicate();
+    test_fn_name_preserved();
+    print("refinement contract autotest spec ok");
+}

@@ -30,6 +30,7 @@
 //! - `@isolation: <level>` - Isolation level: none | process | directory | container
 //! - `@snapshot: <name>` - Golden-file snapshot name; test output compared against stored snapshot
 //! - `@mock: <ContextType>` - Inject a mock for the named context type when running this test file
+//! - `@contract-tests: enabled` - Auto-generate property tests from @requires / @ensures annotations
 //!
 //! # Multi-line Values
 //!
@@ -841,6 +842,8 @@ pub struct TestDirectives {
     /// Context types for which mock implementations should be injected during the test run.
     /// Each entry is the unqualified type name, e.g. "Database", "Logger".
     pub mocks: List<Text>,
+    /// When true, auto-generate property tests from @requires / @ensures contract annotations.
+    pub contract_tests: bool,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -882,6 +885,7 @@ impl Default for TestDirectives {
             isolation: None,
             snapshot: None,
             mocks: List::new(),
+            contract_tests: false,
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1099,6 +1103,8 @@ impl TestDirectives {
                 if !ctx_type.is_empty() {
                     directives.mocks.push(ctx_type.into());
                 }
+            } else if let Some(rest) = comment.strip_prefix("@contract-tests:") {
+                directives.contract_tests = rest.trim() == "enabled";
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()

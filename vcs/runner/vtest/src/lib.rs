@@ -70,6 +70,7 @@ pub mod directive;
 pub mod discovery;
 pub mod executor;
 pub mod filter;
+pub mod contract_gen;
 pub mod fuzz;
 pub mod isolation;
 pub mod mock;
