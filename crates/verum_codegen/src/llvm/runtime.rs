@@ -5205,11 +5205,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         if target_is_linux(module) {
             // Direct syscall — libc-free. CLOCK_MONOTONIC = 1 on Linux.
             // Syscall numbers are arch-specific.
-            let sys_num: u64 = if target_is_aarch64(module) {
-                113 // SYS_clock_gettime aarch64
-            } else {
-                228 // SYS_clock_gettime x86_64
-            };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_CLOCK_GETTIME } else { verum_common::linux_syscalls::x86_64::SYS_CLOCK_GETTIME };
             let clock_id_val = i64_type.const_int(1, false); // CLOCK_MONOTONIC
             let ts_addr = builder
                 .build_ptr_to_int(ts, i64_type, "ts_addr")
@@ -5287,11 +5283,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Cross-compilation-correct: TARGET-triple dispatch via
         // `Self::target_is_linux`, never host `#[cfg]`.
         if target_is_linux(module) {
-            let sys_num: u64 = if target_is_aarch64(module) {
-                113 // SYS_clock_gettime aarch64
-            } else {
-                228 // SYS_clock_gettime x86_64
-            };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_CLOCK_GETTIME } else { verum_common::linux_syscalls::x86_64::SYS_CLOCK_GETTIME };
             let clock_id = i64_type.const_int(0, false); // CLOCK_REALTIME
             let ts_addr = builder
                 .build_ptr_to_int(ts, i64_type, "ts_addr")
@@ -5407,11 +5399,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         //  under signals.
         //  * macOS / other Unix: libSystem nanosleep (acceptable).
         if target_is_linux(module) {
-            let sys_num: u64 = if target_is_aarch64(module) {
-                101 // SYS_nanosleep aarch64
-            } else {
-                35 // SYS_nanosleep x86_64
-            };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_NANOSLEEP } else { verum_common::linux_syscalls::x86_64::SYS_NANOSLEEP };
             let ts_addr = builder
                 .build_ptr_to_int(ts, i64_type, "ts_addr")
                 .or_llvm_err()?;
@@ -7865,11 +7853,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 // Cross-compilation-correct: TARGET-triple dispatch.
                 if target_is_linux(module) {
-                    let sys_num: u64 = if target_is_aarch64(module) {
-                        172 // SYS_getpid aarch64
-                    } else {
-                        39 // SYS_getpid x86_64
-                    };
+                    let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_GETPID } else { verum_common::linux_syscalls::x86_64::SYS_GETPID };
                     let pid = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
                     builder.build_return(Some(&pid)).or_llvm_err()?;
                 } else {
@@ -7965,7 +7949,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     //
 
                     // SYS_gettid: x86_64=186, aarch64=178.
-                    let sys_num: u64 = if target_is_aarch64(module) { 178 } else { 186 };
+                    let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_GETTID } else { verum_common::linux_syscalls::x86_64::SYS_GETTID };
                     let tid = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
                     builder.build_return(Some(&tid)).or_llvm_err()?;
                 } else {
@@ -9168,7 +9152,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             // Direct syscall — libc-free.  Syscall numbers per Linux ABI:
             //   x86_64: 228 (SYS_clock_gettime)
             //   aarch64: 113 (SYS_clock_gettime)
-            let sys_num: u64 = if target_is_aarch64(module) { 113 } else { 228 };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_CLOCK_GETTIME } else { verum_common::linux_syscalls::x86_64::SYS_CLOCK_GETTIME };
             let ts_addr = builder
                 .build_ptr_to_int(ts, i64_type, "ts_addr")
                 .or_llvm_err()?;
@@ -9230,7 +9214,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .into_pointer_value();
 
         if target_is_linux(module) {
-            let sys_num: u64 = if target_is_aarch64(module) { 101 } else { 35 };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_NANOSLEEP } else { verum_common::linux_syscalls::x86_64::SYS_NANOSLEEP };
             let req_addr = builder
                 .build_ptr_to_int(req, i64_type, "req_addr")
                 .or_llvm_err()?;
@@ -9280,7 +9264,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         if target_is_linux(module) {
             // SYS_sched_yield: x86_64 = 24, aarch64 = 124
-            let sys_num: u64 = if target_is_aarch64(module) { 124 } else { 24 };
+            let sys_num: u64 = if target_is_aarch64(module) { verum_common::linux_syscalls::aarch64::SYS_SCHED_YIELD } else { verum_common::linux_syscalls::x86_64::SYS_SCHED_YIELD };
             let result = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
