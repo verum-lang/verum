@@ -46040,1051 +46040,12 @@ impl TypeChecker {
             return Ok(InferResult::new(Type::Var(TypeVar::fresh())));
         }
 
-        // Handle super path function calls
-        // When we have `super.func(args)`, this is parsed as a method call
-        // but should be resolved as a parent module function call.
-        // Circular import handling: detection and error reporting for cyclic module dependencies — Relative module paths
-        if let ExprKind::Path(path) = &receiver.kind
-            && !path.segments.is_empty()
-            && matches!(
-                path.segments.first(),
-                Some(verum_ast::ty::PathSegment::Super)
-            )
-        {
-            // Resolve super.func() by looking up in parent module
-            let method_name = method.name.as_str();
-
-            // Get current module path and compute parent path
-            let current_module_path = self.current_module_path.clone();
-            if let Some(parent_path) =
-                self.compute_parent_module_path(&current_module_path, &path.segments)
-            {
-                // Build the full function path in the parent module
-                let full_path = if parent_path.is_empty() {
-                    verum_common::Text::from(method_name)
-                } else {
-                    verum_common::Text::from(format!("{}.{}", parent_path, method_name))
-                };
-
-                // Look up function in parent module's inline modules
-                // Clone items to avoid borrow conflict with infer_function_type
-                let items_opt = self
-                    .inline_modules
-                    .get(&verum_common::Text::from(parent_path.clone()))
-                    .and_then(|m| m.items.clone());
-
-                if let Some(items) = items_opt {
-                    for item in items.iter() {
-                        if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                            if func_decl.name.name.as_str() == method_name {
-                                // Found the function - infer its type and return
-                                let func_type = self.infer_function_type(func_decl)?;
-                                if let Type::Function {
-                                    params,
-                                    return_type,
-                                    ..
-                                } = &func_type
-                                {
-                                    // Check argument count
-                                    // Allow ±1 tolerance for self-param counting
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::WrongArgCount {
-                                            method: method.name.clone(),
-                                            expected: params.len(),
-                                            actual: args.len(),
-                                            span,
-                                        });
-                                    }
-
-                                    // Type check each argument
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(InferResult::new(resolved_return));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Function not found in parent module
-                return Err(TypeError::UnboundVariable {
-                    name: verum_common::Text::from(format!("super.{}", method_name)),
-                    span,
-                });
-            }
+        if let Some(r) = self.try_resolve_pre_receiver_method(
+            receiver, method, type_args, args, span, skip_static_lookup,
+        )? {
+            return Ok(r);
         }
 
-        // Module-alias dispatch — `mount X as A;` then `A.method(...)`
-        // routes to `X.method(...)` rather than synth_expr'ing `A` as a
-        // value. Without this, a stdlib function with the same name as
-        // the user's alias (e.g. core.sys.linux.syscall.stat vs
-        // `mount core.net.h3.qpack.static_table as stat;`) wins at
-        // value-lookup and the whole `stat.get(0)` call breaks with a
-        // spurious method-dispatch error.
-        //
-
-        // Only fires on the first call of a chain (`!skip_static_lookup`).
-        if !skip_static_lookup
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
-            && let Some(module_path) = self.module_aliases.get(&ident.name).cloned()
-        {
-            let method_name = method.name.as_str();
-            let qualified: Text = format!("{}.{}", module_path, method_name).into();
-
-            // Fast path: the function may already have been imported into
-            // the type env under its qualified-module form by
-            // `import_all_from_module` when the mount was processed.
-            if let Some(scheme) = self.ctx.env.lookup(&qualified).cloned() {
-                let func_type = self.unifier.apply(&scheme.ty);
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &func_type
-                {
-                    if params.len() == args.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    }
-                }
-            }
-
-            // Slow path: walk inline_modules AST items.
-            let items_opt = self
-                .inline_modules
-                .get(&module_path)
-                .map(|m| m.items.clone())
-                .and_then(|items| items);
-            if let Some(items) = items_opt {
-                for item in items.iter() {
-                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                        if func_decl.name.name.as_str() == method_name {
-                            let func_type = self.infer_function_type(func_decl)?;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = &func_type
-                            {
-                                if params.len() == args.len() {
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(InferResult::new(resolved_return));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Registry fallback: walk the parsed AST of the aliased
-            // module, find the named public function, infer its type,
-            // and type-check the call against it.
-            let registry = self.module_registry.read();
-            if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
-                let items: Vec<_> = module_info.ast.items.iter().cloned().collect();
-                drop(registry);
-                for item in items.iter() {
-                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                        if func_decl.name.name.as_str() == method_name
-                            && func_decl.visibility == verum_ast::decl::Visibility::Public
-                        {
-                            let func_type = self.infer_function_type(func_decl)?;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = &func_type
-                            {
-                                if params.len() == args.len() {
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(InferResult::new(resolved_return));
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                drop(registry);
-            }
-
-            // Function not found in aliased module.
-            return Err(TypeError::UnboundVariable {
-                name: verum_common::Text::from(format!("{}.{}", module_path, method_name)),
-                span,
-            });
-        }
-
-        // Context-method dispatch has priority over stdlib module dispatch.
-        //
-
-        // When a user declares
-        //  context Time { fn now() -> Timestamp; }
-        // and writes
-        //  pure fn f() -> Timestamp using [Time] { Time.now() }
-        // the `Time.now()` call must resolve to the context method (returning
-        // Timestamp), not to the stdlib `core.time.Time.now()` (returning
-        // Duration). Before this check the stdlib path won and produced a
-        // misleading type mismatch on the caller's annotated return type.
-        //
-
-        // Trigger: the first segment of the receiver path is a
-        // user-declared context name AND the current function's `using [...]`
-        // clause lists that context. The explicit `using` marker is what
-        // gives the compiler license to choose the context dispatch —
-        // without it, a bare `Time.now()` in a non-`using` context could
-        // legitimately mean the stdlib namespace.
-        //
-
-        // Only fire on the first call of a method chain
-        // (`!skip_static_lookup`). The iterative chain handler reuses the
-        // outermost receiver expression for every chain step, so inside
-        // `CancelCtx.get_token().check()?` the same `Path(CancelCtx)` is
-        // the receiver for both `.get_token()` and `.check()` — but
-        // `.check()` should resolve against the return type of
-        // `.get_token()`, not re-dispatch the context.
-        if !skip_static_lookup
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
-        {
-            let ctx_name: verum_common::Text = ident.name.clone();
-            let in_using_clause = self
-                .current_function_contexts
-                .as_ref()
-                .map(|set| set.iter().any(|req| req.name == ctx_name))
-                .unwrap_or(false);
-            if in_using_clause
-                && let Some(ctx_decl) = self.context_declarations.get(&ctx_name).cloned()
-            {
-                for ctx_method in ctx_decl.methods.iter() {
-                    if ctx_method.name.name != method.name {
-                        continue;
-                    }
-                    // Arity check: caller passes `args`; context method
-                    // carries the signature sans `self` receiver.
-                    if ctx_method.params.len() != args.len() {
-                        continue;
-                    }
-                    // Type-check each argument against the declared
-                    // parameter type. Missing or unresolvable types fall
-                    // through to `Type::Unknown` which still unifies.
-                    for (arg, param) in args.iter().zip(ctx_method.params.iter()) {
-                        let param_ty = if let verum_ast::decl::FunctionParamKind::Regular {
-                            ty: param_ty_ast,
-                            ..
-                        } = &param.kind
-                        {
-                            self.ast_to_type(param_ty_ast).unwrap_or(Type::Unknown)
-                        } else {
-                            Type::Unknown
-                        };
-                        self.check_expr(arg, &param_ty)?;
-                    }
-                    let return_ty = match &ctx_method.return_type {
-                        verum_common::Maybe::Some(rt) => {
-                            self.ast_to_type(rt).unwrap_or(Type::Unknown)
-                        }
-                        verum_common::Maybe::None => Type::unit(),
-                    };
-                    return Ok(InferResult::new(return_ty));
-                }
-            }
-        }
-
-        // Handle inline module function calls
-        // When we have `module.func(args)`, this is parsed as a method call
-        // but should be resolved as a module-qualified function call.
-        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-        if let ExprKind::Path(path) = &receiver.kind {
-            // Check if the first segment is an inline module
-            let first_segment_name = match path.segments.first() {
-                Some(verum_ast::ty::PathSegment::Name(ident)) => Some(ident.name.as_str()),
-                _ => None,
-            };
-
-            if let Some(first_name) = first_segment_name {
-                if self
-                    .inline_modules
-                    .contains_key(&verum_common::Text::from(first_name))
-                {
-                    // Name collision: a single identifier (e.g. `Validated`)
-                    // can refer to BOTH a type and a same-named module
-                    // (`type Validated<E, A> is …;` plus
-                    // `public module Validated { fn validate_all<…>(…) … }`).
-                    // The inline-module branch below assumes module-style
-                    // dispatch and silently swallows static-method calls
-                    // on the type. Before committing to module dispatch,
-                    // check whether the type has a static method by this
-                    // name; if so, fall through to the static-method path
-                    // so `Validated.valid(42)` resolves against
-                    // `implement<E, A> Validated<E, A> { fn valid(…) }`
-                    // rather than failing with `unbound variable: valid`.
-                    let static_key =
-                        verum_common::Text::from(format!("$static${}", method.name.as_str()));
-                    let has_static_method = {
-                        let methods_guard = self.inherent_methods.read();
-                        methods_guard
-                            .get(&verum_common::Text::from(first_name))
-                            .is_some_and(|methods| methods.contains_key(&static_key))
-                    };
-                    if has_static_method {
-                        // Skip the inline-module branch and let the
-                        // static-method dispatch below handle it.
-                    } else {
-                        // Build the full path including the method as the last segment
-                        let mut segments: Vec<verum_ast::ty::PathSegment> =
-                            path.segments.iter().cloned().collect();
-                        segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
-
-                        let module_path = verum_ast::ty::Path {
-                            segments: segments.into(),
-                            span,
-                        };
-
-                        // Resolve through inline module - this will check visibility
-                        let func_result = self.resolve_inline_module_path(&module_path, span)?;
-
-                        // Never propagation: if resolution returned Never, propagate it
-                        if matches!(func_result.ty, Type::Never) {
-                            return Ok(InferResult::new(Type::Never));
-                        }
-
-                        // The result should be a function type - call it with args
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = &func_result.ty
-                        {
-                            // Check argument count
-                            // Allow ±1 tolerance for self-param counting inconsistencies
-                            // and default parameter handling in method resolution
-                            if args.len() > params.len() + 1
-                                || (args.len() + 1 < params.len() && params.len() > 1)
-                            {
-                                return Err(TypeError::WrongArgCount {
-                                    method: method.name.clone(),
-                                    expected: params.len(),
-                                    actual: args.len(),
-                                    span,
-                                });
-                            }
-
-                            // Type check each argument
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-
-                            let resolved_return = self.unifier.apply(return_type);
-                            return Ok(InferResult::new(resolved_return));
-                        } else {
-                            return Err(TypeError::NotAFunction {
-                                ty: format!("{}", func_result.ty).into(),
-                                span,
-                            });
-                        }
-                    } // end of `else` for has_static_method check
-                }
-            }
-        }
-
-        // Handle nested module function calls via Field access
-        // When we have `outer.inner.func(args)`, the receiver is a Field expression:
-        //  Field { expr: Path("outer"), field: "inner" }
-        // We need to recognize this as a nested module path and resolve the function.
-        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Nested Inline Modules
-        if let ExprKind::Field {
-            expr: inner_expr,
-            field: inner_field,
-        } = &receiver.kind
-        {
-            // Check if this is a module path by recursively extracting path segments
-            let module_segments = self.extract_module_path_from_field(inner_expr, inner_field);
-            if let Some(segments) = module_segments {
-                // Check if the first segment is an inline module
-                if self
-                    .inline_modules
-                    .contains_key(&verum_common::Text::from(segments[0]))
-                {
-                    // Build the full path including the method as the last segment
-                    let mut path_segments: Vec<verum_ast::ty::PathSegment> = segments
-                        .iter()
-                        .map(|s| {
-                            verum_ast::ty::PathSegment::Name(verum_ast::Ident {
-                                name: (*s).into(),
-                                span,
-                            })
-                        })
-                        .collect();
-                    path_segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
-
-                    let module_path = verum_ast::ty::Path {
-                        segments: path_segments.into(),
-                        span,
-                    };
-
-                    // Resolve through inline module - this will check visibility
-                    let func_result = self.resolve_inline_module_path(&module_path, span)?;
-
-                    // Never propagation: if resolution returned Never, propagate it
-                    if matches!(func_result.ty, Type::Never) {
-                        return Ok(InferResult::new(Type::Never));
-                    }
-
-                    // The result should be a function type - call it with args
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = &func_result.ty
-                    {
-                        // Check argument count
-                        // Allow ±1 tolerance for self-param counting inconsistencies
-                        // and default parameter handling in method resolution
-                        if args.len() > params.len() + 1
-                            || (args.len() + 1 < params.len() && params.len() > 1)
-                        {
-                            return Err(TypeError::WrongArgCount {
-                                method: method.name.clone(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        // Type check each argument
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    } else {
-                        return Err(TypeError::NotAFunction {
-                            ty: format!("{}", func_result.ty).into(),
-                            span,
-                        });
-                    }
-                }
-            }
-        }
-
-        // GENERIC TYPE STATIC METHOD CALL: Handle Wrapper<Person>.default() syntax
-        // When receiver is a TypeExpr, extract the type and use it for method lookup.
-        // The type arguments (like Person) are used to instantiate generic implementations.
-        // Generic type instantiation: substituting concrete types for type parameters, checking bounds
-        if let ExprKind::TypeExpr(ty) = &receiver.kind {
-            // Convert AST type to internal Type representation
-            let receiver_ty = self.ast_to_type(ty)?;
-            let method_name = method.name.as_str();
-
-            // Extract base type name for method lookup
-            let type_name = self.type_to_name(&receiver_ty).to_string();
-
-            // Try to look up the method via protocol_checker.
-            // Use lookup_all_protocol_methods to handle multiple parameterized protocol impls
-            // (e.g., TryFrom<Int>, TryFrom<Int32>, TryFrom<UInt32> all providing try_from).
-            let method_name_text = verum_common::Text::from(method_name);
-            let all_methods_result = self
-                .protocol_checker
-                .read()
-                .lookup_all_protocol_methods(&receiver_ty, &method_name_text);
-            if let Ok(candidates) = all_methods_result {
-                if candidates.len() == 1 {
-                    // Single candidate - use directly (common fast path)
-                    let method_ty = &candidates[0];
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = method_ty
-                    {
-                        // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    }
-                } else if candidates.len() > 1 {
-                    // Multiple candidates - disambiguate by argument types.
-                    // Pre-infer argument types, then find the candidate whose params match.
-                    let mut arg_types = List::new();
-                    for arg in args.iter() {
-                        if let Ok(r) = self.infer_expr(arg, InferMode::Synth) {
-                            arg_types.push(r.ty);
-                        }
-                    }
-
-                    for candidate in candidates.iter() {
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = candidate
-                        {
-                            if params.len().abs_diff(args.len()) > 1 {
-                                continue;
-                            }
-                            // Check if all arg types are compatible with params
-                            let mut compatible = true;
-                            if arg_types.len() == params.len() {
-                                for (arg_ty, param_ty) in arg_types.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    if !self.types_compatible(arg_ty, &resolved_param) {
-                                        compatible = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            if compatible {
-                                // Found matching candidate - type check args properly
-                                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    self.check_expr(arg, &resolved_param)?;
-                                }
-                                let resolved_return = self.unifier.apply(return_type);
-                                return Ok(InferResult::new(resolved_return));
-                            }
-                        }
-                    }
-                    // If no candidate matched, fall through to env lookup
-                }
-            }
-
-            // Also check for variant constructors like Maybe<Int>.Some(42)
-            let qualified_name = format!("{}.{}", type_name, method_name);
-            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
-                let constructor_ty = scheme.instantiate();
-
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &constructor_ty
-                {
-                    // Pre-check argument compatibility (same as Path block below)
-                    let mut args_pre_compatible = true;
-                    if args.len() == params.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
-                                if !self.types_compatible(&arg_result.ty, &resolved_param) {
-                                    args_pre_compatible = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if args_pre_compatible {
-                        // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    }
-                }
-            }
-        }
-
-        // CRITICAL FIX: Handle Type.Variant(args) syntax for variant constructors
-        // When we have Maybe.Some(42), the parser treats it as a method call on Maybe.
-        // But this should actually be interpreted as calling the variant constructor Maybe.Some.
-        // This is similar to the Field access case, but with arguments.
-        //
-
-        // Also handles Self.method() by resolving Self to the actual type name
-        //
-
-        // IMPORTANT: Skip this check when skip_static_lookup is true. This is set for
-        // chained method calls (after the first) where receiver.kind is the original base
-        // expression, not the actual receiver of this specific method call. For example,
-        // in `Int.max_value().min(0)`, when processing `.min(0)`, receiver.kind is still
-        // Path("Int") but the actual receiver is the result of max_value().
-        if !skip_static_lookup
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-        {
-            // Get the type name - either from a Name segment or from Self resolution
-            let type_name: Option<String> = match &path.segments[0] {
-                verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
-                verum_ast::ty::PathSegment::SelfValue => {
-                    // Resolve Self to the actual type name from current_self_type
-                    self.current_self_type
-                        .as_ref()
-                        .map(|self_ty| self.type_to_name(self_ty).to_string())
-                }
-                _ => None,
-            };
-
-            if let Some(type_name) = type_name {
-                let type_name = type_name.as_str();
-                let method_name = method.name.as_str();
-                let qualified_name = format!("{}.{}", type_name, method_name);
-
-                // CRITICAL: Handle static method calls on type parameters with protocol bounds.
-                // For example: `U.from(self)` where `U: From<T>` should lookup `from` from `From<T>` protocol.
-                // Check if type_name refers to a type parameter.
-                let type_name_text = verum_common::Text::from(type_name);
-                if let Some(ty) = self.ctx.lookup_type(&type_name_text).cloned() {
-                    // If the type is a type variable, it might have protocol bounds
-                    if let Type::Var(_) = &ty {
-                        // Look up all type parameters with their bounds
-                        let all_type_params = self.ctx.env.all_type_params();
-                        for type_param in all_type_params {
-                            // Check if this type parameter matches our type_name
-                            if type_param.name.as_str() == type_name {
-                                // Check each protocol bound on this type parameter
-                                for bound in &type_param.bounds {
-                                    if let Some(protocol_ident) = bound.protocol.as_ident() {
-                                        let protocol_name: Text = protocol_ident.name.clone();
-
-                                        // Look up the protocol definition
-                                        let protocol_opt = self
-                                            .protocol_checker
-                                            .read()
-                                            .get_protocol(&protocol_name)
-                                            .cloned();
-                                        if let Maybe::Some(protocol) = protocol_opt {
-                                            // Check if this protocol has the method we're looking for
-                                            for (_, proto_method) in &protocol.methods {
-                                                if proto_method.name.as_str() == method_name {
-                                                    // Found the method in a bounded protocol
-                                                    // Substitute Self with the type parameter's type variable
-                                                    let method_ty = self
-                                                        .instantiate_method_for_receiver(
-                                                            &proto_method.ty,
-                                                            &ty,
-                                                        );
-                                                    // Instantiate method's own type parameters with explicit type args
-                                                    let method_ty = self
-                                                        .instantiate_method_type_params(
-                                                            method_ty, type_args, span,
-                                                        )?;
-
-                                                    if let Type::Function {
-                                                        params,
-                                                        return_type,
-                                                        ..
-                                                    } = &method_ty
-                                                    {
-                                                        // For STATIC protocol methods (like From::from), there's no self param
-                                                        // The params should already be correct
-                                                        if params.len().abs_diff(args.len()) > 1 {
-                                                            return Err(TypeError::WrongArgCount {
-                                                                method: method_name.to_text(),
-                                                                expected: params.len(),
-                                                                actual: args.len(),
-                                                                span,
-                                                            });
-                                                        }
-
-                                                        // Type check each argument
-                                                        for (arg, param_ty) in
-                                                            args.iter().zip(params.iter())
-                                                        {
-                                                            let resolved_param =
-                                                                self.unifier.apply(param_ty);
-                                                            self.check_expr(arg, &resolved_param)?;
-                                                        }
-
-                                                        // Apply substitution to return type
-                                                        let resolved_return =
-                                                            self.unifier.apply(return_type);
-                                                        return Ok(InferResult::new(
-                                                            resolved_return,
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Try to look up the qualified variant constructor or static method.
-                let mut env_resolved = false;
-                if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
-                    let constructor_ty = scheme.instantiate();
-
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = &constructor_ty
-                    {
-                        // SPECIAL CASE: Handle variadic builtins like List.of, Set.of
-                        if (qualified_name == "List.of" || qualified_name == "Set.of")
-                            && !args.is_empty()
-                        {
-                            let elem_ty = if params.len() == 1 {
-                                params[0].clone()
-                            } else {
-                                Type::Var(TypeVar::fresh())
-                            };
-
-                            for arg in args.iter() {
-                                let resolved_elem = self.unifier.apply(&elem_ty);
-                                self.check_expr(arg, &resolved_elem)?;
-                            }
-
-                            let resolved_return = self.unifier.apply(return_type);
-                            return Ok(InferResult::new(resolved_return));
-                        }
-
-                        // Commit to this qualified-name resolution. The
-                        // earlier `args_pre_compatible` heuristic (raw-string
-                        // type name equality before real check_expr) was a
-                        // silent masker: any spurious mismatch would fall
-                        // through to a hardcoded-method-name fallback, or
-                        // (after that was removed) to MethodNotFound — even
-                        // when the env entry is the one true resolution.
-                        // Real type-checking runs here via check_expr below;
-                        // unification + coercion handle refinement, numeric
-                        // canonicalization, and reference auto-borrow.
-                        // Allow ±1 tolerance for self-param counting.
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
-                    } else {
-                        env_resolved = true; // Non-function type, treat as resolved
-                    }
-                }
-                if !env_resolved {
-                    // Fallback: Check inherent_methods for static methods
-                    let static_key = verum_common::Text::from(format!("$static${}", method_name));
-                    let type_name_text = verum_common::Text::from(type_name);
-                    let method_ty_opt = {
-                        let methods_guard = self.inherent_methods.read();
-                        methods_guard
-                            .get(&type_name_text)
-                            .and_then(|methods| methods.get(&static_key).cloned())
-                            // Instantiate the TypeScheme to create fresh type variables
-                            .map(|scheme| scheme.instantiate())
-                    };
-
-                    // TASK #21 FIX: If not found, try resolving type alias
-                    // For `Vec4f.splat()` where `type Vec4f = Vec<Float32, 4>`,
-                    // we need to look up methods on `Vec` instead of `Vec4f`.
-                    let method_ty_opt = if method_ty_opt.is_none() {
-                        if let Some(resolved_type) = self.ctx.resolve_alias(type_name) {
-                            // Extract base type name from resolved type
-                            // For `Vec<Float32, 4>`, extract `Vec`
-                            let base_type_name = self.type_to_name(resolved_type);
-                            let base_type_text = verum_common::Text::from(base_type_name.as_str());
-                            let methods_guard = self.inherent_methods.read();
-                            methods_guard
-                                .get(&base_type_text)
-                                .and_then(|methods| methods.get(&static_key).cloned())
-                                .map(|scheme| scheme.instantiate())
-                        } else {
-                            None
-                        }
-                    } else {
-                        method_ty_opt
-                    };
-
-                    if let Some(method_ty) = method_ty_opt {
-                        // Method found in inherent_methods - proceed with call
-                        if let Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } = &method_ty
-                        {
-                            // Pre-check argument type compatibility before committing.
-                            // When multiple protocol impls (e.g., TryFrom<Int>, TryFrom<Int32>,
-                            // TryFrom<UInt32>) register methods, inherent_methods stores the last one.
-                            // If args don't match, skip and fall through to protocol_checker.
-                            let mut args_pre_compatible = true;
-                            if args.len() == params.len() {
-                                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
-                                        if !self.types_compatible(&arg_result.ty, &resolved_param) {
-                                            args_pre_compatible = false;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if args_pre_compatible {
-                                // Check argument count
-                                if params.len().abs_diff(args.len()) > 1 {
-                                    return Err(TypeError::WrongArgCount {
-                                        method: method_name.to_text(),
-                                        expected: params.len(),
-                                        actual: args.len(),
-                                        span,
-                                    });
-                                }
-
-                                // Type check each argument and accumulate substitution
-                                for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                    let resolved_param = self.unifier.apply(param_ty);
-                                    self.check_expr(arg, &resolved_param)?;
-                                }
-
-                                // Apply accumulated substitution to return type
-                                let resolved_return = self.unifier.apply(return_type);
-                                return Ok(InferResult::new(resolved_return));
-                            }
-                            // Args not compatible — fall through to protocol_checker
-                        }
-                    }
-
-                    // Fallback: Handle primitive type static method calls.
-                    // For example: Int.min(10, 20), Float.pi(), Int.default()
-                    // These are static calls where the receiver is a primitive type name.
-                    // We resolve them by converting to instance method calls on the primitive type.
-                    {
-                        let prim_ty = match type_name {
-                            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
-                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte" => {
-                                Some(Type::Int)
-                            }
-                            "Float" | "Float32" | "Float64" => Some(Type::Float),
-                            "Bool" => Some(Type::Bool),
-                            "Char" => Some(Type::Char),
-                            "Text" => Some(Type::Text),
-                            _ => None,
-                        };
-                        if let Some(prim) = prim_ty {
-                            // Try as a static method: arg_count = args.len() (no self)
-                            // If resolve_primitive_method handles it with args.len() args, use that.
-                            // Otherwise try with args.len()-1 (first arg is "self").
-                            if let Some(result_ty) =
-                                resolve_primitive_method(&prim, method_name, args.len())
-                            {
-                                // Static method with all args as params
-                                for arg in args.iter() {
-                                    self.synth_expr(arg)?;
-                                }
-                                return Ok(InferResult::new(result_ty));
-                            }
-                            // Try treating first arg as self for instance-like statics
-                            // e.g., Int.min(10, 20) -> 10.min(20) where arg_count=1
-                            if !args.is_empty() {
-                                if let Some(result_ty) =
-                                    resolve_primitive_method(&prim, method_name, args.len() - 1)
-                                {
-                                    for arg in args.iter() {
-                                        self.synth_expr(arg)?;
-                                    }
-                                    return Ok(InferResult::new(result_ty));
-                                }
-                            }
-                        }
-                    }
-
-                    // CRITICAL FIX: Fallback to protocol_checker for protocol static methods
-                    // Protocol impls don't register static methods in ctx.env or with $static$ prefix.
-                    // We need to use lookup_protocol_method which properly handles Self and type params.
-                    // This enables T.default() pattern in generic protocol implementations.
-                    //
-
-                    // IMPORTANT: Only use this fallback if type_name looks like a type name (starts with uppercase)
-                    // not a variable name (starts with lowercase). This prevents false positives where
-                    // `file.read_to_string()` would incorrectly try to look up methods on a type named "file".
-                    let is_type_name = type_name
-                        .chars()
-                        .next()
-                        .map(|c| c.is_uppercase())
-                        .unwrap_or(false);
-                    // NAME-COLLISION GUARD: if the user has a same-named type
-                    // whose inherent methods already define THIS specific
-                    // method, skip the protocol-method static lookup and
-                    // let the downstream inherent-methods path resolve it.
-                    //
-
-                    // Key invariant: the guard only fires when BOTH
-                    // (a) a local `type X` exists AND (b) inherent_methods
-                    // registers the *specific* method name being called.
-                    // Otherwise we fall through to protocol lookup — this
-                    // preserves context-method dispatch (e.g., Logger.info)
-                    // where the user's file has no same-named local type
-                    // OR the user-local type has no method with that name.
-                    let user_type_shadows_this_method = {
-                        let ctn: verum_common::Text = type_name.into();
-                        let has_local_type = matches!(
-                            self.ctx.lookup_type(type_name),
-                            Option::Some(Type::Named { .. })
-                                | Option::Some(Type::Record(_))
-                                | Option::Some(Type::Variant(_))
-                                | Option::Some(Type::Placeholder { .. })
-                        );
-                        let has_this_inherent = self
-                            .inherent_methods
-                            .read()
-                            .get(&ctn)
-                            .map(|m| m.contains_key(&verum_common::Text::from(method_name)))
-                            .unwrap_or(false);
-                        has_local_type && has_this_inherent
-                    };
-                    if is_type_name && !user_type_shadows_this_method {
-                        // Build the lookup type from the type name.
-                        // For generic types like Wrapper, this creates Wrapper with no args, and
-                        // lookup_protocol_method will match it against Wrapper<T> implementations.
-                        let lookup_ty = Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                type_name, span,
-                            )),
-                            args: List::new(),
-                        };
-
-                        let method_name_text = verum_common::Text::from(method_name);
-
-                        // CRITICAL FIX: Use lookup_all_protocol_methods to get ALL matching signatures.
-                        // This handles cases where a type implements multiple parameterized protocols
-                        // with the same method (e.g., FromResidual<Result<Never, E>> and
-                        // FromResidual<Maybe<Never>> both have `from_residual`).
-                        //
-
-                        // Strategy: Synthesize argument types first, then find the signature where
-                        // argument types are compatible using subtype checking (no side effects).
-                        let all_methods = self
-                            .protocol_checker
-                            .read()
-                            .lookup_all_protocol_methods(&lookup_ty, &method_name_text);
-                        if let Ok(method_types) = all_methods {
-                            if !method_types.is_empty() {
-                                // First, synthesize all argument types
-                                let mut arg_types: List<Type> = List::new();
-                                for arg in args.iter() {
-                                    let arg_result = self.synth_expr(arg)?;
-                                    arg_types.push(arg_result.ty);
-                                }
-
-                                // Find the MOST SPECIFIC signature where argument types are compatible.
-                                // Specificity: exact type match > subtype match > structural match.
-                                // This fixes From<Char> vs From<Text> disambiguation — exact match wins.
-                                let mut best_match: Option<&Type> = None;
-                                let mut best_score: i32 = -1;
-                                for method_ty in method_types.iter() {
-                                    if let Type::Function { params, .. } = method_ty {
-                                        if params.len() != arg_types.len() {
-                                            continue;
-                                        }
-
-                                        let mut all_compatible = true;
-                                        let mut match_score: i32 = 0;
-                                        for (arg_ty, param_ty) in
-                                            arg_types.iter().zip(params.iter())
-                                        {
-                                            if arg_ty == param_ty {
-                                                // Exact type match — highest priority
-                                                match_score += 2;
-                                            } else if self.types_compatible(arg_ty, param_ty) {
-                                                // Structural/subtype match — lower priority
-                                                match_score += 1;
-                                            } else {
-                                                all_compatible = false;
-                                                break;
-                                            }
-                                        }
-
-                                        if all_compatible && match_score > best_score {
-                                            best_match = Some(method_ty);
-                                            best_score = match_score;
-                                        }
-                                    }
-                                }
-
-                                if let Some(Type::Function {
-                                    params,
-                                    return_type,
-                                    ..
-                                }) = best_match
-                                {
-                                    // Now do proper type checking with unification
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    return Ok(InferResult::new(resolved_return));
-                                }
-
-                                // No matching signature found - use first one for error message
-                                if let Some(Type::Function { params, .. }) = method_types.first() {
-                                    // Allow ±1 tolerance for self-param counting
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::WrongArgCount {
-                                            method: method_name.to_text(),
-                                            expected: params.len(),
-                                            actual: args.len(),
-                                            span,
-                                        });
-                                    }
-                                    // Fall through to let regular type checking produce the error
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // Step 1: Check for context method calls BEFORE synthesizing receiver.
         // If the receiver is a context name (`ComputeDevice.method()`),
@@ -47218,466 +46179,11 @@ impl TypeChecker {
             other => other,
         };
 
-        // ============================================================
-        // CBGR INTRINSIC METHODS: Handle reference-specific methods BEFORE auto-dereference
-        // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #reference-intrinsics
-        //
+        if let Some(r) = self.resolve_reference_type_method(&recv_ty_raw, method, args, span)? {
+            return Ok(r);
+        }
 
-        // These methods operate on the reference itself, not the underlying value:
-        // - stored_generation() -> Int: Get the generation counter captured when reference was created
-        // - is_valid() -> Bool: Check if reference is still valid (generation matches)
-        // - epoch() -> Int: Get the epoch from epoch_caps field (bits 0-15)
-        // - capabilities() -> Int: Get the capabilities from epoch_caps field (bits 16-31)
-        // - epoch_caps() -> Int: Get the raw epoch_caps u32 value
-        // ============================================================
         let method_name_str = method.name.as_str();
-        let is_reference_type = match &recv_ty_raw {
-            Type::Reference { .. }
-            | Type::CheckedReference { .. }
-            | Type::UnsafeReference { .. } => true,
-            Type::Generic { name, .. } if WKT::is_smart_pointer_name(name.as_str()) => true,
-            _ => false,
-        };
-
-        if is_reference_type {
-            match method_name_str {
-                "stored_generation" if args.is_empty() => {
-                    // stored_generation() -> Int
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "is_valid" if args.is_empty() => {
-                    // is_valid() -> Bool
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                "epoch" if args.is_empty() => {
-                    // epoch() -> Int (u16 extracted from epoch_caps)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "capabilities" if args.is_empty() => {
-                    // capabilities() -> Int (u16 extracted from epoch_caps)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "epoch_caps" | "epoch_caps_raw" | "raw_epoch_caps" if args.is_empty() => {
-                    // epoch_caps() -> Int (raw u32 packed value)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "generation" if args.is_empty() => {
-                    // generation() -> Int (stored generation from reference)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "raw_ptr" if args.is_empty() => {
-                    // raw_ptr() -> *const T (raw pointer to inner type)
-                    // Extract inner type from reference for pointer construction
-                    let inner_ty = match &recv_ty_raw {
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. } => (**inner).clone(),
-                        Type::Generic {
-                            args: type_args, ..
-                        } => type_args.first().cloned().unwrap_or(Type::Int),
-                        _ => Type::Int,
-                    };
-                    return Ok(InferResult::new(Type::Pointer {
-                        inner: Box::new(inner_ty),
-                        mutable: false,
-                    }));
-                }
-                "can_read" if args.is_empty() => {
-                    // can_read() -> Bool (check read capability on reference)
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                "can_write" if args.is_empty() => {
-                    // can_write() -> Bool (check write capability on reference)
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                "is_epoch_valid" if args.is_empty() => {
-                    // is_epoch_valid() -> Bool (check if reference epoch within validity window)
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                "header_generation" if args.is_empty() => {
-                    // header_generation() -> Int (read generation from CBGR AllocationHeader)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "header_size" if args.is_empty() => {
-                    // header_size() -> Int (read data size from CBGR AllocationHeader)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "header_epoch" if args.is_empty() => {
-                    // header_epoch() -> Int (read epoch from CBGR AllocationHeader)
-                    return Ok(InferResult::new(Type::Int));
-                }
-                "is_allocated" if args.is_empty() => {
-                    // is_allocated() -> Bool (check if CBGR allocation is still live)
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                "is_freed" if args.is_empty() => {
-                    // is_freed() -> Bool (check if CBGR allocation has been freed)
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                _ => {}
-            }
-        }
-
-        // ============================================================
-        // TIER CONVERSION METHODS - Must be handled BEFORE auto-dereference
-        // These methods convert between reference tiers:
-        // - to_checked() / as_checked(): Tier 0 (&T) -> Tier 1 (&checked T)
-        // - to_managed() / as_managed(): Tier 1 (&checked T) -> Tier 0 (&T)
-        // - to_unsafe() / as_unsafe(): Any tier -> Tier 2 (&unsafe T)
-        // ============================================================
-        match (&recv_ty_raw, method_name_str) {
-            // to_checked() / as_checked() - Tier 0 -> Tier 1 (upgrade to zero-cost checked)
-            (Type::Reference { inner, mutable }, "to_checked" | "as_checked")
-                if args.is_empty() =>
-            {
-                return Ok(InferResult::new(Type::CheckedReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // to_managed() / as_managed() - Tier 1 -> Tier 0 (downgrade back to managed)
-            (Type::CheckedReference { inner, mutable }, "to_managed" | "as_managed")
-                if args.is_empty() =>
-            {
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // to_unsafe() / as_unsafe() - Any tier -> Tier 2 (manual safety required)
-            (Type::Reference { inner, mutable }, "to_unsafe" | "as_unsafe") if args.is_empty() => {
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            (Type::CheckedReference { inner, mutable }, "to_unsafe" | "as_unsafe")
-                if args.is_empty() =>
-            {
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // as_ref() - coercion for references
-            // For managed: identity (already managed)
-            // For checked: converts to managed (safe widening)
-            // For unsafe: converts to managed (CAUTION: caller must ensure validity)
-            (Type::Reference { inner, mutable }, "as_ref") if args.is_empty() => {
-                // For &Heap<T> and &Shared<T>, as_ref() should unwrap to &T
-                // (auto-deref through the smart pointer)
-                if let Type::Generic {
-                    name,
-                    args: type_args,
-                } = inner.as_ref()
-                {
-                    if WKT::is_smart_pointer_name(name.as_str()) && type_args.len() == 1 {
-                        return Ok(InferResult::new(Type::Reference {
-                            inner: Box::new(type_args[0].clone()),
-                            mutable: *mutable,
-                        }));
-                    }
-                }
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            (Type::CheckedReference { inner, mutable }, "as_ref") if args.is_empty() => {
-                // Checked -> Managed is safe (adds runtime checks)
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            (Type::UnsafeReference { inner, mutable }, "as_ref") if args.is_empty() => {
-                // Unsafe -> Managed (caller must ensure reference is valid)
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // Heap<T>.as_ref() -> &T, Shared<T>.as_ref() -> &T
-            (
-                Type::Generic {
-                    name,
-                    args: type_args,
-                },
-                "as_ref",
-            ) if args.is_empty()
-                && WKT::is_smart_pointer_name(name.as_str())
-                && type_args.len() == 1 =>
-            {
-                return Ok(InferResult::new(Type::Reference {
-                    inner: Box::new(type_args[0].clone()),
-                    mutable: false,
-                }));
-            }
-            // Heap<T>.as_mut() -> &mut T, Shared<T>.as_mut() -> &mut T
-            (
-                Type::Generic {
-                    name,
-                    args: type_args,
-                },
-                "as_mut",
-            ) if args.is_empty()
-                && WKT::is_smart_pointer_name(name.as_str())
-                && type_args.len() == 1 =>
-            {
-                return Ok(InferResult::new(Type::Reference {
-                    inner: Box::new(type_args[0].clone()),
-                    mutable: true,
-                }));
-            }
-            // Mutable variants
-            (
-                Type::Reference {
-                    inner,
-                    mutable: true,
-                },
-                "to_checked_mut",
-            ) if args.is_empty() => {
-                return Ok(InferResult::new(Type::CheckedReference {
-                    inner: inner.clone(),
-                    mutable: true,
-                }));
-            }
-            (
-                Type::CheckedReference {
-                    inner,
-                    mutable: true,
-                },
-                "to_managed_mut",
-            ) if args.is_empty() => {
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: true,
-                }));
-            }
-            (
-                Type::Reference {
-                    inner,
-                    mutable: true,
-                },
-                "to_unsafe_mut",
-            ) if args.is_empty() => {
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: true,
-                }));
-            }
-            (
-                Type::CheckedReference {
-                    inner,
-                    mutable: true,
-                },
-                "to_unsafe_mut",
-            ) if args.is_empty() => {
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: true,
-                }));
-            }
-            // Auto-deref through one reference level for tier conversion methods
-            // Handles `self.to_managed()` inside `implement Ref<T> for &checked T` where self: &&checked T
-            (
-                Type::Reference { inner, .. },
-                method @ ("to_checked" | "as_checked" | "to_managed" | "as_managed" | "to_unsafe"
-                | "as_unsafe" | "to_checked_mut" | "to_managed_mut" | "to_unsafe_mut"),
-            ) if args.is_empty() => {
-                let derefed = inner.as_ref().clone();
-                match (&derefed, method) {
-                    (Type::Reference { inner, mutable }, "to_checked" | "as_checked") => {
-                        return Ok(InferResult::new(Type::CheckedReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        }));
-                    }
-                    (Type::CheckedReference { inner, mutable }, "to_managed" | "as_managed") => {
-                        return Ok(InferResult::new(Type::Reference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        }));
-                    }
-                    (Type::Reference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
-                        return Ok(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        }));
-                    }
-                    (Type::CheckedReference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
-                        return Ok(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: *mutable,
-                        }));
-                    }
-                    (Type::Reference { inner, .. }, "to_checked_mut") => {
-                        return Ok(InferResult::new(Type::CheckedReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        }));
-                    }
-                    (Type::CheckedReference { inner, .. }, "to_managed_mut") => {
-                        return Ok(InferResult::new(Type::Reference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        }));
-                    }
-                    (Type::Reference { inner, .. }, "to_unsafe_mut") => {
-                        return Ok(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        }));
-                    }
-                    (Type::CheckedReference { inner, .. }, "to_unsafe_mut") => {
-                        return Ok(InferResult::new(Type::UnsafeReference {
-                            inner: inner.clone(),
-                            mutable: true,
-                        }));
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-
-        // ============================================================
-        // CBGR INTRINSIC METHODS - Reference metadata access
-        // These provide access to CBGR reference internals:
-        // - stored_generation(): Get generation from reference -> Int
-        // - epoch_caps(): Get packed epoch+capabilities -> Int
-        // - epoch(): Get just the epoch -> Int
-        // - raw_ptr(): Get raw pointer address -> Int
-        // ============================================================
-        match (&recv_ty_raw, method_name_str) {
-            // stored_generation() - Get the generation value stored in a managed reference
-            (Type::Reference { .. }, "stored_generation") if args.is_empty() => {
-                return Ok(InferResult::new(Type::Int));
-            }
-            // epoch_caps() - Get the packed epoch+capabilities value
-            (Type::Reference { .. }, "epoch_caps") if args.is_empty() => {
-                // Returns an EpochCaps struct or Int for now
-                return Ok(InferResult::new(Type::Int));
-            }
-            // epoch() - Get just the epoch value
-            (Type::Reference { .. }, "epoch") if args.is_empty() => {
-                return Ok(InferResult::new(Type::Int));
-            }
-            // raw_ptr() - Get the raw pointer to inner type
-            (Type::Reference { inner, .. }, "raw_ptr") if args.is_empty() => {
-                return Ok(InferResult::new(Type::Pointer {
-                    inner: inner.clone(),
-                    mutable: false,
-                }));
-            }
-            // generation() - Get generation for Heap<T> allocations
-            (
-                Type::Generic {
-                    name,
-                    args: type_args,
-                },
-                "generation",
-            ) if args.is_empty() && WKT::Heap.matches(name.as_str()) => {
-                return Ok(InferResult::new(Type::Int));
-            }
-            // allocation_generation() - Get current generation of the pointed-to allocation
-            (Type::Reference { .. }, "allocation_generation") if args.is_empty() => {
-                return Ok(InferResult::new(Type::Int));
-            }
-            _ => {}
-        }
-
-        // ============================================================
-        // POINTER/REFERENCE INTRINSIC METHODS - Must be BEFORE auto-deref
-        // Methods like offset(), is_null() operate on the reference itself,
-        // not on the pointed-to value. Auto-deref would strip the reference
-        // and lose the ability to find these methods.
-        // ============================================================
-        match (&recv_ty_raw, method_name_str) {
-            // offset(n: Int) -> same reference type (preserves inner type)
-            (Type::UnsafeReference { inner, mutable }, "offset") if args.len() == 1 => {
-                // Infer the argument (should be Int)
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            (Type::Reference { inner, mutable }, "offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            (Type::CheckedReference { inner, mutable }, "offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::CheckedReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // is_null() -> Bool
-            (
-                Type::UnsafeReference { .. }
-                | Type::Reference { .. }
-                | Type::CheckedReference { .. }
-                | Type::Pointer { .. },
-                "is_null",
-            ) if args.is_empty() => {
-                return Ok(InferResult::new(Type::bool()));
-            }
-            // byte_offset(n: Int) -> same reference type
-            (Type::UnsafeReference { inner, mutable }, "byte_offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // add(n: Int) / sub(n: Int) -> same reference type (pointer arithmetic)
-            (Type::UnsafeReference { inner, mutable }, "add" | "sub") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // cast<U>() -> &unsafe U (pointer cast)
-            (Type::UnsafeReference { .. }, "cast") if args.is_empty() => {
-                return Ok(InferResult::new(Type::UnsafeReference {
-                    inner: Box::new(Type::Var(TypeVar::fresh())),
-                    mutable: false,
-                }));
-            }
-            // Pointer methods: offset, byte_offset, add, sub -> same pointer type
-            (Type::Pointer { inner, mutable }, "offset" | "byte_offset" | "add" | "sub")
-                if args.len() == 1 =>
-            {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::Pointer {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                }));
-            }
-            // Pointer offset_from -> Int
-            (Type::Pointer { .. }, "offset_from") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(InferResult::new(Type::Int));
-            }
-            // Pointer cast
-            (Type::Pointer { .. }, "cast") if args.is_empty() => {
-                return Ok(InferResult::new(Type::Pointer {
-                    inner: Box::new(Type::Var(TypeVar::fresh())),
-                    mutable: false,
-                }));
-            }
-            // Pointer to_owned -> inner type
-            (Type::Pointer { inner, .. }, "to_owned") if args.is_empty() => {
-                return Ok(InferResult::new(inner.as_ref().clone()));
-            }
-            _ => {}
-        }
 
         // AUTO-DEREFERENCE: For method calls on references/Heap, use the underlying type
         // This enables ref.len() to call .len() on the underlying value
@@ -48474,6 +46980,500 @@ impl TypeChecker {
         // For HKT dispatch we'll restrict to protocols with explicit HKT
         // type params; for ordinary type-var dispatch, every protocol is fair
         // game (that's how `x.fmt()` on `T: Display` works today).
+        self.resolve_method_via_protocol_search(
+            recv_ty, recv_ty_raw, receiver, method, type_args, args, span, skip_static_lookup,
+        )
+    }
+
+    /// Resolve a method call via protocol search (Steps 2–5: find protocol impls,
+    /// search candidates, select best match, type-check arguments, return type).
+    /// Called after all pre-receiver and receiver-type-based fast paths are exhausted.
+    #[inline(never)]
+    /// Dispatch CBGR intrinsic methods and reference tier-conversion methods.
+    /// Fires BEFORE auto-deref so operations on the reference itself (not the
+    /// referent) are intercepted first.
+    fn resolve_reference_type_method(
+        &mut self,
+        recv_ty_raw: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // ============================================================
+        // CBGR INTRINSIC METHODS: Handle reference-specific methods BEFORE auto-dereference
+        // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #reference-intrinsics
+        //
+
+        // These methods operate on the reference itself, not the underlying value:
+        // - stored_generation() -> Int: Get the generation counter captured when reference was created
+        // - is_valid() -> Bool: Check if reference is still valid (generation matches)
+        // - epoch() -> Int: Get the epoch from epoch_caps field (bits 0-15)
+        // - capabilities() -> Int: Get the capabilities from epoch_caps field (bits 16-31)
+        // - epoch_caps() -> Int: Get the raw epoch_caps u32 value
+        // ============================================================
+        let method_name_str = method.name.as_str();
+        let is_reference_type = match &recv_ty_raw {
+            Type::Reference { .. }
+            | Type::CheckedReference { .. }
+            | Type::UnsafeReference { .. } => true,
+            Type::Generic { name, .. } if WKT::is_smart_pointer_name(name.as_str()) => true,
+            _ => false,
+        };
+
+        if is_reference_type {
+            match method_name_str {
+                "stored_generation" if args.is_empty() => {
+                    // stored_generation() -> Int
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "is_valid" if args.is_empty() => {
+                    // is_valid() -> Bool
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "epoch" if args.is_empty() => {
+                    // epoch() -> Int (u16 extracted from epoch_caps)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "capabilities" if args.is_empty() => {
+                    // capabilities() -> Int (u16 extracted from epoch_caps)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "epoch_caps" | "epoch_caps_raw" | "raw_epoch_caps" if args.is_empty() => {
+                    // epoch_caps() -> Int (raw u32 packed value)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "generation" if args.is_empty() => {
+                    // generation() -> Int (stored generation from reference)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "raw_ptr" if args.is_empty() => {
+                    // raw_ptr() -> *const T (raw pointer to inner type)
+                    // Extract inner type from reference for pointer construction
+                    let inner_ty = match &recv_ty_raw {
+                        Type::Reference { inner, .. }
+                        | Type::CheckedReference { inner, .. }
+                        | Type::UnsafeReference { inner, .. } => (**inner).clone(),
+                        Type::Generic {
+                            args: type_args, ..
+                        } => type_args.first().cloned().unwrap_or(Type::Int),
+                        _ => Type::Int,
+                    };
+                    return Ok(Some(InferResult::new(Type::Pointer {
+                        inner: Box::new(inner_ty),
+                        mutable: false,
+                    })));
+                }
+                "can_read" if args.is_empty() => {
+                    // can_read() -> Bool (check read capability on reference)
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "can_write" if args.is_empty() => {
+                    // can_write() -> Bool (check write capability on reference)
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "is_epoch_valid" if args.is_empty() => {
+                    // is_epoch_valid() -> Bool (check if reference epoch within validity window)
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "header_generation" if args.is_empty() => {
+                    // header_generation() -> Int (read generation from CBGR AllocationHeader)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "header_size" if args.is_empty() => {
+                    // header_size() -> Int (read data size from CBGR AllocationHeader)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "header_epoch" if args.is_empty() => {
+                    // header_epoch() -> Int (read epoch from CBGR AllocationHeader)
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                "is_allocated" if args.is_empty() => {
+                    // is_allocated() -> Bool (check if CBGR allocation is still live)
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                "is_freed" if args.is_empty() => {
+                    // is_freed() -> Bool (check if CBGR allocation has been freed)
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                _ => {}
+            }
+        }
+
+        // ============================================================
+        // TIER CONVERSION METHODS - Must be handled BEFORE auto-dereference
+        // These methods convert between reference tiers:
+        // - to_checked() / as_checked(): Tier 0 (&T) -> Tier 1 (&checked T)
+        // - to_managed() / as_managed(): Tier 1 (&checked T) -> Tier 0 (&T)
+        // - to_unsafe() / as_unsafe(): Any tier -> Tier 2 (&unsafe T)
+        // ============================================================
+        match (&recv_ty_raw, method_name_str) {
+            // to_checked() / as_checked() - Tier 0 -> Tier 1 (upgrade to zero-cost checked)
+            (Type::Reference { inner, mutable }, "to_checked" | "as_checked")
+                if args.is_empty() =>
+            {
+                return Ok(Some(InferResult::new(Type::CheckedReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // to_managed() / as_managed() - Tier 1 -> Tier 0 (downgrade back to managed)
+            (Type::CheckedReference { inner, mutable }, "to_managed" | "as_managed")
+                if args.is_empty() =>
+            {
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // to_unsafe() / as_unsafe() - Any tier -> Tier 2 (manual safety required)
+            (Type::Reference { inner, mutable }, "to_unsafe" | "as_unsafe") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            (Type::CheckedReference { inner, mutable }, "to_unsafe" | "as_unsafe")
+                if args.is_empty() =>
+            {
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // as_ref() - coercion for references
+            // For managed: identity (already managed)
+            // For checked: converts to managed (safe widening)
+            // For unsafe: converts to managed (CAUTION: caller must ensure validity)
+            (Type::Reference { inner, mutable }, "as_ref") if args.is_empty() => {
+                // For &Heap<T> and &Shared<T>, as_ref() should unwrap to &T
+                // (auto-deref through the smart pointer)
+                if let Type::Generic {
+                    name,
+                    args: type_args,
+                } = inner.as_ref()
+                {
+                    if WKT::is_smart_pointer_name(name.as_str()) && type_args.len() == 1 {
+                        return Ok(Some(InferResult::new(Type::Reference {
+                            inner: Box::new(type_args[0].clone()),
+                            mutable: *mutable,
+                        })));
+                    }
+                }
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            (Type::CheckedReference { inner, mutable }, "as_ref") if args.is_empty() => {
+                // Checked -> Managed is safe (adds runtime checks)
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            (Type::UnsafeReference { inner, mutable }, "as_ref") if args.is_empty() => {
+                // Unsafe -> Managed (caller must ensure reference is valid)
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // Heap<T>.as_ref() -> &T, Shared<T>.as_ref() -> &T
+            (
+                Type::Generic {
+                    name,
+                    args: type_args,
+                },
+                "as_ref",
+            ) if args.is_empty()
+                && WKT::is_smart_pointer_name(name.as_str())
+                && type_args.len() == 1 =>
+            {
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: Box::new(type_args[0].clone()),
+                    mutable: false,
+                })));
+            }
+            // Heap<T>.as_mut() -> &mut T, Shared<T>.as_mut() -> &mut T
+            (
+                Type::Generic {
+                    name,
+                    args: type_args,
+                },
+                "as_mut",
+            ) if args.is_empty()
+                && WKT::is_smart_pointer_name(name.as_str())
+                && type_args.len() == 1 =>
+            {
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: Box::new(type_args[0].clone()),
+                    mutable: true,
+                })));
+            }
+            // Mutable variants
+            (
+                Type::Reference {
+                    inner,
+                    mutable: true,
+                },
+                "to_checked_mut",
+            ) if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::CheckedReference {
+                    inner: inner.clone(),
+                    mutable: true,
+                })));
+            }
+            (
+                Type::CheckedReference {
+                    inner,
+                    mutable: true,
+                },
+                "to_managed_mut",
+            ) if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: true,
+                })));
+            }
+            (
+                Type::Reference {
+                    inner,
+                    mutable: true,
+                },
+                "to_unsafe_mut",
+            ) if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: true,
+                })));
+            }
+            (
+                Type::CheckedReference {
+                    inner,
+                    mutable: true,
+                },
+                "to_unsafe_mut",
+            ) if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: true,
+                })));
+            }
+            // Auto-deref through one reference level for tier conversion methods
+            // Handles `self.to_managed()` inside `implement Ref<T> for &checked T` where self: &&checked T
+            (
+                Type::Reference { inner, .. },
+                method @ ("to_checked" | "as_checked" | "to_managed" | "as_managed" | "to_unsafe"
+                | "as_unsafe" | "to_checked_mut" | "to_managed_mut" | "to_unsafe_mut"),
+            ) if args.is_empty() => {
+                let derefed = inner.as_ref().clone();
+                match (&derefed, method) {
+                    (Type::Reference { inner, mutable }, "to_checked" | "as_checked") => {
+                        return Ok(Some(InferResult::new(Type::CheckedReference {
+                            inner: inner.clone(),
+                            mutable: *mutable,
+                        })));
+                    }
+                    (Type::CheckedReference { inner, mutable }, "to_managed" | "as_managed") => {
+                        return Ok(Some(InferResult::new(Type::Reference {
+                            inner: inner.clone(),
+                            mutable: *mutable,
+                        })));
+                    }
+                    (Type::Reference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
+                        return Ok(Some(InferResult::new(Type::UnsafeReference {
+                            inner: inner.clone(),
+                            mutable: *mutable,
+                        })));
+                    }
+                    (Type::CheckedReference { inner, mutable }, "to_unsafe" | "as_unsafe") => {
+                        return Ok(Some(InferResult::new(Type::UnsafeReference {
+                            inner: inner.clone(),
+                            mutable: *mutable,
+                        })));
+                    }
+                    (Type::Reference { inner, .. }, "to_checked_mut") => {
+                        return Ok(Some(InferResult::new(Type::CheckedReference {
+                            inner: inner.clone(),
+                            mutable: true,
+                        })));
+                    }
+                    (Type::CheckedReference { inner, .. }, "to_managed_mut") => {
+                        return Ok(Some(InferResult::new(Type::Reference {
+                            inner: inner.clone(),
+                            mutable: true,
+                        })));
+                    }
+                    (Type::Reference { inner, .. }, "to_unsafe_mut") => {
+                        return Ok(Some(InferResult::new(Type::UnsafeReference {
+                            inner: inner.clone(),
+                            mutable: true,
+                        })));
+                    }
+                    (Type::CheckedReference { inner, .. }, "to_unsafe_mut") => {
+                        return Ok(Some(InferResult::new(Type::UnsafeReference {
+                            inner: inner.clone(),
+                            mutable: true,
+                        })));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+
+        // ============================================================
+        // CBGR INTRINSIC METHODS - Reference metadata access
+        // These provide access to CBGR reference internals:
+        // - stored_generation(): Get generation from reference -> Int
+        // - epoch_caps(): Get packed epoch+capabilities -> Int
+        // - epoch(): Get just the epoch -> Int
+        // - raw_ptr(): Get raw pointer address -> Int
+        // ============================================================
+        match (&recv_ty_raw, method_name_str) {
+            // stored_generation() - Get the generation value stored in a managed reference
+            (Type::Reference { .. }, "stored_generation") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            // epoch_caps() - Get the packed epoch+capabilities value
+            (Type::Reference { .. }, "epoch_caps") if args.is_empty() => {
+                // Returns an EpochCaps struct or Int for now
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            // epoch() - Get just the epoch value
+            (Type::Reference { .. }, "epoch") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            // raw_ptr() - Get the raw pointer to inner type
+            (Type::Reference { inner, .. }, "raw_ptr") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Pointer {
+                    inner: inner.clone(),
+                    mutable: false,
+                })));
+            }
+            // generation() - Get generation for Heap<T> allocations
+            (
+                Type::Generic {
+                    name,
+                    args: type_args,
+                },
+                "generation",
+            ) if args.is_empty() && WKT::Heap.matches(name.as_str()) => {
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            // allocation_generation() - Get current generation of the pointed-to allocation
+            (Type::Reference { .. }, "allocation_generation") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            _ => {}
+        }
+
+        // ============================================================
+        // POINTER/REFERENCE INTRINSIC METHODS - Must be BEFORE auto-deref
+        // Methods like offset(), is_null() operate on the reference itself,
+        // not on the pointed-to value. Auto-deref would strip the reference
+        // and lose the ability to find these methods.
+        // ============================================================
+        match (&recv_ty_raw, method_name_str) {
+            // offset(n: Int) -> same reference type (preserves inner type)
+            (Type::UnsafeReference { inner, mutable }, "offset") if args.len() == 1 => {
+                // Infer the argument (should be Int)
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            (Type::Reference { inner, mutable }, "offset") if args.len() == 1 => {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::Reference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            (Type::CheckedReference { inner, mutable }, "offset") if args.len() == 1 => {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::CheckedReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // is_null() -> Bool
+            (
+                Type::UnsafeReference { .. }
+                | Type::Reference { .. }
+                | Type::CheckedReference { .. }
+                | Type::Pointer { .. },
+                "is_null",
+            ) if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::bool())));
+            }
+            // byte_offset(n: Int) -> same reference type
+            (Type::UnsafeReference { inner, mutable }, "byte_offset") if args.len() == 1 => {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // add(n: Int) / sub(n: Int) -> same reference type (pointer arithmetic)
+            (Type::UnsafeReference { inner, mutable }, "add" | "sub") if args.len() == 1 => {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // cast<U>() -> &unsafe U (pointer cast)
+            (Type::UnsafeReference { .. }, "cast") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::UnsafeReference {
+                    inner: Box::new(Type::Var(TypeVar::fresh())),
+                    mutable: false,
+                })));
+            }
+            // Pointer methods: offset, byte_offset, add, sub -> same pointer type
+            (Type::Pointer { inner, mutable }, "offset" | "byte_offset" | "add" | "sub")
+                if args.len() == 1 =>
+            {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::Pointer {
+                    inner: inner.clone(),
+                    mutable: *mutable,
+                })));
+            }
+            // Pointer offset_from -> Int
+            (Type::Pointer { .. }, "offset_from") if args.len() == 1 => {
+                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
+                return Ok(Some(InferResult::new(Type::Int)));
+            }
+            // Pointer cast
+            (Type::Pointer { .. }, "cast") if args.is_empty() => {
+                return Ok(Some(InferResult::new(Type::Pointer {
+                    inner: Box::new(Type::Var(TypeVar::fresh())),
+                    mutable: false,
+                })));
+            }
+            // Pointer to_owned -> inner type
+            (Type::Pointer { inner, .. }, "to_owned") if args.is_empty() => {
+                return Ok(Some(InferResult::new(inner.as_ref().clone())));
+            }
+            _ => {}
+        }
+        Ok(None)
+    }
+
+    fn resolve_method_via_protocol_search(
+        &mut self,
+        recv_ty: Type,
+        recv_ty_raw: Type,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+    ) -> Result<InferResult> {
+        let method_name_str = method.name.as_str();
         let mut via_hkt_side_table = false;
         let dispatch_var: Option<TypeVar> = match &recv_ty {
             Type::Var(v) => Some(*v),
@@ -51433,6 +50433,1064 @@ impl TypeChecker {
             }
         }
     }
+
+    fn try_resolve_pre_receiver_method(
+        &mut self,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+    ) -> Result<Option<InferResult>> {
+        // Handle super path function calls
+        // When we have `super.func(args)`, this is parsed as a method call
+        // but should be resolved as a parent module function call.
+        // Circular import handling: detection and error reporting for cyclic module dependencies — Relative module paths
+        if let ExprKind::Path(path) = &receiver.kind
+            && !path.segments.is_empty()
+            && matches!(
+                path.segments.first(),
+                Some(verum_ast::ty::PathSegment::Super)
+            )
+        {
+            // Resolve super.func() by looking up in parent module
+            let method_name = method.name.as_str();
+
+            // Get current module path and compute parent path
+            let current_module_path = self.current_module_path.clone();
+            if let Some(parent_path) =
+                self.compute_parent_module_path(&current_module_path, &path.segments)
+            {
+                // Build the full function path in the parent module
+                let full_path = if parent_path.is_empty() {
+                    verum_common::Text::from(method_name)
+                } else {
+                    verum_common::Text::from(format!("{}.{}", parent_path, method_name))
+                };
+
+                // Look up function in parent module's inline modules
+                // Clone items to avoid borrow conflict with infer_function_type
+                let items_opt = self
+                    .inline_modules
+                    .get(&verum_common::Text::from(parent_path.clone()))
+                    .and_then(|m| m.items.clone());
+
+                if let Some(items) = items_opt {
+                    for item in items.iter() {
+                        if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                            if func_decl.name.name.as_str() == method_name {
+                                // Found the function - infer its type and return
+                                let func_type = self.infer_function_type(func_decl)?;
+                                if let Type::Function {
+                                    params,
+                                    return_type,
+                                    ..
+                                } = &func_type
+                                {
+                                    // Check argument count
+                                    // Allow ±1 tolerance for self-param counting
+                                    if params.len().abs_diff(args.len()) > 1 {
+                                        return Err(TypeError::WrongArgCount {
+                                            method: method.name.clone(),
+                                            expected: params.len(),
+                                            actual: args.len(),
+                                            span,
+                                        });
+                                    }
+
+                                    // Type check each argument
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(Some(InferResult::new(resolved_return)));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Function not found in parent module
+                return Err(TypeError::UnboundVariable {
+                    name: verum_common::Text::from(format!("super.{}", method_name)),
+                    span,
+                });
+            }
+        }
+
+        // Module-alias dispatch — `mount X as A;` then `A.method(...)`
+        // routes to `X.method(...)` rather than synth_expr'ing `A` as a
+        // value. Without this, a stdlib function with the same name as
+        // the user's alias (e.g. core.sys.linux.syscall.stat vs
+        // `mount core.net.h3.qpack.static_table as stat;`) wins at
+        // value-lookup and the whole `stat.get(0)` call breaks with a
+        // spurious method-dispatch error.
+        //
+
+        // Only fires on the first call of a chain (`!skip_static_lookup`).
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
+            && let Some(module_path) = self.module_aliases.get(&ident.name).cloned()
+        {
+            let method_name = method.name.as_str();
+            let qualified: Text = format!("{}.{}", module_path, method_name).into();
+
+            // Fast path: the function may already have been imported into
+            // the type env under its qualified-module form by
+            // `import_all_from_module` when the mount was processed.
+            if let Some(scheme) = self.ctx.env.lookup(&qualified).cloned() {
+                let func_type = self.unifier.apply(&scheme.ty);
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &func_type
+                {
+                    if params.len() == args.len() {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                }
+            }
+
+            // Slow path: walk inline_modules AST items.
+            let items_opt = self
+                .inline_modules
+                .get(&module_path)
+                .map(|m| m.items.clone())
+                .and_then(|items| items);
+            if let Some(items) = items_opt {
+                for item in items.iter() {
+                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                        if func_decl.name.name.as_str() == method_name {
+                            let func_type = self.infer_function_type(func_decl)?;
+                            if let Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } = &func_type
+                            {
+                                if params.len() == args.len() {
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(Some(InferResult::new(resolved_return)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Registry fallback: walk the parsed AST of the aliased
+            // module, find the named public function, infer its type,
+            // and type-check the call against it.
+            let registry = self.module_registry.read();
+            if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
+                let items: Vec<_> = module_info.ast.items.iter().cloned().collect();
+                drop(registry);
+                for item in items.iter() {
+                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                        if func_decl.name.name.as_str() == method_name
+                            && func_decl.visibility == verum_ast::decl::Visibility::Public
+                        {
+                            let func_type = self.infer_function_type(func_decl)?;
+                            if let Type::Function {
+                                params,
+                                return_type,
+                                ..
+                            } = &func_type
+                            {
+                                if params.len() == args.len() {
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(Some(InferResult::new(resolved_return)));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                drop(registry);
+            }
+
+            // Function not found in aliased module.
+            return Err(TypeError::UnboundVariable {
+                name: verum_common::Text::from(format!("{}.{}", module_path, method_name)),
+                span,
+            });
+        }
+
+        // Context-method dispatch has priority over stdlib module dispatch.
+        //
+
+        // When a user declares
+        //  context Time { fn now() -> Timestamp; }
+        // and writes
+        //  pure fn f() -> Timestamp using [Time] { Time.now() }
+        // the `Time.now()` call must resolve to the context method (returning
+        // Timestamp), not to the stdlib `core.time.Time.now()` (returning
+        // Duration). Before this check the stdlib path won and produced a
+        // misleading type mismatch on the caller's annotated return type.
+        //
+
+        // Trigger: the first segment of the receiver path is a
+        // user-declared context name AND the current function's `using [...]`
+        // clause lists that context. The explicit `using` marker is what
+        // gives the compiler license to choose the context dispatch —
+        // without it, a bare `Time.now()` in a non-`using` context could
+        // legitimately mean the stdlib namespace.
+        //
+
+        // Only fire on the first call of a method chain
+        // (`!skip_static_lookup`). The iterative chain handler reuses the
+        // outermost receiver expression for every chain step, so inside
+        // `CancelCtx.get_token().check()?` the same `Path(CancelCtx)` is
+        // the receiver for both `.get_token()` and `.check()` — but
+        // `.check()` should resolve against the return type of
+        // `.get_token()`, not re-dispatch the context.
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
+        {
+            let ctx_name: verum_common::Text = ident.name.clone();
+            let in_using_clause = self
+                .current_function_contexts
+                .as_ref()
+                .map(|set| set.iter().any(|req| req.name == ctx_name))
+                .unwrap_or(false);
+            if in_using_clause
+                && let Some(ctx_decl) = self.context_declarations.get(&ctx_name).cloned()
+            {
+                for ctx_method in ctx_decl.methods.iter() {
+                    if ctx_method.name.name != method.name {
+                        continue;
+                    }
+                    // Arity check: caller passes `args`; context method
+                    // carries the signature sans `self` receiver.
+                    if ctx_method.params.len() != args.len() {
+                        continue;
+                    }
+                    // Type-check each argument against the declared
+                    // parameter type. Missing or unresolvable types fall
+                    // through to `Type::Unknown` which still unifies.
+                    for (arg, param) in args.iter().zip(ctx_method.params.iter()) {
+                        let param_ty = if let verum_ast::decl::FunctionParamKind::Regular {
+                            ty: param_ty_ast,
+                            ..
+                        } = &param.kind
+                        {
+                            self.ast_to_type(param_ty_ast).unwrap_or(Type::Unknown)
+                        } else {
+                            Type::Unknown
+                        };
+                        self.check_expr(arg, &param_ty)?;
+                    }
+                    let return_ty = match &ctx_method.return_type {
+                        verum_common::Maybe::Some(rt) => {
+                            self.ast_to_type(rt).unwrap_or(Type::Unknown)
+                        }
+                        verum_common::Maybe::None => Type::unit(),
+                    };
+                    return Ok(Some(InferResult::new(return_ty)));
+                }
+            }
+        }
+
+        // Handle inline module function calls
+        // When we have `module.func(args)`, this is parsed as a method call
+        // but should be resolved as a module-qualified function call.
+        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
+        if let ExprKind::Path(path) = &receiver.kind {
+            // Check if the first segment is an inline module
+            let first_segment_name = match path.segments.first() {
+                Some(verum_ast::ty::PathSegment::Name(ident)) => Some(ident.name.as_str()),
+                _ => None,
+            };
+
+            if let Some(first_name) = first_segment_name {
+                if self
+                    .inline_modules
+                    .contains_key(&verum_common::Text::from(first_name))
+                {
+                    // Name collision: a single identifier (e.g. `Validated`)
+                    // can refer to BOTH a type and a same-named module
+                    // (`type Validated<E, A> is …;` plus
+                    // `public module Validated { fn validate_all<…>(…) … }`).
+                    // The inline-module branch below assumes module-style
+                    // dispatch and silently swallows static-method calls
+                    // on the type. Before committing to module dispatch,
+                    // check whether the type has a static method by this
+                    // name; if so, fall through to the static-method path
+                    // so `Validated.valid(42)` resolves against
+                    // `implement<E, A> Validated<E, A> { fn valid(…) }`
+                    // rather than failing with `unbound variable: valid`.
+                    let static_key =
+                        verum_common::Text::from(format!("$static${}", method.name.as_str()));
+                    let has_static_method = {
+                        let methods_guard = self.inherent_methods.read();
+                        methods_guard
+                            .get(&verum_common::Text::from(first_name))
+                            .is_some_and(|methods| methods.contains_key(&static_key))
+                    };
+                    if has_static_method {
+                        // Skip the inline-module branch and let the
+                        // static-method dispatch below handle it.
+                    } else {
+                        // Build the full path including the method as the last segment
+                        let mut segments: Vec<verum_ast::ty::PathSegment> =
+                            path.segments.iter().cloned().collect();
+                        segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
+
+                        let module_path = verum_ast::ty::Path {
+                            segments: segments.into(),
+                            span,
+                        };
+
+                        // Resolve through inline module - this will check visibility
+                        let func_result = self.resolve_inline_module_path(&module_path, span)?;
+
+                        // Never propagation: if resolution returned Never, propagate it
+                        if matches!(func_result.ty, Type::Never) {
+                            return Ok(Some(InferResult::new(Type::Never)));
+                        }
+
+                        // The result should be a function type - call it with args
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &func_result.ty
+                        {
+                            // Check argument count
+                            // Allow ±1 tolerance for self-param counting inconsistencies
+                            // and default parameter handling in method resolution
+                            if args.len() > params.len() + 1
+                                || (args.len() + 1 < params.len() && params.len() > 1)
+                            {
+                                return Err(TypeError::WrongArgCount {
+                                    method: method.name.clone(),
+                                    expected: params.len(),
+                                    actual: args.len(),
+                                    span,
+                                });
+                            }
+
+                            // Type check each argument
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = self.unifier.apply(param_ty);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+
+                            let resolved_return = self.unifier.apply(return_type);
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        } else {
+                            return Err(TypeError::NotAFunction {
+                                ty: format!("{}", func_result.ty).into(),
+                                span,
+                            });
+                        }
+                    } // end of `else` for has_static_method check
+                }
+            }
+        }
+
+        // Handle nested module function calls via Field access
+        // When we have `outer.inner.func(args)`, the receiver is a Field expression:
+        //  Field { expr: Path("outer"), field: "inner" }
+        // We need to recognize this as a nested module path and resolve the function.
+        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Nested Inline Modules
+        if let ExprKind::Field {
+            expr: inner_expr,
+            field: inner_field,
+        } = &receiver.kind
+        {
+            // Check if this is a module path by recursively extracting path segments
+            let module_segments = self.extract_module_path_from_field(inner_expr, inner_field);
+            if let Some(segments) = module_segments {
+                // Check if the first segment is an inline module
+                if self
+                    .inline_modules
+                    .contains_key(&verum_common::Text::from(segments[0]))
+                {
+                    // Build the full path including the method as the last segment
+                    let mut path_segments: Vec<verum_ast::ty::PathSegment> = segments
+                        .iter()
+                        .map(|s| {
+                            verum_ast::ty::PathSegment::Name(verum_ast::Ident {
+                                name: (*s).into(),
+                                span,
+                            })
+                        })
+                        .collect();
+                    path_segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
+
+                    let module_path = verum_ast::ty::Path {
+                        segments: path_segments.into(),
+                        span,
+                    };
+
+                    // Resolve through inline module - this will check visibility
+                    let func_result = self.resolve_inline_module_path(&module_path, span)?;
+
+                    // Never propagation: if resolution returned Never, propagate it
+                    if matches!(func_result.ty, Type::Never) {
+                        return Ok(Some(InferResult::new(Type::Never)));
+                    }
+
+                    // The result should be a function type - call it with args
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = &func_result.ty
+                    {
+                        // Check argument count
+                        // Allow ±1 tolerance for self-param counting inconsistencies
+                        // and default parameter handling in method resolution
+                        if args.len() > params.len() + 1
+                            || (args.len() + 1 < params.len() && params.len() > 1)
+                        {
+                            return Err(TypeError::WrongArgCount {
+                                method: method.name.clone(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        // Type check each argument
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    } else {
+                        return Err(TypeError::NotAFunction {
+                            ty: format!("{}", func_result.ty).into(),
+                            span,
+                        });
+                    }
+                }
+            }
+        }
+
+        // GENERIC TYPE STATIC METHOD CALL: Handle Wrapper<Person>.default() syntax
+        // When receiver is a TypeExpr, extract the type and use it for method lookup.
+        // The type arguments (like Person) are used to instantiate generic implementations.
+        // Generic type instantiation: substituting concrete types for type parameters, checking bounds
+        if let ExprKind::TypeExpr(ty) = &receiver.kind {
+            // Convert AST type to internal Type representation
+            let receiver_ty = self.ast_to_type(ty)?;
+            let method_name = method.name.as_str();
+
+            // Extract base type name for method lookup
+            let type_name = self.type_to_name(&receiver_ty).to_string();
+
+            // Try to look up the method via protocol_checker.
+            // Use lookup_all_protocol_methods to handle multiple parameterized protocol impls
+            // (e.g., TryFrom<Int>, TryFrom<Int32>, TryFrom<UInt32> all providing try_from).
+            let method_name_text = verum_common::Text::from(method_name);
+            let all_methods_result = self
+                .protocol_checker
+                .read()
+                .lookup_all_protocol_methods(&receiver_ty, &method_name_text);
+            if let Ok(candidates) = all_methods_result {
+                if candidates.len() == 1 {
+                    // Single candidate - use directly (common fast path)
+                    let method_ty = &candidates[0];
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = method_ty
+                    {
+                        // Allow ±1 tolerance for self-param counting
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::WrongArgCount {
+                                method: method_name.to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                } else if candidates.len() > 1 {
+                    // Multiple candidates - disambiguate by argument types.
+                    // Pre-infer argument types, then find the candidate whose params match.
+                    let mut arg_types = List::new();
+                    for arg in args.iter() {
+                        if let Ok(r) = self.infer_expr(arg, InferMode::Synth) {
+                            arg_types.push(r.ty);
+                        }
+                    }
+
+                    for candidate in candidates.iter() {
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = candidate
+                        {
+                            if params.len().abs_diff(args.len()) > 1 {
+                                continue;
+                            }
+                            // Check if all arg types are compatible with params
+                            let mut compatible = true;
+                            if arg_types.len() == params.len() {
+                                for (arg_ty, param_ty) in arg_types.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    if !self.types_compatible(arg_ty, &resolved_param) {
+                                        compatible = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if compatible {
+                                // Found matching candidate - type check args properly
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+                                let resolved_return = self.unifier.apply(return_type);
+                                return Ok(Some(InferResult::new(resolved_return)));
+                            }
+                        }
+                    }
+                    // If no candidate matched, fall through to env lookup
+                }
+            }
+
+            // Also check for variant constructors like Maybe<Int>.Some(42)
+            let qualified_name = format!("{}.{}", type_name, method_name);
+            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+                let constructor_ty = scheme.instantiate();
+
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = &constructor_ty
+                {
+                    // Pre-check argument compatibility (same as Path block below)
+                    let mut args_pre_compatible = true;
+                    if args.len() == params.len() {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
+                                if !self.types_compatible(&arg_result.ty, &resolved_param) {
+                                    args_pre_compatible = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if args_pre_compatible {
+                        // Allow ±1 tolerance for self-param counting
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::WrongArgCount {
+                                method: method_name.to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    }
+                }
+            }
+        }
+
+        // CRITICAL FIX: Handle Type.Variant(args) syntax for variant constructors
+        // When we have Maybe.Some(42), the parser treats it as a method call on Maybe.
+        // But this should actually be interpreted as calling the variant constructor Maybe.Some.
+        // This is similar to the Field access case, but with arguments.
+        //
+
+        // Also handles Self.method() by resolving Self to the actual type name
+        //
+
+        // IMPORTANT: Skip this check when skip_static_lookup is true. This is set for
+        // chained method calls (after the first) where receiver.kind is the original base
+        // expression, not the actual receiver of this specific method call. For example,
+        // in `Int.max_value().min(0)`, when processing `.min(0)`, receiver.kind is still
+        // Path("Int") but the actual receiver is the result of max_value().
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+        {
+            // Get the type name - either from a Name segment or from Self resolution
+            let type_name: Option<String> = match &path.segments[0] {
+                verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
+                verum_ast::ty::PathSegment::SelfValue => {
+                    // Resolve Self to the actual type name from current_self_type
+                    self.current_self_type
+                        .as_ref()
+                        .map(|self_ty| self.type_to_name(self_ty).to_string())
+                }
+                _ => None,
+            };
+
+            if let Some(type_name) = type_name {
+                let type_name = type_name.as_str();
+                let method_name = method.name.as_str();
+                let qualified_name = format!("{}.{}", type_name, method_name);
+
+                // CRITICAL: Handle static method calls on type parameters with protocol bounds.
+                // For example: `U.from(self)` where `U: From<T>` should lookup `from` from `From<T>` protocol.
+                // Check if type_name refers to a type parameter.
+                let type_name_text = verum_common::Text::from(type_name);
+                if let Some(ty) = self.ctx.lookup_type(&type_name_text).cloned() {
+                    // If the type is a type variable, it might have protocol bounds
+                    if let Type::Var(_) = &ty {
+                        // Look up all type parameters with their bounds
+                        let all_type_params = self.ctx.env.all_type_params();
+                        for type_param in all_type_params {
+                            // Check if this type parameter matches our type_name
+                            if type_param.name.as_str() == type_name {
+                                // Check each protocol bound on this type parameter
+                                for bound in &type_param.bounds {
+                                    if let Some(protocol_ident) = bound.protocol.as_ident() {
+                                        let protocol_name: Text = protocol_ident.name.clone();
+
+                                        // Look up the protocol definition
+                                        let protocol_opt = self
+                                            .protocol_checker
+                                            .read()
+                                            .get_protocol(&protocol_name)
+                                            .cloned();
+                                        if let Maybe::Some(protocol) = protocol_opt {
+                                            // Check if this protocol has the method we're looking for
+                                            for (_, proto_method) in &protocol.methods {
+                                                if proto_method.name.as_str() == method_name {
+                                                    // Found the method in a bounded protocol
+                                                    // Substitute Self with the type parameter's type variable
+                                                    let method_ty = self
+                                                        .instantiate_method_for_receiver(
+                                                            &proto_method.ty,
+                                                            &ty,
+                                                        );
+                                                    // Instantiate method's own type parameters with explicit type args
+                                                    let method_ty = self
+                                                        .instantiate_method_type_params(
+                                                            method_ty, type_args, span,
+                                                        )?;
+
+                                                    if let Type::Function {
+                                                        params,
+                                                        return_type,
+                                                        ..
+                                                    } = &method_ty
+                                                    {
+                                                        // For STATIC protocol methods (like From::from), there's no self param
+                                                        // The params should already be correct
+                                                        if params.len().abs_diff(args.len()) > 1 {
+                                                            return Err(TypeError::WrongArgCount {
+                                                                method: method_name.to_text(),
+                                                                expected: params.len(),
+                                                                actual: args.len(),
+                                                                span,
+                                                            });
+                                                        }
+
+                                                        // Type check each argument
+                                                        for (arg, param_ty) in
+                                                            args.iter().zip(params.iter())
+                                                        {
+                                                            let resolved_param =
+                                                                self.unifier.apply(param_ty);
+                                                            self.check_expr(arg, &resolved_param)?;
+                                                        }
+
+                                                        // Apply substitution to return type
+                                                        let resolved_return =
+                                                            self.unifier.apply(return_type);
+                                                        return Ok(Some(InferResult::new(
+                                                            resolved_return,
+                                                        )));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Try to look up the qualified variant constructor or static method.
+                let mut env_resolved = false;
+                if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+                    let constructor_ty = scheme.instantiate();
+
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = &constructor_ty
+                    {
+                        // SPECIAL CASE: Handle variadic builtins like List.of, Set.of
+                        if (qualified_name == "List.of" || qualified_name == "Set.of")
+                            && !args.is_empty()
+                        {
+                            let elem_ty = if params.len() == 1 {
+                                params[0].clone()
+                            } else {
+                                Type::Var(TypeVar::fresh())
+                            };
+
+                            for arg in args.iter() {
+                                let resolved_elem = self.unifier.apply(&elem_ty);
+                                self.check_expr(arg, &resolved_elem)?;
+                            }
+
+                            let resolved_return = self.unifier.apply(return_type);
+                            return Ok(Some(InferResult::new(resolved_return)));
+                        }
+
+                        // Commit to this qualified-name resolution. The
+                        // earlier `args_pre_compatible` heuristic (raw-string
+                        // type name equality before real check_expr) was a
+                        // silent masker: any spurious mismatch would fall
+                        // through to a hardcoded-method-name fallback, or
+                        // (after that was removed) to MethodNotFound — even
+                        // when the env entry is the one true resolution.
+                        // Real type-checking runs here via check_expr below;
+                        // unification + coercion handle refinement, numeric
+                        // canonicalization, and reference auto-borrow.
+                        // Allow ±1 tolerance for self-param counting.
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::WrongArgCount {
+                                method: method_name.to_text(),
+                                expected: params.len(),
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(Some(InferResult::new(resolved_return)));
+                    } else {
+                        env_resolved = true; // Non-function type, treat as resolved
+                    }
+                }
+                if !env_resolved {
+                    // Fallback: Check inherent_methods for static methods
+                    let static_key = verum_common::Text::from(format!("$static${}", method_name));
+                    let type_name_text = verum_common::Text::from(type_name);
+                    let method_ty_opt = {
+                        let methods_guard = self.inherent_methods.read();
+                        methods_guard
+                            .get(&type_name_text)
+                            .and_then(|methods| methods.get(&static_key).cloned())
+                            // Instantiate the TypeScheme to create fresh type variables
+                            .map(|scheme| scheme.instantiate())
+                    };
+
+                    // TASK #21 FIX: If not found, try resolving type alias
+                    // For `Vec4f.splat()` where `type Vec4f = Vec<Float32, 4>`,
+                    // we need to look up methods on `Vec` instead of `Vec4f`.
+                    let method_ty_opt = if method_ty_opt.is_none() {
+                        if let Some(resolved_type) = self.ctx.resolve_alias(type_name) {
+                            // Extract base type name from resolved type
+                            // For `Vec<Float32, 4>`, extract `Vec`
+                            let base_type_name = self.type_to_name(resolved_type);
+                            let base_type_text = verum_common::Text::from(base_type_name.as_str());
+                            let methods_guard = self.inherent_methods.read();
+                            methods_guard
+                                .get(&base_type_text)
+                                .and_then(|methods| methods.get(&static_key).cloned())
+                                .map(|scheme| scheme.instantiate())
+                        } else {
+                            None
+                        }
+                    } else {
+                        method_ty_opt
+                    };
+
+                    if let Some(method_ty) = method_ty_opt {
+                        // Method found in inherent_methods - proceed with call
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &method_ty
+                        {
+                            // Pre-check argument type compatibility before committing.
+                            // When multiple protocol impls (e.g., TryFrom<Int>, TryFrom<Int32>,
+                            // TryFrom<UInt32>) register methods, inherent_methods stores the last one.
+                            // If args don't match, skip and fall through to protocol_checker.
+                            let mut args_pre_compatible = true;
+                            if args.len() == params.len() {
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
+                                        if !self.types_compatible(&arg_result.ty, &resolved_param) {
+                                            args_pre_compatible = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if args_pre_compatible {
+                                // Check argument count
+                                if params.len().abs_diff(args.len()) > 1 {
+                                    return Err(TypeError::WrongArgCount {
+                                        method: method_name.to_text(),
+                                        expected: params.len(),
+                                        actual: args.len(),
+                                        span,
+                                    });
+                                }
+
+                                // Type check each argument and accumulate substitution
+                                for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                    let resolved_param = self.unifier.apply(param_ty);
+                                    self.check_expr(arg, &resolved_param)?;
+                                }
+
+                                // Apply accumulated substitution to return type
+                                let resolved_return = self.unifier.apply(return_type);
+                                return Ok(Some(InferResult::new(resolved_return)));
+                            }
+                            // Args not compatible — fall through to protocol_checker
+                        }
+                    }
+
+                    // Fallback: Handle primitive type static method calls.
+                    // For example: Int.min(10, 20), Float.pi(), Int.default()
+                    // These are static calls where the receiver is a primitive type name.
+                    // We resolve them by converting to instance method calls on the primitive type.
+                    {
+                        let prim_ty = match type_name {
+                            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
+                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte" => {
+                                Some(Type::Int)
+                            }
+                            "Float" | "Float32" | "Float64" => Some(Type::Float),
+                            "Bool" => Some(Type::Bool),
+                            "Char" => Some(Type::Char),
+                            "Text" => Some(Type::Text),
+                            _ => None,
+                        };
+                        if let Some(prim) = prim_ty {
+                            // Try as a static method: arg_count = args.len() (no self)
+                            // If resolve_primitive_method handles it with args.len() args, use that.
+                            // Otherwise try with args.len()-1 (first arg is "self").
+                            if let Some(result_ty) =
+                                resolve_primitive_method(&prim, method_name, args.len())
+                            {
+                                // Static method with all args as params
+                                for arg in args.iter() {
+                                    self.synth_expr(arg)?;
+                                }
+                                return Ok(Some(InferResult::new(result_ty)));
+                            }
+                            // Try treating first arg as self for instance-like statics
+                            // e.g., Int.min(10, 20) -> 10.min(20) where arg_count=1
+                            if !args.is_empty() {
+                                if let Some(result_ty) =
+                                    resolve_primitive_method(&prim, method_name, args.len() - 1)
+                                {
+                                    for arg in args.iter() {
+                                        self.synth_expr(arg)?;
+                                    }
+                                    return Ok(Some(InferResult::new(result_ty)));
+                                }
+                            }
+                        }
+                    }
+
+                    // CRITICAL FIX: Fallback to protocol_checker for protocol static methods
+                    // Protocol impls don't register static methods in ctx.env or with $static$ prefix.
+                    // We need to use lookup_protocol_method which properly handles Self and type params.
+                    // This enables T.default() pattern in generic protocol implementations.
+                    //
+
+                    // IMPORTANT: Only use this fallback if type_name looks like a type name (starts with uppercase)
+                    // not a variable name (starts with lowercase). This prevents false positives where
+                    // `file.read_to_string()` would incorrectly try to look up methods on a type named "file".
+                    let is_type_name = type_name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
+                    // NAME-COLLISION GUARD: if the user has a same-named type
+                    // whose inherent methods already define THIS specific
+                    // method, skip the protocol-method static lookup and
+                    // let the downstream inherent-methods path resolve it.
+                    //
+
+                    // Key invariant: the guard only fires when BOTH
+                    // (a) a local `type X` exists AND (b) inherent_methods
+                    // registers the *specific* method name being called.
+                    // Otherwise we fall through to protocol lookup — this
+                    // preserves context-method dispatch (e.g., Logger.info)
+                    // where the user's file has no same-named local type
+                    // OR the user-local type has no method with that name.
+                    let user_type_shadows_this_method = {
+                        let ctn: verum_common::Text = type_name.into();
+                        let has_local_type = matches!(
+                            self.ctx.lookup_type(type_name),
+                            Option::Some(Type::Named { .. })
+                                | Option::Some(Type::Record(_))
+                                | Option::Some(Type::Variant(_))
+                                | Option::Some(Type::Placeholder { .. })
+                        );
+                        let has_this_inherent = self
+                            .inherent_methods
+                            .read()
+                            .get(&ctn)
+                            .map(|m| m.contains_key(&verum_common::Text::from(method_name)))
+                            .unwrap_or(false);
+                        has_local_type && has_this_inherent
+                    };
+                    if is_type_name && !user_type_shadows_this_method {
+                        // Build the lookup type from the type name.
+                        // For generic types like Wrapper, this creates Wrapper with no args, and
+                        // lookup_protocol_method will match it against Wrapper<T> implementations.
+                        let lookup_ty = Type::Named {
+                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                                type_name, span,
+                            )),
+                            args: List::new(),
+                        };
+
+                        let method_name_text = verum_common::Text::from(method_name);
+
+                        // CRITICAL FIX: Use lookup_all_protocol_methods to get ALL matching signatures.
+                        // This handles cases where a type implements multiple parameterized protocols
+                        // with the same method (e.g., FromResidual<Result<Never, E>> and
+                        // FromResidual<Maybe<Never>> both have `from_residual`).
+                        //
+
+                        // Strategy: Synthesize argument types first, then find the signature where
+                        // argument types are compatible using subtype checking (no side effects).
+                        let all_methods = self
+                            .protocol_checker
+                            .read()
+                            .lookup_all_protocol_methods(&lookup_ty, &method_name_text);
+                        if let Ok(method_types) = all_methods {
+                            if !method_types.is_empty() {
+                                // First, synthesize all argument types
+                                let mut arg_types: List<Type> = List::new();
+                                for arg in args.iter() {
+                                    let arg_result = self.synth_expr(arg)?;
+                                    arg_types.push(arg_result.ty);
+                                }
+
+                                // Find the MOST SPECIFIC signature where argument types are compatible.
+                                // Specificity: exact type match > subtype match > structural match.
+                                // This fixes From<Char> vs From<Text> disambiguation — exact match wins.
+                                let mut best_match: Option<&Type> = None;
+                                let mut best_score: i32 = -1;
+                                for method_ty in method_types.iter() {
+                                    if let Type::Function { params, .. } = method_ty {
+                                        if params.len() != arg_types.len() {
+                                            continue;
+                                        }
+
+                                        let mut all_compatible = true;
+                                        let mut match_score: i32 = 0;
+                                        for (arg_ty, param_ty) in
+                                            arg_types.iter().zip(params.iter())
+                                        {
+                                            if arg_ty == param_ty {
+                                                // Exact type match — highest priority
+                                                match_score += 2;
+                                            } else if self.types_compatible(arg_ty, param_ty) {
+                                                // Structural/subtype match — lower priority
+                                                match_score += 1;
+                                            } else {
+                                                all_compatible = false;
+                                                break;
+                                            }
+                                        }
+
+                                        if all_compatible && match_score > best_score {
+                                            best_match = Some(method_ty);
+                                            best_score = match_score;
+                                        }
+                                    }
+                                }
+
+                                if let Some(Type::Function {
+                                    params,
+                                    return_type,
+                                    ..
+                                }) = best_match
+                                {
+                                    // Now do proper type checking with unification
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(Some(InferResult::new(resolved_return)));
+                                }
+
+                                // No matching signature found - use first one for error message
+                                if let Some(Type::Function { params, .. }) = method_types.first() {
+                                    // Allow ±1 tolerance for self-param counting
+                                    if params.len().abs_diff(args.len()) > 1 {
+                                        return Err(TypeError::WrongArgCount {
+                                            method: method_name.to_text(),
+                                            expected: params.len(),
+                                            actual: args.len(),
+                                            span,
+                                        });
+                                    }
+                                    // Fall through to let regular type checking produce the error
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
 
     /// Auto-dereference for method calls on references and Heap<T>
     ///
