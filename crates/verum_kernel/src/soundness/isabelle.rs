@@ -552,12 +552,17 @@ fn parse_isabelle_signature(sig: String) -> Option<IsaSigParts> {
 /// (`\<Gamma>`) are handled separately since their byte-level
 /// encoding is unique.
 const ISA_ASCII_VAR_CANDIDATES: &[&str] = &[
-    "x", "T", "A", "B", "a", "b", "f", "i", "ty",
+    "x", "T", "A", "B", "a", "b", "f", "i", "t", "ty",
     "motive", "p", "base", "predicate", "equiv", "equivP",
     "fiber", "walls", "phi", "target", "regular", "value",
     "scrutinee", "scrutinee_ty", "case_fn", "components",
     "articulation", "enactment", "framework", "name",
     "recovered", "inner", "solver_tag", "path", "args", "cases",
+    // Free vars whose only constraint is the typing relation —
+    // need explicit binders so the Π-form's `\<forall>` quantifier
+    // covers them and Isabelle's elaborator doesn't get stuck
+    // resolving them as schematic variables in the case-of body.
+    "carrier", "term", "result",
 ];
 
 /// Greek free vars carried in the corpus.  Matched as exact byte
@@ -679,20 +684,32 @@ fn isa_pi_form_for_rule(rule_name: &str) -> Option<String> {
     let scan_corpus = format!("{} {}", asms.join(" "), shows);
     let bound = isa_extract_bound_vars(&scan_corpus);
 
-    let mut out = String::new();
-    out.push_str("\\<forall>");
-    for v in &bound {
-        out.push(' ');
-        out.push_str(v);
-    }
-    out.push('.');
+    // Build the implication chain `asm1 \<longrightarrow> asm2 \<longrightarrow> shows`
+    // (or just `shows` when no premises).
+    let mut body = String::new();
     for asm in &asms {
-        out.push(' ');
-        out.push_str(asm);
-        out.push_str(" \\<longrightarrow>");
+        body.push_str(asm);
+        body.push_str(" \\<longrightarrow> ");
     }
-    out.push(' ');
-    out.push_str(&shows);
+    body.push_str(&shows);
+
+    // Wrap in an outer `\<forall> v1 ... vn. body` quantifier ONLY
+    // when there are bound variables — `\<forall>. body` (empty
+    // binder list) is a syntax error in Isabelle / HOL.  When the
+    // statement has no free vars, the body itself is closed and
+    // ascribes directly.
+    let out = if bound.is_empty() {
+        body
+    } else {
+        let mut q = String::from("\\<forall>");
+        for v in &bound {
+            q.push(' ');
+            q.push_str(v);
+        }
+        q.push_str(". ");
+        q.push_str(&body);
+        q
+    };
     Some(out)
 }
 
