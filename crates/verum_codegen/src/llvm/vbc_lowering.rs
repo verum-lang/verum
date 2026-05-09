@@ -507,17 +507,16 @@ fn to_llvm_calling_convention(cc: &CallingConvention) -> u32 {
 /// This replaces TypeId::is_builtin()/is_semantic_type() checks which are unreliable because
 /// VBC TypeIds are non-deterministic — stdlib types can get assigned IDs in the builtin range
 /// (< 16) depending on module loading order (HashMap iteration in Rust).
+///
+/// Pure delegation to `type_names::is_primitive_value_type`: that predicate
+/// (now fully aligned with `layout::primitive_size_by_name`) covers all
+/// three naming conventions — canonical Verum, legacy uppercase-short
+/// (`I8`/`U16`/`F32`/`Usize`/...), and Rust-lowercase. The previous
+/// hand-rolled `matches!` workaround compensated for an incomplete alias
+/// set in the predicate; with the unified table the workaround would be
+/// dead code and is therefore removed.
 pub(crate) fn is_primitive_type_name(name: &str) -> bool {
-    use verum_common::well_known_types::type_names;
-    type_names::is_primitive_value_type(name)
-        || type_names::is_numeric_type(name)
-        || matches!(
-            name,
-            "Never"
-            // Legacy short aliases used in some code paths
-            | "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" | "I128" | "U128"
-            | "F32" | "Usize" | "Isize"
-        )
+    verum_common::well_known_types::type_names::is_primitive_value_type(name)
 }
 
 /// Main VBC → LLVM IR lowering context.

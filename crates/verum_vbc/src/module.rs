@@ -1040,6 +1040,25 @@ pub struct FunctionDescriptor {
     #[serde(default)]
     pub func_id_base: u32,
 
+    /// #87 — Intrinsic-name marker for inlinable stdlib constants and
+    /// compiler-recognised special functions.  The most-loaded carrier
+    /// in production is `__const_val_<N>`, used by
+    /// `register_constant_with_value` to inline integer literal
+    /// constants at every reference site instead of emitting a
+    /// `Call`.  Without this archive-side field, stdlib `public const
+    /// MAX_FOO: Int = 256;` declarations were registered as plain
+    /// zero-arg functions in the precompile pass, and the inline
+    /// marker was dropped when archive_ctx_loader reconstructed the
+    /// `FunctionInfo` — every cross-module reference then resolved
+    /// to a body-less zero-arg function and surfaced as
+    /// `UndefinedVariable` (the Path-resolution path can't recover
+    /// the literal value without the marker).
+    ///
+    /// `None` for ordinary functions; `Some(stringid)` resolves to
+    /// the marker text via the module's string table.
+    #[serde(default)]
+    pub intrinsic_name: Option<StringId>,
+
     /// Debug variable info for DWARF emission.
     ///
 
@@ -1130,6 +1149,7 @@ impl Default for FunctionDescriptor {
             debug_variables: Vec::new(),
             is_test: false,
             is_gpu_only: false,
+            intrinsic_name: None,
         }
     }
 }
