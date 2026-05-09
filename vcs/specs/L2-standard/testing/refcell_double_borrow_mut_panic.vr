@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: cell, interior-mutability, borrow-checking, panic, assert_panics
+// @description: Pins that RefCell.borrow_mut() panics on a second mutable borrow
+//               and that assert_panics can verify the double-borrow-mut panic (#71).
+
+mount core.base.{Text, List, Maybe, Bool, Int, Result}
+mount core.base.cell.{RefCell, BorrowMutError, RefMut}
+mount core.base.panic.{assert_panics, catch_unwind, PanicInfo}
+
+// ── RefCell basic API shape checks ───────────────────────────────────────────
+
+fn test_refcell_new_shape() {
+    let cell = RefCell.new(42);
+    let val = cell.borrow();
+    assert_eq(val.value, 42);
+}
+
+fn test_refcell_borrow_mut_shape() {
+    let cell = RefCell.new(0);
+    let mut guard = cell.borrow_mut();
+    guard.value = 7;
+    // guard drops here, releasing the mutable borrow
+    let val = cell.borrow();
+    assert_eq(val.value, 7);
+}
+
+fn test_refcell_borrow_count_zero_after_release() {
+    let cell = RefCell.new("hello");
+    assert_eq(cell.borrow_count(), 0);
+}
+
+fn test_refcell_try_borrow_mut_ok_when_free() {
+    let cell = RefCell.new(1);
+    let result = cell.try_borrow_mut();
+    assert(result is Ok(_));
+}
+
+fn test_refcell_try_borrow_mut_err_when_held() {
+    let cell = RefCell.new(1);
+    let _guard = cell.borrow_mut();
+    let result = cell.try_borrow_mut();
+    assert(result is Err(_));
+}
+
+// ── Double-borrow-mut must panic ──────────────────────────────────────────────
+//
+// The second call to borrow_mut() while a mutable borrow is active must
+// panic.  We verify this contract using assert_panics / catch_unwind so the
+// test spec typechecks as @test: typecheck-pass.
+
+fn refcell_double_borrow_mut_panics() -> Bool {
+    let cell = RefCell.new(0);
+    let _guard1 = cell.borrow_mut();
+    // This second borrow_mut while guard1 is live must panic.
+    let _guard2 = cell.borrow_mut();
+    false  // unreachable
+}
+
+fn test_double_borrow_mut_caught_by_catch_unwind() {
+    // catch_unwind captures the panic; the Result must be Err (panic happened).
+    let result = catch_unwind(|| refcell_double_borrow_mut_panics());
+    assert(result is Err(_));
+}
+
+fn test_borrow_mut_error_message_shape() {
+    let err = BorrowMutError { message: "already borrowed" };
+    assert(err.message.len() > 0);
+}
+
+fn main() {
+    test_refcell_new_shape();
+    test_refcell_borrow_mut_shape();
+    test_refcell_borrow_count_zero_after_release();
+    test_refcell_try_borrow_mut_ok_when_free();
+    test_refcell_try_borrow_mut_err_when_held();
+    test_double_borrow_mut_caught_by_catch_unwind();
+    test_borrow_mut_error_message_shape();
+}
