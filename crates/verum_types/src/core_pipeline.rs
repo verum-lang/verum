@@ -784,6 +784,56 @@ impl StdlibTypeRegistry {
             }
         }
 
+        // #97 — Archive-driven const registration.  Walks
+        // `CoreMetadata.functions` for entries marked `is_const = true`
+        // and inserts each into the type environment as a value (via
+        // `register_const_from_metadata`).  Closes the gap between
+        // source-driven and archive-driven typecheck paths: the
+        // source-driven path above walks AST `ItemKind::Const`
+        // declarations from parsed `.vr` files; in the archive-driven
+        // production path `ordered_modules` carries synthetic empty
+        // ASTs (built from CoreMetadata in `load_stdlib_from_embedded`),
+        // so the AST loop registers nothing for stdlib.  Without this
+        // metadata-driven branch the user-side typechecker cannot
+        // resolve `mount core.text.{SSO_CAPACITY}` and the bare
+        // reference surfaces as `unbound variable` despite the
+        // const being present in the precompiled archive.
+        //
+        // Two-phase to dodge borrow-overlap: collect (simple_name,
+        // type_text) pairs first (immutable borrow of type_checker),
+        // then iterate the snapshot to register (mutable borrow).
+        let pending_consts: Vec<(Text, Text)> =
+            type_checker
+                .core_metadata()
+                .map(|metadata| {
+                    metadata
+                        .functions
+                        .iter()
+                        .filter_map(|(qualified_name, fd)| {
+                            if !fd.is_const {
+                                return None;
+                            }
+                            let simple_name = qualified_name
+                                .as_str()
+                                .rsplit_once('.')
+                                .map(|(_, s)| s)
+                                .unwrap_or_else(|| qualified_name.as_str());
+                            Some((Text::from(simple_name), fd.return_type.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+        let mut metadata_consts_registered = 0usize;
+        for (simple_name, type_text) in pending_consts {
+            if type_checker
+                .register_const_from_metadata(simple_name.as_str(), type_text.as_str())
+                .is_ok()
+            {
+                metadata_consts_registered += 1;
+            }
+        }
+        consts_registered += metadata_consts_registered;
+
         if self.verbose {
             eprintln!(
                 "    Registered {} consts, {} extern functions",

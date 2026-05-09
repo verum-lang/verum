@@ -286,6 +286,20 @@ pub struct FunctionDescriptor {
     /// per-type inherent-method registry from metadata.
     #[serde(default)]
     pub parent_type: Maybe<Text>,
+
+    /// `true` when this descriptor represents a `const` (or `static`)
+    /// declaration converted to a zero-arg function during codegen.
+    /// The typechecker registers these as values (`insert_mono`)
+    /// rather than as callable functions, so user code writing
+    /// `let x = SOME_CONST;` succeeds without parentheses.  Round-
+    /// trips through `vbc::FunctionDescriptor::is_const`.
+    ///
+    /// Without this marker the archive-driven typechecker can't tell
+    /// `mount X.SOME_CONST` from `mount X.zero_arg_fn` and either
+    /// rejects bare const references or silently mistypes plain
+    /// zero-arg-fn references as values.
+    #[serde(default)]
+    pub is_const: bool,
 }
 
 /// Implementation descriptor (impl Protocol for Type)

@@ -6695,6 +6695,24 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Register a const declaration sourced from `CoreMetadata` rather
+    /// than an AST `ConstDecl`.  Mirror of [`register_const_declaration`]
+    /// for the archive-driven typechecking path: the precompiled
+    /// stdlib carries `public const X: T = N;` declarations as
+    /// zero-arg [`FunctionDescriptor`]s with `is_const = true` and
+    /// `return_type` as Text; this method parses the type text and
+    /// inserts the const into the environment as a monomorphic value
+    /// so user code can write `let x = SOME_CONST;` without parens.
+    ///
+    /// `name` is the bare const name (e.g. `"SSO_CAPACITY"`).
+    /// `type_text` is the descriptor text (e.g. `"Int"` or `"Maybe<Int>"`).
+    pub fn register_const_from_metadata(&mut self, name: &str, type_text: &str) -> Result<()> {
+        let const_type = crate::infer::helpers::parse_descriptor_type_string(type_text);
+        self.ctx.env.insert_mono(name, const_type);
+        tracing::debug!("Registered const from metadata: {}", name);
+        Ok(())
+    }
+
     /// Check an implementation block and register methods
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .6 - Protocol implementations
     ///

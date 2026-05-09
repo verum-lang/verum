@@ -523,6 +523,8 @@ fn register_module_metadata(
             is_unsafe: false,
             intrinsic_id: Maybe::None,
             parent_type: parent_type.clone(),
+            // #97 — round-trip the const-storage marker.
+            is_const: fn_desc.is_const,
         };
 
         // Mirror the SIMPLE method name (no `Type.` prefix) into
