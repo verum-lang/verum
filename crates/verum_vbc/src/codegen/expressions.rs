@@ -31,6 +31,7 @@
 //! from the same central registry.
 
 use super::context::ExprId;
+use super::error::CodegenOptionExt;
 use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, VbcCodegen};
 use crate::instruction::{
     ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp, FloatToIntMode,
@@ -1744,10 +1745,10 @@ impl VbcCodegen {
         // Evaluate operands
         let left_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("binary op left has no value"))?;
+            .or_internal("binary op left has no value")?;
         let right_reg = self
             .compile_expr(right)?
-            .ok_or_else(|| CodegenError::internal("binary op right has no value"))?;
+            .or_internal("binary op right has no value")?;
 
         let dest = self.ctx.alloc_temp();
 
@@ -2316,7 +2317,7 @@ impl VbcCodegen {
         // Evaluate left
         let left_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("and left has no value"))?;
+            .or_internal("and left has no value")?;
 
         // Copy to destination
         self.ctx.emit(Instruction::Mov {
@@ -2335,7 +2336,7 @@ impl VbcCodegen {
         // Evaluate right
         let right_reg = self
             .compile_expr(right)?
-            .ok_or_else(|| CodegenError::internal("and right has no value"))?;
+            .or_internal("and right has no value")?;
 
         // Copy to destination
         self.ctx.emit(Instruction::Mov {
@@ -2361,7 +2362,7 @@ impl VbcCodegen {
         // Evaluate left
         let left_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("or left has no value"))?;
+            .or_internal("or left has no value")?;
 
         // Copy to destination
         self.ctx.emit(Instruction::Mov {
@@ -2380,7 +2381,7 @@ impl VbcCodegen {
         // Evaluate right
         let right_reg = self
             .compile_expr(right)?
-            .ok_or_else(|| CodegenError::internal("or right has no value"))?;
+            .or_internal("or right has no value")?;
 
         // Copy to destination
         self.ctx.emit(Instruction::Mov {
@@ -2406,7 +2407,7 @@ impl VbcCodegen {
         // Evaluate left (!a)
         let left_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("imply left has no value"))?;
+            .or_internal("imply left has no value")?;
 
         // Negate left (compute !a)
         let not_left = self.ctx.alloc_temp();
@@ -2433,7 +2434,7 @@ impl VbcCodegen {
         // Evaluate right (b)
         let right_reg = self
             .compile_expr(right)?
-            .ok_or_else(|| CodegenError::internal("imply right has no value"))?;
+            .or_internal("imply right has no value")?;
 
         // Result is b
         self.ctx.emit(Instruction::Mov {
@@ -2485,7 +2486,7 @@ impl VbcCodegen {
         // Evaluate value first
         let value_reg = self
             .compile_expr(value)?
-            .ok_or_else(|| CodegenError::internal("assignment value has no value"))?;
+            .or_internal("assignment value has no value")?;
         if let Some(saved) = saved_assign_rt {
             self.ctx.pop_disambig_context(saved);
         }
@@ -2585,7 +2586,7 @@ impl VbcCodegen {
                 let base_type = self.infer_expr_type_name(base);
                 let base_reg = self
                     .compile_expr(base)?
-                    .ok_or_else(|| CodegenError::internal("field base has no value"))?;
+                    .or_internal("field base has no value")?;
 
                 let field_idx = self.resolve_field_index(base_type.as_deref(), &field.name);
                 self.ctx.emit(Instruction::SetF {
@@ -2603,10 +2604,10 @@ impl VbcCodegen {
             ExprKind::Index { expr: base, index } => {
                 let base_reg = self
                     .compile_expr(base)?
-                    .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+                    .or_internal("index base has no value")?;
                 let index_reg = self
                     .compile_expr(index)?
-                    .ok_or_else(|| CodegenError::internal("index has no value"))?;
+                    .or_internal("index has no value")?;
 
                 self.ctx.emit(Instruction::SetE {
                     arr: base_reg,
@@ -2630,7 +2631,7 @@ impl VbcCodegen {
                 // Get the mutable reference
                 let ref_reg = self
                     .compile_expr(ref_expr)?
-                    .ok_or_else(|| CodegenError::internal("deref target has no value"))?;
+                    .or_internal("deref target has no value")?;
 
                 // Check if this is a raw FFI pointer
                 if self.ctx.is_raw_pointer(ref_reg) {
@@ -2791,7 +2792,7 @@ impl VbcCodegen {
                 // Evaluate right side
                 let right_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+                    .or_internal("compound assign value has no value")?;
 
                 // For cell variables, load current value from cell first
                 let op_reg = if var_is_cell {
@@ -2847,7 +2848,7 @@ impl VbcCodegen {
                 let obj_type = self.infer_expr_type_name(obj);
                 let obj_reg = self
                     .compile_expr(obj)?
-                    .ok_or_else(|| CodegenError::internal("field access object has no value"))?;
+                    .or_internal("field access object has no value")?;
 
                 // Get current field value
                 let field_name = &field.name;
@@ -2862,7 +2863,7 @@ impl VbcCodegen {
                 // Evaluate right side
                 let right_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+                    .or_internal("compound assign value has no value")?;
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
@@ -2906,12 +2907,12 @@ impl VbcCodegen {
                 // Load array
                 let arr_reg = self
                     .compile_expr(arr)?
-                    .ok_or_else(|| CodegenError::internal("index target has no value"))?;
+                    .or_internal("index target has no value")?;
 
                 // Evaluate index
                 let idx_reg = self
                     .compile_expr(index)?
-                    .ok_or_else(|| CodegenError::internal("index expression has no value"))?;
+                    .or_internal("index expression has no value")?;
 
                 // Get current element value
                 let current_val = self.ctx.alloc_temp();
@@ -2924,7 +2925,7 @@ impl VbcCodegen {
                 // Evaluate right side
                 let right_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+                    .or_internal("compound assign value has no value")?;
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
@@ -2973,7 +2974,7 @@ impl VbcCodegen {
                 // Load tuple
                 let tuple_reg = self
                     .compile_expr(tuple_expr)?
-                    .ok_or_else(|| CodegenError::internal("tuple index target has no value"))?;
+                    .or_internal("tuple index target has no value")?;
 
                 // Get current element - need to unpack and repack
                 // This is more complex because tuples are typically immutable
@@ -2989,7 +2990,7 @@ impl VbcCodegen {
                 // Evaluate right side
                 let right_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+                    .or_internal("compound assign value has no value")?;
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
@@ -3037,7 +3038,7 @@ impl VbcCodegen {
                 // Get the mutable reference
                 let ref_reg = self
                     .compile_expr(ref_expr)?
-                    .ok_or_else(|| CodegenError::internal("deref target has no value"))?;
+                    .or_internal("deref target has no value")?;
 
                 // Read current value through reference
                 let current_val = self.ctx.alloc_temp();
@@ -3137,14 +3138,14 @@ impl VbcCodegen {
         {
             let arr_reg = self
                 .compile_expr(arr_expr)?
-                .ok_or_else(|| CodegenError::internal("slice base has no value"))?;
+                .or_internal("slice base has no value")?;
 
             // start defaults to 0 when omitted (`&b[..end]`, `&b[..]`).
             let start_reg = self.ctx.alloc_temp();
             if let verum_common::Maybe::Some(s) = start {
                 let s_reg = self
                     .compile_expr(s)?
-                    .ok_or_else(|| CodegenError::internal("slice start has no value"))?;
+                    .or_internal("slice start has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: start_reg,
                     src: s_reg,
@@ -3163,7 +3164,7 @@ impl VbcCodegen {
             if let verum_common::Maybe::Some(e) = end {
                 let e_reg = self
                     .compile_expr(e)?
-                    .ok_or_else(|| CodegenError::internal("slice end has no value"))?;
+                    .or_internal("slice end has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: end_reg,
                     src: e_reg,
@@ -3230,10 +3231,10 @@ impl VbcCodegen {
         {
             let list_reg = self
                 .compile_expr(arr_expr)?
-                .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+                .or_internal("index base has no value")?;
             let index_reg = self
                 .compile_expr(idx_expr)?
-                .ok_or_else(|| CodegenError::internal("index has no value"))?;
+                .or_internal("index has no value")?;
             let dest = self.ctx.alloc_temp();
 
             let mut operands = Vec::<u8>::with_capacity(6);
@@ -3252,7 +3253,7 @@ impl VbcCodegen {
 
         let inner_reg = self
             .compile_expr(inner)?
-            .ok_or_else(|| CodegenError::internal("unary operand has no value"))?;
+            .or_internal("unary operand has no value")?;
 
         let dest = self.ctx.alloc_temp();
 
@@ -3990,7 +3991,7 @@ impl VbcCodegen {
                     };
                     let arg_val = self
                         .compile_expr(inner_expr)?
-                        .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
+                        .or_internal("call arg has no value")?;
                     arg_results.push(arg_val);
                 } else {
                     // Propagate param-type context for variant-name
@@ -4017,7 +4018,7 @@ impl VbcCodegen {
                         });
                     let arg_val = self
                         .compile_expr(arg)?
-                        .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
+                        .or_internal("call arg has no value")?;
                     if let Some(saved) = saved {
                         self.ctx.pop_disambig_context(saved);
                     }
@@ -4306,12 +4307,12 @@ impl VbcCodegen {
         // Compile the array expression to get the array register
         let arr_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("array expression has no value"))?;
+            .or_internal("array expression has no value")?;
 
         // Compile the index expression
         let idx_reg = self
             .compile_expr(index)?
-            .ok_or_else(|| CodegenError::internal("index expression has no value"))?;
+            .or_internal("index expression has no value")?;
 
         // Get the FFI symbol to determine the expected element type
         let ffi_symbol_id = self.get_ffi_symbol_id(func_name).ok_or_else(|| {
@@ -4461,7 +4462,7 @@ impl VbcCodegen {
                 } else {
                     let arg_reg = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("print arg has no value"))?;
+                        .or_internal("print arg has no value")?;
                     self.ctx.emit(Instruction::DebugPrint { value: arg_reg });
                     self.ctx.free_temp(arg_reg);
                 }
@@ -4516,7 +4517,7 @@ impl VbcCodegen {
                 }
                 let cond_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("assert cond has no value"))?;
+                    .or_internal("assert cond has no value")?;
                 let message_id = self.intern_string("assertion failed");
                 self.ctx.emit(Instruction::Assert {
                     cond: cond_reg,
@@ -4545,7 +4546,7 @@ impl VbcCodegen {
                 }
                 let src = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("transmute arg has no value"))?;
+                    .or_internal("transmute arg has no value")?;
                 // transmute is identity at the value level in VBC
                 Ok(Some(Some(src)))
             }
@@ -4602,7 +4603,7 @@ impl VbcCodegen {
             _ if self.is_allocating_wrapper(name) && args.len() == 1 && name == "Heap" => {
                 let inner = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("Heap arg has no value"))?;
+                    .or_internal("Heap arg has no value")?;
 
                 // Load "Heap" as receiver (small string recognized by interpreter)
                 let receiver_reg = self.ctx.alloc_temp();
@@ -4648,7 +4649,7 @@ impl VbcCodegen {
                 }
                 let left_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("assert_eq left has no value"))?;
+                    .or_internal("assert_eq left has no value")?;
                 // Propagate the first argument's variable type name (if it is
                 // a Path) as `current_return_type_name` so that a bare variant
                 // constructor in the second argument (e.g.
@@ -4673,7 +4674,7 @@ impl VbcCodegen {
                 };
                 let right_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("assert_eq right has no value"))?;
+                    .or_internal("assert_eq right has no value")?;
                 if let Some(saved) = saved_assert_rt {
                     self.ctx.pop_disambig_context(saved);
                 }
@@ -4711,10 +4712,10 @@ impl VbcCodegen {
                 }
                 let left_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("assert_ne left has no value"))?;
+                    .or_internal("assert_ne left has no value")?;
                 let right_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("assert_ne right has no value"))?;
+                    .or_internal("assert_ne right has no value")?;
 
                 // Compare values using generic equality then negate
                 let eq_result = self.ctx.alloc_temp();
@@ -4759,7 +4760,7 @@ impl VbcCodegen {
                 }
                 let cond_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("debug_assert cond has no value"))?;
+                    .or_internal("debug_assert cond has no value")?;
                 let message_id = self.intern_string("debug assertion failed");
                 self.ctx.emit(Instruction::Assert {
                     cond: cond_reg,
@@ -4779,7 +4780,7 @@ impl VbcCodegen {
                 }
                 let arg_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("dbg arg has no value"))?;
+                    .or_internal("dbg arg has no value")?;
                 self.ctx.emit(Instruction::DebugPrint { value: arg_reg });
                 // Return the value (don't free it)
                 Ok(Some(Some(arg_reg)))
@@ -4804,7 +4805,7 @@ impl VbcCodegen {
                 if !args.is_empty() {
                     let arg_reg = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("drop arg has no value"))?;
+                        .or_internal("drop arg has no value")?;
                     self.ctx
                         .emit(crate::instruction::Instruction::DropRef { src: arg_reg });
                     self.ctx.free_temp(arg_reg);
@@ -4817,7 +4818,7 @@ impl VbcCodegen {
                 if !args.is_empty() {
                     let arg_reg = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("forget arg has no value"))?;
+                        .or_internal("forget arg has no value")?;
                     // Don't emit any cleanup - just free the register
                     self.ctx.free_temp(arg_reg);
                 }
@@ -4834,10 +4835,10 @@ impl VbcCodegen {
                 }
                 let a_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("min arg has no value"))?;
+                    .or_internal("min arg has no value")?;
                 let b_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("min arg has no value"))?;
+                    .or_internal("min arg has no value")?;
 
                 let result = self.ctx.alloc_temp();
                 let cmp = self.ctx.alloc_temp();
@@ -4889,10 +4890,10 @@ impl VbcCodegen {
                 }
                 let a_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("max arg has no value"))?;
+                    .or_internal("max arg has no value")?;
                 let b_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("max arg has no value"))?;
+                    .or_internal("max arg has no value")?;
 
                 let result = self.ctx.alloc_temp();
                 let cmp = self.ctx.alloc_temp();
@@ -4950,10 +4951,10 @@ impl VbcCodegen {
                 }
                 let start_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                    .or_internal("range start has no value")?;
                 let end_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+                    .or_internal("range end has no value")?;
 
                 // Emit NewRange { dst, start, end, inclusive: false }
                 let result = self.ctx.alloc_temp();
@@ -4979,10 +4980,10 @@ impl VbcCodegen {
                 }
                 let start_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("range_inclusive start has no value"))?;
+                    .or_internal("range_inclusive start has no value")?;
                 let end_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("range_inclusive end has no value"))?;
+                    .or_internal("range_inclusive end has no value")?;
 
                 // Emit NewRange { dst, start, end, inclusive: true }
                 let result = self.ctx.alloc_temp();
@@ -5015,7 +5016,7 @@ impl VbcCodegen {
                 for arg in args.iter() {
                     let r = self
                         .compile_expr(arg)?
-                        .ok_or_else(|| CodegenError::internal("runtime I/O arg has no value"))?;
+                        .or_internal("runtime I/O arg has no value")?;
                     arg_results.push(r);
                 }
 
@@ -5059,7 +5060,7 @@ impl VbcCodegen {
                 // refl(x) = λi. x — constant path
                 let x = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("refl arg has no value"))?;
+                    .or_internal("refl arg has no value")?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
                     sub_op: crate::instruction::CubicalSubOpcode::PathRefl.to_byte(),
@@ -5074,10 +5075,10 @@ impl VbcCodegen {
                 // transport(type_path, value) — move value along type path
                 let type_path = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("transport type_path has no value"))?;
+                    .or_internal("transport type_path has no value")?;
                 let value = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("transport value has no value"))?;
+                    .or_internal("transport value has no value")?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
                     sub_op: crate::instruction::CubicalSubOpcode::Transport.to_byte(),
@@ -5093,13 +5094,13 @@ impl VbcCodegen {
                 // hcomp(φ, walls, base) — homogeneous composition
                 let face = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("hcomp face has no value"))?;
+                    .or_internal("hcomp face has no value")?;
                 let walls = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("hcomp walls has no value"))?;
+                    .or_internal("hcomp walls has no value")?;
                 let base = self
                     .compile_expr(&args[2])?
-                    .ok_or_else(|| CodegenError::internal("hcomp base has no value"))?;
+                    .or_internal("hcomp base has no value")?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
                     sub_op: crate::instruction::CubicalSubOpcode::Hcomp.to_byte(),
@@ -5118,7 +5119,7 @@ impl VbcCodegen {
                 let path_idx = args.len() - 1; // last arg is the path
                 let path = self
                     .compile_expr(&args[path_idx])?
-                    .ok_or_else(|| CodegenError::internal("sym path has no value"))?;
+                    .or_internal("sym path has no value")?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
                     sub_op: crate::instruction::CubicalSubOpcode::PathSym.to_byte(),
@@ -5136,10 +5137,10 @@ impl VbcCodegen {
                 if n >= 2 {
                     let p = self
                         .compile_expr(&args[n - 2])?
-                        .ok_or_else(|| CodegenError::internal("trans p has no value"))?;
+                        .or_internal("trans p has no value")?;
                     let q = self
                         .compile_expr(&args[n - 1])?
-                        .ok_or_else(|| CodegenError::internal("trans q has no value"))?;
+                        .or_internal("trans q has no value")?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
                         sub_op: crate::instruction::CubicalSubOpcode::PathTrans.to_byte(),
@@ -5161,10 +5162,10 @@ impl VbcCodegen {
                 if n >= 2 {
                     let f = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("ap func has no value"))?;
+                        .or_internal("ap func has no value")?;
                     let path = self
                         .compile_expr(&args[n - 1])?
-                        .ok_or_else(|| CodegenError::internal("ap path has no value"))?;
+                        .or_internal("ap path has no value")?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
                         sub_op: crate::instruction::CubicalSubOpcode::PathAp.to_byte(),
@@ -5185,10 +5186,10 @@ impl VbcCodegen {
                 if n >= 2 {
                     let f = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("apd func has no value"))?;
+                        .or_internal("apd func has no value")?;
                     let path = self
                         .compile_expr(&args[n - 1])?
-                        .ok_or_else(|| CodegenError::internal("apd path has no value"))?;
+                        .or_internal("apd path has no value")?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
                         sub_op: crate::instruction::CubicalSubOpcode::PathAp.to_byte(),
@@ -5229,10 +5230,10 @@ impl VbcCodegen {
                 if args.len() >= 2 {
                     let p = self
                         .compile_expr(&args[0])?
-                        .ok_or_else(|| CodegenError::internal("sigma_path p has no value"))?;
+                        .or_internal("sigma_path p has no value")?;
                     let q = self
                         .compile_expr(&args[1])?
-                        .ok_or_else(|| CodegenError::internal("sigma_path q has no value"))?;
+                        .or_internal("sigma_path q has no value")?;
                     let dst = self.ctx.alloc_temp();
                     // Pack the pair of paths
                     self.ctx.emit(Instruction::Pack {
@@ -5254,7 +5255,7 @@ impl VbcCodegen {
                 if !args.is_empty() {
                     let x = self
                         .compile_expr(&args[args.len() - 1])?
-                        .ok_or_else(|| CodegenError::internal("roundtrip arg has no value"))?;
+                        .or_internal("roundtrip arg has no value")?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
                         sub_op: crate::instruction::CubicalSubOpcode::PathRefl.to_byte(),
@@ -5281,7 +5282,7 @@ impl VbcCodegen {
         // Evaluate function expression
         let func_reg = self
             .compile_expr(func)?
-            .ok_or_else(|| CodegenError::internal("indirect call func has no value"))?;
+            .or_internal("indirect call func has no value")?;
 
         // Compile arguments into consecutive registers
         // IMPORTANT: Use the same Phase 1/2/3 approach as compile_call to guarantee
@@ -5293,7 +5294,7 @@ impl VbcCodegen {
             for arg in args.iter() {
                 let arg_val = self
                     .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("indirect call arg has no value"))?;
+                    .or_internal("indirect call arg has no value")?;
                 arg_results.push(arg_val);
             }
 
@@ -5488,7 +5489,7 @@ impl VbcCodegen {
         if !args.is_empty() {
             let data_val = self
                 .compile_expr(&args[0])?
-                .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                .or_internal("variant constructor arg has no value")?;
             self.ctx.emit(Instruction::SetVariantData {
                 variant: result,
                 field: 0,
@@ -5588,7 +5589,7 @@ impl VbcCodegen {
             // Compile the first argument (most variants have 0 or 1 args)
             let data_val = self
                 .compile_expr(&args[0])?
-                .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                .or_internal("variant constructor arg has no value")?;
 
             self.ctx.emit(Instruction::SetVariantData {
                 variant: result,
@@ -5710,7 +5711,7 @@ impl VbcCodegen {
         {
             let inner = self
                 .compile_expr(&args[0])?
-                .ok_or_else(|| CodegenError::internal("Q.of arg has no value"))?;
+                .or_internal("Q.of arg has no value")?;
             let dst = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Mov { dst, src: inner });
             self.ctx.free_temp(inner);
@@ -5735,7 +5736,7 @@ impl VbcCodegen {
         {
             let base_reg = self
                 .compile_expr(receiver)?
-                .ok_or_else(|| CodegenError::internal("q.rep receiver has no value"))?;
+                .or_internal("q.rep receiver has no value")?;
             let dst = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Mov { dst, src: base_reg });
             self.ctx.free_temp(base_reg);
@@ -5764,7 +5765,7 @@ impl VbcCodegen {
         {
             let inner = self
                 .compile_expr(&args[0])?
-                .ok_or_else(|| CodegenError::internal("wrapper .new arg has no value"))?;
+                .or_internal("wrapper .new arg has no value")?;
 
             // Load receiver type name as a small string the interpreter recognizes.
             let receiver_reg = self.ctx.alloc_temp();
@@ -5831,7 +5832,7 @@ impl VbcCodegen {
                 // by emitting AsBytes then calling the stdlib function.
                 let arg_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("Text.from arg has no value"))?;
+                    .or_internal("Text.from arg has no value")?;
                 let bytes_reg = self.ctx.alloc_temp();
                 let mut ab_operands = Vec::with_capacity(4);
                 let push_reg = |operands: &mut Vec<u8>, r: Reg| {
@@ -6157,7 +6158,7 @@ impl VbcCodegen {
                 let first = self.ctx.alloc_temp();
                 let first_val = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
+                    .or_internal("context method arg has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: first,
                     src: first_val,
@@ -6170,7 +6171,7 @@ impl VbcCodegen {
                     let arg_reg = self.ctx.alloc_temp();
                     let arg_val = self
                         .compile_expr(arg)?
-                        .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
+                        .or_internal("context method arg has no value")?;
                     self.ctx.emit(Instruction::Mov {
                         dst: arg_reg,
                         src: arg_val,
@@ -6215,7 +6216,7 @@ impl VbcCodegen {
         // Compile receiver as value
         let receiver_reg = self
             .compile_expr(receiver)?
-            .ok_or_else(|| CodegenError::internal("method receiver has no value"))?;
+            .or_internal("method receiver has no value")?;
 
         // Raw-pointer method interception — when the receiver register is
         // tagged `raw_pointer` (set by `compile_cast` for `… as &unsafe T`,
@@ -6282,10 +6283,10 @@ impl VbcCodegen {
             if is_slice {
                 let start_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("slice.start has no value"))?;
+                    .or_internal("slice.start has no value")?;
                 let end_reg = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("slice.end has no value"))?;
+                    .or_internal("slice.end has no value")?;
                 let result = self.ctx.alloc_temp();
                 let mut operands = Vec::with_capacity(8);
                 let push_reg = |operands: &mut Vec<u8>, r: Reg| {
@@ -6590,7 +6591,7 @@ impl VbcCodegen {
             for arg in args.iter() {
                 let arg_val = self
                     .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("method arg has no value"))?;
+                    .or_internal("method arg has no value")?;
                 arg_vals.push(arg_val);
             }
 
@@ -8093,7 +8094,7 @@ impl VbcCodegen {
             for arg in args.iter() {
                 let arg_val = self
                     .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("static method arg has no value"))?;
+                    .or_internal("static method arg has no value")?;
                 arg_results.push(arg_val);
             }
 
@@ -8150,7 +8151,7 @@ impl VbcCodegen {
             let first = self.ctx.alloc_temp();
             let first_val = self
                 .compile_expr(&args[0])?
-                .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
+                .or_internal("type method arg has no value")?;
             self.ctx.emit(Instruction::Mov {
                 dst: first,
                 src: first_val,
@@ -8163,7 +8164,7 @@ impl VbcCodegen {
                 let arg_reg = self.ctx.alloc_temp();
                 let arg_val = self
                     .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
+                    .or_internal("type method arg has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: arg_reg,
                     src: arg_val,
@@ -8331,7 +8332,7 @@ impl VbcCodegen {
                     // Regular boolean expression condition
                     let cond_reg = self
                         .compile_expr(expr)?
-                        .ok_or_else(|| CodegenError::internal("if condition has no value"))?;
+                        .or_internal("if condition has no value")?;
 
                     // Jump to else if condition is false
                     self.ctx
@@ -8347,7 +8348,7 @@ impl VbcCodegen {
                     // Evaluate the expression
                     let scrutinee = self
                         .compile_expr(value)?
-                        .ok_or_else(|| CodegenError::internal("if-let expr has no value"))?;
+                        .or_internal("if-let expr has no value")?;
 
                     // Track for cleanup on else path
                     scrutinee_regs.push(scrutinee);
@@ -8432,7 +8433,7 @@ impl VbcCodegen {
         if let Some(expr) = value {
             let reg = self
                 .compile_expr(expr)?
-                .ok_or_else(|| CodegenError::internal("return value has no value"))?;
+                .or_internal("return value has no value")?;
 
             // If the enclosing function's declared return type carries
             // a refinement predicate, emit the runtime Assert before
@@ -8470,7 +8471,7 @@ impl VbcCodegen {
         if let Some(expr) = value {
             let val_reg = self
                 .compile_expr(expr)?
-                .ok_or_else(|| CodegenError::internal("break value has no value"))?;
+                .or_internal("break value has no value")?;
 
             if let Some(break_reg) = loop_ctx.break_value_reg {
                 self.ctx.emit(Instruction::Mov {
@@ -8654,7 +8655,7 @@ impl VbcCodegen {
         // Compile condition
         let cond_reg = self
             .compile_expr(condition)?
-            .ok_or_else(|| CodegenError::internal("while condition has no value"))?;
+            .or_internal("while condition has no value")?;
 
         // Exit if false
         self.ctx
@@ -8699,7 +8700,7 @@ impl VbcCodegen {
         // Compile the scrutinee expression
         let scrutinee = self
             .compile_expr(scrutinee_expr)?
-            .ok_or_else(|| CodegenError::internal("while-let scrutinee has no value"))?;
+            .or_internal("while-let scrutinee has no value")?;
 
         // Test if pattern matches
         let match_reg = self.ctx.alloc_temp();
@@ -8837,7 +8838,7 @@ impl VbcCodegen {
         // correctly references the heap-allocated iterator object.
         let iter_val = self
             .compile_expr(iter)?
-            .ok_or_else(|| CodegenError::internal("for iter has no value"))?;
+            .or_internal("for iter has no value")?;
         let iter_reg = self.ctx.define_var("__for_iter", true);
         self.ctx.emit(Instruction::Mov {
             dst: iter_reg,
@@ -8933,7 +8934,7 @@ impl VbcCodegen {
         // Compile iterator (built-in collections: List, Map, Set, Deque, Range)
         let iter_reg = self
             .compile_expr(iter)?
-            .ok_or_else(|| CodegenError::internal("for iter has no value"))?;
+            .or_internal("for iter has no value")?;
 
         // Create iterator from iterable
         let iterator_reg = self.ctx.alloc_temp();
@@ -9043,7 +9044,7 @@ impl VbcCodegen {
         // Evaluate scrutinee
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
-            .ok_or_else(|| CodegenError::internal("match scrutinee has no value"))?;
+            .or_internal("match scrutinee has no value")?;
 
         // Try to determine the type of the scrutinee for variant pattern resolution.
         // Uses extract_expr_type_name which handles variables, field access, method calls etc.
@@ -9139,7 +9140,7 @@ impl VbcCodegen {
             if let Some(ref guard) = arm.guard {
                 let guard_reg = self
                     .compile_expr(guard)?
-                    .ok_or_else(|| CodegenError::internal("match guard has no value"))?;
+                    .or_internal("match guard has no value")?;
 
                 if let Some(ref next_label) = next_arm_label {
                     self.ctx
@@ -9268,7 +9269,7 @@ impl VbcCodegen {
                 // Compare with literal
                 let lit_reg = self
                     .compile_literal(lit)?
-                    .ok_or_else(|| CodegenError::internal("pattern literal has no value"))?;
+                    .or_internal("pattern literal has no value")?;
                 self.ctx.emit(Instruction::CmpI {
                     op: CompareOp::Eq,
                     dst: result,
@@ -9624,7 +9625,7 @@ impl VbcCodegen {
                 if let verum_common::Maybe::Some(start_lit) = start {
                     let start_reg = self
                         .compile_literal(start_lit)?
-                        .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                        .or_internal("range start has no value")?;
                     let check_reg = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CmpI {
                         op: CompareOp::Ge,
@@ -9652,7 +9653,7 @@ impl VbcCodegen {
                 if let verum_common::Maybe::Some(end_lit) = end {
                     let end_reg = self
                         .compile_literal(end_lit)?
-                        .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+                        .or_internal("range end has no value")?;
                     let check_reg = self.ctx.alloc_temp();
                     let cmp_op = if *inclusive {
                         CompareOp::Le
@@ -10126,7 +10127,7 @@ impl VbcCodegen {
                     if !params.is_empty() {
                         let first_arg_val = self
                             .compile_expr(&params[0])?
-                            .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                            .or_internal("pattern arg has no value")?;
                         self.ctx.emit(Instruction::Mov {
                             dst: args_start,
                             src: first_arg_val,
@@ -11672,7 +11673,7 @@ impl VbcCodegen {
         for (i, elem) in elements.iter().enumerate() {
             let elem_val = self
                 .compile_expr(elem)?
-                .ok_or_else(|| CodegenError::internal("tuple element has no value"))?;
+                .or_internal("tuple element has no value")?;
             let target_reg = Reg(first_reg.0 + i as u16);
             if elem_val != target_reg {
                 self.ctx.emit(Instruction::Mov {
@@ -11708,7 +11709,7 @@ impl VbcCodegen {
                 for elem in elements.iter() {
                     let elem_reg = self
                         .compile_expr(elem)?
-                        .ok_or_else(|| CodegenError::internal("array element has no value"))?;
+                        .or_internal("array element has no value")?;
                     self.ctx.emit(Instruction::ListPush {
                         list: result,
                         val: elem_reg,
@@ -11724,7 +11725,7 @@ impl VbcCodegen {
                 // Compile size
                 let size_reg = self
                     .compile_expr(count)?
-                    .ok_or_else(|| CodegenError::internal("array size has no value"))?;
+                    .or_internal("array size has no value")?;
 
                 // Create list
                 self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: 0 });
@@ -11732,7 +11733,7 @@ impl VbcCodegen {
                 // Compile value template
                 let val_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("array value has no value"))?;
+                    .or_internal("array value has no value")?;
 
                 // Create loop to push elements
                 let loop_counter = self.ctx.alloc_temp();
@@ -11847,7 +11848,7 @@ impl VbcCodegen {
                     for elem in elements.iter() {
                         let elem_reg = self
                             .compile_expr(elem)?
-                            .ok_or_else(|| CodegenError::internal("stream element has no value"))?;
+                            .or_internal("stream element has no value")?;
                         self.ctx.emit(Instruction::ListPush {
                             list: list_reg,
                             val: elem_reg,
@@ -11877,7 +11878,7 @@ impl VbcCodegen {
                     for elem in elements.iter() {
                         let elem_reg = self
                             .compile_expr(elem)?
-                            .ok_or_else(|| CodegenError::internal("stream element has no value"))?;
+                            .or_internal("stream element has no value")?;
                         self.ctx.emit(Instruction::ListPush {
                             list: list_reg,
                             val: elem_reg,
@@ -11907,14 +11908,14 @@ impl VbcCodegen {
                 // Compile the start value
                 let start_reg = self
                     .compile_expr(start)?
-                    .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                    .or_internal("range start has no value")?;
 
                 match end {
                     verum_common::Maybe::Some(end_expr) => {
                         // Bounded range: stream[0..100] or stream[0..=100]
                         let end_reg = self
                             .compile_expr(end_expr)?
-                            .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+                            .or_internal("range end has no value")?;
 
                         // Create a range object and then create an iterator from it
                         // For now, we create the elements lazily using a generator pattern
@@ -12847,7 +12848,7 @@ impl VbcCodegen {
 
         let base_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("field base has no value"))?;
+            .or_internal("field base has no value")?;
 
         let result = self.ctx.alloc_temp();
         let field_idx = self.resolve_field_index(base_type.as_deref(), field);
@@ -12897,7 +12898,7 @@ impl VbcCodegen {
         {
             let base_reg = self
                 .compile_expr(base)?
-                .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
+                .or_internal("tuple base has no value")?;
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Mov {
                 dst: result,
@@ -12909,7 +12910,7 @@ impl VbcCodegen {
 
         let base_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
+            .or_internal("tuple base has no value")?;
 
         let result = self.ctx.alloc_temp();
 
@@ -12944,13 +12945,13 @@ impl VbcCodegen {
         {
             let arr_reg = self
                 .compile_expr(base)?
-                .ok_or_else(|| CodegenError::internal("slice base has no value"))?;
+                .or_internal("slice base has no value")?;
 
             let start_reg = self.ctx.alloc_temp();
             if let verum_common::Maybe::Some(s) = start {
                 let s_reg = self
                     .compile_expr(s)?
-                    .ok_or_else(|| CodegenError::internal("slice start has no value"))?;
+                    .or_internal("slice start has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: start_reg,
                     src: s_reg,
@@ -12967,7 +12968,7 @@ impl VbcCodegen {
             if let verum_common::Maybe::Some(e) = end {
                 let e_reg = self
                     .compile_expr(e)?
-                    .ok_or_else(|| CodegenError::internal("slice end has no value"))?;
+                    .or_internal("slice end has no value")?;
                 self.ctx.emit(Instruction::Mov {
                     dst: end_reg,
                     src: e_reg,
@@ -13023,10 +13024,10 @@ impl VbcCodegen {
 
         let base_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+            .or_internal("index base has no value")?;
         let idx_reg = self
             .compile_expr(index)?
-            .ok_or_else(|| CodegenError::internal("index has no value"))?;
+            .or_internal("index has no value")?;
 
         let result = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::GetE {
@@ -13218,7 +13219,7 @@ impl VbcCodegen {
 
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
-                        .ok_or_else(|| CodegenError::internal("field value has no value"))?
+                        .or_internal("field value has no value")?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -13255,7 +13256,7 @@ impl VbcCodegen {
             if let Some(base_expr) = base {
                 let base_reg = self
                     .compile_expr(base_expr)?
-                    .ok_or_else(|| CodegenError::internal("record base has no value"))?;
+                    .or_internal("record base has no value")?;
                 self.ctx.emit(Instruction::Clone {
                     dst: result,
                     src: base_reg,
@@ -13298,7 +13299,7 @@ impl VbcCodegen {
 
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
-                        .ok_or_else(|| CodegenError::internal("field value has no value"))?
+                        .or_internal("field value has no value")?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -13409,7 +13410,7 @@ impl VbcCodegen {
         for (idx, arg_expr) in args.iter().enumerate() {
             let value_reg = self
                 .compile_expr(arg_expr)?
-                .ok_or_else(|| CodegenError::internal("record ctor arg has no value"))?;
+                .or_internal("record ctor arg has no value")?;
 
             let field_idx = func_info
                 .param_names
@@ -13497,7 +13498,7 @@ impl VbcCodegen {
         for (idx, arm) in arms.iter().enumerate() {
             let value_reg = self
                 .compile_expr(&arm.body)?
-                .ok_or_else(|| CodegenError::internal("copattern arm body produced no value"))?;
+                .or_internal("copattern arm body produced no value")?;
 
             // Clone for value semantics (same as regular record fields).
             let cloned = self.ctx.alloc_temp();
@@ -13557,7 +13558,7 @@ impl VbcCodegen {
     fn compile_await(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
         let task_reg = self
             .compile_expr(inner)?
-            .ok_or_else(|| CodegenError::internal("await expr has no value"))?;
+            .or_internal("await expr has no value")?;
 
         // Cooperative yield-point. No-operand opcode; pure
         // side-effect on the scheduler (pumps one ready sibling
@@ -13608,7 +13609,7 @@ impl VbcCodegen {
     fn compile_try(&mut self, inner: &Expr) -> CodegenResult<Option<Reg>> {
         let inner_reg = self
             .compile_expr(inner)?
-            .ok_or_else(|| CodegenError::internal("try expr has no value"))?;
+            .or_internal("try expr has no value")?;
 
         let result = self.ctx.alloc_temp();
         let continue_label = self.ctx.new_label("try_continue");
@@ -13777,7 +13778,7 @@ impl VbcCodegen {
         // Compile the inner block
         let inner_reg = self
             .compile_expr(inner)?
-            .ok_or_else(|| CodegenError::internal("try block has no value"))?;
+            .or_internal("try block has no value")?;
 
         self.ctx.try_recover_depth -= 1;
         self.ctx.emit(Instruction::TryEnd);
@@ -13841,7 +13842,7 @@ impl VbcCodegen {
         // Compile the source expression
         let src_reg = self
             .compile_expr(inner)?
-            .ok_or_else(|| CodegenError::internal("cast source has no value"))?;
+            .or_internal("cast source has no value")?;
 
         // Determine source type from expression
         let src_kind = self.infer_expr_type_kind(inner);
@@ -14156,7 +14157,7 @@ impl VbcCodegen {
         // Compile the receiver to get a heap pointer Value.
         let recv_reg = self
             .compile_expr(receiver)?
-            .ok_or_else(|| CodegenError::internal("field-addr receiver has no value"))?;
+            .or_internal("field-addr receiver has no value")?;
 
         let dst = self.ctx.alloc_temp();
 
@@ -14255,10 +14256,10 @@ impl VbcCodegen {
 
         let arr_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("array base has no value"))?;
+            .or_internal("array base has no value")?;
         let idx_reg = self
             .compile_expr(index)?
-            .ok_or_else(|| CodegenError::internal("array index has no value"))?;
+            .or_internal("array index has no value")?;
 
         let dst = self.ctx.alloc_temp();
 
@@ -15595,7 +15596,7 @@ impl VbcCodegen {
         if let Some(start_expr) = start {
             let start_reg = self
                 .compile_expr(start_expr)?
-                .ok_or_else(|| CodegenError::internal("range start has no value"))?;
+                .or_internal("range start has no value")?;
             self.ctx.emit(Instruction::SetF {
                 obj: result,
                 field_idx: 0,
@@ -15608,7 +15609,7 @@ impl VbcCodegen {
         if let Some(end_expr) = end {
             let end_reg = self
                 .compile_expr(end_expr)?
-                .ok_or_else(|| CodegenError::internal("range end has no value"))?;
+                .or_internal("range end has no value")?;
             self.ctx.emit(Instruction::SetF {
                 obj: result,
                 field_idx: 1,
@@ -16325,7 +16326,7 @@ impl VbcCodegen {
         // Evaluate base expression (should be Maybe<T>)
         let base_reg = self
             .compile_expr(base)?
-            .ok_or_else(|| CodegenError::internal("optional chain base has no value"))?;
+            .or_internal("optional chain base has no value")?;
 
         // Check if base is Some (tag != 0) or None (tag == 0)
         let tag_reg = self.ctx.alloc_temp();
@@ -16404,7 +16405,7 @@ impl VbcCodegen {
         // Evaluate left (the argument)
         let arg_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("pipeline left has no value"))?;
+            .or_internal("pipeline left has no value")?;
 
         // Right should be a function or closure - compile it as a call with arg
         match &right.kind {
@@ -16445,7 +16446,7 @@ impl VbcCodegen {
                 // For more complex right-hand sides, compile as indirect call
                 let func_reg = self
                     .compile_expr(right)?
-                    .ok_or_else(|| CodegenError::internal("pipeline right has no value"))?;
+                    .or_internal("pipeline right has no value")?;
 
                 let dest = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::Push { src: arg_reg });
@@ -16474,7 +16475,7 @@ impl VbcCodegen {
         // Evaluate left
         let left_reg = self
             .compile_expr(left)?
-            .ok_or_else(|| CodegenError::internal("coalesce left has no value"))?;
+            .or_internal("coalesce left has no value")?;
 
         // Check if left is Some (tag != 0)
         let tag_reg = self.ctx.alloc_temp();
@@ -16516,7 +16517,7 @@ impl VbcCodegen {
         // Left is None - evaluate and use right
         let right_reg = self
             .compile_expr(right)?
-            .ok_or_else(|| CodegenError::internal("coalesce right has no value"))?;
+            .or_internal("coalesce right has no value")?;
 
         self.ctx.emit(Instruction::Mov {
             dst: dest,
@@ -16542,7 +16543,7 @@ impl VbcCodegen {
         // Evaluate scrutinee
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
-            .ok_or_else(|| CodegenError::internal("is pattern scrutinee has no value"))?;
+            .or_internal("is pattern scrutinee has no value")?;
 
         // Set scrutinee type for variant collision resolution in compile_pattern_test.
         // The `is` expression doesn't go through compile_match, so match_scrutinee_type
@@ -16577,7 +16578,7 @@ impl VbcCodegen {
         // Evaluate error value
         let error_reg = self
             .compile_expr(error_expr)?
-            .ok_or_else(|| CodegenError::internal("throw error has no value"))?;
+            .or_internal("throw error has no value")?;
 
         // Emit throw instruction (similar to panic but with error value)
         self.ctx.emit(Instruction::Throw { error: error_reg });
@@ -16951,7 +16952,7 @@ impl VbcCodegen {
                 for arg in args.iter() {
                     let reg = self
                         .compile_expr(arg)?
-                        .ok_or_else(|| CodegenError::internal("spawn arg has no value"))?;
+                        .or_internal("spawn arg has no value")?;
                     arg_results.push(reg);
                 }
 
@@ -17199,7 +17200,7 @@ impl VbcCodegen {
             if let verum_common::Maybe::Some(ref future_expr) = arm.future {
                 let future_reg = self
                     .compile_expr(future_expr)?
-                    .ok_or_else(|| CodegenError::internal("select future has no value"))?;
+                    .or_internal("select future has no value")?;
                 future_regs.push(future_reg);
             } else {
                 // Default/else arm - use a special marker
@@ -17343,7 +17344,7 @@ impl VbcCodegen {
         if let verum_common::Maybe::Some(ref timeout_expr) = options.timeout {
             let timeout_reg = self
                 .compile_expr(timeout_expr)?
-                .ok_or_else(|| CodegenError::internal("nursery timeout has no value"))?;
+                .or_internal("nursery timeout has no value")?;
             self.ctx.emit(Instruction::NurserySetTimeout {
                 nursery: nursery_handle,
                 timeout: timeout_reg,
@@ -17355,7 +17356,7 @@ impl VbcCodegen {
         if let verum_common::Maybe::Some(ref max_tasks_expr) = options.max_tasks {
             let max_tasks_reg = self
                 .compile_expr(max_tasks_expr)?
-                .ok_or_else(|| CodegenError::internal("nursery max_tasks has no value"))?;
+                .or_internal("nursery max_tasks has no value")?;
             self.ctx.emit(Instruction::NurserySetMaxTasks {
                 nursery: nursery_handle,
                 max_tasks: max_tasks_reg,
@@ -17468,7 +17469,7 @@ impl VbcCodegen {
                         if let verum_common::Maybe::Some(ref guard) = arm.guard {
                             let guard_result = self
                                 .compile_expr(guard)?
-                                .ok_or_else(|| CodegenError::internal("guard has no value"))?;
+                                .or_internal("guard has no value")?;
                             self.ctx
                                 .emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
                                     cond: guard_result,
@@ -17588,7 +17589,7 @@ impl VbcCodegen {
         // Compile async iterable to get async iterator
         let iterable_reg = self
             .compile_expr(async_iterable)?
-            .ok_or_else(|| CodegenError::internal("for-await iterable has no value"))?;
+            .or_internal("for-await iterable has no value")?;
 
         // Get async iterator from iterable
         let async_iter = self.ctx.alloc_temp();
@@ -17705,7 +17706,7 @@ impl VbcCodegen {
         // Evaluate yield value
         let value_reg = self
             .compile_expr(value)?
-            .ok_or_else(|| CodegenError::internal("yield value has no value"))?;
+            .or_internal("yield value has no value")?;
 
         // Track this as a suspend point for the generator state machine
         self.ctx.suspend_point_count = self.ctx.suspend_point_count.saturating_add(1);
@@ -18156,7 +18157,7 @@ impl VbcCodegen {
                 }
                 let arg_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("@get_tag arg has no value"))?;
+                    .or_internal("@get_tag arg has no value")?;
                 self.ctx.emit(Instruction::GetTag {
                     dst: dest,
                     variant: arg_reg,
@@ -18169,7 +18170,7 @@ impl VbcCodegen {
                 }
                 let arg_reg = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("@abs arg has no value"))?;
+                    .or_internal("@abs arg has no value")?;
                 self.ctx.emit(Instruction::UnaryI {
                     op: UnaryIntOp::Abs,
                     dst: dest,
@@ -18360,10 +18361,10 @@ impl VbcCodegen {
                 }
                 let a = self
                     .compile_expr(&args[0])?
-                    .ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                    .or_internal("@ref_eq arg has no value")?;
                 let b = self
                     .compile_expr(&args[1])?
-                    .ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                    .or_internal("@ref_eq arg has no value")?;
                 self.ctx.emit(Instruction::CmpI {
                     op: CompareOp::Eq,
                     dst: dest,
@@ -24265,7 +24266,7 @@ impl VbcCodegen {
         // Compile handler
         let handler_reg = self
             .compile_expr(handler)?
-            .ok_or_else(|| CodegenError::internal("context handler has no value"))?;
+            .or_internal("context handler has no value")?;
 
         // Get context name
         let context_name = context
@@ -24305,7 +24306,7 @@ impl VbcCodegen {
         // Compile context expression
         let context_reg = self
             .compile_expr(context)?
-            .ok_or_else(|| CodegenError::internal("attenuate context has no value"))?;
+            .or_internal("attenuate context has no value")?;
 
         // Create attenuated context
         let dest = self.ctx.alloc_temp();
@@ -24362,7 +24363,7 @@ impl VbcCodegen {
             // No more clauses - evaluate expr and append to result
             let value = self
                 .compile_expr(expr)?
-                .ok_or_else(|| CodegenError::internal("comprehension expr has no value"))?;
+                .or_internal("comprehension expr has no value")?;
             self.ctx.emit(Instruction::ListPush {
                 list: result,
                 val: value,
@@ -24377,7 +24378,7 @@ impl VbcCodegen {
                 // Compile iterator
                 let iter_reg = self
                     .compile_expr(iter)?
-                    .ok_or_else(|| CodegenError::internal("comprehension iter has no value"))?;
+                    .or_internal("comprehension iter has no value")?;
 
                 // Get iterator
                 let iterator = self.ctx.alloc_temp();
@@ -24428,7 +24429,7 @@ impl VbcCodegen {
                 // Compile condition
                 let cond_reg = self
                     .compile_expr(condition)?
-                    .ok_or_else(|| CodegenError::internal("comprehension if has no value"))?;
+                    .or_internal("comprehension if has no value")?;
 
                 let skip_label = self.ctx.new_label("comp_skip");
 
@@ -24449,7 +24450,7 @@ impl VbcCodegen {
                 // Compile value
                 let value_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("comprehension let has no value"))?;
+                    .or_internal("comprehension let has no value")?;
 
                 // Bind pattern
                 self.compile_pattern_bind(pattern, value_reg)?;
@@ -24567,7 +24568,7 @@ impl VbcCodegen {
         }
 
         let source = source_reg
-            .ok_or_else(|| CodegenError::internal("stream comprehension has no source"))?;
+            .or_internal("stream comprehension has no source")?;
 
         // Create iterator from source - this is inherently lazy
         let iterator = self.ctx.alloc_temp();
@@ -24615,7 +24616,7 @@ impl VbcCodegen {
         // Compile as eager list
         let list = self.compile_comprehension(expr, clauses)?;
         let list_reg =
-            list.ok_or_else(|| CodegenError::internal("stream comprehension has no value"))?;
+            list.or_internal("stream comprehension has no value")?;
 
         // Wrap list in iterator for lazy consumption
         let iter_result = self.ctx.alloc_temp();
@@ -24924,7 +24925,7 @@ impl VbcCodegen {
             // Base case: all clauses processed, yield the output
             let output_reg = self
                 .compile_expr(output_expr)?
-                .ok_or_else(|| CodegenError::internal("stream output has no value"))?;
+                .or_internal("stream output has no value")?;
 
             // Track suspend point and emit yield
             self.ctx.suspend_point_count = self.ctx.suspend_point_count.saturating_add(1);
@@ -24940,7 +24941,7 @@ impl VbcCodegen {
                 // Compile iterator source
                 let iter_source = self
                     .compile_expr(iter)?
-                    .ok_or_else(|| CodegenError::internal("stream iter has no value"))?;
+                    .or_internal("stream iter has no value")?;
 
                 // Create iterator
                 let iterator_reg = self.ctx.alloc_temp();
@@ -25006,7 +25007,7 @@ impl VbcCodegen {
                 // Compile filter predicate
                 let pred_reg = self
                     .compile_expr(predicate)?
-                    .ok_or_else(|| CodegenError::internal("stream predicate has no value"))?;
+                    .or_internal("stream predicate has no value")?;
 
                 // Skip to next iteration if predicate is false
                 let skip_label = self.ctx.new_label("stream_if_skip");
@@ -25028,7 +25029,7 @@ impl VbcCodegen {
                 // Compile let binding value
                 let value_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("stream let value has no value"))?;
+                    .or_internal("stream let value has no value")?;
 
                 // Bind pattern
                 self.compile_pattern_bind(pattern, value_reg)?;
@@ -25080,10 +25081,10 @@ impl VbcCodegen {
             // No more clauses - evaluate key and value, insert into map
             let key = self
                 .compile_expr(key_expr)?
-                .ok_or_else(|| CodegenError::internal("map comprehension key has no value"))?;
+                .or_internal("map comprehension key has no value")?;
             let val = self
                 .compile_expr(value_expr)?
-                .ok_or_else(|| CodegenError::internal("map comprehension value has no value"))?;
+                .or_internal("map comprehension value has no value")?;
             self.ctx.emit(Instruction::MapSet {
                 map: result,
                 key,
@@ -25100,7 +25101,7 @@ impl VbcCodegen {
                 // Compile iterator
                 let iter_reg = self
                     .compile_expr(iter)?
-                    .ok_or_else(|| CodegenError::internal("map comprehension iter has no value"))?;
+                    .or_internal("map comprehension iter has no value")?;
 
                 // Get iterator
                 let iterator = self.ctx.alloc_temp();
@@ -25157,7 +25158,7 @@ impl VbcCodegen {
                 // Compile condition
                 let cond_reg = self
                     .compile_expr(condition)?
-                    .ok_or_else(|| CodegenError::internal("map comprehension if has no value"))?;
+                    .or_internal("map comprehension if has no value")?;
 
                 let skip_label = self.ctx.new_label("map_comp_skip");
 
@@ -25183,7 +25184,7 @@ impl VbcCodegen {
             ComprehensionClauseKind::Let { pattern, value, .. } => {
                 let value_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("map comprehension let has no value"))?;
+                    .or_internal("map comprehension let has no value")?;
 
                 self.compile_pattern_bind(pattern, value_reg)?;
                 self.ctx.free_temp(value_reg);
@@ -25237,7 +25238,7 @@ impl VbcCodegen {
             // No more clauses - evaluate expr and insert into set
             let elem = self
                 .compile_expr(expr)?
-                .ok_or_else(|| CodegenError::internal("set comprehension expr has no value"))?;
+                .or_internal("set comprehension expr has no value")?;
             self.ctx.emit(Instruction::SetInsert { set: result, elem });
             self.ctx.free_temp(elem);
             return Ok(());
@@ -25249,7 +25250,7 @@ impl VbcCodegen {
                 // Compile iterator
                 let iter_reg = self
                     .compile_expr(iter)?
-                    .ok_or_else(|| CodegenError::internal("set comprehension iter has no value"))?;
+                    .or_internal("set comprehension iter has no value")?;
 
                 // Get iterator
                 let iterator = self.ctx.alloc_temp();
@@ -25299,7 +25300,7 @@ impl VbcCodegen {
             ComprehensionClauseKind::If(condition) => {
                 let cond_reg = self
                     .compile_expr(condition)?
-                    .ok_or_else(|| CodegenError::internal("set comprehension if has no value"))?;
+                    .or_internal("set comprehension if has no value")?;
 
                 let skip_label = self.ctx.new_label("set_comp_skip");
 
@@ -25317,7 +25318,7 @@ impl VbcCodegen {
             ComprehensionClauseKind::Let { pattern, value, .. } => {
                 let value_reg = self
                     .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("set comprehension let has no value"))?;
+                    .or_internal("set comprehension let has no value")?;
 
                 self.compile_pattern_bind(pattern, value_reg)?;
                 self.ctx.free_temp(value_reg);
@@ -25624,7 +25625,7 @@ impl VbcCodegen {
             // Convert expression to string
             let expr_reg = self
                 .compile_expr(expr)?
-                .ok_or_else(|| CodegenError::internal("interpolation expr has no value"))?;
+                .or_internal("interpolation expr has no value")?;
 
             let str_reg = self.ctx.alloc_temp();
 
@@ -25701,7 +25702,7 @@ impl VbcCodegen {
         // Compile data expression
         let data_reg = self
             .compile_expr(data)?
-            .ok_or_else(|| CodegenError::internal("tensor data has no value"))?;
+            .or_internal("tensor data has no value")?;
 
         // Create tensor with shape
         let dest = self.ctx.alloc_temp();
@@ -25734,10 +25735,10 @@ impl VbcCodegen {
         for (key, value) in entries.iter() {
             let key_reg = self
                 .compile_expr(key)?
-                .ok_or_else(|| CodegenError::internal("map key has no value"))?;
+                .or_internal("map key has no value")?;
             let value_reg = self
                 .compile_expr(value)?
-                .ok_or_else(|| CodegenError::internal("map value has no value"))?;
+                .or_internal("map value has no value")?;
 
             self.ctx.emit(Instruction::MapInsert {
                 map: dest,
@@ -25766,7 +25767,7 @@ impl VbcCodegen {
         for elem in elements.iter() {
             let elem_reg = self
                 .compile_expr(elem)?
-                .ok_or_else(|| CodegenError::internal("set element has no value"))?;
+                .or_internal("set element has no value")?;
 
             self.ctx.emit(Instruction::SetInsert {
                 set: dest,
