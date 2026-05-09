@@ -1069,262 +1069,30 @@ fn resolve_string_value(v: &Value, state: &InterpreterState) -> String {
     format!("<value:{}>", v.as_i64())
 }
 
-/// CBGR reference encoding helpers (for deep_value_eq).
-fn is_cbgr_ref(val: &Value) -> bool {
-    if !val.is_int() || val.is_bool() {
-        return false;
-    }
-    let bits = val.as_i64();
-    let sentinel = bits & !0xFFFF_FFFF_FFFFi64;
-    sentinel == -0x4000_0000_0000_0000i64 || sentinel == -0x3000_0000_0000_0000i64
-}
-
-fn decode_cbgr_ref(encoded: i64) -> (u32, u32) {
-    let abs_index = (encoded & 0xFFFF) as u32;
-    let generation = ((encoded >> 16) & 0xFFFF) as u32;
-    (abs_index, generation)
-}
-
-/// Deep structural value equality comparison.
+/// **DELETED**: a parallel `deep_value_eq` (with locally-defined,
+/// INCOMPATIBLE `is_cbgr_ref` / `decode_cbgr_ref` helpers) once
+/// lived here. It was strictly inferior to the canonical
+/// implementation at
+/// `super::handlers::string_helpers::deep_value_eq` —
 ///
-
-/// Handles all value types including heap objects (variants, tuples, arrays),
-/// references (ThinRef, FatRef, CBGR), and cross-representation strings.
-pub(crate) fn deep_value_eq(va: &Value, vb: &Value, state: &InterpreterState) -> bool {
-    use super::heap::OBJECT_HEADER_SIZE;
-
-    // IEEE 754: NaN is never equal to anything
-    const TAG_NAN: u8 = 0x7;
-    if va.tag() == Some(TAG_NAN) || vb.tag() == Some(TAG_NAN) {
-        return false;
-    }
-    if va.is_float() && va.as_f64().is_nan() {
-        return false;
-    }
-    if vb.is_float() && vb.as_f64().is_nan() {
-        return false;
-    }
-
-    // Fast path: identical bit patterns
-    if va.to_bits() == vb.to_bits() {
-        return true;
-    }
-
-    // ThinRef comparison
-    if va.is_thin_ref() && vb.is_thin_ref() {
-        let thin_a = va.as_thin_ref();
-        let thin_b = vb.as_thin_ref();
-        if thin_a.is_null() && thin_b.is_null() {
-            return true;
-        }
-        if thin_a.is_null() || thin_b.is_null() {
-            return false;
-        }
-        let deref_a = unsafe { *(thin_a.ptr as *const Value) };
-        let deref_b = unsafe { *(thin_b.ptr as *const Value) };
-        return deep_value_eq(&deref_a, &deref_b, state);
-    }
-
-    // FatRef comparison
-    if va.is_fat_ref() && vb.is_fat_ref() {
-        let fat_a = va.as_fat_ref();
-        let fat_b = vb.as_fat_ref();
-        if fat_a.is_null() && fat_b.is_null() {
-            return true;
-        }
-        if fat_a.is_null() || fat_b.is_null() {
-            return false;
-        }
-        let deref_a = unsafe { *(fat_a.ptr() as *const Value) };
-        let deref_b = unsafe { *(fat_b.ptr() as *const Value) };
-        return deep_value_eq(&deref_a, &deref_b, state);
-    }
-
-    // Mixed: ThinRef vs CBGR register ref
-    if va.is_thin_ref() && is_cbgr_ref(vb) {
-        let thin_a = va.as_thin_ref();
-        if thin_a.is_null() {
-            return false;
-        }
-        let deref_a = unsafe { *(thin_a.ptr as *const Value) };
-        let (abs_idx, _gen) = decode_cbgr_ref(vb.as_i64());
-        let deref_b = state.registers.get_absolute(abs_idx);
-        return deep_value_eq(&deref_a, &deref_b, state);
-    }
-
-    if is_cbgr_ref(va) && vb.is_thin_ref() {
-        let thin_b = vb.as_thin_ref();
-        if thin_b.is_null() {
-            return false;
-        }
-        let (abs_idx, _gen) = decode_cbgr_ref(va.as_i64());
-        let deref_a = state.registers.get_absolute(abs_idx);
-        let deref_b = unsafe { *(thin_b.ptr as *const Value) };
-        return deep_value_eq(&deref_a, &deref_b, state);
-    }
-
-    // Two CBGR register references
-    if is_cbgr_ref(va) && is_cbgr_ref(vb) {
-        let (abs_idx_a, _gen_a) = decode_cbgr_ref(va.as_i64());
-        let (abs_idx_b, _gen_b) = decode_cbgr_ref(vb.as_i64());
-        let deref_a = state.registers.get_absolute(abs_idx_a);
-        let deref_b = state.registers.get_absolute(abs_idx_b);
-        return deep_value_eq(&deref_a, &deref_b, state);
-    }
-
-    // Primitives
-    if va.is_float() && vb.is_float() {
-        return va.as_f64() == vb.as_f64();
-    }
-    if va.is_bool() && vb.is_bool() {
-        return va.as_bool() == vb.as_bool();
-    }
-    // Bool <-> Int cross-type comparison
-    if (va.is_bool() && vb.is_int()) || (va.is_int() && vb.is_bool()) {
-        let ia = if va.is_bool() {
-            va.as_bool() as i64
-        } else {
-            va.as_i64()
-        };
-        let ib = if vb.is_bool() {
-            vb.as_bool() as i64
-        } else {
-            vb.as_i64()
-        };
-        return ia == ib;
-    }
-    if va.is_unit() && vb.is_unit() {
-        return true;
-    }
-    if va.is_nil() && vb.is_nil() {
-        return true;
-    }
-
-    // String comparison (cross-representation)
-    let a_is_string_like = va.is_small_string() || is_heap_string(va) || is_string_id(va, state);
-    let b_is_string_like = vb.is_small_string() || is_heap_string(vb) || is_string_id(vb, state);
-
-    if a_is_string_like && b_is_string_like {
-        let str_a = resolve_string_value(va, state);
-        let str_b = resolve_string_value(vb, state);
-        return str_a == str_b;
-    }
-
-    // Pure integer comparison
-    if va.is_int() && vb.is_int() {
-        return va.as_i64() == vb.as_i64();
-    }
-
-    // Small string vs non-string
-    if va.is_small_string() || vb.is_small_string() {
-        return false;
-    }
-
-    // Heap pointer comparison (variants, tuples, arrays, strings)
-    if va.is_ptr() && vb.is_ptr() {
-        let ptr_a = va.as_ptr::<u8>();
-        let ptr_b = vb.as_ptr::<u8>();
-
-        if ptr_a.is_null() && ptr_b.is_null() {
-            return true;
-        }
-        if ptr_a.is_null() || ptr_b.is_null() {
-            return false;
-        }
-
-        let type_id_a = unsafe { *(ptr_a as *const u32) };
-        let type_id_b = unsafe { *(ptr_b as *const u32) };
-
-        // Variant comparison — both pointers must be in the synthetic
-        // variant TypeId range (`MakeVariant` opcode emission).  See
-        // `verum_common::layout::is_synthetic_variant_type_id` for the
-        // canonical predicate.
-        if verum_common::layout::is_synthetic_variant_type_id(type_id_a)
-            && verum_common::layout::is_synthetic_variant_type_id(type_id_b)
-        {
-            let tag_a = unsafe { *(ptr_a.add(OBJECT_HEADER_SIZE) as *const u32) };
-            let tag_b = unsafe { *(ptr_b.add(OBJECT_HEADER_SIZE) as *const u32) };
-
-            if tag_a != tag_b {
-                return false;
-            }
-
-            let header_a = unsafe { &*(ptr_a as *const super::heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const super::heap::ObjectHeader) };
-            let size_a = header_a.size as usize;
-            let size_b = header_b.size as usize;
-            if size_a != size_b {
-                return false;
-            }
-            let field_count = size_a.saturating_sub(8) / std::mem::size_of::<Value>();
-            let payload_offset = OBJECT_HEADER_SIZE + 8;
-            for i in 0..field_count {
-                let fa = unsafe {
-                    &*(ptr_a.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value)
-                };
-                let fb = unsafe {
-                    &*(ptr_b.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value)
-                };
-                if !deep_value_eq(fa, fb, state) {
-                    return false;
-                }
-            }
-            return true;
-        } else if (type_id_a == 0 || type_id_a == TypeId::TUPLE.0)
-            && (type_id_b == 0 || type_id_b == TypeId::TUPLE.0)
-        {
-            // Tuple/pack comparison
-            let header_a = unsafe { &*(ptr_a as *const super::heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const super::heap::ObjectHeader) };
-            let size_a = header_a.size as usize;
-            let size_b = header_b.size as usize;
-            if size_a != size_b {
-                return false;
-            }
-            let field_count = size_a / std::mem::size_of::<Value>();
-            let data_offset = OBJECT_HEADER_SIZE;
-            for i in 0..field_count {
-                let fa = unsafe {
-                    &*(ptr_a.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value)
-                };
-                let fb = unsafe {
-                    &*(ptr_b.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value)
-                };
-                if !deep_value_eq(fa, fb, state) {
-                    return false;
-                }
-            }
-            return true;
-        } else if is_array_type_id(type_id_a) && is_array_type_id(type_id_b) {
-            // Array/List structural comparison
-            let header_a = unsafe { &*(ptr_a as *const super::heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const super::heap::ObjectHeader) };
-            let len_a = get_array_length(ptr_a, header_a).unwrap_or(0);
-            let len_b = get_array_length(ptr_b, header_b).unwrap_or(0);
-            if len_a != len_b {
-                return false;
-            }
-            for i in 0..len_a {
-                let ea = get_array_element(ptr_a, header_a, i).unwrap_or(Value::nil());
-                let eb = get_array_element(ptr_b, header_b, i).unwrap_or(Value::nil());
-                if !deep_value_eq(&ea, &eb, state) {
-                    return false;
-                }
-            }
-            return true;
-        } else if type_id_a == type_id_b {
-            // Same type - likely strings
-            let str_a = extract_string(va, state);
-            let str_b = extract_string(vb, state);
-            return str_a == str_b;
-        } else {
-            return false;
-        }
-    }
-
-    // Type mismatch
-    false
-}
+///   * no recursion-depth bound (cyclic `Heap<T>` structures
+///     stack-overflowed where the canonical impl returns at
+///     depth 64),
+///   * no single-side reference unwrap (`&text == raw_text`
+///     returned false),
+///   * MOST IMPORTANTLY, the local `decode_cbgr_ref` did
+///     `(encoded & 0xFFFF, (encoded >> 16) & 0xFFFF)` which
+///     does NOT invert the canonical encoder's
+///     `-1 - (idx | mut_bit) - (gen << 32)` formula in
+///     `cbgr_helpers::encode_cbgr_ref_mut` — `.eq()` METHOD
+///     dispatch (which routed through this duplicate) silently
+///     produced garbage results on CBGR-ref values while the
+///     `==` operator (which routed through the canonical
+///     `string_helpers` impl) was correct.
+///
+/// Re-exported below as `pub(crate)` for the historical
+/// `super::deep_value_eq` import path used by `method_dispatch`.
+pub(crate) use self::handlers::string_helpers::deep_value_eq;
 
 /// Default handler for unimplemented opcodes.
 fn handle_not_implemented(_state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
