@@ -148,8 +148,21 @@ pub mod caps {
 /// future direct-syscall allocator code that needs to inspect the
 /// allocation state.
 pub mod flags {
-    /// Allocation has been freed and the generation invalidated.
+    /// Bit 0 — Allocation has been freed.
+    ///
+    /// Set by `CbgrDealloc` / drop paths in the runtime; readers
+    /// (`Deref`, capability checks) test this bit before dereferencing
+    /// to surface use-after-free as `InterpreterError::Panic`.  Pre-this
+    /// constant, `verum_vbc::interpreter::dispatch_table::handlers::cbgr`
+    /// referenced the bit as a magic `flags & 1` literal at 4+ sites.
+    pub const FREED: u32 = 0x01;
+
+    /// Bit 1 — Allocation has been revoked, generation invalidated.
+    ///
     /// Reads through a revoked allocation panic with `UseAfterFree`.
+    /// Distinct from [`FREED`]: `REVOKED` is the post-free state where
+    /// the allocator has already incremented the generation; `FREED`
+    /// is the transition flag set during dealloc.
     pub const REVOKED: u32 = 0x02;
 }
 
@@ -995,8 +1008,11 @@ mod tests {
                 | caps::NO_ESCAPE,
         );
         assert_eq!(caps::ALL, 0xFF, "caps::ALL = bits 0..7 set");
-        // Allocation flags
+        // Allocation flags — bits MUST be distinct so callers can OR them
+        assert_eq!(flags::FREED, 0x01);
         assert_eq!(flags::REVOKED, 0x02);
+        assert_ne!(flags::FREED, flags::REVOKED);
+        assert_eq!(flags::FREED & flags::REVOKED, 0, "flag bits must not overlap");
         // Layout bridge
         assert_eq!(crate::layout::ALLOCATION_HEADER_SIZE, 32);
     }
