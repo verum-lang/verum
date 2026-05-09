@@ -48,6 +48,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod agda;
 pub mod apply_graph;
 pub mod coq;
 pub mod corpus_export;
