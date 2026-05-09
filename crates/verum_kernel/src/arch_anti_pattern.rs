@@ -139,233 +139,176 @@ pub enum AntiPatternCode {
     SelfReferenceWithoutOperator,
 }
 
+/// Roadmap band an anti-pattern belongs to. Determines the
+/// `season()` cohort for version-compat tracking (per spec §29.5)
+/// AND the `is_mtac()` / `is_cve_ah()` band-membership predicates
+/// — there is no longer a separate per-pattern table for either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AntiPatternBand {
+    /// AP-001..010 — capability/composition core (season 1).
+    Core,
+    /// AP-011..026 — boundary / lifecycle / capability ontology (season 2).
+    Base,
+    /// AP-027..032 — modal-temporal-architectural calculus (season 2).
+    Mtac,
+    /// AP-033..040 — CVE articulation-hygiene band (season 3).
+    /// Operationalises cve-architecture spec §1.5, §2.3.0, §3.5,
+    /// §4.5, §14.6, §16.
+    CveAh,
+}
+
+impl AntiPatternBand {
+    /// Roadmap season this band landed in. Stable for version-compat
+    /// tracking per spec §29.5.
+    pub fn season(self) -> u8 {
+        match self {
+            AntiPatternBand::Core => 1,
+            AntiPatternBand::Base | AntiPatternBand::Mtac => 2,
+            AntiPatternBand::CveAh => 3,
+        }
+    }
+}
+
+/// Canonical metadata for a single [`AntiPatternCode`].
+///
+/// Pre-this-struct, [`AntiPatternCode`] carried five separate data
+/// methods (`code` / `name` / `docs_url` / `season` / `is_*` band
+/// predicates) plus a `full_list` array, each with its own 40-arm
+/// match. Adding a new pattern meant touching seven places, with
+/// the per-pattern ordinal encoded twice (in `code()` as the
+/// `"ATS-V-AP-NNN"` suffix and in `docs_url()`'s integer-mapping
+/// match). The metadata is now anchored on this struct, with the
+/// legacy methods reduced to trivial projections — the per-pattern
+/// data lives in one match arm in [`AntiPatternCode::meta`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AntiPatternCodeMeta {
+    /// Stable RFC error code, e.g. `"ATS-V-AP-001"`. Computed
+    /// internally from the ordinal so the format is enforced
+    /// structurally rather than hand-maintained.
+    pub code: &'static str,
+    /// Canonical short name matching the enum-variant identifier,
+    /// e.g. `"CapabilityEscalation"`.
+    pub name: &'static str,
+    /// Ordinal 1..=40 — the `NNN` in `ATS-V-AP-NNN`.
+    pub ordinal: u8,
+    /// Roadmap band the pattern belongs to. Drives the `season()`,
+    /// `is_mtac()`, and `is_cve_ah()` accessors.
+    pub band: AntiPatternBand,
+}
+
 impl AntiPatternCode {
- /// Stable error code string `ATS-V-AP-NNN`.
-    pub fn code(&self) -> &'static str {
-        match self {
-            AntiPatternCode::CapabilityEscalation => "ATS-V-AP-001",
-            AntiPatternCode::CapabilityLeak => "ATS-V-AP-002",
-            AntiPatternCode::DependencyCycle => "ATS-V-AP-003",
-            AntiPatternCode::TierMixing => "ATS-V-AP-004",
-            AntiPatternCode::FoundationDrift => "ATS-V-AP-005",
-            AntiPatternCode::RegisterMixing => "ATS-V-AP-006",
-            AntiPatternCode::TxStraddling => "ATS-V-AP-007",
-            AntiPatternCode::ResourceStraddling => "ATS-V-AP-008",
-            AntiPatternCode::LifecycleRegression => "ATS-V-AP-009",
-            AntiPatternCode::CveIncomplete => "ATS-V-AP-010",
-            AntiPatternCode::AbsoluteBoundaryAttempt => "ATS-V-AP-011",
-            AntiPatternCode::InvariantViolation => "ATS-V-AP-012",
-            AntiPatternCode::DanglingMessageType => "ATS-V-AP-013",
-            AntiPatternCode::UnauthenticatedCrossing => "ATS-V-AP-014",
-            AntiPatternCode::DeterministicViolation => "ATS-V-AP-015",
-            AntiPatternCode::CapabilityDuplication => "ATS-V-AP-016",
-            AntiPatternCode::OrphanCapability => "ATS-V-AP-017",
-            AntiPatternCode::MissingHandoff => "ATS-V-AP-018",
-            AntiPatternCode::FoundationDowngrade => "ATS-V-AP-019",
-            AntiPatternCode::TimeBoundLeakage => "ATS-V-AP-020",
-            AntiPatternCode::PersistenceMismatch => "ATS-V-AP-021",
-            AntiPatternCode::CapabilityLaundering => "ATS-V-AP-022",
-            AntiPatternCode::FoundationForgery => "ATS-V-AP-023",
-            AntiPatternCode::TransitiveLifecycleRegression => "ATS-V-AP-024",
-            AntiPatternCode::DeclarationDrift => "ATS-V-AP-025",
-            AntiPatternCode::FoundationContentMismatch => "ATS-V-AP-026",
-            AntiPatternCode::TemporalInconsistency => "ATS-V-AP-027",
-            AntiPatternCode::CounterfactualBrittleness => "ATS-V-AP-028",
-            AntiPatternCode::MissedAdjoint => "ATS-V-AP-029",
-            AntiPatternCode::UniversalPropertyViolation => "ATS-V-AP-030",
-            AntiPatternCode::PhantomEvolution => "ATS-V-AP-031",
-            AntiPatternCode::YonedaInequivalentRefactor => "ATS-V-AP-032",
-            AntiPatternCode::RetractedCitationUse => "ATS-V-AP-033",
-            AntiPatternCode::HypothesisWithoutMaturationPlan => "ATS-V-AP-034",
-            AntiPatternCode::InterpretationInMatureCorpus => "ATS-V-AP-035",
-            AntiPatternCode::ObserverImpersonation => "ATS-V-AP-036",
-            AntiPatternCode::BoundlessAudit => "ATS-V-AP-037",
-            AntiPatternCode::ImplicitSubstrate => "ATS-V-AP-038",
-            AntiPatternCode::AnchoringOverextension => "ATS-V-AP-039",
-            AntiPatternCode::SelfReferenceWithoutOperator => "ATS-V-AP-040",
-        }
-    }
-
- /// Canonical short name (matches spec §7 + §26 + §33 catalog).
-    pub fn name(&self) -> &'static str {
-        match self {
-            AntiPatternCode::CapabilityEscalation => "CapabilityEscalation",
-            AntiPatternCode::CapabilityLeak => "CapabilityLeak",
-            AntiPatternCode::DependencyCycle => "DependencyCycle",
-            AntiPatternCode::TierMixing => "TierMixing",
-            AntiPatternCode::FoundationDrift => "FoundationDrift",
-            AntiPatternCode::RegisterMixing => "RegisterMixing",
-            AntiPatternCode::TxStraddling => "TxStraddling",
-            AntiPatternCode::ResourceStraddling => "ResourceStraddling",
-            AntiPatternCode::LifecycleRegression => "LifecycleRegression",
-            AntiPatternCode::CveIncomplete => "CveIncomplete",
-            AntiPatternCode::AbsoluteBoundaryAttempt => "AbsoluteBoundaryAttempt",
-            AntiPatternCode::InvariantViolation => "InvariantViolation",
-            AntiPatternCode::DanglingMessageType => "DanglingMessageType",
-            AntiPatternCode::UnauthenticatedCrossing => "UnauthenticatedCrossing",
-            AntiPatternCode::DeterministicViolation => "DeterministicViolation",
-            AntiPatternCode::CapabilityDuplication => "CapabilityDuplication",
-            AntiPatternCode::OrphanCapability => "OrphanCapability",
-            AntiPatternCode::MissingHandoff => "MissingHandoff",
-            AntiPatternCode::FoundationDowngrade => "FoundationDowngrade",
-            AntiPatternCode::TimeBoundLeakage => "TimeBoundLeakage",
-            AntiPatternCode::PersistenceMismatch => "PersistenceMismatch",
-            AntiPatternCode::CapabilityLaundering => "CapabilityLaundering",
-            AntiPatternCode::FoundationForgery => "FoundationForgery",
-            AntiPatternCode::TransitiveLifecycleRegression => "TransitiveLifecycleRegression",
-            AntiPatternCode::DeclarationDrift => "DeclarationDrift",
-            AntiPatternCode::FoundationContentMismatch => "FoundationContentMismatch",
-            AntiPatternCode::TemporalInconsistency => "TemporalInconsistency",
-            AntiPatternCode::CounterfactualBrittleness => "CounterfactualBrittleness",
-            AntiPatternCode::MissedAdjoint => "MissedAdjoint",
-            AntiPatternCode::UniversalPropertyViolation => "UniversalPropertyViolation",
-            AntiPatternCode::PhantomEvolution => "PhantomEvolution",
-            AntiPatternCode::YonedaInequivalentRefactor => "YonedaInequivalentRefactor",
-            AntiPatternCode::RetractedCitationUse => "RetractedCitationUse",
-            AntiPatternCode::HypothesisWithoutMaturationPlan => "HypothesisWithoutMaturationPlan",
-            AntiPatternCode::InterpretationInMatureCorpus => "InterpretationInMatureCorpus",
-            AntiPatternCode::ObserverImpersonation => "ObserverImpersonation",
-            AntiPatternCode::BoundlessAudit => "BoundlessAudit",
-            AntiPatternCode::ImplicitSubstrate => "ImplicitSubstrate",
-            AntiPatternCode::AnchoringOverextension => "AnchoringOverextension",
-            AntiPatternCode::SelfReferenceWithoutOperator => "SelfReferenceWithoutOperator",
-        }
-    }
-
- /// Documentation URL — stable per spec §32.4. Format
- /// `https://verum.lang/docs/ats-v/ap-NNN`.
-    pub fn docs_url(&self) -> String {
-        let n = match self {
-            AntiPatternCode::CapabilityEscalation => 1,
-            AntiPatternCode::CapabilityLeak => 2,
-            AntiPatternCode::DependencyCycle => 3,
-            AntiPatternCode::TierMixing => 4,
-            AntiPatternCode::FoundationDrift => 5,
-            AntiPatternCode::RegisterMixing => 6,
-            AntiPatternCode::TxStraddling => 7,
-            AntiPatternCode::ResourceStraddling => 8,
-            AntiPatternCode::LifecycleRegression => 9,
-            AntiPatternCode::CveIncomplete => 10,
-            AntiPatternCode::AbsoluteBoundaryAttempt => 11,
-            AntiPatternCode::InvariantViolation => 12,
-            AntiPatternCode::DanglingMessageType => 13,
-            AntiPatternCode::UnauthenticatedCrossing => 14,
-            AntiPatternCode::DeterministicViolation => 15,
-            AntiPatternCode::CapabilityDuplication => 16,
-            AntiPatternCode::OrphanCapability => 17,
-            AntiPatternCode::MissingHandoff => 18,
-            AntiPatternCode::FoundationDowngrade => 19,
-            AntiPatternCode::TimeBoundLeakage => 20,
-            AntiPatternCode::PersistenceMismatch => 21,
-            AntiPatternCode::CapabilityLaundering => 22,
-            AntiPatternCode::FoundationForgery => 23,
-            AntiPatternCode::TransitiveLifecycleRegression => 24,
-            AntiPatternCode::DeclarationDrift => 25,
-            AntiPatternCode::FoundationContentMismatch => 26,
-            AntiPatternCode::TemporalInconsistency => 27,
-            AntiPatternCode::CounterfactualBrittleness => 28,
-            AntiPatternCode::MissedAdjoint => 29,
-            AntiPatternCode::UniversalPropertyViolation => 30,
-            AntiPatternCode::PhantomEvolution => 31,
-            AntiPatternCode::YonedaInequivalentRefactor => 32,
-            AntiPatternCode::RetractedCitationUse => 33,
-            AntiPatternCode::HypothesisWithoutMaturationPlan => 34,
-            AntiPatternCode::InterpretationInMatureCorpus => 35,
-            AntiPatternCode::ObserverImpersonation => 36,
-            AntiPatternCode::BoundlessAudit => 37,
-            AntiPatternCode::ImplicitSubstrate => 38,
-            AntiPatternCode::AnchoringOverextension => 39,
-            AntiPatternCode::SelfReferenceWithoutOperator => 40,
+    /// Per-pattern metadata: stable code, canonical name, ordinal,
+    /// band. **Single source of truth** — every other accessor
+    /// (`code()` / `name()` / `docs_url()` / `season()` /
+    /// `is_mtac()` / `is_cve_ah()`) is a one-line projection over
+    /// this struct, so adding a new pattern requires extending
+    /// exactly one match arm here.
+    pub fn meta(&self) -> AntiPatternCodeMeta {
+        // Helper closure keeps each arm to one line.
+        let m = |code: &'static str, name: &'static str, ordinal: u8, band| AntiPatternCodeMeta {
+            code,
+            name,
+            ordinal,
+            band,
         };
-        format!("https://verum.lang/docs/ats-v/ap-{:03}", n)
-    }
-
- /// Which roadmap section introduced this pattern. Stable for
- /// version-compat tracking (per spec §29.5 versioning policy).
-    pub fn season(&self) -> u8 {
+        use AntiPatternBand::*;
         match self {
- // AP-001..010
-            AntiPatternCode::CapabilityEscalation
-            | AntiPatternCode::CapabilityLeak
-            | AntiPatternCode::DependencyCycle
-            | AntiPatternCode::TierMixing
-            | AntiPatternCode::FoundationDrift
-            | AntiPatternCode::RegisterMixing
-            | AntiPatternCode::TxStraddling
-            | AntiPatternCode::ResourceStraddling
-            | AntiPatternCode::LifecycleRegression
-            | AntiPatternCode::CveIncomplete => 1,
- // AP-011..032 (base + MTAC)
-            AntiPatternCode::AbsoluteBoundaryAttempt
-            | AntiPatternCode::InvariantViolation
-            | AntiPatternCode::DanglingMessageType
-            | AntiPatternCode::UnauthenticatedCrossing
-            | AntiPatternCode::DeterministicViolation
-            | AntiPatternCode::CapabilityDuplication
-            | AntiPatternCode::OrphanCapability
-            | AntiPatternCode::MissingHandoff
-            | AntiPatternCode::FoundationDowngrade
-            | AntiPatternCode::TimeBoundLeakage
-            | AntiPatternCode::PersistenceMismatch
-            | AntiPatternCode::CapabilityLaundering
-            | AntiPatternCode::FoundationForgery
-            | AntiPatternCode::TransitiveLifecycleRegression
-            | AntiPatternCode::DeclarationDrift
-            | AntiPatternCode::FoundationContentMismatch
-            | AntiPatternCode::TemporalInconsistency
-            | AntiPatternCode::CounterfactualBrittleness
-            | AntiPatternCode::MissedAdjoint
-            | AntiPatternCode::UniversalPropertyViolation
-            | AntiPatternCode::PhantomEvolution
-            | AntiPatternCode::YonedaInequivalentRefactor => 2,
- // AP-033..039 (CVE-AH band, season 3 — operationalises
- // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16)
-            AntiPatternCode::RetractedCitationUse
-            | AntiPatternCode::HypothesisWithoutMaturationPlan
-            | AntiPatternCode::InterpretationInMatureCorpus
-            | AntiPatternCode::ObserverImpersonation
-            | AntiPatternCode::BoundlessAudit
-            | AntiPatternCode::ImplicitSubstrate
-            | AntiPatternCode::AnchoringOverextension
-            | AntiPatternCode::SelfReferenceWithoutOperator => 3,
+            // -- capability/composition core (AP-001..010) --
+            AntiPatternCode::CapabilityEscalation => m("ATS-V-AP-001", "CapabilityEscalation", 1, Core),
+            AntiPatternCode::CapabilityLeak => m("ATS-V-AP-002", "CapabilityLeak", 2, Core),
+            AntiPatternCode::DependencyCycle => m("ATS-V-AP-003", "DependencyCycle", 3, Core),
+            AntiPatternCode::TierMixing => m("ATS-V-AP-004", "TierMixing", 4, Core),
+            AntiPatternCode::FoundationDrift => m("ATS-V-AP-005", "FoundationDrift", 5, Core),
+            AntiPatternCode::RegisterMixing => m("ATS-V-AP-006", "RegisterMixing", 6, Core),
+            AntiPatternCode::TxStraddling => m("ATS-V-AP-007", "TxStraddling", 7, Core),
+            AntiPatternCode::ResourceStraddling => m("ATS-V-AP-008", "ResourceStraddling", 8, Core),
+            AntiPatternCode::LifecycleRegression => m("ATS-V-AP-009", "LifecycleRegression", 9, Core),
+            AntiPatternCode::CveIncomplete => m("ATS-V-AP-010", "CveIncomplete", 10, Core),
+            // -- base boundary / lifecycle / capability ontology (AP-011..026) --
+            AntiPatternCode::AbsoluteBoundaryAttempt => m("ATS-V-AP-011", "AbsoluteBoundaryAttempt", 11, Base),
+            AntiPatternCode::InvariantViolation => m("ATS-V-AP-012", "InvariantViolation", 12, Base),
+            AntiPatternCode::DanglingMessageType => m("ATS-V-AP-013", "DanglingMessageType", 13, Base),
+            AntiPatternCode::UnauthenticatedCrossing => m("ATS-V-AP-014", "UnauthenticatedCrossing", 14, Base),
+            AntiPatternCode::DeterministicViolation => m("ATS-V-AP-015", "DeterministicViolation", 15, Base),
+            AntiPatternCode::CapabilityDuplication => m("ATS-V-AP-016", "CapabilityDuplication", 16, Base),
+            AntiPatternCode::OrphanCapability => m("ATS-V-AP-017", "OrphanCapability", 17, Base),
+            AntiPatternCode::MissingHandoff => m("ATS-V-AP-018", "MissingHandoff", 18, Base),
+            AntiPatternCode::FoundationDowngrade => m("ATS-V-AP-019", "FoundationDowngrade", 19, Base),
+            AntiPatternCode::TimeBoundLeakage => m("ATS-V-AP-020", "TimeBoundLeakage", 20, Base),
+            AntiPatternCode::PersistenceMismatch => m("ATS-V-AP-021", "PersistenceMismatch", 21, Base),
+            AntiPatternCode::CapabilityLaundering => m("ATS-V-AP-022", "CapabilityLaundering", 22, Base),
+            AntiPatternCode::FoundationForgery => m("ATS-V-AP-023", "FoundationForgery", 23, Base),
+            AntiPatternCode::TransitiveLifecycleRegression => m("ATS-V-AP-024", "TransitiveLifecycleRegression", 24, Base),
+            AntiPatternCode::DeclarationDrift => m("ATS-V-AP-025", "DeclarationDrift", 25, Base),
+            AntiPatternCode::FoundationContentMismatch => m("ATS-V-AP-026", "FoundationContentMismatch", 26, Base),
+            // -- MTAC modal-temporal (AP-027..032) --
+            AntiPatternCode::TemporalInconsistency => m("ATS-V-AP-027", "TemporalInconsistency", 27, Mtac),
+            AntiPatternCode::CounterfactualBrittleness => m("ATS-V-AP-028", "CounterfactualBrittleness", 28, Mtac),
+            AntiPatternCode::MissedAdjoint => m("ATS-V-AP-029", "MissedAdjoint", 29, Mtac),
+            AntiPatternCode::UniversalPropertyViolation => m("ATS-V-AP-030", "UniversalPropertyViolation", 30, Mtac),
+            AntiPatternCode::PhantomEvolution => m("ATS-V-AP-031", "PhantomEvolution", 31, Mtac),
+            AntiPatternCode::YonedaInequivalentRefactor => m("ATS-V-AP-032", "YonedaInequivalentRefactor", 32, Mtac),
+            // -- CVE articulation-hygiene band (AP-033..040) --
+            AntiPatternCode::RetractedCitationUse => m("ATS-V-AP-033", "RetractedCitationUse", 33, CveAh),
+            AntiPatternCode::HypothesisWithoutMaturationPlan => m("ATS-V-AP-034", "HypothesisWithoutMaturationPlan", 34, CveAh),
+            AntiPatternCode::InterpretationInMatureCorpus => m("ATS-V-AP-035", "InterpretationInMatureCorpus", 35, CveAh),
+            AntiPatternCode::ObserverImpersonation => m("ATS-V-AP-036", "ObserverImpersonation", 36, CveAh),
+            AntiPatternCode::BoundlessAudit => m("ATS-V-AP-037", "BoundlessAudit", 37, CveAh),
+            AntiPatternCode::ImplicitSubstrate => m("ATS-V-AP-038", "ImplicitSubstrate", 38, CveAh),
+            AntiPatternCode::AnchoringOverextension => m("ATS-V-AP-039", "AnchoringOverextension", 39, CveAh),
+            AntiPatternCode::SelfReferenceWithoutOperator => m("ATS-V-AP-040", "SelfReferenceWithoutOperator", 40, CveAh),
         }
     }
 
- /// True iff the pattern belongs to the CVE-AH band — operationalises
- /// the cve-architecture spec primitives (§§1.5, 2.3.0, 3.5, 4.5,
- /// 14.6, 16).
+    /// Stable error code string `ATS-V-AP-NNN`. Thin accessor over
+    /// [`Self::meta`].
+    #[inline]
+    pub fn code(&self) -> &'static str {
+        self.meta().code
+    }
+
+    /// Canonical short name (matches spec §7 + §26 + §33 catalog).
+    /// Thin accessor over [`Self::meta`].
+    #[inline]
+    pub fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Documentation URL — stable per spec §32.4. Format
+    /// `https://verum.lang/docs/ats-v/ap-NNN` where `NNN` is the
+    /// ordinal from [`Self::meta`].
+    pub fn docs_url(&self) -> String {
+        format!("https://verum.lang/docs/ats-v/ap-{:03}", self.meta().ordinal)
+    }
+
+    /// Which roadmap section introduced this pattern. Stable for
+    /// version-compat tracking (per spec §29.5 versioning policy).
+    /// Thin accessor over [`Self::meta`].`band.season()`.
+    #[inline]
+    pub fn season(&self) -> u8 {
+        self.meta().band.season()
+    }
+
+    /// True iff the pattern belongs to the CVE-AH band — operationalises
+    /// the cve-architecture spec primitives (§§1.5, 2.3.0, 3.5, 4.5,
+    /// 14.6, 16). Thin accessor over [`Self::meta`].
+    #[inline]
     pub fn is_cve_ah(&self) -> bool {
-        matches!(
-            self,
-            AntiPatternCode::RetractedCitationUse
-                | AntiPatternCode::HypothesisWithoutMaturationPlan
-                | AntiPatternCode::InterpretationInMatureCorpus
-                | AntiPatternCode::ObserverImpersonation
-                | AntiPatternCode::BoundlessAudit
-                | AntiPatternCode::ImplicitSubstrate
-                | AntiPatternCode::AnchoringOverextension
-                | AntiPatternCode::SelfReferenceWithoutOperator
-        )
+        matches!(self.meta().band, AntiPatternBand::CveAh)
     }
 
- /// True iff the pattern is MTAC-specific (modal-temporal,
- /// per spec §20-§23 + §26).
+    /// True iff the pattern is MTAC-specific (modal-temporal,
+    /// per spec §20-§23 + §26). Thin accessor over [`Self::meta`].
+    #[inline]
     pub fn is_mtac(&self) -> bool {
-        matches!(
-            self,
-            AntiPatternCode::TemporalInconsistency
-                | AntiPatternCode::CounterfactualBrittleness
-                | AntiPatternCode::MissedAdjoint
-                | AntiPatternCode::UniversalPropertyViolation
-                | AntiPatternCode::PhantomEvolution
-                | AntiPatternCode::YonedaInequivalentRefactor
-        )
+        matches!(self.meta().band, AntiPatternBand::Mtac)
     }
 
- /// Full canonical list — = 40 patterns total.
+    /// Full canonical list — 40 patterns total, in ascending
+    /// ordinal order.
     pub fn full_list() -> [AntiPatternCode; 40] {
         [
- // capability/composition core (10)
+            // Core (10)
             AntiPatternCode::CapabilityEscalation,
             AntiPatternCode::CapabilityLeak,
             AntiPatternCode::DependencyCycle,
@@ -376,7 +319,7 @@ impl AntiPatternCode {
             AntiPatternCode::ResourceStraddling,
             AntiPatternCode::LifecycleRegression,
             AntiPatternCode::CveIncomplete,
- // boundary / lifecycle / capability ontology (16)
+            // Base (16)
             AntiPatternCode::AbsoluteBoundaryAttempt,
             AntiPatternCode::InvariantViolation,
             AntiPatternCode::DanglingMessageType,
@@ -393,15 +336,14 @@ impl AntiPatternCode {
             AntiPatternCode::TransitiveLifecycleRegression,
             AntiPatternCode::DeclarationDrift,
             AntiPatternCode::FoundationContentMismatch,
- // MTAC modal-temporal (6)
+            // MTAC modal-temporal (6)
             AntiPatternCode::TemporalInconsistency,
             AntiPatternCode::CounterfactualBrittleness,
             AntiPatternCode::MissedAdjoint,
             AntiPatternCode::UniversalPropertyViolation,
             AntiPatternCode::PhantomEvolution,
             AntiPatternCode::YonedaInequivalentRefactor,
- // CVE articulation-hygiene band (8) — operationalises
- // cve-architecture spec §1.5, §2.3.0, §3.5, §4.5, §14.6, §16
+            // CVE articulation-hygiene (8)
             AntiPatternCode::RetractedCitationUse,
             AntiPatternCode::HypothesisWithoutMaturationPlan,
             AntiPatternCode::InterpretationInMatureCorpus,
@@ -3615,5 +3557,156 @@ mod tests {
             codes.contains(&AntiPatternCode::DeclarationDrift),
             "AT-5 closure must fire on malformed consumes entry"
         );
+    }
+
+    // =============================================================
+    // Structural pin tests for the AntiPatternCodeMeta consolidation
+    // =============================================================
+
+    #[test]
+    fn meta_code_format_matches_ordinal_for_every_pattern() {
+        // Pin: every pattern's `code` field is exactly
+        // `format!("ATS-V-AP-{:03}", ordinal)`. Was previously
+        // possible to drift (the `code()` arms and `docs_url()`'s
+        // ordinal map were independently hand-maintained).
+        for pattern in AntiPatternCode::full_list() {
+            let m = pattern.meta();
+            let expected = format!("ATS-V-AP-{:03}", m.ordinal);
+            assert_eq!(
+                m.code, expected,
+                "AntiPatternCode::{:?}: meta.code={} but ordinal {} would format as {}",
+                pattern, m.code, m.ordinal, expected,
+            );
+        }
+    }
+
+    #[test]
+    fn meta_name_matches_variant_identifier_for_every_pattern() {
+        // Pin: every pattern's `name` is the variant identifier
+        // verbatim (the kernel-side stable name MUST match the
+        // Debug-printed enum constructor for grep-ability).
+        for pattern in AntiPatternCode::full_list() {
+            let m = pattern.meta();
+            // Debug for unit variants prints "AntiPatternCode::Variant".
+            let dbg = format!("{:?}", pattern);
+            assert!(
+                dbg.ends_with(m.name),
+                "AntiPatternCode::{:?}: meta.name={} doesn't match variant identifier",
+                pattern, m.name,
+            );
+        }
+    }
+
+    #[test]
+    fn meta_ordinals_partition_1_through_40_uniquely() {
+        // Pin: the 40 ordinals are exactly 1..=40, no gaps, no
+        // duplicates. Catches both off-by-one mistakes and
+        // forgotten-band increments when adding a new pattern.
+        let mut seen: Vec<u8> = AntiPatternCode::full_list()
+            .iter()
+            .map(|p| p.meta().ordinal)
+            .collect();
+        seen.sort_unstable();
+        let expected: Vec<u8> = (1..=40).collect();
+        assert_eq!(
+            seen, expected,
+            "AntiPatternCode ordinals don't form a contiguous 1..=40 partition"
+        );
+    }
+
+    #[test]
+    fn meta_band_ordinal_ranges_match_cohort_definitions() {
+        // Pin: every pattern's ordinal lies in the canonical range
+        // for its declared band. Adding a new pattern in the wrong
+        // band (e.g. assigning ordinal 28 to a CveAh entry) trips
+        // here.
+        for pattern in AntiPatternCode::full_list() {
+            let m = pattern.meta();
+            let in_range = match m.band {
+                AntiPatternBand::Core => (1..=10).contains(&m.ordinal),
+                AntiPatternBand::Base => (11..=26).contains(&m.ordinal),
+                AntiPatternBand::Mtac => (27..=32).contains(&m.ordinal),
+                AntiPatternBand::CveAh => (33..=40).contains(&m.ordinal),
+            };
+            assert!(
+                in_range,
+                "AntiPatternCode::{:?}: ordinal {} doesn't lie in the {:?} band's range",
+                pattern, m.ordinal, m.band,
+            );
+        }
+    }
+
+    #[test]
+    fn band_predicates_agree_with_meta_band() {
+        // Pin: `is_cve_ah()` and `is_mtac()` return what the band
+        // would say. Pre-this-commit these were independent
+        // `matches!()` expressions; now they're projections over
+        // `meta().band`.
+        for pattern in AntiPatternCode::full_list() {
+            let band = pattern.meta().band;
+            assert_eq!(
+                pattern.is_mtac(),
+                band == AntiPatternBand::Mtac,
+                "is_mtac() drift on {:?}",
+                pattern,
+            );
+            assert_eq!(
+                pattern.is_cve_ah(),
+                band == AntiPatternBand::CveAh,
+                "is_cve_ah() drift on {:?}",
+                pattern,
+            );
+        }
+    }
+
+    #[test]
+    fn band_seasons_match_canonical_partition() {
+        // Pin: Core=>1, Base/Mtac=>2, CveAh=>3.
+        for pattern in AntiPatternCode::full_list() {
+            let band = pattern.meta().band;
+            let expected_season = match band {
+                AntiPatternBand::Core => 1,
+                AntiPatternBand::Base | AntiPatternBand::Mtac => 2,
+                AntiPatternBand::CveAh => 3,
+            };
+            assert_eq!(
+                pattern.season(),
+                expected_season,
+                "season() drift on {:?} (band {:?})",
+                pattern,
+                band,
+            );
+        }
+    }
+
+    #[test]
+    fn full_list_uniqueness_and_count() {
+        // Pin: full_list() has 40 distinct entries. Adding a
+        // variant + appending to the array is required; missing
+        // either step is caught here.
+        let list = AntiPatternCode::full_list();
+        assert_eq!(list.len(), 40);
+        let unique: std::collections::BTreeSet<_> =
+            list.iter().map(|p| p.meta().code).collect();
+        assert_eq!(
+            unique.len(),
+            40,
+            "AntiPatternCode::full_list() has duplicate entries"
+        );
+    }
+
+    #[test]
+    fn docs_url_format_matches_ordinal() {
+        // Pin: docs_url() format hasn't drifted from
+        // `https://verum.lang/docs/ats-v/ap-NNN` with NNN = ordinal.
+        for pattern in AntiPatternCode::full_list() {
+            let m = pattern.meta();
+            assert_eq!(
+                pattern.docs_url(),
+                format!("https://verum.lang/docs/ats-v/ap-{:03}", m.ordinal),
+                "docs_url() drift on {:?}",
+                pattern,
+            );
+        }
     }
 }
