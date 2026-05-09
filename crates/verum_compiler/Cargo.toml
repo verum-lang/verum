@@ -85,8 +85,17 @@ zstd = "0.13"
 blake3 = { workspace = true }
 
 [features]
-default = []
+default = ["embed-stdlib-source"]
 metal = ["verum_vbc/metal"]
+# #104 — Embed gzipped stdlib `.vr` source in the binary.  Default-on
+# during the migration window so existing dev workflows continue to
+# work; disable with `--no-default-features --features metal` (or
+# similar) to ship a production binary that consumes stdlib source
+# exclusively from the on-disk SDK installed via
+# `verum stdlib install`.  Source-walking dev tools (classifier,
+# audit, debugger) fall back to clean `SdkNotInstalled` errors when
+# this feature is disabled and no SDK is present.
+embed-stdlib-source = []
 
 # Note: Cargo doesn't support target-conditional default features.
 # On macOS, build with: cargo build --features metal
