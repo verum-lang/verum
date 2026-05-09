@@ -9171,6 +9171,196 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .expect("nanosleep must be in the syscall registry")
     }
 
+    // =========================================================================
+    // Verum-ABI syscall wrappers — single typed boundary that closes the
+    // libc-on-Linux gap exposed by `platform_ir.rs::emit_nursery_await_all`
+    // / `emit_select_channels` (which historically called `clock_gettime`
+    // and `sched_yield` directly as symbols, dispatching through libc on
+    // Linux in violation of `docs/architecture/no-libc-architecture.md`).
+    //
+    // The wrapper is a private LLVM function `__verum_<name>` with a
+    // Verum-ABI signature (uniform i64 / ptr).  Internally it branches:
+    //   * Linux  → inline `syscall` / `svc #0` instruction
+    //   * Other  → forward to the canonical libc/libSystem symbol
+    //
+    // All call sites resolve the wrapper by name — they see ONE
+    // FunctionValue regardless of target, so the per-callsite branching
+    // disappears.  When a Linux build links the resulting `.o` no
+    // libc symbol is needed for clock-gettime/nanosleep/sched-yield.
+    // =========================================================================
+
+    /// Emit (or no-op when already present) the `__verum_clock_gettime`
+    /// wrapper.  Verum-ABI signature: `(clock_id: i64, ts: ptr) -> i64`.
+    /// Returns the wrapper's `FunctionValue` for the caller to use in
+    /// `build_call`.
+    pub fn emit_verum_clock_gettime_wrapper(
+        &self,
+        module: &Module<'ctx>,
+    ) -> Result<FunctionValue<'ctx>> {
+        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")
+            .expect("clock_gettime wrapper present in registry");
+        if let Some(existing) = module.get_function(name) {
+            if existing.count_basic_blocks() > 0 {
+                return Ok(existing);
+            }
+        }
+
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let func = match module.get_function(name) {
+            Some(f) => f,
+            None => module.add_function(name, fn_type, None),
+        };
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let clock_id = func
+            .get_nth_param(0)
+            .or_internal("missing clock_id param")?
+            .into_int_value();
+        let ts = func
+            .get_nth_param(1)
+            .or_internal("missing ts param")?
+            .into_pointer_value();
+
+        if target_is_linux(module) {
+            // Direct syscall — libc-free.  Syscall numbers per Linux ABI:
+            //   x86_64: 228 (SYS_clock_gettime)
+            //   aarch64: 113 (SYS_clock_gettime)
+            let sys_num: u64 = if target_is_aarch64(module) { 113 } else { 228 };
+            let ts_addr = builder
+                .build_ptr_to_int(ts, i64_type, "ts_addr")
+                .or_llvm_err()?;
+            let result =
+                self.emit_linux_syscall(&builder, module, sys_num, &[clock_id, ts_addr])?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        } else {
+            // macOS / other: forward to the libSystem `clock_gettime`
+            // symbol declared via the canonical syscall registry.
+            let lib_fn = self.get_or_declare_clock_gettime(module);
+            let call_site = builder
+                .build_call(lib_fn, &[clock_id.into(), ts.into()], "ret")
+                .or_llvm_err()?;
+            // Coerce the libc i64 return into our wrapper's i64 ret —
+            // the registry's signature already matches, so this is a
+            // straight forward.
+            let ret_val = call_site
+                .try_as_basic_value()
+                .basic()
+                .or_internal("clock_gettime returned void")?
+                .into_int_value();
+            builder.build_return(Some(&ret_val)).or_llvm_err()?;
+        }
+        Ok(func)
+    }
+
+    /// Emit `__verum_nanosleep`.  Verum-ABI signature:
+    /// `(req: ptr, rem: ptr) -> i64`.
+    pub fn emit_verum_nanosleep_wrapper(
+        &self,
+        module: &Module<'ctx>,
+    ) -> Result<FunctionValue<'ctx>> {
+        let name = super::syscall_registry::verum_wrapper_name("nanosleep")
+            .expect("nanosleep wrapper present in registry");
+        if let Some(existing) = module.get_function(name) {
+            if existing.count_basic_blocks() > 0 {
+                return Ok(existing);
+            }
+        }
+
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        let func = match module.get_function(name) {
+            Some(f) => f,
+            None => module.add_function(name, fn_type, None),
+        };
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let req = func
+            .get_nth_param(0)
+            .or_internal("missing req param")?
+            .into_pointer_value();
+        let rem = func
+            .get_nth_param(1)
+            .or_internal("missing rem param")?
+            .into_pointer_value();
+
+        if target_is_linux(module) {
+            let sys_num: u64 = if target_is_aarch64(module) { 101 } else { 35 };
+            let req_addr = builder
+                .build_ptr_to_int(req, i64_type, "req_addr")
+                .or_llvm_err()?;
+            let rem_addr = builder
+                .build_ptr_to_int(rem, i64_type, "rem_addr")
+                .or_llvm_err()?;
+            let result =
+                self.emit_linux_syscall(&builder, module, sys_num, &[req_addr, rem_addr])?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        } else {
+            let lib_fn = self.get_or_declare_nanosleep(module);
+            let call_site = builder
+                .build_call(lib_fn, &[req.into(), rem.into()], "ret")
+                .or_llvm_err()?;
+            let ret_val = call_site
+                .try_as_basic_value()
+                .basic()
+                .or_internal("nanosleep returned void")?
+                .into_int_value();
+            builder.build_return(Some(&ret_val)).or_llvm_err()?;
+        }
+        Ok(func)
+    }
+
+    /// Emit `__verum_sched_yield`.  Verum-ABI signature: `() -> i64`.
+    pub fn emit_verum_sched_yield_wrapper(
+        &self,
+        module: &Module<'ctx>,
+    ) -> Result<FunctionValue<'ctx>> {
+        let name = super::syscall_registry::verum_wrapper_name("sched_yield")
+            .expect("sched_yield wrapper present in registry");
+        if let Some(existing) = module.get_function(name) {
+            if existing.count_basic_blocks() > 0 {
+                return Ok(existing);
+            }
+        }
+
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+        let func = match module.get_function(name) {
+            Some(f) => f,
+            None => module.add_function(name, fn_type, None),
+        };
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        if target_is_linux(module) {
+            // SYS_sched_yield: x86_64 = 24, aarch64 = 124
+            let sys_num: u64 = if target_is_aarch64(module) { 124 } else { 24 };
+            let result = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        } else {
+            let lib_fn =
+                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")
+                    .expect("sched_yield in registry");
+            let call_site = builder
+                .build_call(lib_fn, &[], "ret")
+                .or_llvm_err()?;
+            let ret_val = call_site
+                .try_as_basic_value()
+                .basic()
+                .or_internal("sched_yield returned void")?
+                .into_int_value();
+            builder.build_return(Some(&ret_val)).or_llvm_err()?;
+        }
+        Ok(func)
+    }
+
     /// Get or declare a libc-free `strcmp` wrapper.
     ///
 

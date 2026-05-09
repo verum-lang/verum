@@ -352,6 +352,116 @@ impl<'ctx> PlatformIR<'ctx> {
         }
     }
 
+    /// Get-or-emit the `__verum_clock_gettime` wrapper.  Same Verum-ABI
+    /// signature as `RuntimeLowering::emit_verum_clock_gettime_wrapper`
+    /// — the two emit paths produce identical bytecode and only the
+    /// first one to run actually populates the body; subsequent calls
+    /// are O(1) `module.get_function` hits.
+    ///
+    /// Used by `emit_nursery_await_all` and `emit_select_channels` to
+    /// route their `clock_gettime` references through the no-libc
+    /// boundary (Linux→syscall, macOS→libSystem) instead of
+    /// dispatching through libc on Linux.
+    fn emit_or_get_verum_clock_gettime(
+        &self,
+        module: &Module<'ctx>,
+    ) -> super::error::Result<verum_llvm::values::FunctionValue<'ctx>> {
+        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")
+            .expect("registry has clock_gettime wrapper");
+        if let Some(existing) = module.get_function(name) {
+            if existing.count_basic_blocks() > 0 {
+                return Ok(existing);
+            }
+        }
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let func = match module.get_function(name) {
+            Some(f) => f,
+            None => module.add_function(name, fn_type, None),
+        };
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+        let clock_id = func
+            .get_nth_param(0)
+            .or_internal("missing clock_id param")?
+            .into_int_value();
+        let ts = func
+            .get_nth_param(1)
+            .or_internal("missing ts param")?
+            .into_pointer_value();
+        if super::target_triple::target_is_linux(module) {
+            let sys_num: u64 =
+                if super::target_triple::target_is_aarch64(module) { 113 } else { 228 };
+            let ts_addr = builder
+                .build_ptr_to_int(ts, i64_type, "ts_addr")
+                .or_llvm_err()?;
+            let result =
+                self.emit_linux_syscall(&builder, module, sys_num, &[clock_id, ts_addr])?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        } else {
+            let lib_fn =
+                super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")
+                    .expect("registry has clock_gettime");
+            let cs = builder
+                .build_call(lib_fn, &[clock_id.into(), ts.into()], "ret")
+                .or_llvm_err()?;
+            let ret_val = cs
+                .try_as_basic_value()
+                .basic()
+                .or_internal("clock_gettime returned void")?
+                .into_int_value();
+            builder.build_return(Some(&ret_val)).or_llvm_err()?;
+        }
+        Ok(func)
+    }
+
+    /// Get-or-emit the `__verum_sched_yield` wrapper.  See
+    /// [`Self::emit_or_get_verum_clock_gettime`] for the architectural
+    /// rationale.
+    fn emit_or_get_verum_sched_yield(
+        &self,
+        module: &Module<'ctx>,
+    ) -> super::error::Result<verum_llvm::values::FunctionValue<'ctx>> {
+        let name = super::syscall_registry::verum_wrapper_name("sched_yield")
+            .expect("registry has sched_yield wrapper");
+        if let Some(existing) = module.get_function(name) {
+            if existing.count_basic_blocks() > 0 {
+                return Ok(existing);
+            }
+        }
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+        let func = match module.get_function(name) {
+            Some(f) => f,
+            None => module.add_function(name, fn_type, None),
+        };
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+        if super::target_triple::target_is_linux(module) {
+            let sys_num: u64 =
+                if super::target_triple::target_is_aarch64(module) { 124 } else { 24 };
+            let result = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
+        } else {
+            let lib_fn =
+                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")
+                    .expect("registry has sched_yield");
+            let cs = builder
+                .build_call(lib_fn, &[], "ret")
+                .or_llvm_err()?;
+            let ret_val = cs
+                .try_as_basic_value()
+                .basic()
+                .or_internal("sched_yield returned void")?
+                .into_int_value();
+            builder.build_return(Some(&ret_val)).or_llvm_err()?;
+        }
+        Ok(func)
+    }
+
     /// Cross-compilation correct: reads `module.get_triple()`, never
     /// host `#[cfg]`.
     fn emit_linux_syscall(
@@ -9350,16 +9460,14 @@ impl<'ctx> PlatformIR<'ctx> {
             "verum_pool_await",
             i64_type.fn_type(&[i64_type.into()], false),
         );
-        // sched_yield + clock_gettime via the canonical syscall
-        // registry — see `super::syscall_registry` for the Verum-ABI
-        // rationale that resolves the historical i32-vs-i64 drift
-        // between this site and `runtime.rs`.
-        let sched_yield_fn =
-            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
-                .expect("sched_yield in registry");
-        let clock_gettime_fn =
-            super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")
-                .expect("clock_gettime in registry");
+        // sched_yield + clock_gettime via Verum-ABI wrappers — single
+        // typed boundary that closes the libc-on-Linux gap (see
+        // `super::syscall_registry` for the no-libc rationale).
+        // The wrappers internally branch Linux→inline-syscall vs
+        // macOS→libSystem so this call site sees ONE FunctionValue
+        // regardless of target.
+        let sched_yield_fn = self.emit_or_get_verum_sched_yield(module)?;
+        let clock_gettime_fn = self.emit_or_get_verum_clock_gettime(module)?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -10237,14 +10345,10 @@ impl<'ctx> PlatformIR<'ctx> {
             return Ok(());
         }
 
-        // sched_yield + clock_gettime via the canonical syscall
-        // registry (see `super::syscall_registry` module docstring).
-        let sched_yield_fn =
-            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
-                .expect("sched_yield in registry");
-        let clock_gettime_fn =
-            super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")
-                .expect("clock_gettime in registry");
+        // sched_yield + clock_gettime via Verum-ABI wrappers — see
+        // `super::syscall_registry` for the no-libc-on-Linux rationale.
+        let sched_yield_fn = self.emit_or_get_verum_sched_yield(module)?;
+        let clock_gettime_fn = self.emit_or_get_verum_clock_gettime(module)?;
         let mutex_lock = module
             .get_function("verum_mutex_lock")
             .or_missing_fn("verum_mutex_lock")?;

@@ -206,3 +206,37 @@ pub fn ensure_io_declared<'ctx>(
         let _ = get_or_declare(module, ctx, name);
     }
 }
+
+// =============================================================================
+// Verum-ABI syscall wrappers — no-libc enforcement layer.
+// =============================================================================
+
+/// Canonical name of the Verum-ABI wrapper for a given POSIX syscall.
+/// Wrappers are emitted as private LLVM functions inside the module
+/// and route calls through the platform-correct boundary:
+///
+///   * Linux       → inline `syscall` / `svc #0` instruction (no libc)
+///   * macOS       → libSystem.B.dylib symbol (Apple-required boundary)
+///   * Windows     → kernel32.dll / ntdll.dll equivalent
+///
+/// Call sites issue `module.get_function(verum_wrapper_name(s))` and
+/// see the same Verum-ABI signature regardless of target — no
+/// per-callsite Linux/macOS branching, no libc symbol on Linux.
+///
+/// Returns `None` when no wrapper exists; callers then fall back to
+/// the direct-symbol [`get_or_declare`] path which is correct for
+/// syscalls whose libc binding is already considered acceptable
+/// (POSIX I/O on macOS goes through libSystem unconditionally per
+/// the architecture doc; matching libc bindings on Linux is the gap
+/// this wrapper layer closes for time-critical syscalls).
+///
+/// See `docs/architecture/no-libc-architecture.md` for the
+/// project-wide no-libc invariant this layer enforces.
+pub fn verum_wrapper_name(syscall_name: &str) -> Option<&'static str> {
+    match syscall_name {
+        "clock_gettime" => Some("__verum_clock_gettime"),
+        "nanosleep"     => Some("__verum_nanosleep"),
+        "sched_yield"   => Some("__verum_sched_yield"),
+        _ => None,
+    }
+}
