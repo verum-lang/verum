@@ -126,6 +126,35 @@ fn main() {
         manifest_archive.len() as f64 / 1024.0,
     );
 
+    // === Prelude seeds (#102) =============================================
+    //
+    // `core/mod.vr` contains a series of `public mount super.X.{…}`
+    // declarations whose targets are auto-imported into every user
+    // compilation.  The runtime `stdlib_reachability::prelude_seeds`
+    // path used to read `core/mod.vr` source from `embedded_stdlib`
+    // and parse it on every compile to extract this seed list — the
+    // last load-bearing reason to embed gzipped .vr sources in the
+    // production binary.
+    //
+    // Precompute the seed list at build time by parsing `core/mod.vr`
+    // here, serialise as one path per line, embed via `include_bytes!`.
+    // Runtime decoder: split by '\n'.  Cost: ~1KB embedded (vs the
+    // ≈200KB embedded_stdlib gzip archive whose only consumers were
+    // dev tools).
+    let prelude_seeds = build_prelude_seeds(&files);
+    let prelude_serialized = prelude_seeds.join("\n");
+    let prelude_path = Path::new(&out_dir).join("stdlib_prelude_seeds.txt");
+    fs::write(&prelude_path, &prelude_serialized).unwrap();
+    println!(
+        "cargo:rustc-env=STDLIB_PRELUDE_SEEDS_PATH={}",
+        prelude_path.display()
+    );
+    println!(
+        "cargo:warning=Stdlib prelude seeds: {} paths, {} bytes",
+        prelude_seeds.len(),
+        prelude_serialized.len(),
+    );
+
     // Rerun if any .vr file changes
     println!("cargo:rerun-if-changed={}", core_dir.display());
     for (path, _) in &files {
@@ -712,6 +741,156 @@ fn dep_edge_count(files: &[(String, Vec<u8>)]) -> usize {
     total
 }
 
+/// #102 — Extract the prelude seed module-paths from `core/mod.vr`.
+///
+/// The prelude consists of every `public mount super.X.{…}` (or
+/// `mount super.X.{…}`) declaration in `core/mod.vr`; the targets
+/// are auto-imported into every user compilation via the
+/// re-export chain.  Pre-fix this scan ran at runtime against
+/// `embedded_stdlib`; post-fix it runs once at build time and the
+/// result is embedded as a tiny newline-separated text artefact.
+///
+/// Mirror of `stdlib_reachability::extract_prelude_paths` —
+/// intentional duplication to avoid pulling the runtime crate
+/// into the build script.  Drift contract: pin tests in
+/// `stdlib_reachability` validate the runtime decoder against
+/// representative inputs; the build-time scanner follows the
+/// same conventions.
+fn build_prelude_seeds(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    // Find `core/mod.vr` (or just `mod.vr` if we're rooted at core/).
+    let core_mod = files.iter().find_map(|(rel, bytes)| {
+        if rel == "mod.vr" || rel == "core/mod.vr" {
+            std::str::from_utf8(bytes).ok()
+        } else {
+            None
+        }
+    });
+    let src = match core_mod {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    // Strip line + block comments so commented-out `// public mount
+    // super.foo;` declarations don't seed the prelude.
+    let stripped = strip_vr_comments(src);
+    let mut out: Vec<String> = Vec::new();
+    let mut cursor = 0usize;
+    let bytes = stripped.as_bytes();
+
+    while cursor < bytes.len() {
+        let Some(rel) = stripped[cursor..].find("mount") else {
+            break;
+        };
+        let kw_pos = cursor + rel;
+        let preceded_ok = kw_pos == 0
+            || matches!(bytes[kw_pos - 1], b' ' | b'\t' | b'\n' | b'\r');
+        let followed_ok = matches!(bytes.get(kw_pos + 5), Some(b' ' | b'\t' | b'\n'));
+        if !preceded_ok || !followed_ok {
+            cursor = kw_pos + 5;
+            continue;
+        }
+        let stmt_end = stripped[kw_pos..]
+            .find(';')
+            .map(|p| kw_pos + p)
+            .unwrap_or(stripped.len());
+        let body = stripped[kw_pos + 5..stmt_end].trim();
+        cursor = stmt_end + 1;
+
+        if !body.starts_with("super.") && body != "super" {
+            continue;
+        }
+        let rewritten = body.replacen("super", "core", 1);
+        accumulate_prelude_paths(&rewritten, &mut out);
+    }
+
+    // De-duplicate while preserving order.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|p| seen.insert(p.clone()));
+    out.sort();
+    out
+}
+
+fn accumulate_prelude_paths(body: &str, out: &mut Vec<String>) {
+    let body = match body.find(" as ") {
+        Some(p) => &body[..p],
+        None => body,
+    }
+    .trim();
+
+    if let Some(brace_open) = body.find('{') {
+        let prefix = body[..brace_open].trim_end_matches('.').trim();
+        out.push(prefix.to_string());
+        let inner = &body[brace_open + 1..];
+        let close = inner.rfind('}').unwrap_or(inner.len());
+        let leaves = &inner[..close];
+        for leaf in leaves.split(',') {
+            let leaf = leaf.trim();
+            if leaf.is_empty() {
+                continue;
+            }
+            let leaf_head = leaf.split_whitespace().next().unwrap_or("");
+            let leaf_head = leaf_head.split('{').next().unwrap_or(leaf_head);
+            if leaf_head == "*" || leaf_head.is_empty() {
+                continue;
+            }
+            out.push(format!("{}.{}", prefix, leaf_head));
+        }
+    } else if let Some(p) = body.strip_suffix(".*") {
+        out.push(p.trim().to_string());
+    } else {
+        out.push(body.trim().to_string());
+    }
+}
+
+/// Strip `//` line comments and `/* */` block comments from .vr
+/// source while preserving string literals.  Used by the prelude-
+/// seed scanner to avoid commented-out `mount` directives.
+fn strip_vr_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    let mut in_str: Option<u8> = None; // ' or "
+    while i < bytes.len() {
+        if let Some(q) = in_str {
+            out.push(bytes[i] as char);
+            if bytes[i] == q && (i == 0 || bytes[i - 1] != b'\\') {
+                in_str = None;
+            }
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            in_str = Some(bytes[i]);
+            out.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            // Skip to newline (preserve newline so line counting stays).
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                if bytes[i] == b'\n' {
+                    out.push('\n');
+                }
+                i += 1;
+            }
+            if i + 1 < bytes.len() {
+                i += 2; // skip closing */
+            }
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 fn write_str(out: &mut Vec<u8>, s: &str) {
     let len: u16 = s.len().try_into().expect("path too long for u16");
     out.extend_from_slice(&len.to_le_bytes());
@@ -1026,16 +1205,38 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
     total
 }
 
+/// Schema version string mixed into the precompile cache key
+/// alongside the source hash.  **Bump this any time the wire format
+/// of `verum_vbc::module::FunctionDescriptor`,
+/// `verum_vbc::types::TypeDescriptor`, or
+/// `verum_types::core_metadata::CoreMetadata` changes** — without a
+/// bump, the build cache keeps a stale `.vbca`/`.core_metadata` and
+/// every downstream binary fails to decode the embedded artefacts at
+/// startup with a misleading bincode error (e.g. "invalid u8 while
+/// decoding bool, expected 0 or 1, found 16").
+///
+/// The cache key composition is `blake3(SCHEMA_VERSION || core_files)`,
+/// so source-only changes invalidate as before AND schema changes
+/// invalidate independently of source.  Format: free-form ASCII;
+/// readable strings make `git log` of this constant tell the story.
+const PRECOMPILE_SCHEMA_VERSION: &str = "v7-2026-05-09-intrinsic_name_remap";
+
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
-/// by relative path.  Stable across runs (sorted iteration), so two
-/// build script invocations on the same `core/` produce the same
-/// hex digest.  Used as the cache key for the `runtime.vbca` +
+/// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
+/// Stable across runs (sorted iteration), so two build script
+/// invocations on the same `core/` produce the same hex digest.
+/// Used as the cache key for the `runtime.vbca` +
 /// `runtime.core_metadata` artefact pair — when this digest matches
 /// the stored value beside the archive, the artefacts are reused
 /// without invoking `verum_stdlib_precompiler`.
 fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
     let _ = core_dir;
     let mut hasher = blake3::Hasher::new();
+    // Mix the schema-version tag in first so any wire-format bump
+    // forces a full re-precompile even when source hasn't changed.
+    hasher.update(b"schema:");
+    hasher.update(PRECOMPILE_SCHEMA_VERSION.as_bytes());
+    hasher.update(b"\0");
     let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     for (rel_path, bytes) in sorted {
