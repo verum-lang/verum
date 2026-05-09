@@ -9302,6 +9302,83 @@ pub enum CharSubOpcode {
     GeneralCategory = 0x53,
 }
 
+// =========================================================================
+// CharSubOpcode metadata — single source of truth for the 32 variants.
+//
+// The legacy implementation maintained five parallel match-arm
+// methods (`mnemonic`, `category`, `is_ascii_fast_path`,
+// `returns_bool`, `returns_char`).  `category()` and
+// `is_ascii_fast_path()` were both driven by `match self.to_byte()`
+// over byte-range windows so renumbering a variant could silently
+// reclassify it.
+//
+// Latent drift defect closed: `returns_char()` flagged 6 of the
+// 7 variants that actually produce a `Char` result.  `DecodeUtf8`
+// (0x51) was missed — its doc explicitly says "Returns the
+// character from UTF-8 byte sequence" but the method body
+// excluded it from the matches!() list.
+//
+// Same drift-collapse pattern as SimdSubOpcode.meta() (cbaf0b9d8),
+// CbgrSubOpcode (8e6c4cb93), MlSubOpcode (ae5bc5896),
+// ArithSubOpcode (06d64018d), TensorSubOpcode (79369267d),
+// GpuSubOpcode (dd84a929b), SystemSubOpcode (60b4cc3b9),
+// MathSubOpcode (4b2792881), KernelRule (ec9cfc411).
+// =========================================================================
+
+/// Functional band a `CharSubOpcode` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CharCategory {
+    /// `IsAlphabeticAscii` / `IsNumericAscii` / `IsAscii` / etc.
+    /// (the inline ASCII-fast-path classifier band).
+    AsciiClassification,
+    /// `ToUppercaseAscii` / `ToLowercaseAscii` /
+    /// `EqIgnoreCaseAscii` (inline ASCII case conversions).
+    AsciiCaseConversion,
+    /// `IsAlphabeticUnicode` etc. (runtime-table classifiers).
+    UnicodeClassification,
+    /// `ToUppercaseUnicode` / `ToLowercaseUnicode` /
+    /// `ToTitlecaseUnicode` (runtime-table case conversions).
+    UnicodeCaseConversion,
+    /// `ToCodePoint` / `FromCodePoint` / `LenUtf8` / `LenUtf16`.
+    CharValueOperations,
+    /// `EncodeUtf8` / `DecodeUtf8` / `EscapeDebug` /
+    /// `GeneralCategory`.
+    Utf8EncodingDecoding,
+}
+
+impl CharCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AsciiClassification    => "ASCII Classification",
+            Self::AsciiCaseConversion    => "ASCII Case Conversion",
+            Self::UnicodeClassification  => "Unicode Classification",
+            Self::UnicodeCaseConversion  => "Unicode Case Conversion",
+            Self::CharValueOperations    => "Char Value Operations",
+            Self::Utf8EncodingDecoding   => "UTF-8 Encoding/Decoding",
+        }
+    }
+}
+
+/// Co-located metadata for one `CharSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct CharOpMeta {
+    /// All-caps mnemonic prefixed with `"CHAR_"`.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: CharCategory,
+    /// True for the inline-implementable ASCII-only fast-path
+    /// variants (`AsciiClassification` + `AsciiCaseConversion`
+    /// bands); false for variants that need a runtime Unicode
+    /// table.
+    pub is_ascii_fast_path: bool,
+    /// True for predicate variants that yield a `Bool` result.
+    pub returns_bool: bool,
+    /// True for variants that yield a `Char` result (case
+    /// conversions + `FromCodePoint` + `DecodeUtf8`).
+    pub returns_char: bool,
+}
+
 impl CharSubOpcode {
     /// Creates a Char sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -9353,105 +9430,110 @@ impl CharSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this Char sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            // ASCII Classification
-            Self::IsAlphabeticAscii => "CHAR_IS_ALPHA_ASCII",
-            Self::IsNumericAscii => "CHAR_IS_NUMERIC_ASCII",
-            Self::IsAlphanumericAscii => "CHAR_IS_ALNUM_ASCII",
-            Self::IsWhitespaceAscii => "CHAR_IS_WS_ASCII",
-            Self::IsControlAscii => "CHAR_IS_CTRL_ASCII",
-            Self::IsPunctuationAscii => "CHAR_IS_PUNCT_ASCII",
-            Self::IsGraphicAscii => "CHAR_IS_GRAPH_ASCII",
-            Self::IsHexDigitAscii => "CHAR_IS_HEX_ASCII",
-            Self::IsLowercaseAscii => "CHAR_IS_LOWER_ASCII",
-            Self::IsUppercaseAscii => "CHAR_IS_UPPER_ASCII",
-            Self::IsAscii => "CHAR_IS_ASCII",
-            // ASCII Case Conversion
-            Self::ToUppercaseAscii => "CHAR_TO_UPPER_ASCII",
-            Self::ToLowercaseAscii => "CHAR_TO_LOWER_ASCII",
-            Self::EqIgnoreCaseAscii => "CHAR_EQ_ICASE_ASCII",
-            // Unicode Classification
-            Self::IsAlphabeticUnicode => "CHAR_IS_ALPHA_UNI",
-            Self::IsNumericUnicode => "CHAR_IS_NUMERIC_UNI",
-            Self::IsAlphanumericUnicode => "CHAR_IS_ALNUM_UNI",
-            Self::IsWhitespaceUnicode => "CHAR_IS_WS_UNI",
-            Self::IsControlUnicode => "CHAR_IS_CTRL_UNI",
-            Self::IsLowercaseUnicode => "CHAR_IS_LOWER_UNI",
-            Self::IsUppercaseUnicode => "CHAR_IS_UPPER_UNI",
-            // Unicode Case Conversion
-            Self::ToUppercaseUnicode => "CHAR_TO_UPPER_UNI",
-            Self::ToLowercaseUnicode => "CHAR_TO_LOWER_UNI",
-            Self::ToTitlecaseUnicode => "CHAR_TO_TITLE_UNI",
-            // Char Value Operations
-            Self::ToCodePoint => "CHAR_TO_CODEPOINT",
-            Self::FromCodePoint => "CHAR_FROM_CODEPOINT",
-            Self::LenUtf8 => "CHAR_LEN_UTF8",
-            Self::LenUtf16 => "CHAR_LEN_UTF16",
-            // UTF-8 Encoding/Decoding
-            Self::EncodeUtf8 => "CHAR_ENCODE_UTF8",
-            Self::DecodeUtf8 => "CHAR_DECODE_UTF8",
-            Self::EscapeDebug => "CHAR_ESCAPE_DEBUG",
-            Self::GeneralCategory => "CHAR_GENERAL_CATEGORY",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `is_ascii_fast_path` / `returns_bool` / `returns_char`.
+    /// Sibling accessors are `#[inline]` projections through this
+    /// method.
+    pub const fn meta(self) -> CharOpMeta {
+        use CharCategory::{
+            AsciiCaseConversion, AsciiClassification, CharValueOperations,
+            UnicodeCaseConversion, UnicodeClassification, Utf8EncodingDecoding,
+        };
+
+        // Field order: mnemonic, category, ascii_fast,
+        // returns_bool, returns_char.
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             ascii=$ascii:literal, rbool=$rbool:literal, rchar=$rchar:literal $(,)?) => {
+                CharOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    is_ascii_fast_path: $ascii,
+                    returns_bool: $rbool,
+                    returns_char: $rchar,
+                }
+            };
         }
+
+        match self {
+            // ===== ASCII Classification (0x00-0x0F) — fast path =====
+            Self::IsAlphabeticAscii    => m!("CHAR_IS_ALPHA_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsNumericAscii       => m!("CHAR_IS_NUMERIC_ASCII",  AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsAlphanumericAscii  => m!("CHAR_IS_ALNUM_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsWhitespaceAscii    => m!("CHAR_IS_WS_ASCII",       AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsControlAscii       => m!("CHAR_IS_CTRL_ASCII",     AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsPunctuationAscii   => m!("CHAR_IS_PUNCT_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsGraphicAscii       => m!("CHAR_IS_GRAPH_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsHexDigitAscii      => m!("CHAR_IS_HEX_ASCII",      AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsLowercaseAscii     => m!("CHAR_IS_LOWER_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsUppercaseAscii     => m!("CHAR_IS_UPPER_ASCII",    AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+            Self::IsAscii              => m!("CHAR_IS_ASCII",          AsciiClassification,   ascii=true,  rbool=true,  rchar=false),
+
+            // ===== ASCII Case Conversion (0x10-0x1F) — fast path =====
+            Self::ToUppercaseAscii     => m!("CHAR_TO_UPPER_ASCII",    AsciiCaseConversion,   ascii=true,  rbool=false, rchar=true),
+            Self::ToLowercaseAscii     => m!("CHAR_TO_LOWER_ASCII",    AsciiCaseConversion,   ascii=true,  rbool=false, rchar=true),
+            Self::EqIgnoreCaseAscii    => m!("CHAR_EQ_ICASE_ASCII",    AsciiCaseConversion,   ascii=true,  rbool=true,  rchar=false),
+
+            // ===== Unicode Classification (0x20-0x2F) =====
+            Self::IsAlphabeticUnicode  => m!("CHAR_IS_ALPHA_UNI",      UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsNumericUnicode     => m!("CHAR_IS_NUMERIC_UNI",    UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsAlphanumericUnicode=> m!("CHAR_IS_ALNUM_UNI",      UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsWhitespaceUnicode  => m!("CHAR_IS_WS_UNI",         UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsControlUnicode     => m!("CHAR_IS_CTRL_UNI",       UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsLowercaseUnicode   => m!("CHAR_IS_LOWER_UNI",      UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+            Self::IsUppercaseUnicode   => m!("CHAR_IS_UPPER_UNI",      UnicodeClassification, ascii=false, rbool=true,  rchar=false),
+
+            // ===== Unicode Case Conversion (0x30-0x3F) =====
+            Self::ToUppercaseUnicode   => m!("CHAR_TO_UPPER_UNI",      UnicodeCaseConversion, ascii=false, rbool=false, rchar=true),
+            Self::ToLowercaseUnicode   => m!("CHAR_TO_LOWER_UNI",      UnicodeCaseConversion, ascii=false, rbool=false, rchar=true),
+            Self::ToTitlecaseUnicode   => m!("CHAR_TO_TITLE_UNI",      UnicodeCaseConversion, ascii=false, rbool=false, rchar=true),
+
+            // ===== Char Value Operations (0x40-0x4F) =====
+            Self::ToCodePoint          => m!("CHAR_TO_CODEPOINT",      CharValueOperations,   ascii=false, rbool=false, rchar=false),
+            Self::FromCodePoint        => m!("CHAR_FROM_CODEPOINT",    CharValueOperations,   ascii=false, rbool=false, rchar=true),
+            Self::LenUtf8              => m!("CHAR_LEN_UTF8",          CharValueOperations,   ascii=false, rbool=false, rchar=false),
+            Self::LenUtf16             => m!("CHAR_LEN_UTF16",         CharValueOperations,   ascii=false, rbool=false, rchar=false),
+
+            // ===== UTF-8 Encoding/Decoding (0x50-0x5F) =====
+            // DecodeUtf8 returns a char per its doc — closes the
+            // legacy `returns_char` 6→7 undercount.
+            Self::EncodeUtf8           => m!("CHAR_ENCODE_UTF8",       Utf8EncodingDecoding,  ascii=false, rbool=false, rchar=false),
+            Self::DecodeUtf8           => m!("CHAR_DECODE_UTF8",       Utf8EncodingDecoding,  ascii=false, rbool=false, rchar=true),
+            Self::EscapeDebug          => m!("CHAR_ESCAPE_DEBUG",      Utf8EncodingDecoding,  ascii=false, rbool=false, rchar=false),
+            Self::GeneralCategory      => m!("CHAR_GENERAL_CATEGORY",  Utf8EncodingDecoding,  ascii=false, rbool=false, rchar=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this Char sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode range.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "ASCII Classification",
-            0x10..=0x1F => "ASCII Case Conversion",
-            0x20..=0x2F => "Unicode Classification",
-            0x30..=0x3F => "Unicode Case Conversion",
-            0x40..=0x4F => "Char Value Operations",
-            0x50..=0x5F => "UTF-8 Encoding/Decoding",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this is an ASCII fast path operation.
+    #[inline]
     pub fn is_ascii_fast_path(self) -> bool {
-        self.to_byte() < 0x20
+        self.meta().is_ascii_fast_path
     }
 
     /// Returns true if this operation returns a boolean.
+    #[inline]
     pub fn returns_bool(self) -> bool {
-        matches!(
-            self,
-            Self::IsAlphabeticAscii
-                | Self::IsNumericAscii
-                | Self::IsAlphanumericAscii
-                | Self::IsWhitespaceAscii
-                | Self::IsControlAscii
-                | Self::IsPunctuationAscii
-                | Self::IsGraphicAscii
-                | Self::IsHexDigitAscii
-                | Self::IsLowercaseAscii
-                | Self::IsUppercaseAscii
-                | Self::IsAscii
-                | Self::EqIgnoreCaseAscii
-                | Self::IsAlphabeticUnicode
-                | Self::IsNumericUnicode
-                | Self::IsAlphanumericUnicode
-                | Self::IsWhitespaceUnicode
-                | Self::IsControlUnicode
-                | Self::IsLowercaseUnicode
-                | Self::IsUppercaseUnicode
-        )
+        self.meta().returns_bool
     }
 
     /// Returns true if this operation returns a char.
+    #[inline]
     pub fn returns_char(self) -> bool {
-        matches!(
-            self,
-            Self::ToUppercaseAscii
-                | Self::ToLowercaseAscii
-                | Self::ToUppercaseUnicode
-                | Self::ToLowercaseUnicode
-                | Self::ToTitlecaseUnicode
-                | Self::FromCodePoint
-        )
+        self.meta().returns_char
     }
 }
 
@@ -16915,5 +16997,130 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 67);
+    }
+
+    // ========================================================================
+    // CharSubOpcode meta() drift pins
+    //
+    // Latent drift defect closed: `returns_char()` was 6/7 —
+    // missing DecodeUtf8 (which explicitly returns a char per its
+    // doc).  Both `category()` and `is_ascii_fast_path()` were
+    // also byte-range driven; the new meta() table is structural.
+    // ========================================================================
+
+    fn for_every_char_sub_opcode<F: FnMut(CharSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = CharSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "CharSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn char_meta_count_pinned_at_thirty_two() {
+        let mut count = 0;
+        for_every_char_sub_opcode(|_| count += 1);
+        assert_eq!(count, 32,
+            "CharSubOpcode variant count drift: expected 32, got {}", count);
+    }
+
+    #[test]
+    fn char_meta_category_matches_byte_range_band() {
+        for_every_char_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => CharCategory::AsciiClassification,
+                0x10..=0x1F => CharCategory::AsciiCaseConversion,
+                0x20..=0x2F => CharCategory::UnicodeClassification,
+                0x30..=0x3F => CharCategory::UnicodeCaseConversion,
+                0x40..=0x4F => CharCategory::CharValueOperations,
+                0x50..=0x5F => CharCategory::Utf8EncodingDecoding,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn char_meta_is_ascii_fast_path_iff_ascii_band() {
+        // is_ascii_fast_path ⇔ AsciiClassification ∪
+        // AsciiCaseConversion bands.
+        for_every_char_sub_opcode(|op| {
+            let in_ascii_band = matches!(op.meta().category,
+                CharCategory::AsciiClassification | CharCategory::AsciiCaseConversion);
+            assert_eq!(op.is_ascii_fast_path(), in_ascii_band,
+                "{:?}: is_ascii_fast_path={} but ASCII band membership={}",
+                op, op.is_ascii_fast_path(), in_ascii_band);
+        });
+    }
+
+    #[test]
+    fn char_meta_returns_bool_xor_returns_char() {
+        // returns_bool and returns_char are mutually exclusive
+        // (an op that returns Bool can't also return Char).
+        for_every_char_sub_opcode(|op| {
+            assert!(!(op.returns_bool() && op.returns_char()),
+                "{:?}: tagged both returns_bool and returns_char", op);
+        });
+    }
+
+    #[test]
+    fn char_meta_returns_bool_set_pinned() {
+        // The set of bool-returning predicates: every IsX ASCII
+        // + EqIgnoreCaseAscii + every IsX Unicode = 19 total.
+        let mut count = 0;
+        for_every_char_sub_opcode(|op| {
+            if op.returns_bool() { count += 1; }
+        });
+        assert_eq!(count, 19, "returns_bool count drift: expected 19");
+    }
+
+    #[test]
+    fn char_meta_returns_char_set_pinned() {
+        // The set of char-returning ops — 7 total after closing
+        // the legacy 6/7 DecodeUtf8 undercount.
+        let mut count = 0;
+        for_every_char_sub_opcode(|op| {
+            if op.returns_char() { count += 1; }
+        });
+        assert_eq!(count, 7,
+            "returns_char count drift: expected 7 (was 6 pre-fix; DecodeUtf8 closed)");
+        // Named regression assertions for the closed gap:
+        assert!(CharSubOpcode::DecodeUtf8.returns_char(),
+            "DecodeUtf8 returns a char per its format docs");
+        // Pin the rest of the set by name:
+        for op in [
+            CharSubOpcode::ToUppercaseAscii,
+            CharSubOpcode::ToLowercaseAscii,
+            CharSubOpcode::ToUppercaseUnicode,
+            CharSubOpcode::ToLowercaseUnicode,
+            CharSubOpcode::ToTitlecaseUnicode,
+            CharSubOpcode::FromCodePoint,
+        ] {
+            assert!(op.returns_char(), "{:?} should return a char", op);
+        }
+        // Negative pins:
+        assert!(!CharSubOpcode::EncodeUtf8.returns_char(),
+            "EncodeUtf8 returns bytes, not a char");
+        assert!(!CharSubOpcode::ToCodePoint.returns_char(),
+            "ToCodePoint returns u32 code-point, not a char");
+    }
+
+    #[test]
+    fn char_meta_mnemonic_uniqueness_and_prefix() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(32);
+        for_every_char_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("CHAR_"),
+                "{:?}: mnemonic {:?} not in `CHAR_*` namespace", op, m);
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 32);
     }
 }
