@@ -57,6 +57,7 @@ mount core.sys.linux.syscall.{
     send, recv, shutdown, close,
     set_nonblocking, set_reuseaddr,
     AF_UNIX, SOCK_STREAM, SOCK_CLOEXEC, SOCK_NONBLOCK,
+    MSG_NOSIGNAL, MSG_DONTWAIT,
 };
 
 @cfg(target_os = "macos")
@@ -65,6 +66,7 @@ mount core.sys.darwin.libsystem.{
     sys_send, sys_recv, sys_shutdown, sys_close,
     safe_set_nonblocking, safe_set_reuseaddr, safe_set_nosigpipe,
     AF_UNIX, SOCK_STREAM,
+    MSG_DONTWAIT,
 };
 
 // =============================================================================
@@ -424,10 +426,7 @@ public type ShutdownKind is
 implement Read for UnixStream {
     fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
-        };
+        let r = recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os);
         @cfg(target_os = "macos")
         let r = sys_recv(self.fd, buf, 0).map_err(IoError.from_os);
         r
@@ -437,10 +436,7 @@ implement Read for UnixStream {
 implement Write for UnixStream {
     fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
-        };
+        let r = send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os);
         @cfg(target_os = "macos")
         let r = sys_send(self.fd, buf, 0).map_err(IoError.from_os);
         r
@@ -463,13 +459,9 @@ implement AsyncRead for UnixStream {
         }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let result = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            const MSG_DONTWAIT: Int = 0x40;
-            recv(self.fd, &mut byte_buf[..read_len], MSG_NOSIGNAL | MSG_DONTWAIT)
-        };
+        let result = recv(self.fd, &mut byte_buf[..read_len], MSG_NOSIGNAL | MSG_DONTWAIT);
         @cfg(target_os = "macos")
-        let result = sys_recv(self.fd, &mut byte_buf[..read_len], 0x80);
+        let result = sys_recv(self.fd, &mut byte_buf[..read_len], MSG_DONTWAIT);
 
         match result {
             Ok(n) => {
@@ -497,13 +489,9 @@ implement AsyncWrite for UnixStream {
         for i in 0..write_len { byte_buf[i] = buf[i]; }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let result = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            const MSG_DONTWAIT: Int = 0x40;
-            send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT)
-        };
+        let result = send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT);
         @cfg(target_os = "macos")
-        let result = sys_send(self.fd, &byte_buf[..write_len], 0x80);
+        let result = sys_send(self.fd, &byte_buf[..write_len], MSG_DONTWAIT);
 
         match result {
             Ok(n) => Poll.Ready(Ok(n as Int)),
