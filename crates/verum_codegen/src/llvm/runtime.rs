@@ -42,10 +42,19 @@ use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux};
 
 /// Default initial capacity for lists.
-pub const DEFAULT_LIST_CAPACITY: u64 = 16;
+///
+/// Re-exports the canonical
+/// [`verum_common::layout::DEFAULT_COLLECTION_CAPACITY`] — agrees
+/// with stdlib `core/collections/map.vr::INITIAL_CAPACITY`.
+pub const DEFAULT_LIST_CAPACITY: u64 = verum_common::layout::DEFAULT_COLLECTION_CAPACITY;
 
-/// Default initial capacity for maps (must be power of 2).
-pub const DEFAULT_MAP_CAPACITY: u64 = 16;
+/// Default initial capacity for maps (must be power of 2 — verified
+/// by `verum_common::layout::tests::heap_config_invariants`).
+///
+/// Re-exports the canonical
+/// [`verum_common::layout::DEFAULT_COLLECTION_CAPACITY`] — agrees
+/// with stdlib `core/collections/map.vr::INITIAL_CAPACITY`.
+pub const DEFAULT_MAP_CAPACITY: u64 = verum_common::layout::DEFAULT_COLLECTION_CAPACITY;
 
 /// Size of a NaN-boxed value in bytes.
 ///
