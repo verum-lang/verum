@@ -737,7 +737,7 @@ impl ArchiveCtxCache {
         if wanted.is_empty() {
             return (0, 0);
         }
-        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
+        let mut wanted_module_prefixes: std::collections::HashSet<String> = wanted
             .iter()
             .flat_map(|name| {
                 let mut prefixes: Vec<String> = Vec::new();
@@ -754,6 +754,34 @@ impl ArchiveCtxCache {
                 prefixes
             })
             .collect();
+
+        // **Variant-tag-collision force-load** (load-bearing for
+        // bare `Some(x)` / `None` / `Ok(x)` / `Err(e)` syntax — see
+        // commit 66ab177f1 for the original fix and the AliasError
+        // collision case it was solving).  The unqualified-wanted
+        // second pass below filters these names out because
+        // `lookup_function(name).is_some()` is true (they're
+        // pre-registered by `VbcCodegen::register_builtin_variants`),
+        // so without this hook Maybe / Result archive modules never
+        // get loaded for code that mentions only the bare ctors.  The
+        // runtime then falls through to the global tag-scan and picks
+        // whichever unrelated stdlib variant happens to share the
+        // synthetic `0x8000+tag` TypeId — `Maybe.None` rendering as
+        // `AliasError.EmptyWeights` is the canonical failure mode.
+        //
+        // Source-of-truth: `verum_common::well_known_types::variant_tags`
+        // tracks the recognised ctor names; the canonical archive
+        // modules they belong to are the only Verum-wide hardcode and
+        // mirror the layout constants `MAYBE_VARIANT_LAYOUT` /
+        // `RESULT_VARIANT_LAYOUT`.
+        for name in &wanted {
+            if verum_common::well_known_types::variant_tags::is_maybe_constructor(name) {
+                wanted_module_prefixes.insert("core.base.maybe".to_string());
+            }
+            if verum_common::well_known_types::variant_tags::is_result_constructor(name) {
+                wanted_module_prefixes.insert("core.base.result".to_string());
+            }
+        }
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;
         // **Cold-start optimisation**: parallelise the decode step.
