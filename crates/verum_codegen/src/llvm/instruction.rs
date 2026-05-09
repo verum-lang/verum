@@ -18045,7 +18045,12 @@ fn lower_arith_extended<'ctx>(
 
         // ==== Binary Float Operations ====
         Some(ArithSubOpcode::Atan2) => {
-            // atan2(a, b) via C library function
+            // atan2(a, b) — `@llvm.atan2.f64` intrinsic.  LLVM
+            // lowers this to the platform's math runtime
+            // (libSystem.B.dylib on macOS, libm via the syscall-
+            // free runtime on Linux); using the intrinsic
+            // directly (vs declaring an external `atan2` symbol)
+            // keeps the no-libc invariant intact.
             if operands.len() < 3 {
                 return Ok(());
             }
@@ -18056,8 +18061,8 @@ fn lower_arith_extended<'ctx>(
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
             let func = module
-                .get_function("atan2")
-                .unwrap_or_else(|| module.add_function("atan2", fn_type, None));
+                .get_function("llvm.atan2.f64")
+                .unwrap_or_else(|| module.add_function("llvm.atan2.f64", fn_type, None));
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "atan2")
@@ -18069,7 +18074,10 @@ fn lower_arith_extended<'ctx>(
             Ok(())
         }
         Some(ArithSubOpcode::Hypot) => {
-            // hypot(a, b) via C library function
+            // hypot(a, b) — `@llvm.hypot.f64` intrinsic
+            // (numerically stable sqrt(x²+y²) without
+            // intermediate overflow).  Same no-libc rationale as
+            // Atan2 above.
             if operands.len() < 3 {
                 return Ok(());
             }
@@ -18080,8 +18088,8 @@ fn lower_arith_extended<'ctx>(
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
             let module = ctx.get_module();
             let func = module
-                .get_function("hypot")
-                .unwrap_or_else(|| module.add_function("hypot", fn_type, None));
+                .get_function("llvm.hypot.f64")
+                .unwrap_or_else(|| module.add_function("llvm.hypot.f64", fn_type, None));
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "hypot")
@@ -18364,429 +18372,246 @@ fn lower_arith_extended<'ctx>(
 
 /// Handles transcendental math functions (sin, cos, exp, log, sqrt, etc.)
 /// via LLVM intrinsics.
+/// Lower a `MathExtended` sub-opcode to LLVM IR.
+///
+/// Pre-refactor this function had 80 hand-written match arms — one per
+/// `MathSubOpcode` variant — passing the LLVM intrinsic name as a
+/// literal string at every call site.  Two structural defects:
+///
+/// 1. **No-libc invariant violation**: 26 arms (TanF64, AsinF64,
+///    AcosF64, AtanF64, Atan2F64, Sinh*, Cosh*, Tanh*, Asinh*,
+///    Acosh*, Atanh*, Expm1*, Log1p*, Cbrt*, Hypot*, Remainder*,
+///    Fdim*, Powi*) passed *libc* names (`"tan"`, `"asin"`, ...)
+///    where LLVM intrinsic names belong.  At AOT link this declared
+///    external libc symbols, violating the no-libc invariant from
+///    `docs/architecture/no-libc-architecture.md`.
+///
+/// 2. **F32→F64 lowering decision repeated** at every F32 arm —
+///    Verum's codegen routes all math through f64 representation,
+///    so every F32 op needs its F64 sibling's intrinsic; the
+///    legacy code hand-listed each pair.
+///
+/// Both defects are closed by routing through
+/// `MathSubOpcode::f64_sibling().llvm_intrinsic()` from the
+/// instruction.rs meta() consolidation: `f64_sibling` is the
+/// canonical F32→F64 mapping (per-variant test pinned in
+/// `verum_vbc::instruction::tests::math_meta_f64_sibling_invariants`),
+/// and `llvm_intrinsic` returns the canonical
+/// `@llvm.<op>.f64` name.  All 80 generic-dispatch arms now
+/// collapse to operand-count-driven dispatch using meta().
+///
+/// Special cases that don't dispatch via a single
+/// `@llvm.*` intrinsic remain explicit: `Fma*` (3 operands),
+/// `Fmod*` (LLVM `frem` instruction, no intrinsic), and the
+/// classification family (`IsNan*` / `IsInf*` / `IsFinite*` —
+/// custom float-compare logic).
 fn lower_math_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
-    let sub = MathSubOpcode::from_byte(sub_op);
+    let Some(op) = MathSubOpcode::from_byte(sub_op) else {
+        ctx.emit_unimplemented_sub_op("MathExtended", sub_op);
+        return Ok(());
+    };
 
-    // Most math ops: operands[0]=dst, operands[1]=src (unary) or operands[2]=src2 (binary)
-    match sub {
-        // ==== F64 Trigonometric ====
-        Some(MathSubOpcode::SinF64) => lower_math_unary_f64(ctx, operands, "llvm.sin.f64", "sin"),
-        Some(MathSubOpcode::CosF64) => lower_math_unary_f64(ctx, operands, "llvm.cos.f64", "cos"),
-        Some(MathSubOpcode::TanF64) => lower_math_unary_f64(ctx, operands, "tan", "tan"),
-        Some(MathSubOpcode::AsinF64) => lower_math_unary_f64(ctx, operands, "asin", "asin"),
-        Some(MathSubOpcode::AcosF64) => lower_math_unary_f64(ctx, operands, "acos", "acos"),
-        Some(MathSubOpcode::AtanF64) => lower_math_unary_f64(ctx, operands, "atan", "atan"),
-        Some(MathSubOpcode::Atan2F64) => lower_math_binary_f64(ctx, operands, "atan2", "atan2"),
+    // --- Special cases that don't dispatch via a single @llvm.* intrinsic ---
+    match op {
+        MathSubOpcode::FmaF64 | MathSubOpcode::FmaF32 => return lower_fma_via_f64(ctx, operands),
+        MathSubOpcode::FmodF64 | MathSubOpcode::FmodF32 => {
+            return lower_fmod_via_frem(ctx, operands);
+        }
+        MathSubOpcode::IsNanF64 | MathSubOpcode::IsNanF32 => return lower_is_nan_f64(ctx, operands),
+        MathSubOpcode::IsInfF64 | MathSubOpcode::IsInfF32 => return lower_is_inf_f64(ctx, operands),
+        MathSubOpcode::IsFiniteF64 | MathSubOpcode::IsFiniteF32 => {
+            return lower_is_finite_f64(ctx, operands);
+        }
+        _ => {}
+    }
 
-        // ==== F64 Hyperbolic ====
-        Some(MathSubOpcode::SinhF64) => lower_math_unary_f64(ctx, operands, "sinh", "sinh"),
-        Some(MathSubOpcode::CoshF64) => lower_math_unary_f64(ctx, operands, "cosh", "cosh"),
-        Some(MathSubOpcode::TanhF64) => lower_math_unary_f64(ctx, operands, "tanh", "tanh"),
-        Some(MathSubOpcode::AsinhF64) => lower_math_unary_f64(ctx, operands, "asinh", "asinh"),
-        Some(MathSubOpcode::AcoshF64) => lower_math_unary_f64(ctx, operands, "acosh", "acosh"),
-        Some(MathSubOpcode::AtanhF64) => lower_math_unary_f64(ctx, operands, "atanh", "atanh"),
-
-        // ==== F64 Exponential/Logarithmic ====
-        Some(MathSubOpcode::ExpF64) => lower_math_unary_f64(ctx, operands, "llvm.exp.f64", "exp"),
-        Some(MathSubOpcode::Exp2F64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.exp2.f64", "exp2")
-        }
-        Some(MathSubOpcode::Expm1F64) => lower_math_unary_f64(ctx, operands, "expm1", "expm1"),
-        Some(MathSubOpcode::LogF64) => lower_math_unary_f64(ctx, operands, "llvm.log.f64", "log"),
-        Some(MathSubOpcode::Log2F64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.log2.f64", "log2")
-        }
-        Some(MathSubOpcode::Log10F64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.log10.f64", "log10")
-        }
-        Some(MathSubOpcode::Log1pF64) => lower_math_unary_f64(ctx, operands, "log1p", "log1p"),
-
-        // ==== F64 Root/Power ====
-        Some(MathSubOpcode::SqrtF64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.sqrt.f64", "sqrt")
-        }
-        Some(MathSubOpcode::CbrtF64) => lower_math_unary_f64(ctx, operands, "cbrt", "cbrt"),
-        Some(MathSubOpcode::PowF64) => lower_math_binary_f64(ctx, operands, "llvm.pow.f64", "pow"),
-        Some(MathSubOpcode::PowiF64) => lower_math_binary_f64(ctx, operands, "pow", "powi"),
-        Some(MathSubOpcode::HypotF64) => lower_math_binary_f64(ctx, operands, "hypot", "hypot"),
-
-        // ==== F64 Rounding ====
-        Some(MathSubOpcode::FloorF64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.floor.f64", "floor")
-        }
-        Some(MathSubOpcode::CeilF64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.ceil.f64", "ceil")
-        }
-        Some(MathSubOpcode::RoundF64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.round.f64", "round")
-        }
-        Some(MathSubOpcode::TruncF64) => {
-            lower_math_unary_f64(ctx, operands, "llvm.trunc.f64", "trunc")
-        }
-
-        // ==== F64 Special ====
-        Some(MathSubOpcode::AbsF64) => lower_math_unary_f64(ctx, operands, "llvm.fabs.f64", "fabs"),
-        Some(MathSubOpcode::CopysignF64) => {
-            lower_math_binary_f64(ctx, operands, "llvm.copysign.f64", "copysign")
-        }
-        Some(MathSubOpcode::FmaF64) => {
-            // FMA: dst = a * b + c — needs 3 operands
-            if operands.len() < 4 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
-            let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let fma_fn = module
-                .get_function("llvm.fma.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fma.f64", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("FMA: expected return value"))?;
-            ctx.set_register(dst, result);
-            Ok(())
-        }
-        Some(MathSubOpcode::FmodF64) => {
-            // fmod(a, b) = LLVM frem instruction
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmod_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmod_b")?;
-            let result = ctx
-                .builder()
-                .build_float_rem(a, b, "fmod")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::RemainderF64) => {
-            lower_math_binary_f64(ctx, operands, "remainder", "remainder")
-        }
-        Some(MathSubOpcode::FdimF64) => lower_math_binary_f64(ctx, operands, "fdim", "fdim"),
-        Some(MathSubOpcode::MinnumF64) => {
-            lower_math_binary_f64(ctx, operands, "llvm.minnum.f64", "minnum")
-        }
-        Some(MathSubOpcode::MaxnumF64) => {
-            lower_math_binary_f64(ctx, operands, "llvm.maxnum.f64", "maxnum")
-        }
-
-        // ==== F64 Classification ====
-        Some(MathSubOpcode::IsNanF64) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnan_src")?;
-            // NaN != NaN is true
-            let is_nan = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::UNO, a, a, "is_nan")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_nan, ctx.types().i64_type(), "is_nan_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::IsInfF64) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
-            let f64_ty = ctx.types().f64_type();
-            let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-            let module = ctx.get_module();
-            let abs_fn = module
-                .get_function("llvm.fabs.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
-            let abs_val = ctx
-                .builder()
-                .build_call(abs_fn, &[a.into()], "fabs")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
-                .into_float_value();
-            let inf = f64_ty.const_float(f64::INFINITY);
-            let is_inf = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::OEQ, abs_val, inf, "is_inf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_inf, ctx.types().i64_type(), "is_inf_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::IsFiniteF64) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
-            // finite = ordered comparison with itself (not NaN) AND not infinite
-            let f64_ty = ctx.types().f64_type();
-            let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-            let module = ctx.get_module();
-            let abs_fn = module
-                .get_function("llvm.fabs.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
-            let abs_val = ctx
-                .builder()
-                .build_call(abs_fn, &[a.into()], "fabs_finite")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
-                .into_float_value();
-            let inf = f64_ty.const_float(f64::INFINITY);
-            // finite means: not NaN AND not Inf => fabs(x) != Inf AND x == x
-            let is_not_inf = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::ONE, abs_val, inf, "not_inf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let is_ord = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::ORD, a, a, "is_ord")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let is_finite = ctx
-                .builder()
-                .build_and(is_not_inf, is_ord, "is_finite")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finite_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-
-        // ==== F32 Trigonometric (delegate to F64 — Verum uses f64 uniformly) ====
-        Some(MathSubOpcode::SinF32) => lower_math_unary_f64(ctx, operands, "llvm.sin.f64", "sinf"),
-        Some(MathSubOpcode::CosF32) => lower_math_unary_f64(ctx, operands, "llvm.cos.f64", "cosf"),
-        Some(MathSubOpcode::TanF32) => lower_math_unary_f64(ctx, operands, "tan", "tanf"),
-        Some(MathSubOpcode::AsinF32) => lower_math_unary_f64(ctx, operands, "asin", "asinf"),
-        Some(MathSubOpcode::AcosF32) => lower_math_unary_f64(ctx, operands, "acos", "acosf"),
-        Some(MathSubOpcode::AtanF32) => lower_math_unary_f64(ctx, operands, "atan", "atanf"),
-        Some(MathSubOpcode::Atan2F32) => lower_math_binary_f64(ctx, operands, "atan2", "atan2f"),
-
-        // ==== F32 Hyperbolic (delegate to F64) ====
-        Some(MathSubOpcode::SinhF32) => lower_math_unary_f64(ctx, operands, "sinh", "sinhf"),
-        Some(MathSubOpcode::CoshF32) => lower_math_unary_f64(ctx, operands, "cosh", "coshf"),
-        Some(MathSubOpcode::TanhF32) => lower_math_unary_f64(ctx, operands, "tanh", "tanhf"),
-        Some(MathSubOpcode::AsinhF32) => lower_math_unary_f64(ctx, operands, "asinh", "asinhf"),
-        Some(MathSubOpcode::AcoshF32) => lower_math_unary_f64(ctx, operands, "acosh", "acoshf"),
-        Some(MathSubOpcode::AtanhF32) => lower_math_unary_f64(ctx, operands, "atanh", "atanhf"),
-
-        // ==== F32 Exponential/Logarithmic (delegate to F64) ====
-        Some(MathSubOpcode::ExpF32) => lower_math_unary_f64(ctx, operands, "llvm.exp.f64", "expf"),
-        Some(MathSubOpcode::Exp2F32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.exp2.f64", "exp2f")
-        }
-        Some(MathSubOpcode::Expm1F32) => lower_math_unary_f64(ctx, operands, "expm1", "expm1f"),
-        Some(MathSubOpcode::LogF32) => lower_math_unary_f64(ctx, operands, "llvm.log.f64", "logf"),
-        Some(MathSubOpcode::Log2F32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.log2.f64", "log2f")
-        }
-        Some(MathSubOpcode::Log10F32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.log10.f64", "log10f")
-        }
-        Some(MathSubOpcode::Log1pF32) => lower_math_unary_f64(ctx, operands, "log1p", "log1pf"),
-
-        // ==== F32 Root/Power (delegate to F64) ====
-        Some(MathSubOpcode::SqrtF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.sqrt.f64", "sqrtf")
-        }
-        Some(MathSubOpcode::CbrtF32) => lower_math_unary_f64(ctx, operands, "cbrt", "cbrtf"),
-        Some(MathSubOpcode::PowF32) => lower_math_binary_f64(ctx, operands, "llvm.pow.f64", "powf"),
-        Some(MathSubOpcode::PowiF32) => lower_math_binary_f64(ctx, operands, "pow", "powif"),
-        Some(MathSubOpcode::HypotF32) => lower_math_binary_f64(ctx, operands, "hypot", "hypotf"),
-
-        // ==== F32 Rounding (delegate to F64) ====
-        Some(MathSubOpcode::FloorF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.floor.f64", "floorf")
-        }
-        Some(MathSubOpcode::CeilF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.ceil.f64", "ceilf")
-        }
-        Some(MathSubOpcode::RoundF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.round.f64", "roundf")
-        }
-        Some(MathSubOpcode::TruncF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.trunc.f64", "truncf")
-        }
-
-        // ==== F32 Special (delegate to F64) ====
-        Some(MathSubOpcode::AbsF32) => {
-            lower_math_unary_f64(ctx, operands, "llvm.fabs.f64", "fabsf")
-        }
-        Some(MathSubOpcode::CopysignF32) => {
-            lower_math_binary_f64(ctx, operands, "llvm.copysign.f64", "copysignf")
-        }
-        Some(MathSubOpcode::FmaF32) => {
-            // FMA F32: delegate to F64 llvm.fma.f64 (3-arg)
-            if operands.len() < 4 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmaf_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmaf_b")?;
-            let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fmaf_c")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let fma_fn = module
-                .get_function("llvm.fma.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fma.f64", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fmaf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("FMA F32: expected return value"))?;
-            ctx.set_register(dst, result);
-            Ok(())
-        }
-        Some(MathSubOpcode::FmodF32) => {
-            // fmod F32: LLVM frem (same as F64 — uniform f64 representation)
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmodf_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmodf_b")?;
-            let result = ctx
-                .builder()
-                .build_float_rem(a, b, "fmodf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::RemainderF32) => {
-            lower_math_binary_f64(ctx, operands, "remainder", "remainderf")
-        }
-        Some(MathSubOpcode::FdimF32) => lower_math_binary_f64(ctx, operands, "fdim", "fdimf"),
-        Some(MathSubOpcode::MinnumF32) => {
-            lower_math_binary_f64(ctx, operands, "llvm.minnum.f64", "minnumf")
-        }
-        Some(MathSubOpcode::MaxnumF32) => {
-            lower_math_binary_f64(ctx, operands, "llvm.maxnum.f64", "maxnumf")
-        }
-
-        // ==== F32 Classification (delegate to F64 — same logic) ====
-        Some(MathSubOpcode::IsNanF32) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnanf_src")?;
-            let is_nan = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::UNO, a, a, "is_nanf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_nan, ctx.types().i64_type(), "is_nanf_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::IsInfF32) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinff_src")?;
-            let f64_ty = ctx.types().f64_type();
-            let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-            let module = ctx.get_module();
-            let abs_fn = module
-                .get_function("llvm.fabs.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
-            let abs_val = ctx
-                .builder()
-                .build_call(abs_fn, &[a.into()], "fabsf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
-                .into_float_value();
-            let inf = f64_ty.const_float(f64::INFINITY);
-            let is_inf = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::OEQ, abs_val, inf, "is_inff")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_inf, ctx.types().i64_type(), "is_inff_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(MathSubOpcode::IsFiniteF32) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinitef_src")?;
-            let f64_ty = ctx.types().f64_type();
-            let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-            let module = ctx.get_module();
-            let abs_fn = module
-                .get_function("llvm.fabs.f64")
-                .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
-            let abs_val = ctx
-                .builder()
-                .build_call(abs_fn, &[a.into()], "fabsf_finite")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
-                .into_float_value();
-            let inf = f64_ty.const_float(f64::INFINITY);
-            let is_not_inf = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::ONE, abs_val, inf, "not_inff")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let is_ord = ctx
-                .builder()
-                .build_float_compare(FloatPredicate::ORD, a, a, "is_ordf")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let is_finite = ctx
-                .builder()
-                .build_and(is_not_inf, is_ord, "is_finitef")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let result = ctx
-                .builder()
-                .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finitef_i64")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-
+    // --- Generic dispatch via meta()-driven LLVM intrinsic + operand count ---
+    //
+    // Verum lowers all math through f64 representation, so for F32
+    // ops we use the F64 sibling's intrinsic name; for F64 ops the
+    // sibling IS the op itself, so this is identity.  See
+    // `MathSubOpcode::f64_sibling()` for the structural mapping.
+    let intrinsic_name = op.f64_sibling().llvm_intrinsic();
+    debug_assert!(intrinsic_name.starts_with("llvm."),
+        "{:?}: f64-sibling intrinsic {:?} not in llvm.* namespace \
+         (no-libc invariant)", op, intrinsic_name);
+    // Re-use the variant mnemonic as the SSA value debug label —
+    // self-documenting and unique per op.
+    let label = op.mnemonic();
+    match op.operand_count() {
+        1 => lower_math_unary_f64(ctx, operands, intrinsic_name, label),
+        2 => lower_math_binary_f64(ctx, operands, intrinsic_name, label),
         _ => {
+            // operand_count() returns 3 only for Fma{F64,F32}, both
+            // handled in the special-case match above.  Anything
+            // else is a metadata bug.
             ctx.emit_unimplemented_sub_op("MathExtended", sub_op);
             Ok(())
         }
     }
+}
+
+/// FMA: `dst = a * b + c` — invokes `@llvm.fma.f64` with three
+/// f64 operands.  Shared by `FmaF64` and `FmaF32` (per Verum's
+/// f64-uniform codegen).
+fn lower_fma_via_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 4 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
+    let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
+    let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
+    let f64_ty = ctx.types().f64_type();
+    let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
+    let module = ctx.get_module();
+    let fma_fn = module
+        .get_function("llvm.fma.f64")
+        .unwrap_or_else(|| module.add_function("llvm.fma.f64", fn_type, None));
+    let result = ctx
+        .builder()
+        .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmLoweringError::internal("FMA: expected return value"))?;
+    ctx.set_register(dst, result);
+    Ok(())
+}
+
+/// fmod via LLVM `frem` instruction — semantically equivalent to
+/// the C `fmod` function (truncated remainder).  No intrinsic
+/// call; LLVM lowers `frem` directly.  Shared by F64 + F32.
+fn lower_fmod_via_frem<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fmod_a")?;
+    let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fmod_b")?;
+    let result = ctx
+        .builder()
+        .build_float_rem(a, b, "fmod")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `is_nan(x)`: NaN ≠ NaN — emit an unordered-equal compare
+/// (`fcmp uno`) and z-extend the resulting i1 to i64.
+fn lower_is_nan_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnan_src")?;
+    let is_nan = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::UNO, a, a, "is_nan")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let result = ctx
+        .builder()
+        .build_int_z_extend(is_nan, ctx.types().i64_type(), "is_nan_i64")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `is_infinite(x)`: |x| == INF.  Uses `@llvm.fabs.f64` to take
+/// the magnitude, then ordered-equals against IEEE-754 +Inf.
+fn lower_is_inf_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
+    let f64_ty = ctx.types().f64_type();
+    let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
+    let module = ctx.get_module();
+    let abs_fn = module
+        .get_function("llvm.fabs.f64")
+        .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
+    let abs_val = ctx
+        .builder()
+        .build_call(abs_fn, &[a.into()], "fabs")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
+        .into_float_value();
+    let inf = f64_ty.const_float(f64::INFINITY);
+    let is_inf = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::OEQ, abs_val, inf, "is_inf")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let result = ctx
+        .builder()
+        .build_int_z_extend(is_inf, ctx.types().i64_type(), "is_inf_i64")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.set_register(dst, result.into());
+    Ok(())
+}
+
+/// `is_finite(x)`: ¬NaN ∧ ¬Inf — combines an ordered self-compare
+/// (`fcmp ord`) with `|x| ≠ INF`.
+fn lower_is_finite_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
+    let f64_ty = ctx.types().f64_type();
+    let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
+    let module = ctx.get_module();
+    let abs_fn = module
+        .get_function("llvm.fabs.f64")
+        .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
+    let abs_val = ctx
+        .builder()
+        .build_call(abs_fn, &[a.into()], "fabs_finite")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmLoweringError::internal("fabs: expected return value"))?
+        .into_float_value();
+    let inf = f64_ty.const_float(f64::INFINITY);
+    let is_not_inf = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::ONE, abs_val, inf, "not_inf")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let is_ord = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::ORD, a, a, "is_ord")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let is_finite = ctx
+        .builder()
+        .build_and(is_not_inf, is_ord, "is_finite")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    let result = ctx
+        .builder()
+        .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finite_i64")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.set_register(dst, result.into());
+    Ok(())
 }
 
 /// Lower TextExtended instruction to LLVM IR.

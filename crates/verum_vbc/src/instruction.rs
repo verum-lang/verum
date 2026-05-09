@@ -7872,6 +7872,79 @@ impl MathSubOpcode {
     pub fn mlir_op(self) -> Option<&'static str> {
         self.meta().mlir_op
     }
+
+    /// Returns the F64 variant of this operation.
+    ///
+    /// For F64 variants, returns `self`.  For F32 variants,
+    /// returns the structurally-paired F64 sibling (`SinF32 →
+    /// SinF64`, `PowF32 → PowF64`, etc.).
+    ///
+    /// Used by the LLVM codegen lowering path
+    /// (`lower_math_extended` in
+    /// `crates/verum_codegen/src/llvm/instruction.rs`) which
+    /// converts every floating-point operand through f64
+    /// representation before invoking the corresponding LLVM
+    /// intrinsic.  Calling `op.f64_sibling().llvm_intrinsic()`
+    /// at the lowering site produces the canonical
+    /// `@llvm.<op>.f64` name; routing through this method
+    /// closes the legacy drift defect where 26 lowering arms
+    /// hardcoded *libc* names (`"tan"`, `"asin"`, `"sinh"`,
+    /// `"cbrt"`, `"hypot"`, `"remainder"`, `"fdim"`, `"expm1"`,
+    /// `"log1p"`, `"pow"` for powi) — declaring external libc
+    /// symbols at AOT link, violating the no-libc invariant.
+    pub const fn f64_sibling(self) -> Self {
+        match self {
+            // ===== Trigonometric F32 → F64 =====
+            Self::SinF32    => Self::SinF64,
+            Self::CosF32    => Self::CosF64,
+            Self::TanF32    => Self::TanF64,
+            Self::AsinF32   => Self::AsinF64,
+            Self::AcosF32   => Self::AcosF64,
+            Self::AtanF32   => Self::AtanF64,
+            Self::Atan2F32  => Self::Atan2F64,
+            // ===== Hyperbolic F32 → F64 =====
+            Self::SinhF32   => Self::SinhF64,
+            Self::CoshF32   => Self::CoshF64,
+            Self::TanhF32   => Self::TanhF64,
+            Self::AsinhF32  => Self::AsinhF64,
+            Self::AcoshF32  => Self::AcoshF64,
+            Self::AtanhF32  => Self::AtanhF64,
+            // ===== Exponential / Logarithmic F32 → F64 =====
+            Self::ExpF32    => Self::ExpF64,
+            Self::Exp2F32   => Self::Exp2F64,
+            Self::Expm1F32  => Self::Expm1F64,
+            Self::LogF32    => Self::LogF64,
+            Self::Log2F32   => Self::Log2F64,
+            Self::Log10F32  => Self::Log10F64,
+            Self::Log1pF32  => Self::Log1pF64,
+            // ===== Root / Power F32 → F64 =====
+            Self::SqrtF32   => Self::SqrtF64,
+            Self::CbrtF32   => Self::CbrtF64,
+            Self::HypotF32  => Self::HypotF64,
+            Self::PowF32    => Self::PowF64,
+            Self::PowiF32   => Self::PowiF64,
+            // ===== Rounding F32 → F64 =====
+            Self::FloorF32  => Self::FloorF64,
+            Self::CeilF32   => Self::CeilF64,
+            Self::RoundF32  => Self::RoundF64,
+            Self::TruncF32  => Self::TruncF64,
+            // ===== Special F32 → F64 =====
+            Self::AbsF32       => Self::AbsF64,
+            Self::CopysignF32  => Self::CopysignF64,
+            Self::FmaF32       => Self::FmaF64,
+            Self::FmodF32      => Self::FmodF64,
+            Self::RemainderF32 => Self::RemainderF64,
+            Self::FdimF32      => Self::FdimF64,
+            Self::MinnumF32    => Self::MinnumF64,
+            Self::MaxnumF32    => Self::MaxnumF64,
+            // ===== Classification F32 → F64 =====
+            Self::IsNanF32    => Self::IsNanF64,
+            Self::IsInfF32    => Self::IsInfF64,
+            Self::IsFiniteF32 => Self::IsFiniteF64,
+            // ===== F64 variants are their own sibling =====
+            other => other,
+        }
+    }
 }
 
 // ============================================================================
@@ -16129,6 +16202,42 @@ mod tests {
         assert_eq!(count, 80,
             "MathSubOpcode variant count drift: expected 80, got {}",
             count);
+    }
+
+    #[test]
+    fn math_meta_f64_sibling_invariants() {
+        // Every f64_sibling result must have width=F64, and
+        // every F64 variant must be its own sibling.  This pins
+        // the contract relied on by `lower_math_extended` in the
+        // LLVM codegen — passing `op.f64_sibling().llvm_intrinsic()`
+        // to the lowering helper must always yield an
+        // `@llvm.*.f64` name.
+        for_every_math_sub_opcode(|op| {
+            let sibling = op.f64_sibling();
+            assert_eq!(sibling.meta().width, FloatWidth::F64,
+                "{:?}: f64_sibling() yielded {:?} which is not F64-width",
+                op, sibling);
+            // F64 variants are their own sibling; F32 variants
+            // map to a *different* F64 variant.
+            match op.meta().width {
+                FloatWidth::F64 => assert_eq!(sibling, op,
+                    "{:?}: F64 variant must be its own f64_sibling, got {:?}",
+                    op, sibling),
+                FloatWidth::F32 => assert_ne!(sibling, op,
+                    "{:?}: F32 variant must map to a different F64 sibling",
+                    op),
+            }
+            // The sibling's llvm_intrinsic must be a canonical
+            // `@llvm.*.f64` name (modulo the powi `.i32` exception).
+            let intrinsic = sibling.llvm_intrinsic();
+            let core = intrinsic.trim_end_matches(".i32");
+            assert!(intrinsic.starts_with("llvm."),
+                "{:?}: f64_sibling intrinsic {:?} not in `llvm.*` namespace",
+                op, intrinsic);
+            assert!(core.ends_with(".f64"),
+                "{:?}: f64_sibling intrinsic {:?} not f64-suffixed",
+                op, intrinsic);
+        });
     }
 
     // ========================================================================
