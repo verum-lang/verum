@@ -21,6 +21,37 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Per-variant projection for [`OutputFormat`].
+#[derive(Debug, Clone, Copy)]
+pub struct OutputFormatMeta {
+    pub name: &'static str,
+}
+
+impl OutputFormat {
+    pub const ALL: &'static [Self] = &[Self::Human, Self::Json];
+
+    pub const fn meta(self) -> OutputFormatMeta {
+        match self {
+            Self::Human => OutputFormatMeta { name: "human" },
+            Self::Json => OutputFormatMeta { name: "json" },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+}
+
 /// Verification mode for refinement types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum VerifyMode {
@@ -35,6 +66,68 @@ pub enum VerifyMode {
     Auto,
 }
 
+/// Per-variant projection for [`VerifyMode`].
+///
+/// `use_smt` and `use_runtime` were previously two parallel
+/// matches!(); now they live next to `name` so any new variant must
+/// classify itself once.
+#[derive(Debug, Clone, Copy)]
+pub struct VerifyModeMeta {
+    pub name: &'static str,
+    pub use_smt: bool,
+    pub use_runtime: bool,
+}
+
+impl VerifyMode {
+    pub const ALL: &'static [Self] = &[Self::Runtime, Self::Proof, Self::Auto];
+
+    pub const fn meta(self) -> VerifyModeMeta {
+        match self {
+            Self::Runtime => VerifyModeMeta {
+                name: "runtime",
+                use_smt: false,
+                use_runtime: true,
+            },
+            Self::Proof => VerifyModeMeta {
+                name: "proof",
+                use_smt: true,
+                use_runtime: false,
+            },
+            Self::Auto => VerifyModeMeta {
+                name: "auto",
+                use_smt: true,
+                use_runtime: true,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Should use SMT solver for this mode?
+    #[inline]
+    pub const fn use_smt(&self) -> bool {
+        self.meta().use_smt
+    }
+
+    /// Should use runtime checks?
+    #[inline]
+    pub const fn use_runtime(&self) -> bool {
+        self.meta().use_runtime
+    }
+}
+
 /// Link-Time Optimization mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LtoMode {
@@ -44,14 +137,43 @@ pub enum LtoMode {
     Full,
 }
 
+/// Per-variant projection for [`LtoMode`] (the compiler-side LTO mode
+/// — distinct from `verum_ast::attr::LtoMode` which has 3 variants
+/// covering the `@lto(none|always|thin)` attribute surface).
+#[derive(Debug, Clone, Copy)]
+pub struct LtoModeMeta {
+    pub name: &'static str,
+}
+
 impl LtoMode {
-    /// Parse LTO mode from string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "thin" => Some(LtoMode::Thin),
-            "full" => Some(LtoMode::Full),
-            _ => None,
+    pub const ALL: &'static [Self] = &[Self::Thin, Self::Full];
+
+    pub const fn meta(self) -> LtoModeMeta {
+        match self {
+            Self::Thin => LtoModeMeta { name: "thin" },
+            Self::Full => LtoModeMeta { name: "full" },
         }
+    }
+
+    /// Parse LTO mode from string (case-insensitive — preserved
+    /// behaviour from the legacy implementation).
+    pub fn from_str(s: &str) -> Option<Self> {
+        let lowered = s.to_lowercase();
+        for v in Self::ALL {
+            if v.meta().name == lowered.as_str() {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical lowercase name. Closes a drift defect: previously
+    /// `from_str` was present but no symmetric `as_str` existed, so
+    /// callers had no way to format an LtoMode back into its
+    /// command-line form (e.g. for diagnostic output).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -71,15 +193,90 @@ pub enum EmitMode {
     Object,
 }
 
-impl VerifyMode {
-    /// Should use SMT solver for this mode?
-    pub fn use_smt(&self) -> bool {
-        matches!(self, VerifyMode::Proof | VerifyMode::Auto)
+/// Per-variant projection for [`EmitMode`].
+///
+/// `is_terminal` distinguishes the modes that REPLACE the executable
+/// as the final pipeline artifact (Assembly, Object — pipeline short-
+/// circuits before linking) from the modes that emit *alongside* the
+/// executable (LlvmIr, Bitcode). Pinned by
+/// `emit_mode_terminal_modes_distinct_from_binary`.
+#[derive(Debug, Clone, Copy)]
+pub struct EmitModeMeta {
+    pub name: &'static str,
+    pub extension: &'static str,
+    pub is_terminal: bool,
+}
+
+impl EmitMode {
+    pub const ALL: &'static [Self] = &[
+        Self::Binary,
+        Self::Assembly,
+        Self::LlvmIr,
+        Self::Bitcode,
+        Self::Object,
+    ];
+
+    pub const fn meta(self) -> EmitModeMeta {
+        match self {
+            Self::Binary => EmitModeMeta {
+                name: "binary",
+                extension: "",
+                is_terminal: true,
+            },
+            Self::Assembly => EmitModeMeta {
+                name: "asm",
+                extension: "s",
+                is_terminal: true,
+            },
+            Self::LlvmIr => EmitModeMeta {
+                name: "llvm-ir",
+                extension: "ll",
+                is_terminal: false,
+            },
+            Self::Bitcode => EmitModeMeta {
+                name: "bitcode",
+                extension: "bc",
+                is_terminal: false,
+            },
+            Self::Object => EmitModeMeta {
+                name: "obj",
+                extension: "o",
+                is_terminal: true,
+            },
+        }
     }
 
-    /// Should use runtime checks?
-    pub fn use_runtime(&self) -> bool {
-        matches!(self, VerifyMode::Runtime | VerifyMode::Auto)
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical CLI / report name (`"binary"`, `"asm"`, `"llvm-ir"`,
+    /// `"bitcode"`, `"obj"`) — what the `--emit` flag accepts.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Conventional output-file extension (without the leading dot).
+    /// Empty for `Binary` since the binary's extension is platform-
+    /// derived (`""` on Unix, `"exe"` on Windows).
+    #[inline]
+    pub const fn extension(&self) -> &'static str {
+        self.meta().extension
+    }
+
+    /// `true` when this emit mode REPLACES the executable as the
+    /// pipeline's terminal artifact (Binary / Assembly / Object).
+    /// `false` when this mode emits *alongside* a normal build
+    /// (LlvmIr / Bitcode).
+    #[inline]
+    pub const fn is_terminal(&self) -> bool {
+        self.meta().is_terminal
     }
 }
 
@@ -863,5 +1060,175 @@ mod emit_mode_tests {
         assert_ne!(EmitMode::Assembly, EmitMode::Object);
         assert_ne!(EmitMode::LlvmIr, EmitMode::Assembly);
         assert_ne!(EmitMode::Bitcode, EmitMode::Object);
+    }
+
+    // -------------------------------------------------------------------
+    // meta() consolidation drift pins for the four enums in this file.
+    //
+    // Each pin closes one of these failure modes:
+    //   * Round-trip drift: from_str(x.as_str()) != Some(x).
+    //   * Variant coverage drift: a new variant lands without the
+    //     parallel meta() arm — caught by ALL.len() pins.
+    //   * Classification drift: use_smt / use_runtime / is_terminal
+    //     would silently disagree with their reference matches!.
+    // -------------------------------------------------------------------
+
+    fn round_trip_unique<T, const N: usize>(
+        kind: &str,
+        all: [T; N],
+        as_str: impl Fn(&T) -> &'static str,
+        from_str: impl Fn(&str) -> Option<T>,
+    ) where
+        T: std::fmt::Debug + Copy + PartialEq,
+    {
+        for v in all.iter() {
+            let s = as_str(v);
+            assert_eq!(
+                from_str(s),
+                Some(*v),
+                "{}: round-trip drift on {:?}",
+                kind,
+                v
+            );
+        }
+        let mut seen: Vec<&'static str> = Vec::new();
+        for v in all.iter() {
+            let s = as_str(v);
+            assert!(
+                !seen.contains(&s),
+                "{}: duplicate canonical name '{}'",
+                kind,
+                s
+            );
+            seen.push(s);
+        }
+        assert_eq!(seen.len(), N, "{}: ALL count mismatch", kind);
+        assert!(
+            from_str("__not_a_variant_string__").is_none(),
+            "{}: from_str accepted a bogus name",
+            kind
+        );
+    }
+
+    #[test]
+    fn output_format_round_trip_unique() {
+        round_trip_unique(
+            "OutputFormat",
+            [OutputFormat::Human, OutputFormat::Json],
+            |v| v.as_str(),
+            OutputFormat::from_str,
+        );
+        assert_eq!(OutputFormat::ALL.len(), 2);
+        // Default is Human (preserve historical CLI behaviour).
+        assert_eq!(OutputFormat::default(), OutputFormat::Human);
+    }
+
+    #[test]
+    fn verify_mode_round_trip_unique_and_classification() {
+        round_trip_unique(
+            "VerifyMode",
+            [VerifyMode::Runtime, VerifyMode::Proof, VerifyMode::Auto],
+            |v| v.as_str(),
+            VerifyMode::from_str,
+        );
+        assert_eq!(VerifyMode::ALL.len(), 3);
+        // use_smt / use_runtime classification — meta-derived
+        // projections agree with hand-written reference matches!.
+        for v in VerifyMode::ALL {
+            let expected_smt =
+                matches!(v, VerifyMode::Proof | VerifyMode::Auto);
+            let expected_runtime =
+                matches!(v, VerifyMode::Runtime | VerifyMode::Auto);
+            assert_eq!(v.use_smt(), expected_smt, "VerifyMode::{:?}: use_smt", v);
+            assert_eq!(
+                v.use_runtime(),
+                expected_runtime,
+                "VerifyMode::{:?}: use_runtime",
+                v
+            );
+            // Cross-cutting: Auto is the only mode with both true;
+            // Runtime is the only one with use_runtime && !use_smt;
+            // Proof is the only one with use_smt && !use_runtime.
+            match v {
+                VerifyMode::Runtime => {
+                    assert!(v.use_runtime() && !v.use_smt())
+                }
+                VerifyMode::Proof => {
+                    assert!(v.use_smt() && !v.use_runtime())
+                }
+                VerifyMode::Auto => {
+                    assert!(v.use_smt() && v.use_runtime())
+                }
+            }
+        }
+        // Default is Auto (the safe-but-fast heuristic).
+        assert_eq!(VerifyMode::default(), VerifyMode::Auto);
+    }
+
+    #[test]
+    fn lto_mode_round_trip_unique_case_insensitive() {
+        round_trip_unique(
+            "LtoMode",
+            [LtoMode::Thin, LtoMode::Full],
+            |v| v.as_str(),
+            LtoMode::from_str,
+        );
+        assert_eq!(LtoMode::ALL.len(), 2);
+        // Case-insensitivity preserved from the legacy impl.
+        assert_eq!(LtoMode::from_str("THIN"), Some(LtoMode::Thin));
+        assert_eq!(LtoMode::from_str("Full"), Some(LtoMode::Full));
+    }
+
+    #[test]
+    fn emit_mode_round_trip_unique_and_terminal_classification() {
+        round_trip_unique(
+            "EmitMode",
+            [
+                EmitMode::Binary,
+                EmitMode::Assembly,
+                EmitMode::LlvmIr,
+                EmitMode::Bitcode,
+                EmitMode::Object,
+            ],
+            |v| v.as_str(),
+            EmitMode::from_str,
+        );
+        assert_eq!(EmitMode::ALL.len(), 5);
+
+        // Terminal classification — meta-derived projections agree
+        // with the legacy "Assembly/Object replace executable;
+        // LlvmIr/Bitcode emit alongside" pin above.
+        for v in EmitMode::ALL {
+            let expected_terminal = matches!(
+                v,
+                EmitMode::Binary | EmitMode::Assembly | EmitMode::Object
+            );
+            assert_eq!(
+                v.is_terminal(),
+                expected_terminal,
+                "EmitMode::{:?}: is_terminal drift",
+                v
+            );
+        }
+        // Exactly 3 terminal modes (Binary/Assembly/Object) and 2
+        // additive modes (LlvmIr/Bitcode).
+        assert_eq!(
+            EmitMode::ALL.iter().filter(|v| v.is_terminal()).count(),
+            3
+        );
+        assert_eq!(
+            EmitMode::ALL.iter().filter(|v| !v.is_terminal()).count(),
+            2
+        );
+
+        // Extension spot-pins. Binary's extension is the empty string
+        // because the actual binary extension is platform-derived
+        // (`""` on Unix, `"exe"` on Windows) — encoding it here would
+        // tie this enum to a target.
+        assert_eq!(EmitMode::Binary.extension(), "");
+        assert_eq!(EmitMode::Assembly.extension(), "s");
+        assert_eq!(EmitMode::LlvmIr.extension(), "ll");
+        assert_eq!(EmitMode::Bitcode.extension(), "bc");
+        assert_eq!(EmitMode::Object.extension(), "o");
     }
 }
