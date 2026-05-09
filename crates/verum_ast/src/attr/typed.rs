@@ -6619,27 +6619,40 @@ pub enum ExtractTarget {
     Coq,
 }
 
+/// Per-variant projection for [`ExtractTarget`].
+#[derive(Debug, Clone, Copy)]
+pub struct ExtractTargetMeta {
+    pub name: &'static str,
+}
+
 impl ExtractTarget {
+    pub const ALL: &'static [Self] = &[Self::Verum, Self::OCaml, Self::Lean, Self::Coq];
+
+    pub const fn meta(self) -> ExtractTargetMeta {
+        match self {
+            Self::Verum => ExtractTargetMeta { name: "verum" },
+            Self::OCaml => ExtractTargetMeta { name: "ocaml" },
+            Self::Lean => ExtractTargetMeta { name: "lean" },
+            Self::Coq => ExtractTargetMeta { name: "coq" },
+        }
+    }
+
     /// Parse a target identifier (case-insensitive: `verum` / `ocaml` /
     /// `lean` / `coq`). Returns `None` for unknown targets so the caller
     /// can surface a precise diagnostic.
     pub fn from_ident(ident: &str) -> Option<Self> {
-        match ident.to_ascii_lowercase().as_str() {
-            "verum" => Some(Self::Verum),
-            "ocaml" => Some(Self::OCaml),
-            "lean" => Some(Self::Lean),
-            "coq" => Some(Self::Coq),
-            _ => None,
+        let lowered = ident.to_ascii_lowercase();
+        for v in Self::ALL {
+            if v.meta().name == lowered.as_str() {
+                return Some(*v);
+            }
         }
+        None
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Verum => "verum",
-            Self::OCaml => "ocaml",
-            Self::Lean => "lean",
-            Self::Coq => "coq",
-        }
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -7280,12 +7293,61 @@ pub enum ExtensionToggleKind {
     Disable,
 }
 
+/// Per-variant projection for [`ExtensionToggleKind`].
+///
+/// `name` is the attribute-name form returned by `as_str` (the same
+/// string that `@require_extension(...)` / `@disable_extension(...)`
+/// uses on the wire). `is_opt_in` distinguishes the two policy
+/// directions explicitly so the elaborator can run the require / disable
+/// walks symmetrically without re-pattern-matching.
+#[derive(Debug, Clone, Copy)]
+pub struct ExtensionToggleKindMeta {
+    pub name: &'static str,
+    pub is_opt_in: bool,
+}
+
 impl ExtensionToggleKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[Self::Require, Self::Disable];
+
+    pub const fn meta(self) -> ExtensionToggleKindMeta {
         match self {
-            ExtensionToggleKind::Require => "require_extension",
-            ExtensionToggleKind::Disable => "disable_extension",
+            Self::Require => ExtensionToggleKindMeta {
+                name: "require_extension",
+                is_opt_in: true,
+            },
+            Self::Disable => ExtensionToggleKindMeta {
+                name: "disable_extension",
+                is_opt_in: false,
+            },
         }
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse an extension-toggle attribute name back to a typed
+    /// `ExtensionToggleKind`. Closes a drift defect: `as_str` was
+    /// present but no inverse mapping existed, so consumers had no
+    /// symmetric way to recover the typed form from a serialised
+    /// attribute name.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// True for `Require` (opt-in policy direction).
+    #[inline]
+    pub const fn is_opt_in(&self) -> bool {
+        self.meta().is_opt_in
     }
 }
 
@@ -7758,30 +7820,100 @@ pub enum Owl2Characteristic {
     InverseFunctional,
 }
 
+/// Per-variant projection for [`Owl2Characteristic`].
+///
+/// `is_unary_compat` flags the four characteristics whose witness
+/// shape on functions is single-argument-symmetric (Symmetric /
+/// Asymmetric / Reflexive / Irreflexive); `is_functionality` flags
+/// the two functionality variants (Functional / InverseFunctional);
+/// the remaining `Transitive` is the lone purely-binary structural
+/// flag. This three-way partition is not load-bearing on the wire
+/// form but lets diagnostic passes route per-bucket warnings
+/// without re-reading the doc comments.
+#[derive(Debug, Clone, Copy)]
+pub struct Owl2CharacteristicMeta {
+    pub name: &'static str,
+    pub is_unary_compat: bool,
+    pub is_functionality: bool,
+}
+
 impl Owl2Characteristic {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::Transitive,
+        Self::Symmetric,
+        Self::Asymmetric,
+        Self::Reflexive,
+        Self::Irreflexive,
+        Self::Functional,
+        Self::InverseFunctional,
+    ];
+
+    pub const fn meta(self) -> Owl2CharacteristicMeta {
         match self {
-            Self::Transitive => "Transitive",
-            Self::Symmetric => "Symmetric",
-            Self::Asymmetric => "Asymmetric",
-            Self::Reflexive => "Reflexive",
-            Self::Irreflexive => "Irreflexive",
-            Self::Functional => "Functional",
-            Self::InverseFunctional => "InverseFunctional",
+            Self::Transitive => Owl2CharacteristicMeta {
+                name: "Transitive",
+                is_unary_compat: false,
+                is_functionality: false,
+            },
+            Self::Symmetric => Owl2CharacteristicMeta {
+                name: "Symmetric",
+                is_unary_compat: true,
+                is_functionality: false,
+            },
+            Self::Asymmetric => Owl2CharacteristicMeta {
+                name: "Asymmetric",
+                is_unary_compat: true,
+                is_functionality: false,
+            },
+            Self::Reflexive => Owl2CharacteristicMeta {
+                name: "Reflexive",
+                is_unary_compat: true,
+                is_functionality: false,
+            },
+            Self::Irreflexive => Owl2CharacteristicMeta {
+                name: "Irreflexive",
+                is_unary_compat: true,
+                is_functionality: false,
+            },
+            Self::Functional => Owl2CharacteristicMeta {
+                name: "Functional",
+                is_unary_compat: false,
+                is_functionality: true,
+            },
+            Self::InverseFunctional => Owl2CharacteristicMeta {
+                name: "InverseFunctional",
+                is_unary_compat: false,
+                is_functionality: true,
+            },
         }
     }
 
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a Shkotin Table 6 characteristic name (PascalCase, exact
+    /// match). Existing callers chain `.and_then(parse)` on string
+    /// arguments — the signature is kept (`Option<Self>`) intentionally
+    /// to avoid touching the parse-time call sites.
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "Transitive" => Some(Self::Transitive),
-            "Symmetric" => Some(Self::Symmetric),
-            "Asymmetric" => Some(Self::Asymmetric),
-            "Reflexive" => Some(Self::Reflexive),
-            "Irreflexive" => Some(Self::Irreflexive),
-            "Functional" => Some(Self::Functional),
-            "InverseFunctional" => Some(Self::InverseFunctional),
-            _ => None,
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    #[inline]
+    pub const fn is_unary_compat(&self) -> bool {
+        self.meta().is_unary_compat
+    }
+
+    #[inline]
+    pub const fn is_functionality(&self) -> bool {
+        self.meta().is_functionality
     }
 }
 
@@ -8279,45 +8411,111 @@ pub enum Quantity {
     Many,
 }
 
+/// Per-variant projection for [`Quantity`].
+///
+/// The Atkey QTT quantity has two surface forms (ASCII via
+/// `as_str` for serialisation; Unicode via `surface_glyph` for
+/// diagnostics), three boolean projections (`is_finite` / `is_linear`
+/// / `is_erased`), and a multi-form parse alias table. All of that
+/// is now a single per-variant projection. The `aliases` slice
+/// excludes `name` itself; callers that need the full accept set
+/// look at both.
+#[derive(Debug, Clone, Copy)]
+pub struct QuantityMeta {
+    /// Canonical ASCII form returned by `as_str` (`"0"` / `"1"` /
+    /// `"omega"`).
+    pub name: &'static str,
+    /// Unicode glyph for diagnostics (`"0"` / `"1"` / `"ω"`).
+    pub glyph: &'static str,
+    /// Extra surface forms accepted by `parse` beyond the canonical
+    /// `name` and `glyph`.
+    pub aliases: &'static [&'static str],
+    pub is_finite: bool,
+    pub is_linear: bool,
+    pub is_erased: bool,
+}
+
 impl Quantity {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[Self::Zero, Self::One, Self::Many];
+
+    pub const fn meta(self) -> QuantityMeta {
         match self {
-            Self::Zero => "0",
-            Self::One => "1",
-            Self::Many => "omega",
+            Self::Zero => QuantityMeta {
+                name: "0",
+                glyph: "0",
+                aliases: &["Zero", "zero", "erased"],
+                is_finite: true,
+                is_linear: false,
+                is_erased: true,
+            },
+            Self::One => QuantityMeta {
+                name: "1",
+                glyph: "1",
+                aliases: &["One", "one", "linear"],
+                is_finite: true,
+                is_linear: true,
+                is_erased: false,
+            },
+            Self::Many => QuantityMeta {
+                name: "omega",
+                glyph: "ω",
+                aliases: &["Many", "many", "unrestricted"],
+                is_finite: false,
+                is_linear: false,
+                is_erased: false,
+            },
         }
     }
 
-    pub fn surface_glyph(&self) -> &'static str {
-        match self {
-            Self::Zero => "0",
-            Self::One => "1",
-            Self::Many => "ω",
-        }
+    /// Canonical ASCII form (`"0"` / `"1"` / `"omega"`) used at
+    /// serialisation boundaries.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Diagnostic-friendly Unicode glyph (`"0"` / `"1"` / `"ω"`).
+    #[inline]
+    pub const fn surface_glyph(&self) -> &'static str {
+        self.meta().glyph
     }
 
     /// True iff this quantity admits at most one use (Zero or One).
-    pub fn is_finite(&self) -> bool {
-        matches!(self, Self::Zero | Self::One)
+    #[inline]
+    pub const fn is_finite(&self) -> bool {
+        self.meta().is_finite
     }
 
     /// True iff this quantity demands exactly one use.
-    pub fn is_linear(&self) -> bool {
-        matches!(self, Self::One)
+    #[inline]
+    pub const fn is_linear(&self) -> bool {
+        self.meta().is_linear
     }
 
     /// True iff this quantity demands zero uses (erased).
-    pub fn is_erased(&self) -> bool {
-        matches!(self, Self::Zero)
+    #[inline]
+    pub const fn is_erased(&self) -> bool {
+        self.meta().is_erased
     }
 
+    /// Parse any of the accepted surface forms — canonical `name`,
+    /// Unicode `glyph`, or any explicit alias from `meta().aliases`.
+    /// Existing callers chain `.and_then(Quantity::parse)` on
+    /// `Option<Text>`; the `Option<Self>` signature is preserved
+    /// for source compatibility.
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "0" | "Zero" | "zero" | "erased" => Some(Self::Zero),
-            "1" | "One" | "one" | "linear" => Some(Self::One),
-            "omega" | "ω" | "Many" | "many" | "unrestricted" => Some(Self::Many),
-            _ => None,
+        for v in Self::ALL {
+            let m = v.meta();
+            if m.name == s || m.glyph == s {
+                return Some(*v);
+            }
+            for alias in m.aliases {
+                if *alias == s {
+                    return Some(*v);
+                }
+            }
         }
+        None
     }
 }
 

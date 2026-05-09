@@ -1827,6 +1827,231 @@ mod meta_consolidation_pins {
     }
 
     #[test]
+    fn extract_target_round_trip_unique_case_insensitive() {
+        let all = [
+            ExtractTarget::Verum.as_str(),
+            ExtractTarget::OCaml.as_str(),
+            ExtractTarget::Lean.as_str(),
+            ExtractTarget::Coq.as_str(),
+        ];
+        assert_eq!(ExtractTarget::ALL.len(), 4);
+        // `from_ident` is case-insensitive — round-trip with lowercase.
+        assert_round_trip_unique("ExtractTarget", all, |s| {
+            match ExtractTarget::from_ident(s) {
+                Some(v) => Maybe::Some(v.as_str()),
+                None => Maybe::None,
+            }
+        });
+        // PascalCase / mixed case parse to the same lowercase canonical
+        // form (the case-insensitivity contract — would silently break
+        // if `meta().name` ever held mixed-case).
+        for v in ExtractTarget::ALL {
+            let lowered = v.as_str().to_string();
+            let mixed = lowered
+                .chars()
+                .enumerate()
+                .map(|(i, c)| {
+                    if i == 0 {
+                        c.to_ascii_uppercase()
+                    } else {
+                        c
+                    }
+                })
+                .collect::<String>();
+            assert_eq!(
+                ExtractTarget::from_ident(&mixed),
+                Some(*v),
+                "ExtractTarget::{:?}: mixed-case '{}' must parse",
+                v,
+                mixed
+            );
+        }
+        // Negative pin: rust is not a target.
+        assert_eq!(ExtractTarget::from_ident("rust"), None);
+        assert_eq!(ExtractTarget::from_ident(""), None);
+    }
+
+    #[test]
+    fn extension_toggle_kind_round_trip_unique_and_opt_in_classification() {
+        let all = [
+            ExtensionToggleKind::Require.as_str(),
+            ExtensionToggleKind::Disable.as_str(),
+        ];
+        assert_eq!(ExtensionToggleKind::ALL.len(), 2);
+        // `from_str` is the new symmetric inverse — drift fix.
+        assert_round_trip_unique("ExtensionToggleKind", all, |s| {
+            match ExtensionToggleKind::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+        // is_opt_in: only Require is opt-in.
+        assert!(ExtensionToggleKind::Require.is_opt_in());
+        assert!(!ExtensionToggleKind::Disable.is_opt_in());
+        // Cross-pin: exactly one variant per direction.
+        let opt_in_count = ExtensionToggleKind::ALL
+            .iter()
+            .filter(|v| v.is_opt_in())
+            .count();
+        assert_eq!(opt_in_count, 1, "exactly one opt-in direction");
+        // Wire-form spot: as_str returns the attribute-name form.
+        assert_eq!(
+            ExtensionToggleKind::Require.as_str(),
+            "require_extension"
+        );
+        assert_eq!(
+            ExtensionToggleKind::Disable.as_str(),
+            "disable_extension"
+        );
+    }
+
+    #[test]
+    fn owl2_characteristic_round_trip_unique_and_partition() {
+        let all = [
+            Owl2Characteristic::Transitive.as_str(),
+            Owl2Characteristic::Symmetric.as_str(),
+            Owl2Characteristic::Asymmetric.as_str(),
+            Owl2Characteristic::Reflexive.as_str(),
+            Owl2Characteristic::Irreflexive.as_str(),
+            Owl2Characteristic::Functional.as_str(),
+            Owl2Characteristic::InverseFunctional.as_str(),
+        ];
+        assert_eq!(Owl2Characteristic::ALL.len(), 7);
+        assert_round_trip_unique("Owl2Characteristic", all, |s| {
+            match Owl2Characteristic::parse(s) {
+                Some(v) => Maybe::Some(v.as_str()),
+                None => Maybe::None,
+            }
+        });
+        // Three-way partition: exactly four unary_compat (Symmetric/
+        // Asymmetric/Reflexive/Irreflexive), exactly two functionality
+        // (Functional/InverseFunctional), and the lone Transitive.
+        let unary_compat_count = Owl2Characteristic::ALL
+            .iter()
+            .filter(|v| v.is_unary_compat())
+            .count();
+        let functionality_count = Owl2Characteristic::ALL
+            .iter()
+            .filter(|v| v.is_functionality())
+            .count();
+        let neither_count = Owl2Characteristic::ALL
+            .iter()
+            .filter(|v| !v.is_unary_compat() && !v.is_functionality())
+            .count();
+        assert_eq!(unary_compat_count, 4);
+        assert_eq!(functionality_count, 2);
+        assert_eq!(neither_count, 1, "Transitive is the lone non-bucketed");
+        // Disjointness: no variant is in both buckets.
+        for v in Owl2Characteristic::ALL {
+            assert!(
+                !(v.is_unary_compat() && v.is_functionality()),
+                "Owl2Characteristic::{:?}: buckets must be disjoint",
+                v
+            );
+        }
+        // Spec-form spot pins (Shkotin Table 6).
+        assert_eq!(
+            Owl2Characteristic::InverseFunctional.as_str(),
+            "InverseFunctional"
+        );
+        assert_eq!(
+            Owl2Characteristic::parse("InverseFunctional"),
+            Some(Owl2Characteristic::InverseFunctional)
+        );
+    }
+
+    #[test]
+    fn quantity_round_trip_unique_aliases_glyphs_and_classification() {
+        let all = [
+            Quantity::Zero.as_str(),
+            Quantity::One.as_str(),
+            Quantity::Many.as_str(),
+        ];
+        assert_eq!(Quantity::ALL.len(), 3);
+        assert_round_trip_unique("Quantity", all, |s| match Quantity::parse(s) {
+            Some(v) => Maybe::Some(v.as_str()),
+            None => Maybe::None,
+        });
+        // Surface glyph round-trips back to the same variant.
+        for v in Quantity::ALL {
+            assert_eq!(
+                Quantity::parse(v.surface_glyph()),
+                Some(*v),
+                "Quantity::{:?}: glyph '{}' must parse back",
+                v,
+                v.surface_glyph()
+            );
+        }
+        // Multi-form alias pin — every entry in `meta().aliases` parses
+        // to the variant. Catches an alias getting silently dropped
+        // when the parse logic is rewritten.
+        let alias_pins: &[(&str, Quantity)] = &[
+            ("0", Quantity::Zero),
+            ("Zero", Quantity::Zero),
+            ("zero", Quantity::Zero),
+            ("erased", Quantity::Zero),
+            ("1", Quantity::One),
+            ("One", Quantity::One),
+            ("one", Quantity::One),
+            ("linear", Quantity::One),
+            ("omega", Quantity::Many),
+            ("ω", Quantity::Many),
+            ("Many", Quantity::Many),
+            ("many", Quantity::Many),
+            ("unrestricted", Quantity::Many),
+        ];
+        for (alias, expected) in alias_pins {
+            assert_eq!(
+                Quantity::parse(alias),
+                Some(*expected),
+                "Quantity alias '{}' must parse to {:?}",
+                alias,
+                expected
+            );
+        }
+        // Classification — meta-derived projections agree with hand-
+        // written reference matches!.
+        for v in Quantity::ALL {
+            assert_eq!(
+                v.is_finite(),
+                matches!(v, Quantity::Zero | Quantity::One),
+                "Quantity::{:?}: is_finite drift",
+                v
+            );
+            assert_eq!(
+                v.is_linear(),
+                *v == Quantity::One,
+                "Quantity::{:?}: is_linear drift",
+                v
+            );
+            assert_eq!(
+                v.is_erased(),
+                *v == Quantity::Zero,
+                "Quantity::{:?}: is_erased drift",
+                v
+            );
+            // Cross-cutting: linear ⇒ finite; erased ⇒ finite;
+            // ¬finite ⇒ ¬linear ∧ ¬erased.
+            if v.is_linear() {
+                assert!(v.is_finite());
+            }
+            if v.is_erased() {
+                assert!(v.is_finite());
+            }
+            if !v.is_finite() {
+                assert!(!v.is_linear() && !v.is_erased());
+            }
+        }
+        // Default is Many (unrestricted) — Atkey QTT default.
+        assert_eq!(Quantity::default(), Quantity::Many);
+        // Default's parse-form round-trips.
+        assert_eq!(
+            Quantity::parse(Quantity::default().as_str()),
+            Some(Quantity::default())
+        );
+    }
+
+    #[test]
     fn reduction_op_round_trip_unique_and_kind_partition() {
         let all = [
             ReductionOp::Add.as_str(),
