@@ -134,6 +134,25 @@ pub mod caps {
     pub const OWNER: u32 = READ | WRITE | MUTABLE | DELEGATE | REVOKE;
 }
 
+/// Allocation state flags stored in `AllocationHeader::flags` (atomic u32).
+///
+/// These flags track non-capability allocation state: revocation,
+/// finalisation, and the like. The VBC interpreter reads them via
+/// atomic loads on the header's `flags` field; LLVM codegen emits
+/// the same atomic ops against the same offset (per
+/// `verum_common::layout::ALLOCATION_HEADER_SIZE`).
+///
+/// **Drift contract:** values declared here are the single source
+/// of truth shared by `verum_codegen::llvm::runtime` (which formerly
+/// carried local copies as `RuntimeLowering::FLAG_REVOKED`) and any
+/// future direct-syscall allocator code that needs to inspect the
+/// allocation state.
+pub mod flags {
+    /// Allocation has been freed and the generation invalidated.
+    /// Reads through a revoked allocation panic with `UseAfterFree`.
+    pub const REVOKED: u32 = 0x02;
+}
+
 /// Capability preset for CBGR references
 ///
 
@@ -949,6 +968,37 @@ mod tests {
     #[test]
     fn test_cbgr_header_size() {
         assert_eq!(std::mem::size_of::<CbgrHeader>(), CbgrHeader::SIZE);
+    }
+
+    /// Constants shared with `verum_codegen::llvm::runtime` (re-exported
+    /// from this module) keep their canonical values. Codegen-side
+    /// `RuntimeLowering::ALLOC_HEADER_SIZE` / `GEN_INITIAL` / `GEN_MAX` /
+    /// `CAP_FULL` / `FLAG_REVOKED` are direct re-exports — drift between
+    /// the two crates is structurally impossible. This test pins the
+    /// expected values so silent renumbering of any constant fails at
+    /// unit-test time before reaching codegen IR.
+    #[test]
+    fn cross_crate_cbgr_constants_pinned() {
+        // Generation-counter constants (mirrored in stdlib core/mem/allocator.vr).
+        assert_eq!(GEN_INITIAL, 1);
+        assert_eq!(GEN_MAX, 0xFFFF_FFFE);
+        // Capability "all flags" must equal the union of named bits.
+        assert_eq!(
+            caps::ALL,
+            caps::READ
+                | caps::WRITE
+                | caps::EXECUTE
+                | caps::DELEGATE
+                | caps::REVOKE
+                | caps::BORROWED
+                | caps::MUTABLE
+                | caps::NO_ESCAPE,
+        );
+        assert_eq!(caps::ALL, 0xFF, "caps::ALL = bits 0..7 set");
+        // Allocation flags
+        assert_eq!(flags::REVOKED, 0x02);
+        // Layout bridge
+        assert_eq!(crate::layout::ALLOCATION_HEADER_SIZE, 32);
     }
 
     #[test]
