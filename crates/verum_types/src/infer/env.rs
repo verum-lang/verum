@@ -176,6 +176,46 @@ impl TypeChecker {
         self.ctx.register_inductive_type("Unit", unit_constructors);
     }
 
+    /// #97 — Register every stdlib const (`is_const = true`) from
+    /// CoreMetadata as a monomorphic value in the type environment.
+    ///
+    /// The precompiled archive carries `public const X: T = N;`
+    /// declarations as zero-arg [`FunctionDescriptor`]s with the
+    /// `is_const` flag set; without the metadata-driven registration
+    /// here, the archive-driven typechecker can't tell the const from
+    /// a real zero-arg function and either rejects bare `let x = X;`
+    /// references (`unbound variable: X`) or mistypes them as
+    /// callables (`() -> Int` instead of `Int`).
+    ///
+    /// Eagerly registering every const is cheap (Map<Text, Type>
+    /// inserts, sub-millisecond for the full stdlib's ≈3000 consts)
+    /// and matches the semantics of the source-driven Pass 6 in
+    /// `core_pipeline::register_all_global_passes`, where every const
+    /// in every loaded `.vr` AST is registered up-front.
+    pub(super) fn register_stdlib_consts_from_metadata(
+        &mut self,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        for (qualified_name, fd) in metadata.functions.iter() {
+            if !fd.is_const {
+                continue;
+            }
+            // Bare-name registration so user code writing
+            // `let s = SSO_CAPACITY;` resolves directly through
+            // `env.lookup`.  Qualified-name registration is reachable
+            // through the codegen-side `archive_ctx_loader` which
+            // already keys both forms.
+            let simple_name = qualified_name
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, s)| s)
+                .unwrap_or_else(|| qualified_name.as_str());
+            let const_type =
+                crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
+            self.ctx.env.insert_mono(simple_name, const_type);
+        }
+    }
+
     /// Get the stdlib metadata (if loaded).
     /// Stdlib metadata is always loaded for user code compilation.
     pub fn core_metadata(&self) -> Option<&crate::core_metadata::CoreMetadata> {

@@ -255,6 +255,15 @@ fn register_module(
         let new_id = verum_vbc::module::FunctionId(*next_id);
         *next_id = next_id.saturating_add(1);
 
+        // #87 — restore the intrinsic-name marker that was
+        // serialised on the archive side.  `__const_val_<N>` and
+        // similar markers identify inlinable stdlib constants;
+        // without them the codegen's path-resolution treats
+        // imported constants as ordinary zero-arg functions and
+        // surfaces them as `UndefinedVariable` at the use site.
+        let intrinsic_name = fn_desc
+            .intrinsic_name
+            .and_then(|sid| lookup(sid).map(|s| s.to_string()));
         let info = FunctionInfo {
             id: new_id,
             param_count: fn_desc.params.len(),
@@ -267,7 +276,7 @@ fn register_module(
             contexts: vec![],
             return_type: Some(fn_desc.return_type.clone()),
             yield_type: fn_desc.yield_type.clone(),
-            intrinsic_name: None,
+            intrinsic_name,
             variant_tag,
             parent_type_name,
             variant_payload_types,
@@ -275,6 +284,10 @@ fn register_module(
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner,
+            // #97 — restore the const-storage marker so user-side
+            // codegen treats stdlib `public const X` as a value
+            // rather than a callable.
+            is_const: fn_desc.is_const,
         };
 
         // Always register qualified — `module.path.simple` —
@@ -358,6 +371,7 @@ fn register_module(
                 takes_self_mut_ref: false,
                 return_type_name: Some(parent_name.clone()),
                 return_type_inner: None,
+                is_const: false,
             };
             ctx.register_function(qualified, info);
             stats.variant_ctors_resolved += 1;
@@ -1641,6 +1655,14 @@ fn register_module_filtered(
             .collect();
         let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
+        // #87 — restore the intrinsic-name marker that was serialised
+        // on the archive side.  Mirrors the populate_ctx_from_archive
+        // site; without this, inlinable stdlib constants surface as
+        // `UndefinedVariable` at the use site after the archive
+        // round-trip.
+        let intrinsic_name = fn_desc
+            .intrinsic_name
+            .and_then(|sid| lookup(sid).map(|s| s.to_string()));
         let info = FunctionInfo {
             id: new_id,
             param_count: fn_desc.params.len(),
@@ -1653,7 +1675,7 @@ fn register_module_filtered(
             contexts: vec![],
             return_type: Some(fn_desc.return_type.clone()),
             yield_type: fn_desc.yield_type.clone(),
-            intrinsic_name: None,
+            intrinsic_name,
             variant_tag,
             parent_type_name,
             variant_payload_types,
@@ -1661,6 +1683,8 @@ fn register_module_filtered(
             takes_self_mut_ref: false,
             return_type_name,
             return_type_inner,
+            // #97 — see populate_ctx_from_archive for the rationale.
+            is_const: fn_desc.is_const,
         };
         ctx.register_function(qualified.clone(), info.clone());
         // ALSO register under any qualified path from `wanted` whose
@@ -1815,6 +1839,7 @@ fn register_module_filtered(
                 takes_self_mut_ref: false,
                 return_type_name: Some(parent_name.clone()),
                 return_type_inner: None,
+                is_const: false,
             };
             ctx.register_function(qualified, info);
             // Deliberately skip simple-name registration — see the

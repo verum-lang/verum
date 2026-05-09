@@ -1683,6 +1683,10 @@ impl<'s> CompilationPipeline<'s> {
                     Maybe::None
                 },
                 parent_type: Maybe::None,
+                // #97 — cached metadata path doesn't carry const
+                // markers; default to false (cached path is for
+                // user-side incremental compilation, not stdlib).
+                is_const: false,
             };
             metadata
                 .functions

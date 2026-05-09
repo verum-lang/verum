@@ -676,6 +676,11 @@ impl TypeChecker {
             Maybe::None => return,
         };
         self.register_stdlib_constructors_from_metadata(&metadata);
+        // #97 — register stdlib consts (zero-arg fns with is_const=true)
+        // as values in the env so user code's bare references
+        // (`let s = SSO_CAPACITY;`) resolve via env.lookup.  Cheap to
+        // do eagerly; ~3000 inserts run in sub-millisecond.
+        self.register_stdlib_consts_from_metadata(&metadata);
 
         // Unconditionally register every type alias from metadata
         // into the unifier's alias registry.  Aliases are cheap
@@ -1974,6 +1979,10 @@ impl TypeChecker {
 
         // Register inductive constructors for pattern matching
         self.register_stdlib_constructors_from_metadata(metadata);
+        // #97 — register stdlib consts as values; mirrors the lazy
+        // path above so bare `let s = SSO_CAPACITY;` resolves through
+        // env.lookup in eager mode too.
+        self.register_stdlib_consts_from_metadata(metadata);
     }
 
     /// Helper function to create a Path from a type name string.

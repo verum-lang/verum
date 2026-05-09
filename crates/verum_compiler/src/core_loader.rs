@@ -565,6 +565,10 @@ fn convert_function_descriptor(
         is_unsafe: false, // Would need VBC metadata for this
         intrinsic_id: Maybe::None,
         parent_type,
+        // #97 — round-trip the const-storage marker so the archive-
+        // driven typechecker treats `public const X` as a value
+        // rather than a callable.
+        is_const: vbc_fn.is_const,
     })
 }
 
