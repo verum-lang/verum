@@ -734,7 +734,7 @@ pub fn emit_range_table_lookup<'ctx>(
         .or_llvm_err()?
         .try_as_basic_value()
         .basic()
-        .ok_or_else(|| LlvmLoweringError::internal("unicode range lookup: expected return value"))?
+        .or_internal("unicode range lookup: expected return value")?
         .into_int_value();
 
     Ok(call_result)
@@ -914,7 +914,7 @@ pub fn emit_case_conversion<'ctx>(
         .or_llvm_err()?
         .try_as_basic_value()
         .basic()
-        .ok_or_else(|| LlvmLoweringError::internal("case conversion: expected return value"))?
+        .or_internal("case conversion: expected return value")?
         .into_int_value();
 
     Ok(call_result)
