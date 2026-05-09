@@ -1804,6 +1804,18 @@ impl FileInfo {
             // Mount statements: "mount module.{name1, name2}" or "mount module.name"
             if trimmed.starts_with("mount ") {
                 if let Some(rest) = trimmed.strip_prefix("mount ") {
+                    // Strip inline `// …` comments BEFORE trimming the
+                    // trailing semicolon — otherwise `mount foo.*; // why`
+                    // surfaces as a non-glob single-name import whose
+                    // "name" is `*; // why` (no exact `*` match), and the
+                    // glob-skip in check_unused_imports misses it.  The
+                    // `unused-import` rule then mis-classifies the glob
+                    // mount as unused and `verum lint --fix` deletes
+                    // load-bearing imports.
+                    let rest = match rest.find("//") {
+                        Some(comment_start) => &rest[..comment_start],
+                        None => rest,
+                    };
                     let rest = rest.trim_end_matches(';').trim();
                     let (module_path, names) = parse_mount_statement(rest);
                     mount_imports.push((module_path, names, line_num));
