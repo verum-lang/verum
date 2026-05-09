@@ -1,0 +1,170 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, backtrace, Backtrace, StackFrame, capture, DWARF, libunwind
+// @timeout: 10000
+// @description: Pins the Backtrace.capture() API surface and StackFrame contract (#48).
+//
+// `Backtrace` holds a list of `StackFrame` values (innermost-first) and
+// exposes:
+//
+//   Backtrace.capture()              — capture the current call stack (returns empty
+//                                      backtrace when DWARF/libunwind not wired).
+//   Backtrace.empty()                — construct an empty backtrace.
+//   Backtrace.from_frames(frames)    — construct from an explicit list.
+//   backtrace.frames()               — &List<StackFrame> view.
+//   backtrace.is_empty()             — Bool.
+//   backtrace.len()                  — Int.
+//
+// `StackFrame` holds:
+//   function: Text, file: Text, line: Int, column: Int
+//   StackFrame.new(function, file, line, column) constructor.
+//
+// This spec verifies:
+//   1. Backtrace.empty() produces a backtrace with len=0 and is_empty=true.
+//   2. Backtrace.from_frames() populates frames and len reflects count.
+//   3. StackFrame.new() constructor and field access typecheck.
+//   4. Backtrace.capture() typechecks and returns a Backtrace (may be empty).
+//   5. frames() return type is compatible with iteration.
+//   6. Backtrace composites correctly with Maybe<Backtrace> for lazy capture.
+//   7. Backtrace.len() matches the frame list length.
+
+mount core.base.error.{Backtrace, StackFrame};
+mount core.collections.list.{List};
+mount core.base.maybe.{Maybe, Some, None};
+
+// ── 1. Backtrace.empty() ─────────────────────────────────────────────────────
+
+fn empty_backtrace_has_zero_frames() {
+    let bt = Backtrace.empty();
+    assert(bt.is_empty());
+    assert_eq(bt.len(), 0);
+}
+
+// ── 2. Backtrace.from_frames() ────────────────────────────────────────────────
+
+fn from_frames_populates_len() {
+    let frames: List<StackFrame> = [
+        StackFrame.new(Text.from("main"), Text.from("app.vr"), 10, 4),
+        StackFrame.new(Text.from("helper"), Text.from("app.vr"), 5, 8),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    assert(!bt.is_empty());
+    assert_eq(bt.len(), 2);
+}
+
+fn from_empty_frames_is_empty() {
+    let bt = Backtrace.from_frames(List.new());
+    assert(bt.is_empty());
+    assert_eq(bt.len(), 0);
+}
+
+// ── 3. StackFrame.new() constructor ──────────────────────────────────────────
+
+fn stackframe_new_constructor_typechecks() {
+    let frame = StackFrame.new(
+        Text.from("my_function"),
+        Text.from("src/lib.vr"),
+        42,
+        8,
+    );
+    assert(frame.function == Text.from("my_function"));
+    assert(frame.file == Text.from("src/lib.vr"));
+    assert_eq(frame.line, 42);
+    assert_eq(frame.column, 8);
+}
+
+fn stackframe_struct_literal_typechecks() {
+    let frame = StackFrame {
+        function: Text.from("start"),
+        file: Text.from("main.vr"),
+        line: 1,
+        column: 1,
+    };
+    assert(frame.line == 1);
+}
+
+// ── 4. Backtrace.capture() ────────────────────────────────────────────────────
+
+fn capture_returns_backtrace() {
+    // capture() always returns a Backtrace; may be empty when DWARF/libunwind
+    // is not wired (Tier 0 / typecheck-pass context).
+    let bt: Backtrace = Backtrace.capture();
+    // No assertion on content — only typecheck is required.
+    let _ = bt.len();
+}
+
+// ── 5. frames() return type allows iteration ─────────────────────────────────
+
+fn frames_return_supports_len() {
+    let frames: List<StackFrame> = [
+        StackFrame.new(Text.from("f"), Text.from("f.vr"), 1, 1),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    let view: &List<StackFrame> = bt.frames();
+    assert_eq(view.len(), 1);
+}
+
+fn frames_can_be_iterated() {
+    let frames: List<StackFrame> = [
+        StackFrame.new(Text.from("alpha"), Text.from("a.vr"), 10, 4),
+        StackFrame.new(Text.from("beta"), Text.from("b.vr"), 20, 8),
+        StackFrame.new(Text.from("gamma"), Text.from("c.vr"), 30, 1),
+    ];
+    let bt = Backtrace.from_frames(frames);
+    let mut count: Int = 0;
+    for frame in bt.frames() {
+        assert(frame.line > 0);
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+// ── 6. Maybe<Backtrace> for lazy / optional capture ──────────────────────────
+
+fn optional_backtrace_composites_with_maybe() {
+    let captured: Maybe<Backtrace> = Some(Backtrace.capture());
+    match captured {
+        Some(bt) => {
+            let _ = bt.is_empty();
+        }
+        None => {}
+    }
+}
+
+fn none_backtrace_is_valid() {
+    let no_bt: Maybe<Backtrace> = None;
+    match no_bt {
+        None => assert(true),
+        Some(_) => panic("expected None"),
+    }
+}
+
+// ── 7. len() matches frame count ─────────────────────────────────────────────
+
+fn len_matches_frame_count() {
+    let make_frame: fn(Int) -> StackFrame = |n| {
+        StackFrame.new(Text.from("fn"), Text.from("f.vr"), n, 1)
+    };
+    let bt0 = Backtrace.from_frames([]);
+    let bt1 = Backtrace.from_frames([make_frame(1)]);
+    let bt3 = Backtrace.from_frames([make_frame(1), make_frame(2), make_frame(3)]);
+    assert_eq(bt0.len(), 0);
+    assert_eq(bt1.len(), 1);
+    assert_eq(bt3.len(), 3);
+}
+
+fn main() {
+    empty_backtrace_has_zero_frames();
+    from_frames_populates_len();
+    from_empty_frames_is_empty();
+    stackframe_new_constructor_typechecks();
+    stackframe_struct_literal_typechecks();
+    capture_returns_backtrace();
+    frames_return_supports_len();
+    frames_can_be_iterated();
+    optional_backtrace_composites_with_maybe();
+    none_backtrace_is_valid();
+    len_matches_frame_count();
+    print("Backtrace.capture() API typecheck ok");
+}

@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, PanicInfo, catch_unwind, CatchResult, Location, panic-recovery
+// @timeout: 10000
+// @description: Pins the PanicInfo carrier returned by catch_unwind (#50).
+//
+// `catch_unwind<T, F>(f: F) -> Result<T, PanicInfo>` catches a panic and
+// returns it as a structured `PanicInfo` value instead of unwinding.
+//
+// `PanicInfo` carries:
+//   message:  Text          — human-readable panic message.
+//   location: Maybe<Location> — source file/line/column where panic was raised.
+//
+// `PanicInfo.message()   -> &Text`
+// `PanicInfo.location()  -> Maybe<&Location>`
+//
+// `Location` carries:  file: Text, line: Int, column: Int
+// `Location.new(file, line, column)`
+//
+// `CatchResult<T>` is an alias for `Result<T, PanicInfo>`.
+//
+// `resume_unwind(panic_info: PanicInfo) -> !` re-raises a caught panic.
+//
+// This spec verifies:
+//   1. PanicInfo struct literal construction typechecks.
+//   2. PanicInfo.message() returns a non-empty Text reference.
+//   3. PanicInfo.location() returns Maybe<&Location>.
+//   4. Location.new() constructor typechecks and fields are accessible.
+//   5. catch_unwind return type is Result<T, PanicInfo>.
+//   6. CatchResult<T> alias is usable as a type annotation.
+//   7. Matching on catch_unwind Err arm extracts PanicInfo fields.
+//   8. assert_panics closure shape typechecks with PanicInfo Err arm.
+//   9. resume_unwind signature accepts PanicInfo (never returns).
+
+mount core.base.panic.{PanicInfo, Location, CatchResult, catch_unwind, assert_panics};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// ── 1. PanicInfo struct literal ───────────────────────────────────────────────
+
+fn panic_info_construct_with_location() {
+    let loc = Location.new(Text.from("main.vr"), 42, 8);
+    let info = PanicInfo {
+        message: Text.from("index out of bounds"),
+        location: Some(loc),
+    };
+    assert(info.message.len() > 0);
+}
+
+fn panic_info_construct_without_location() {
+    let info = PanicInfo {
+        message: Text.from("explicit panic"),
+        location: None,
+    };
+    assert(info.message.len() > 0);
+}
+
+// ── 2. PanicInfo.message() ────────────────────────────────────────────────────
+
+fn panic_info_message_method() {
+    let info = PanicInfo {
+        message: Text.from("something went wrong"),
+        location: None,
+    };
+    let msg: &Text = info.message();
+    assert(msg.len() > 0);
+}
+
+// ── 3. PanicInfo.location() ───────────────────────────────────────────────────
+
+fn panic_info_location_some() {
+    let loc = Location { file: Text.from("lib.vr"), line: 10, column: 4 };
+    let info = PanicInfo {
+        message: Text.from("assertion failed"),
+        location: Some(loc),
+    };
+    match info.location() {
+        Some(l) => {
+            assert(l.line > 0);
+            assert(l.column >= 0);
+        }
+        None => panic("expected Some location"),
+    }
+}
+
+fn panic_info_location_none() {
+    let info = PanicInfo { message: Text.from("no location"), location: None };
+    match info.location() {
+        None => assert(true),
+        Some(_) => panic("expected None"),
+    }
+}
+
+// ── 4. Location.new() constructor ─────────────────────────────────────────────
+
+fn location_new_constructor() {
+    let loc = Location.new(Text.from("src/app.vr"), 99, 12);
+    assert(loc.file == Text.from("src/app.vr"));
+    assert_eq(loc.line, 99);
+    assert_eq(loc.column, 12);
+}
+
+// ── 5. catch_unwind return type ───────────────────────────────────────────────
+
+fn catch_unwind_ok_arm_typechecks() {
+    let result: Result<Int, PanicInfo> = catch_unwind(|| { 42 });
+    match result {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => panic("unexpected panic"),
+    }
+}
+
+fn catch_unwind_unit_return_typechecks() {
+    let result: Result<(), PanicInfo> = catch_unwind(|| {
+        let _ = 1 + 1;
+    });
+    assert(result.is_ok());
+}
+
+// ── 6. CatchResult<T> alias ───────────────────────────────────────────────────
+
+fn catch_result_alias_usable_as_annotation() {
+    let r: CatchResult<Int> = catch_unwind(|| { 7 });
+    match r {
+        Ok(v)  => assert(v == 7),
+        Err(_) => panic("unexpected"),
+    }
+}
+
+fn catch_result_text_alias() {
+    let r: CatchResult<Text> = catch_unwind(|| { Text.from("ok") });
+    match r {
+        Ok(s)  => assert(s.len() > 0),
+        Err(_) => panic("unexpected"),
+    }
+}
+
+// ── 7. Matching on Err arm extracts PanicInfo fields ─────────────────────────
+
+fn panic_info_err_arm_field_access_typechecks() {
+    // Shape-only: the closure won't actually panic at tier-0 typecheck.
+    // Verifies that Err(info) binding and info.message / info.location compile.
+    let result: Result<Int, PanicInfo> = catch_unwind(|| { 0 });
+    match result {
+        Ok(_)  => {}
+        Err(info) => {
+            let _msg: &Text = info.message();
+            let _loc: Maybe<&Location> = info.location();
+        }
+    }
+}
+
+// ── 8. assert_panics closure shape ────────────────────────────────────────────
+
+fn assert_panics_shape_typechecks() {
+    // assert_panics takes fn() -> () — the closure must typecheck.
+    // Not executed at tier 0 (typecheck-pass spec).
+    assert_panics(|| {
+        let _: Int = 1 + 1;
+    });
+}
+
+// ── 9. resume_unwind accepts PanicInfo ───────────────────────────────────────
+//
+// We cannot call resume_unwind in a typecheck-pass spec (it diverges),
+// but we can verify that a function whose body is `resume_unwind(info)`
+// typechecks with return type `!` (never).
+
+fn resume_unwind_type_shape(info: PanicInfo) -> ! {
+    // This function MUST NOT be called in main() — it would panic.
+    // Shape pin only.
+    core.base.panic.resume_unwind(info)
+}
+
+fn main() {
+    panic_info_construct_with_location();
+    panic_info_construct_without_location();
+    panic_info_message_method();
+    panic_info_location_some();
+    panic_info_location_none();
+    location_new_constructor();
+    catch_unwind_ok_arm_typechecks();
+    catch_unwind_unit_return_typechecks();
+    catch_result_alias_usable_as_annotation();
+    catch_result_text_alias();
+    panic_info_err_arm_field_access_typechecks();
+    assert_panics_shape_typechecks();
+    print("PanicInfo / catch_unwind carrier typecheck ok");
+}
