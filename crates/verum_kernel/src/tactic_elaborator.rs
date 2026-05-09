@@ -322,7 +322,7 @@ pub fn resolve_apply_target(ctx: &ElabContext, name: &str) -> Result<Term, ElabE
 /// only weakly load-bearing. Callers should record the fallback in
 /// the certificate's metadata so reviewers can downgrade trust.
 pub fn placeholder_proposition() -> Term {
-    Term::Universe(0)
+    Term::universe(0)
 }
 
 /// **Translate a Verum proposition Expr to a kernel Term.**
@@ -358,7 +358,7 @@ pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabE
             // trivially-inhabited type. The kernel doesn't yet
             // distinguish bottom; that distinction is a future
             // primitive-encoding upgrade.
-            Ok(Term::Universe(0))
+            Ok(Term::universe(0))
         }
         ExprKind::Path(_) | ExprKind::Field { .. } | ExprKind::Call { .. } => {
             // Predicate names or function applications — direct
@@ -476,7 +476,7 @@ pub fn register_propositional_connectives(ctx: &mut ElabContext) {
         "__verum_kernel_Not",
     ] {
         if ctx.get_axiom(name).is_none() {
-            ctx.register_axiom(name, Term::Universe(0));
+            ctx.register_axiom(name, Term::universe(0));
         }
     }
 }
@@ -509,7 +509,7 @@ pub fn register_kernel_v0_lemmas(ctx: &mut ElabContext) {
         "core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion",
     ] {
         if ctx.get_axiom(name).is_none() {
-            ctx.register_axiom(name, Term::Universe(0));
+            ctx.register_axiom(name, Term::universe(0));
         }
     }
 }
@@ -538,7 +538,7 @@ pub fn register_kernel_bridge_dispatchers(ctx: &mut ElabContext) {
         "kernel_sub_strict",
     ] {
         if ctx.get_axiom(name).is_none() {
-            ctx.register_axiom(name, Term::Universe(0));
+            ctx.register_axiom(name, Term::universe(0));
         }
     }
 }
@@ -673,7 +673,7 @@ pub fn elaborate_tactic(tactic: &TacticExpr, ctx: &mut ElabContext) -> Result<Te
             }
             let mut term = Term::Var(0);
             for _ in 0..depth {
-                term = Term::Lam(Box::new(Term::Universe(0)), Box::new(term));
+                term = Term::Lam(Box::new(Term::universe(0)), Box::new(term));
             }
             for _ in 0..depth {
                 ctx.pop_binder();
@@ -754,7 +754,7 @@ fn elaborate_tactic_seq(
             // Wrap from innermost outwards.
             let mut term = body;
             for _ in 0..introduced.len() {
-                term = Term::Lam(Box::new(Term::Universe(0)), Box::new(term));
+                term = Term::Lam(Box::new(Term::universe(0)), Box::new(term));
             }
             // Restore the context for the caller.
             for _ in 0..introduced.len() {
@@ -1039,11 +1039,11 @@ mod tests {
     #[test]
     fn axiom_registry_round_trip() {
         let mut ctx = ElabContext::new();
-        let prev = ctx.register_axiom("ZFC.foundation", Term::Universe(0));
+        let prev = ctx.register_axiom("ZFC.foundation", Term::universe(0));
         assert!(prev.is_none());
         let entry = ctx.get_axiom("ZFC.foundation").unwrap();
         assert_eq!(entry.name, "ZFC.foundation");
-        assert_eq!(entry.claimed_type, Term::Universe(0));
+        assert_eq!(entry.claimed_type, Term::universe(0));
     }
 
     #[test]
@@ -1063,7 +1063,7 @@ mod tests {
 
     #[test]
     fn build_app_chain_no_args_returns_head_unchanged() {
-        let head = Term::Universe(0);
+        let head = Term::universe(0);
         let result = build_app_chain(head.clone(), vec![]);
         assert_eq!(result, head);
     }
@@ -1079,8 +1079,8 @@ mod tests {
     #[test]
     fn resolve_apply_target_finds_axiom() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("A", Term::Universe(0));
-        ctx.register_axiom("B", Term::Universe(0));
+        ctx.register_axiom("A", Term::universe(0));
+        ctx.register_axiom("B", Term::universe(0));
         // No local binders yet, so axioms start at index = depth = 0.
         // A is registered first — index 0. B is registered second — index 1.
         let a = resolve_apply_target(&ctx, "A").unwrap();
@@ -1093,7 +1093,7 @@ mod tests {
     fn resolve_apply_target_axiom_with_local_binders() {
         // Local binders shift the axiom indices upward.
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("A", Term::Universe(0));
+        ctx.register_axiom("A", Term::universe(0));
         ctx.push_binder("h0");
         ctx.push_binder("h1");
         // A's index is depth(2) + position(0) = 2.
@@ -1115,19 +1115,19 @@ mod tests {
     #[test]
     fn close_over_axioms_wraps_in_pi_lam_chain() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("A", Term::Universe(0));
+        ctx.register_axiom("A", Term::universe(0));
         let body = Term::Var(0); // body uses the axiom
-        let body_type = Term::Universe(0);
+        let body_type = Term::universe(0);
         let (term, ty) = close_over_axioms(&ctx, body, body_type);
         // Term: Lam(Universe(0), Var(0))
         assert_eq!(
             term,
-            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
+            Term::Lam(Box::new(Term::universe(0)), Box::new(Term::Var(0)),),
         );
         // Type: Pi(Universe(0), Universe(0)) — `Universe(0) → Universe(0)`.
         assert_eq!(
             ty,
-            Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)),),
+            Term::Pi(Box::new(Term::universe(0)), Box::new(Term::universe(0)),),
         );
     }
 
@@ -1137,8 +1137,8 @@ mod tests {
         // `Π(A: Universe(0)). Universe(0)`.
         // The identity at universe 0 — same as
         // `core/verify/proof_term_examples/identity_at_universe_0.vproof`.
-        let term = Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)));
-        let claimed_type = Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)));
+        let term = Term::Lam(Box::new(Term::universe(0)), Box::new(Term::Var(0)));
+        let claimed_type = Term::Pi(Box::new(Term::universe(0)), Box::new(Term::universe(0)));
         let cert = finalise_certificate(term, claimed_type, BTreeMap::new()).unwrap();
         // Certificate verified — the de Bruijn criterion holds.
         cert.verify().unwrap();
@@ -1148,8 +1148,8 @@ mod tests {
     fn finalise_certificate_rejects_ill_typed_term() {
         // Universe(0) does NOT have type Universe(0) — it has type
         // Universe(1). The kernel must reject.
-        let term = Term::Universe(0);
-        let claimed_type = Term::Universe(0);
+        let term = Term::universe(0);
+        let claimed_type = Term::universe(0);
         match finalise_certificate(term, claimed_type, BTreeMap::new()) {
             Err(ElabError::KernelRejection(_)) => {}
             other => panic!("expected KernelRejection, got {:?}", other),
@@ -1224,7 +1224,7 @@ mod tests {
     #[test]
     fn expr_to_term_resolves_path_via_axiom() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
         let term = expr_to_term(&path_expr("foo"), &ctx).unwrap();
         assert_eq!(term, Term::Var(0)); // depth 0 + axiom position 0
     }
@@ -1233,7 +1233,7 @@ mod tests {
     fn elaborate_tactic_apply_zero_args() {
         // Tactic body: `apply foo;`
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
         let tactic = TacticExpr::Apply {
             lemma: verum_common::Heap::new(path_expr("foo")),
             args: List::new(),
@@ -1248,9 +1248,9 @@ mod tests {
         // BTreeMap iterates by KEY order: a < b < foo, so positions are
         // a=0, b=1, foo=2. Depth=0.
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
-        ctx.register_axiom("a", Term::Universe(0));
-        ctx.register_axiom("b", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
+        ctx.register_axiom("a", Term::universe(0));
+        ctx.register_axiom("b", Term::universe(0));
         let mut args = List::new();
         args.push(path_expr("a"));
         args.push(path_expr("b"));
@@ -1304,7 +1304,7 @@ mod tests {
     #[test]
     fn elaborate_proof_body_dispatches_to_tactic() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("witness", Term::Universe(0));
+        ctx.register_axiom("witness", Term::universe(0));
         let body = ProofBody::Tactic(TacticExpr::Apply {
             lemma: verum_common::Heap::new(path_expr("witness")),
             args: List::new(),
@@ -1319,7 +1319,7 @@ mod tests {
         // `proof = foo` where foo is a registered axiom should produce
         // the same Var(idx) the apply form would.
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
         let body = ProofBody::Term(verum_common::Heap::new(path_expr("foo")));
         let term = elaborate_proof_body(&body, &mut ctx).unwrap();
         assert_eq!(term, Term::Var(0));
@@ -1349,7 +1349,7 @@ mod tests {
         let term = elaborate_tactic(&TacticExpr::Intro(idents), &mut ctx).unwrap();
         assert_eq!(
             term,
-            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
+            Term::Lam(Box::new(Term::universe(0)), Box::new(Term::Var(0)),),
         );
         // Context restored — Intro doesn't leak binders.
         assert_eq!(ctx.depth(), 0);
@@ -1371,11 +1371,11 @@ mod tests {
         assert_eq!(
             term,
             Term::Lam(
-                Box::new(Term::Universe(0)),
+                Box::new(Term::universe(0)),
                 Box::new(Term::Lam(
-                    Box::new(Term::Universe(0)),
+                    Box::new(Term::universe(0)),
                     Box::new(Term::Lam(
-                        Box::new(Term::Universe(0)),
+                        Box::new(Term::universe(0)),
                         Box::new(Term::Var(0)),
                     )),
                 )),
@@ -1404,7 +1404,7 @@ mod tests {
         let term = elaborate_tactic(&TacticExpr::Seq(steps), &mut ctx).unwrap();
         assert_eq!(
             term,
-            Term::Lam(Box::new(Term::Universe(0)), Box::new(Term::Var(0)),),
+            Term::Lam(Box::new(Term::universe(0)), Box::new(Term::Var(0)),),
         );
         assert_eq!(ctx.depth(), 0, "Seq restores context after binder pop");
     }
@@ -1415,8 +1415,8 @@ mod tests {
         // not Intro. Reject with a diagnostic naming the offending
         // step.
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
-        ctx.register_axiom("bar", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
+        ctx.register_axiom("bar", Term::universe(0));
         let mut steps = List::new();
         steps.push(TacticExpr::Apply {
             lemma: verum_common::Heap::new(path_expr("foo")),
@@ -1453,7 +1453,7 @@ mod tests {
     fn elaborate_tactic_seq_single_step_works() {
         // A single Apply wrapped in Seq behaves like the Apply alone.
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("witness", Term::Universe(0));
+        ctx.register_axiom("witness", Term::universe(0));
         let mut steps = List::new();
         steps.push(TacticExpr::Apply {
             lemma: verum_common::Heap::new(path_expr("witness")),
@@ -1508,7 +1508,7 @@ mod tests {
         }));
 
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("foo", Term::universe(0));
 
         let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
         // De Bruijn criterion: certificate re-verifies via the kernel.
@@ -1535,13 +1535,13 @@ mod tests {
         let prop = Expr::new(ExprKind::Literal(Literal::bool(true, span)), span);
         let ctx = ElabContext::new();
         let term = proposition_to_term(&prop, &ctx).unwrap();
-        assert_eq!(term, Term::Universe(0));
+        assert_eq!(term, Term::universe(0));
     }
 
     #[test]
     fn proposition_to_term_handles_path_via_axiom() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("my_predicate", Term::Universe(0));
+        ctx.register_axiom("my_predicate", Term::universe(0));
         let prop = path_expr("my_predicate");
         let term = proposition_to_term(&prop, &ctx).unwrap();
         assert_eq!(term, Term::Var(0));
@@ -1572,8 +1572,8 @@ mod tests {
         );
         let mut ctx = ElabContext::new();
         register_propositional_connectives(&mut ctx);
-        ctx.register_axiom("a", Term::Universe(0));
-        ctx.register_axiom("b", Term::Universe(0));
+        ctx.register_axiom("a", Term::universe(0));
+        ctx.register_axiom("b", Term::universe(0));
         let term = proposition_to_term(&prop, &ctx).unwrap();
         // Term is App(App(Var(eq_idx), Var(a_idx)), Var(b_idx)) — exact
         // indices depend on BTreeMap key order; just check the shape.
@@ -1621,8 +1621,8 @@ mod tests {
         let span = Span::dummy();
         let mut ctx = ElabContext::new();
         register_propositional_connectives(&mut ctx);
-        ctx.register_axiom("a", Term::Universe(0));
-        ctx.register_axiom("b", Term::Universe(0));
+        ctx.register_axiom("a", Term::universe(0));
+        ctx.register_axiom("b", Term::universe(0));
         let prop = Expr::new(
             ExprKind::Binary {
                 op: verum_ast::BinOp::Add,
@@ -1756,7 +1756,7 @@ mod tests {
             args: List::new(),
         }));
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("witness", Term::Universe(0));
+        ctx.register_axiom("witness", Term::universe(0));
         // Note: connectives NOT registered, so Eq axiom is undeclared.
 
         let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();

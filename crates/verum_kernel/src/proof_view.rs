@@ -380,7 +380,9 @@ pub fn snapshot_proof_state(theorem_decl: &TheoremDecl) -> Option<ProofState> {
     }
 
     // Heuristic remaining-goals count. See doc comment.
-    let proposition = ReflectedTerm::Universe { level: 0 };
+    let proposition = ReflectedTerm::Universe {
+        level: crate::proof_checker::Level::Concrete(0),
+    };
     let remaining_goals = if steps.is_empty() {
         vec![ProofGoal::with_hypotheses(
             proposition,
@@ -878,7 +880,9 @@ fn snapshot_step_count(out: &[ProofStepSnapshot]) -> usize {
 /// returns `Universe(0)` so downstream consumers see a syntactically
 /// valid reflected term and don't have to handle a `None` case.
 pub fn opaque_placeholder() -> ReflectedTerm {
-    ReflectedTerm::Universe { level: 0 }
+    ReflectedTerm::Universe {
+        level: crate::proof_checker::Level::Concrete(0),
+    }
 }
 
 // =============================================================================
@@ -1085,7 +1089,12 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_named_hypothesis() {
-        let h = NamedHypothesis::new("x", ReflectedTerm::Universe { level: 1 });
+        let h = NamedHypothesis::new(
+            "x",
+            ReflectedTerm::Universe {
+                level: crate::proof_checker::Level::Concrete(1),
+            },
+        );
         let json = serde_json::to_string(&h).expect("serialise");
         let back: NamedHypothesis = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(h, back);
@@ -1137,7 +1146,12 @@ mod tests {
 
     #[test]
     fn opaque_placeholder_is_universe_zero() {
-        assert_eq!(opaque_placeholder(), ReflectedTerm::Universe { level: 0 });
+        assert_eq!(
+            opaque_placeholder(),
+            ReflectedTerm::Universe {
+                level: crate::proof_checker::Level::Concrete(0),
+            },
+        );
     }
 
     #[test]

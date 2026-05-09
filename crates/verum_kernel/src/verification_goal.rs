@@ -278,12 +278,12 @@ pub fn from_theorem_decl(
     // Generic-parameter binders. Each generic contributes one
     // Pi-binder with `Universe(0)` as the placeholder type.
     for _ in theorem.generics.iter() {
-        hypotheses.push(Term::Universe(0));
+        hypotheses.push(Term::universe(0));
     }
     // Value-parameter binders. Same placeholder until the type
     // translator produces real Term encodings of param types.
     for _ in theorem.params.iter() {
-        hypotheses.push(Term::Universe(0));
+        hypotheses.push(Term::universe(0));
     }
     // `requires`-clause hypotheses, in source order.
     let mut requires_terms = translate_clauses(theorem.requires.iter(), ctx)?;
@@ -331,7 +331,7 @@ pub fn from_fn_decl(
 ) -> Result<VerificationGoal, ElabError> {
     let hypotheses = translate_clauses(fn_decl.requires.iter(), ctx)?;
     let conclusion = if fn_decl.ensures.is_empty() {
-        Term::Universe(0)
+        Term::universe(0)
     } else if fn_decl.ensures.len() == 1 {
         proposition_to_term(fn_decl.ensures.iter().next().unwrap(), ctx)?
     } else {
@@ -432,7 +432,7 @@ pub fn from_refined_type(
 ) -> Result<VerificationGoal, ElabError> {
     match &refined_ty.kind {
         TypeKind::Refined { base: _, predicate } => {
-            from_refinement(Term::Universe(0), &predicate.expr, ty_name, ctx)
+            from_refinement(Term::universe(0), &predicate.expr, ty_name, ctx)
         }
         other => Err(ElabError::UnsupportedExpression(format!(
             "from_refined_type: expected TypeKind::Refined, got {:?}",
@@ -643,7 +643,7 @@ mod tests {
     use super::*;
 
     fn term_universe(n: u32) -> Term {
-        Term::Universe(n)
+        Term::universe(n)
     }
 
     #[test]
@@ -657,7 +657,7 @@ mod tests {
         );
         assert!(g.is_unconditional());
         assert_eq!(g.hypothesis_count(), 0);
-        assert_eq!(g.to_term(), Term::Universe(0));
+        assert_eq!(g.to_term(), Term::universe(0));
     }
 
     #[test]
@@ -672,7 +672,7 @@ mod tests {
         assert!(!g.is_unconditional());
         assert_eq!(
             g.to_term(),
-            Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)),),
+            Term::Pi(Box::new(Term::universe(0)), Box::new(Term::universe(0)),),
         );
     }
 
@@ -691,11 +691,11 @@ mod tests {
         assert_eq!(
             t,
             Term::Pi(
-                Box::new(Term::Universe(0)),
+                Box::new(Term::universe(0)),
                 Box::new(Term::Pi(
-                    Box::new(Term::Universe(1)),
+                    Box::new(Term::universe(1)),
                     Box::new(Term::Pi(
-                        Box::new(Term::Universe(2)),
+                        Box::new(Term::universe(2)),
                         Box::new(Term::Var(0)),
                     )),
                 )),
@@ -809,7 +809,7 @@ mod tests {
         );
         let ctx = ElabContext::new();
         let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
-        assert_eq!(goal.conclusion, Term::Universe(0));
+        assert_eq!(goal.conclusion, Term::universe(0));
         assert_eq!(goal.hypothesis_count(), 0);
         assert!(matches!(goal.source, GoalSource::Theorem { ref name } if name == "trivial"));
     }
@@ -842,7 +842,7 @@ mod tests {
             span,
         );
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("my_pred", Term::Universe(0));
+        ctx.register_axiom("my_pred", Term::universe(0));
         let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
         assert_eq!(goal.conclusion, Term::Var(0));
     }
@@ -932,9 +932,9 @@ mod tests {
     #[test]
     fn from_refinement_produces_predicate_obligation() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("is_positive", Term::Universe(0));
+        ctx.register_axiom("is_positive", Term::universe(0));
         let pred = path_expr("is_positive");
-        let goal = from_refinement(Term::Universe(0), &pred, "PosInt", &ctx).unwrap();
+        let goal = from_refinement(Term::universe(0), &pred, "PosInt", &ctx).unwrap();
         assert_eq!(goal.hypothesis_count(), 1, "base type is hypothesis");
         assert_eq!(goal.conclusion, Term::Var(0));
         assert!(
@@ -966,7 +966,7 @@ mod tests {
         // The unified type is consumable by JSON pipelines (audit
         // gates, CLI exporters, foreign-tool inspectors).
         let original = VerificationGoal::new(
-            vec![Term::Universe(0), Term::Universe(1)],
+            vec![Term::universe(0), Term::universe(1)],
             Term::Var(0),
             GoalSource::TacticSubgoal {
                 parent: "parent_thm".into(),
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn from_refined_type_extracts_predicate() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("is_positive", Term::Universe(0));
+        ctx.register_axiom("is_positive", Term::universe(0));
         let ty = refined_type_with_path_predicate("is_positive");
         let goal = from_refined_type(&ty, "PosInt", &ctx).unwrap();
         assert_eq!(goal.hypothesis_count(), 1, "base type as hypothesis");
@@ -1081,7 +1081,7 @@ mod tests {
     #[test]
     fn obligation_source_dispatches_refinement_source() {
         let mut ctx = ElabContext::new();
-        ctx.register_axiom("is_positive", Term::Universe(0));
+        ctx.register_axiom("is_positive", Term::universe(0));
         let ty = refined_type_with_path_predicate("is_positive");
         let goal = from_obligation_source(
             ObligationSource::RefinedType {

@@ -436,8 +436,8 @@ mod tests {
     fn invalid_cert() -> Certificate {
         // Universe(0) : Universe(0) — should reject.
         Certificate {
-            term: Term::Universe(0),
-            claimed_type: Term::Universe(0),
+            term: Term::universe(0),
+            claimed_type: Term::universe(0),
             metadata: std::collections::BTreeMap::new(),
         }
     }

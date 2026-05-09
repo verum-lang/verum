@@ -230,16 +230,16 @@ pub fn apply_mutation(cert: &Certificate, mutation: &Mutation) -> Certificate {
             claimed_type = lift_universes_in_term(&claimed_type, *delta);
         }
         Mutation::ReplaceTermWithUniverseZero => {
-            term = Term::Universe(0);
+            term = Term::universe(0);
         }
         Mutation::ReplaceClaimedTypeWithUniverseZero => {
-            claimed_type = Term::Universe(0);
+            claimed_type = Term::universe(0);
         }
         Mutation::ReplaceTermWithFreeVariable { idx } => {
             term = Term::Var(*idx);
         }
         Mutation::AppToNonFunction => {
-            term = Term::app(term, Term::Universe(0));
+            term = Term::app(term, Term::universe(0));
         }
         Mutation::WrapTermInExtraLam { domain } => {
             term = Term::lam(domain.clone(), term);
@@ -249,12 +249,12 @@ pub fn apply_mutation(cert: &Certificate, mutation: &Mutation) -> Certificate {
         }
         Mutation::PiDomainToUniverseZero => {
             if let Term::Pi(_, body) = &claimed_type {
-                claimed_type = Term::Pi(Box::new(Term::Universe(0)), body.clone());
+                claimed_type = Term::Pi(Box::new(Term::universe(0)), body.clone());
             }
         }
         Mutation::LamDomainToUniverseZero => {
             if let Term::Lam(_, body) = &term {
-                term = Term::Lam(Box::new(Term::Universe(0)), body.clone());
+                term = Term::Lam(Box::new(Term::universe(0)), body.clone());
             }
         }
     }
@@ -271,7 +271,7 @@ pub fn apply_mutation(cert: &Certificate, mutation: &Mutation) -> Certificate {
 fn lift_universes_in_term(term: &Term, delta: u32) -> Term {
     match term {
         Term::Var(i) => Term::Var(*i),
-        Term::Universe(n) => Term::Universe(n.saturating_add(delta)),
+        Term::Universe(level) => Term::Universe(level.clone().shifted_by(delta)),
         Term::Pi(domain, body) => Term::Pi(
             Box::new(lift_universes_in_term(domain, delta)),
             Box::new(lift_universes_in_term(body, delta)),
@@ -327,10 +327,10 @@ pub fn sample_mutation(rng: &mut FuzzRng) -> Mutation {
 /// shape: Universe(0..3) | Pi(Universe(0), Universe(0)).
 fn sample_small_domain(rng: &mut FuzzRng) -> Term {
     match rng.gen_below(4) {
-        0 => Term::Universe(0),
-        1 => Term::Universe(1),
-        2 => Term::Universe(2),
-        3 => Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0))),
+        0 => Term::universe(0),
+        1 => Term::universe(1),
+        2 => Term::universe(2),
+        3 => Term::Pi(Box::new(Term::universe(0)), Box::new(Term::universe(0))),
         _ => unreachable!(),
     }
 }
@@ -763,13 +763,13 @@ pub fn gen_arbitrary_term(rng: &mut FuzzRng, depth: u32) -> crate::proof_checker
         // Leaf: Var or Universe with low-bias toward Universe(0)
         // (the most common well-typed leaf).
         return match rng.gen_below(3) {
-            0 => Term::Universe(rng.gen_below(4) as u32),
+            0 => Term::universe(rng.gen_below(4) as u32),
             1 => Term::Var(rng.gen_below(3) as usize),
-            _ => Term::Universe(0),
+            _ => Term::universe(0),
         };
     }
     match rng.gen_below(5) {
-        0 => Term::Universe(rng.gen_below(4) as u32),
+        0 => Term::universe(rng.gen_below(4) as u32),
         1 => Term::Var(rng.gen_below((depth + 2) as u64) as usize),
         2 => Term::Pi(
             Box::new(gen_arbitrary_term(rng, depth - 1)),
@@ -950,9 +950,9 @@ mod tests {
         let lifted = lift_universes_in_term(&t, 2);
         match lifted {
             Term::Pi(domain, body) => {
-                assert_eq!(*domain, Term::Universe(2));
+                assert_eq!(*domain, Term::universe(2));
                 match *body {
-                    Term::Lam(_, lam_body) => assert_eq!(*lam_body, Term::Universe(5)),
+                    Term::Lam(_, lam_body) => assert_eq!(*lam_body, Term::universe(5)),
                     other => panic!("expected Lam, got {:?}", other),
                 }
             }
@@ -962,16 +962,16 @@ mod tests {
 
     #[test]
     fn lift_universes_saturates_at_u32_max() {
-        let t = Term::Universe(u32::MAX - 1);
+        let t = Term::universe(u32::MAX - 1);
         let lifted = lift_universes_in_term(&t, 100);
-        assert_eq!(lifted, Term::Universe(u32::MAX));
+        assert_eq!(lifted, Term::universe(u32::MAX));
     }
 
     #[test]
     fn apply_mutation_replace_term_with_universe_zero() {
         let cert = seed_certificates()[0].clone();
         let m = apply_mutation(&cert, &Mutation::ReplaceTermWithUniverseZero);
-        assert_eq!(m.term, Term::Universe(0));
+        assert_eq!(m.term, Term::universe(0));
         assert_eq!(m.claimed_type, cert.claimed_type);
     }
 
@@ -1021,7 +1021,7 @@ mod tests {
             Mutation::ReplaceTermWithFreeVariable { idx: 0 },
             Mutation::AppToNonFunction,
             Mutation::WrapTermInExtraLam {
-                domain: Term::Universe(0),
+                domain: Term::universe(0),
             },
             Mutation::SwapTermAndType,
             Mutation::PiDomainToUniverseZero,
@@ -1328,7 +1328,7 @@ mod tests {
             "synthetic — always rejects (test-only)"
         }
         fn verify(&self, _cert: &Certificate) -> Result<(), CheckError> {
-            Err(CheckError::NotAType(Term::Universe(0)))
+            Err(CheckError::NotAType(Term::universe(0)))
         }
     }
 

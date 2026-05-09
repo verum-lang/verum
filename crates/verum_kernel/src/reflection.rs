@@ -94,7 +94,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::proof_checker::Term;
+use crate::proof_checker::{Level, Term};
 
 // =============================================================================
 // ReflectedTerm — serializable mirror of proof_checker::Term
@@ -120,10 +120,14 @@ pub enum ReflectedTerm {
         index: usize,
     },
 
-    /// Mirror of [`Term::Universe`].
+    /// Mirror of [`Term::Universe`] — carries a [`Level`] so
+    /// universe-polymorphic schemas (level variables, `succ`,
+    /// `max`) round-trip losslessly.  Concrete levels serialise
+    /// as `{"kind":"universe","level":{"concrete":0}}` for the
+    /// canonical type-0 case and structurally for symbolic levels.
     Universe {
-        /// Universe level (`Type` is `level = 0`).
-        level: u32,
+        /// Universe level — concrete, variable, or expression.
+        level: Level,
     },
 
     /// Mirror of [`Term::Pi`].
@@ -193,7 +197,9 @@ impl From<&Term> for ReflectedTerm {
     fn from(term: &Term) -> Self {
         match term {
             Term::Var(i) => ReflectedTerm::Var { index: *i },
-            Term::Universe(n) => ReflectedTerm::Universe { level: *n },
+            Term::Universe(level) => ReflectedTerm::Universe {
+                level: level.clone(),
+            },
             Term::Pi(a, b) => ReflectedTerm::Pi {
                 domain: Box::new(ReflectedTerm::from(a.as_ref())),
                 body: Box::new(ReflectedTerm::from(b.as_ref())),
@@ -216,7 +222,7 @@ impl TryFrom<&ReflectedTerm> for Term {
     fn try_from(reflected: &ReflectedTerm) -> Result<Self, Self::Error> {
         match reflected {
             ReflectedTerm::Var { index } => Ok(Term::Var(*index)),
-            ReflectedTerm::Universe { level } => Ok(Term::Universe(*level)),
+            ReflectedTerm::Universe { level } => Ok(Term::Universe(level.clone())),
             ReflectedTerm::Pi { domain, body } => Ok(Term::pi(
                 Term::try_from(domain.as_ref())?,
                 Term::try_from(body.as_ref())?,
@@ -385,8 +391,8 @@ fn reflect_t_var() -> ReflectedKernelRule {
 fn reflect_t_univ() -> ReflectedKernelRule {
     // T-Univ: Universe(n) : Universe(n+1). V0 sketch pins n=0.
     let conclusion = ReflectedJudgment::closed(
-        ReflectedTerm::Universe { level: 0 },
-        ReflectedTerm::Universe { level: 1 },
+        ReflectedTerm::Universe { level: Level::Concrete(0) },
+        ReflectedTerm::Universe { level: Level::Concrete(1) },
     );
     ReflectedKernelRule {
         name: "T-Univ".to_string(),
@@ -400,19 +406,19 @@ fn reflect_t_pi_form() -> ReflectedKernelRule {
     // V0 sketch pins n = m = 0.
     let premise_a = ReflectedJudgment::closed(
         ReflectedTerm::Var { index: 0 },
-        ReflectedTerm::Universe { level: 0 },
+        ReflectedTerm::Universe { level: Level::Concrete(0) },
     );
     let premise_b = ReflectedJudgment::at_depth(
         1,
         ReflectedTerm::Var { index: 0 },
-        ReflectedTerm::Universe { level: 0 },
+        ReflectedTerm::Universe { level: Level::Concrete(0) },
     );
     let conclusion = ReflectedJudgment::closed(
         ReflectedTerm::Pi {
             domain: Box::new(ReflectedTerm::Var { index: 0 }),
             body: Box::new(ReflectedTerm::Var { index: 0 }),
         },
-        ReflectedTerm::Universe { level: 0 },
+        ReflectedTerm::Universe { level: Level::Concrete(0) },
     );
     ReflectedKernelRule {
         name: "T-Pi-Form".to_string(),
@@ -565,24 +571,24 @@ mod tests {
 
     #[test]
     fn roundtrip_universe() {
-        roundtrip(Term::Universe(0));
-        roundtrip(Term::Universe(42));
+        roundtrip(Term::universe(0));
+        roundtrip(Term::universe(42));
     }
 
     #[test]
     fn roundtrip_pi() {
-        roundtrip(Term::pi(Term::Universe(0), Term::Var(0)));
+        roundtrip(Term::pi(Term::universe(0), Term::Var(0)));
         roundtrip(Term::pi(
-            Term::pi(Term::Universe(0), Term::Var(0)),
-            Term::Universe(1),
+            Term::pi(Term::universe(0), Term::Var(0)),
+            Term::universe(1),
         ));
     }
 
     #[test]
     fn roundtrip_lam() {
-        roundtrip(Term::lam(Term::Universe(0), Term::Var(0)));
+        roundtrip(Term::lam(Term::universe(0), Term::Var(0)));
         roundtrip(Term::lam(
-            Term::Universe(0),
+            Term::universe(0),
             Term::lam(Term::Var(0), Term::Var(1)),
         ));
     }
@@ -591,15 +597,15 @@ mod tests {
     fn roundtrip_app() {
         roundtrip(Term::app(Term::Var(0), Term::Var(1)));
         roundtrip(Term::app(
-            Term::lam(Term::Universe(0), Term::Var(0)),
-            Term::Universe(0),
+            Term::lam(Term::universe(0), Term::Var(0)),
+            Term::universe(0),
         ));
     }
 
     #[test]
     fn roundtrip_polymorphic_identity() {
         // λ(A : Type). λ(x : A). x --- the polymorphic identity.
-        let poly_id = Term::lam(Term::Universe(0), Term::lam(Term::Var(0), Term::Var(0)));
+        let poly_id = Term::lam(Term::universe(0), Term::lam(Term::Var(0), Term::Var(0)));
         roundtrip(poly_id);
     }
 
@@ -610,8 +616,8 @@ mod tests {
     #[test]
     fn well_formed_closed_universe() {
         let j = ReflectedJudgment::closed(
-            ReflectedTerm::Universe { level: 0 },
-            ReflectedTerm::Universe { level: 1 },
+            ReflectedTerm::Universe { level: Level::Concrete(0) },
+            ReflectedTerm::Universe { level: Level::Concrete(1) },
         );
         assert!(is_reflected_well_formed(&j));
     }
@@ -633,7 +639,7 @@ mod tests {
         let j = ReflectedJudgment::at_depth(
             1,
             ReflectedTerm::Var { index: 2 },
-            ReflectedTerm::Universe { level: 0 },
+            ReflectedTerm::Universe { level: Level::Concrete(0) },
         );
         assert!(!is_reflected_well_formed(&j));
     }
@@ -642,7 +648,7 @@ mod tests {
     fn malformed_var_out_of_range_in_type() {
         let j = ReflectedJudgment::at_depth(
             1,
-            ReflectedTerm::Universe { level: 0 },
+            ReflectedTerm::Universe { level: Level::Concrete(0) },
             ReflectedTerm::Var { index: 5 },
         );
         assert!(!is_reflected_well_formed(&j));
@@ -653,10 +659,10 @@ mod tests {
         // λ. Var(0) — Var(0) refers to the lambda's own binder, so
         // it's legal even at outer depth 0.
         let body = ReflectedTerm::Lam {
-            domain: Box::new(ReflectedTerm::Universe { level: 0 }),
+            domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
             body: Box::new(ReflectedTerm::Var { index: 0 }),
         };
-        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: 0 });
+        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: Level::Concrete(0) });
         assert!(is_reflected_well_formed(&j));
     }
 
@@ -664,10 +670,10 @@ mod tests {
     fn malformed_under_binder_index_too_large() {
         // λ. Var(3) with no surrounding context — Var(3) escapes.
         let body = ReflectedTerm::Lam {
-            domain: Box::new(ReflectedTerm::Universe { level: 0 }),
+            domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
             body: Box::new(ReflectedTerm::Var { index: 3 }),
         };
-        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: 0 });
+        let j = ReflectedJudgment::closed(body, ReflectedTerm::Universe { level: Level::Concrete(0) });
         assert!(!is_reflected_well_formed(&j));
     }
 
@@ -722,12 +728,12 @@ mod tests {
     fn serde_roundtrip_judgment() {
         let j = ReflectedJudgment::closed(
             ReflectedTerm::Lam {
-                domain: Box::new(ReflectedTerm::Universe { level: 0 }),
+                domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
                 body: Box::new(ReflectedTerm::Var { index: 0 }),
             },
             ReflectedTerm::Pi {
-                domain: Box::new(ReflectedTerm::Universe { level: 0 }),
-                body: Box::new(ReflectedTerm::Universe { level: 0 }),
+                domain: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
+                body: Box::new(ReflectedTerm::Universe { level: Level::Concrete(0) }),
             },
         );
         let json = serde_json::to_string(&j).expect("serialise");

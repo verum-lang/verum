@@ -452,7 +452,7 @@ pub fn try_lift_to_verification_goal(
 /// work in [`crate::tactic_elaborator`].
 fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
     match p {
-        HeapPredicate::Emp => Some(Term::Universe(0)),
+        HeapPredicate::Emp => Some(Term::universe(0)),
         HeapPredicate::Pure(t) => Some(t.clone()),
         HeapPredicate::And { lhs, rhs } if lhs.is_pure() && rhs.is_pure() => {
             // Without registering a connective axiom here, fall
@@ -949,14 +949,14 @@ mod tests {
 
     #[test]
     fn sep_of_pure_is_pure() {
-        let p = HeapPredicate::sep(HeapPredicate::pure(Term::Universe(0)), HeapPredicate::emp());
+        let p = HeapPredicate::sep(HeapPredicate::pure(Term::universe(0)), HeapPredicate::emp());
         assert!(p.is_pure());
     }
 
     #[test]
     fn sep_with_points_to_is_not_pure() {
         let p = HeapPredicate::sep(
-            HeapPredicate::pure(Term::Universe(0)),
+            HeapPredicate::pure(Term::universe(0)),
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
         );
         assert!(!p.is_pure());
@@ -992,8 +992,8 @@ mod tests {
     fn pure_hoare_triple_round_trip() {
         let triple = HoareTriple::new(
             HeapPredicate::emp(),
-            Term::Universe(0),
-            HeapPredicate::pure(Term::Universe(0)),
+            Term::universe(0),
+            HeapPredicate::pure(Term::universe(0)),
             Capability::None,
         );
         assert!(triple.is_pure());
@@ -1003,7 +1003,7 @@ mod tests {
     fn stateful_hoare_triple_is_not_pure() {
         let triple = HoareTriple::new(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
         );
@@ -1014,7 +1014,7 @@ mod tests {
     fn separation_goal_audit_metadata_complete() {
         let triple = HoareTriple::new(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::Write,
         );
@@ -1037,7 +1037,7 @@ mod tests {
     fn pure_separation_goal_lifts_to_verification_goal() {
         let triple = HoareTriple::new(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
         );
@@ -1049,14 +1049,14 @@ mod tests {
         );
         assert!(goal.is_pure());
         let vg = try_lift_to_verification_goal(&goal).expect("pure goal lifts");
-        assert_eq!(vg.conclusion, Term::Universe(0));
+        assert_eq!(vg.conclusion, Term::universe(0));
     }
 
     #[test]
     fn stateful_separation_goal_does_not_lift() {
         let triple = HoareTriple::new(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
         );
@@ -1074,13 +1074,13 @@ mod tests {
     fn separation_goal_serde_round_trip() {
         let triple = HoareTriple::new(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
             Capability::Write,
         );
         let goal = SeparationGoal::new(
             triple,
-            HeapPredicate::pure(Term::Universe(0)),
+            HeapPredicate::pure(Term::universe(0)),
             SeparationGoalSource::LoopInvariant {
                 enclosing_fn: "f".into(),
                 loop_site: "f.vr:42".into(),
@@ -1143,7 +1143,7 @@ mod tests {
     fn dispatch_trivial_emp_emp_discharges() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
             HeapPredicate::emp(),
@@ -1160,8 +1160,8 @@ mod tests {
         // statements cannot need heap-region access — reject.
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
-            HeapPredicate::pure(Term::Universe(0)),
+            Term::universe(0),
+            HeapPredicate::pure(Term::universe(0)),
             Capability::Write,
             HeapPredicate::emp(),
         );
@@ -1178,9 +1178,9 @@ mod tests {
     fn dispatch_pure_with_read_capability_also_rejects() {
         // Read is also non-None — same rejection path.
         let goal = make_goal(
-            HeapPredicate::pure(Term::Universe(0)),
-            Term::Universe(0),
-            HeapPredicate::pure(Term::Universe(0)),
+            HeapPredicate::pure(Term::universe(0)),
+            Term::universe(0),
+            HeapPredicate::pure(Term::universe(0)),
             Capability::Read,
             HeapPredicate::emp(),
         );
@@ -1196,7 +1196,7 @@ mod tests {
         // should route to the frame rule.
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
             HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
@@ -1229,7 +1229,7 @@ mod tests {
         // frame ⇒ consequence rule.
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
             HeapPredicate::emp(),
@@ -1247,7 +1247,7 @@ mod tests {
         // This is the residual case — admit with IOU.
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::Own,
             HeapPredicate::emp(),
@@ -1267,7 +1267,7 @@ mod tests {
         // capability-mismatch rule fires FIRST and rejects.
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::Read,
             HeapPredicate::emp(),
@@ -1368,7 +1368,7 @@ mod tests {
     fn execute_frame_rule_with_emp_residual_discharges() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
@@ -1386,7 +1386,7 @@ mod tests {
     fn execute_frame_rule_with_nontrivial_residual_emits_subgoal() {
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
             HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
@@ -1407,7 +1407,7 @@ mod tests {
     fn execute_frame_rule_rejects_emp_frame() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
             HeapPredicate::emp(),
@@ -1442,7 +1442,7 @@ mod tests {
     fn execute_hoare_sequencing_rejects_non_app_command() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
             HeapPredicate::emp(),
@@ -1458,7 +1458,7 @@ mod tests {
     fn execute_consequence_admits_for_differing_predicates() {
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
             HeapPredicate::emp(),
@@ -1477,7 +1477,7 @@ mod tests {
     fn execute_consequence_rejects_emp_pre_or_post() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
             Capability::Write,
             HeapPredicate::emp(),
@@ -1493,7 +1493,7 @@ mod tests {
     fn dispatch_and_execute_routes_frame_to_executor() {
         let goal = make_goal(
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
             Capability::Write,
             HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
@@ -1511,7 +1511,7 @@ mod tests {
     fn dispatch_and_execute_skips_executor_for_discharged() {
         let goal = make_goal(
             HeapPredicate::emp(),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::emp(),
             Capability::None,
             HeapPredicate::emp(),
@@ -1595,7 +1595,7 @@ mod tests {
                 lhs: Box::new(HeapPredicate::Emp),
                 rhs: Box::new(HeapPredicate::Emp),
             },
-            HeapPredicate::Pure(Term::Universe(0)),
+            HeapPredicate::Pure(Term::universe(0)),
             HeapPredicate::Named {
                 name: "list".to_string(),
                 args: vec![Term::Var(0), Term::Var(1)],
@@ -1657,7 +1657,7 @@ mod tests {
                 HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
                 HeapPredicate::emp(),
             ),
-            Term::Universe(0),
+            Term::universe(0),
             HeapPredicate::sep(
                 HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
                 HeapPredicate::emp(),

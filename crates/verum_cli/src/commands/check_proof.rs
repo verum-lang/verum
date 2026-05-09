@@ -155,8 +155,8 @@ mod tests {
     #[test]
     fn check_proof_accepts_polymorphic_identity_certificate() {
         let cert = Certificate {
-            term: Term::lam(Term::Universe(0), Term::lam(Term::Var(0), Term::Var(0))),
-            claimed_type: Term::pi(Term::Universe(0), Term::pi(Term::Var(0), Term::Var(1))),
+            term: Term::lam(Term::universe(0), Term::lam(Term::Var(0), Term::Var(0))),
+            claimed_type: Term::pi(Term::universe(0), Term::pi(Term::Var(0), Term::Var(1))),
             metadata: {
                 let mut m = std::collections::BTreeMap::new();
                 m.insert("name".to_string(), "polymorphic_id".to_string());
@@ -175,8 +175,8 @@ mod tests {
     fn check_proof_rejects_wrong_type_certificate() {
         let cert = Certificate {
             // Identity at Universe(0) — but claim it's Universe(0).
-            term: Term::lam(Term::Universe(0), Term::Var(0)),
-            claimed_type: Term::Universe(0),
+            term: Term::lam(Term::universe(0), Term::Var(0)),
+            claimed_type: Term::universe(0),
             metadata: Default::default(),
         };
         let mut tmpfile = tempfile::NamedTempFile::new().expect("tempfile");
