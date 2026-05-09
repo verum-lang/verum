@@ -2792,6 +2792,29 @@ fn module_name_for_path(path: &Path) -> Option<String> {
     }
 }
 
+/// Read the declared module name (`module foo.bar.baz;`) from the file's
+/// AST.  When present, this is the canonical name the rest of the corpus
+/// uses in `mount foo.bar.baz` — preferring it over the path-derived
+/// heuristic closes the project-prefix gap (e.g. registry files declare
+/// `module verum_registry.audit.X;` but the path-walk only sees
+/// `audit.X`, which makes dead-module / orphan-module mis-fire).
+///
+/// Falls back to `module_name_for_path` when the file has no top-level
+/// `module` declaration (e.g. inline `mod.vr` entry points) or when the
+/// AST hasn't been parsed (cache-only path).
+fn module_name_for_file(file: &CorpusFile) -> Option<String> {
+    use verum_ast::ItemKind;
+    for item in &file.module.items {
+        if let ItemKind::Module(m) = &item.kind {
+            let name = m.name.name.as_str();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    module_name_for_path(&file.path)
+}
+
 // ── circular-import ─────────────────────────────────────────────────
 //
 
@@ -2823,7 +2846,7 @@ impl CrossFilePass for CircularImportPass {
         let mut name_of: std::collections::HashMap<String, &CorpusFile> =
             std::collections::HashMap::new();
         for f in ctx.files {
-            if let Some(n) = module_name_for_path(&f.path) {
+            if let Some(n) = module_name_for_file(f) {
                 name_of.insert(n, f);
             }
         }
@@ -2953,7 +2976,7 @@ impl CrossFilePass for OrphanModulePass {
             if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
                 continue;
             }
-            let name = match module_name_for_path(&f.path) {
+            let name = match module_name_for_file(f) {
                 Some(n) => n,
                 None => continue,
             };
@@ -3253,7 +3276,7 @@ impl CrossFilePass for DeadModulePass {
         let mut name_of: std::collections::HashMap<String, &CorpusFile> =
             std::collections::HashMap::new();
         for f in ctx.files {
-            if let Some(n) = module_name_for_path(&f.path) {
+            if let Some(n) = module_name_for_file(f) {
                 name_of.insert(n, f);
             }
         }
@@ -3267,7 +3290,7 @@ impl CrossFilePass for DeadModulePass {
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
             if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
-                if let Some(n) = module_name_for_path(&f.path) {
+                if let Some(n) = module_name_for_file(f) {
                     frontier.push(n.clone());
                     reachable.insert(n);
                 }
@@ -3295,7 +3318,7 @@ impl CrossFilePass for DeadModulePass {
             if matches!(stem, "main.vr" | "lib.vr" | "mod.vr") {
                 continue;
             }
-            let name = match module_name_for_path(&f.path) {
+            let name = match module_name_for_file(f) {
                 Some(n) => n,
                 None => continue,
             };
@@ -3460,7 +3483,7 @@ impl CrossFilePass for MountCycleViaStdlibPass {
         let user_top_segs: std::collections::HashSet<String> = ctx
             .files
             .iter()
-            .filter_map(|f| module_name_for_path(&f.path))
+            .filter_map(|f| module_name_for_file(f))
             .filter_map(|n| n.split('.').next().map(|s| s.to_string()))
             .collect();
         for f in ctx.files {
