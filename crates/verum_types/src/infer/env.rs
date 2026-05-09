@@ -364,6 +364,7 @@ impl TypeChecker {
             skolem_tracker: crate::existential::SkolemTracker::new(),
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
+            resolved_call_targets: std::collections::HashMap::new(),
         }
     }
 
@@ -489,6 +490,7 @@ impl TypeChecker {
             skolem_tracker: crate::existential::SkolemTracker::new(),
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
+            resolved_call_targets: std::collections::HashMap::new(),
         }
     }
 
@@ -615,6 +617,7 @@ impl TypeChecker {
             skolem_tracker: crate::existential::SkolemTracker::new(),
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
+            resolved_call_targets: std::collections::HashMap::new(),
         }
     }
 

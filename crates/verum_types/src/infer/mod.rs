@@ -1198,6 +1198,30 @@ pub struct TypeChecker {
     /// to prevent stack overflow from mutual recursion between these functions.
     /// Spec: L0-critical/memory-safety/buffer_overflow/no_stack_overflow
     inference_depth: Cell<u32>,
+    /// #91 Phase 3 — pre-resolved-static-call side-table.
+    ///
+    /// During `infer_method_call_inner_impl`, when the dispatch
+    /// resolves unambiguously to a single `FunctionId` (or variant
+    /// constructor), the resolution is written here keyed by the
+    /// MethodCall expression's `Span`.  After type checking
+    /// completes, `commit_resolved_call_targets` walks the AST
+    /// mutably and stamps each `Expr::resolved_call_target` from
+    /// this table.  At codegen time, `compile_method_call` reads
+    /// the field and emits a direct `Call` / `MakeVariant` in O(1)
+    /// instead of replaying the legacy 7-step name-resolution
+    /// cascade in `try_resolve_static_method`.
+    ///
+    /// Side-table architecture chosen over `&mut Expr` walk:
+    /// inference is `&Expr`-driven across hundreds of call sites
+    /// (synth_expr, check_expr, infer_method_call_inner, …);
+    /// converting them all to `&mut Expr` is mechanically large and
+    /// risks subtle borrow conflicts.  The side-table keeps
+    /// inference immutable and concentrates the mut walk in a
+    /// single finalisation pass.  Span uniqueness is sufficient for
+    /// non-macro source — every method-call expression in the
+    /// parsed AST has a distinct span.
+    pub(crate) resolved_call_targets:
+        std::collections::HashMap<verum_ast::span::Span, verum_ast::expr::ResolvedCallTarget>,
 }
 
 /// Generator context tracking for yield expressions

@@ -73,6 +73,282 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
 impl TypeChecker {
+    // ========================================================================
+    // #91 Phase 3 — pre-resolved-static-call side-table API.
+    //
+    // The typechecker writes to the side-table during inference at every
+    // method-call resolution success point.  After type checking
+    // completes, `commit_resolved_call_targets` drains the table into
+    // the AST so the VBC codegen's fast path picks up the resolutions.
+    //
+    // Architectural rationale lives on the field's docstring at
+    // `TypeChecker::resolved_call_targets` (infer/mod.rs).
+    // ========================================================================
+
+    /// Record that the method-call expression at `span` resolves to
+    /// the function with canonical name `qualified_name`.  Called by
+    /// `infer_method_call_inner_impl` at every static-method dispatch
+    /// success point.
+    pub(crate) fn record_resolved_static_call(
+        &mut self,
+        span: verum_ast::span::Span,
+        qualified_name: impl Into<verum_common::Text>,
+    ) {
+        self.resolved_call_targets.insert(
+            span,
+            verum_ast::expr::ResolvedCallTarget::StaticCall {
+                qualified_name: qualified_name.into(),
+            },
+        );
+    }
+
+    /// Record that the method-call expression at `span` resolves to
+    /// a variant constructor with the given tag and (optionally)
+    /// parent-type canonical name.
+    pub(crate) fn record_resolved_variant_ctor(
+        &mut self,
+        span: verum_ast::span::Span,
+        tag: u32,
+        parent_type_name: Option<verum_common::Text>,
+    ) {
+        self.resolved_call_targets.insert(
+            span,
+            verum_ast::expr::ResolvedCallTarget::VariantCtor {
+                tag,
+                parent_type_name,
+            },
+        );
+    }
+
+    /// Walk `module` mutably and stamp every `MethodCall` expression's
+    /// `resolved_call_target` from the typechecker's side-table.
+    /// Idempotent — running twice produces the same AST.
+    ///
+    /// Call this AFTER `phase_type_check` but BEFORE the codegen
+    /// phase so the codegen's `compile_method_call` fast path sees
+    /// the resolutions.
+    pub fn commit_resolved_call_targets(&self, module: &mut verum_ast::Module) {
+        if self.resolved_call_targets.is_empty() {
+            return;
+        }
+        for item in module.items.iter_mut() {
+            commit_resolved_in_item(item, &self.resolved_call_targets);
+        }
+    }
+}
+
+fn commit_resolved_in_item(
+    item: &mut verum_ast::decl::Item,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    use verum_ast::decl::ItemKind;
+    use verum_common::Maybe;
+    match &mut item.kind {
+        ItemKind::Function(func) => {
+            if let Maybe::Some(body) = &mut func.body {
+                commit_resolved_in_function_body(body, table);
+            }
+        }
+        ItemKind::Impl(impl_decl) => {
+            for impl_item in impl_decl.items.iter_mut() {
+                if let verum_ast::decl::ImplItemKind::Function(func) = &mut impl_item.kind
+                    && let Maybe::Some(body) = &mut func.body
+                {
+                    commit_resolved_in_function_body(body, table);
+                }
+            }
+        }
+        ItemKind::Const(decl) => commit_resolved_in_expr(&mut decl.value, table),
+        ItemKind::Static(decl) => commit_resolved_in_expr(&mut decl.value, table),
+        _ => {}
+    }
+}
+
+fn commit_resolved_in_function_body(
+    body: &mut verum_ast::decl::FunctionBody,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    use verum_ast::decl::FunctionBody;
+    match body {
+        FunctionBody::Block(block) => commit_resolved_in_block(block, table),
+        FunctionBody::Expr(expr) => commit_resolved_in_expr(expr, table),
+    }
+}
+
+fn commit_resolved_in_block(
+    block: &mut verum_ast::expr::Block,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    use verum_common::Maybe;
+    for stmt in block.stmts.iter_mut() {
+        commit_resolved_in_stmt(stmt, table);
+    }
+    if let Maybe::Some(tail) = &mut block.expr {
+        commit_resolved_in_expr(tail, table);
+    }
+}
+
+fn commit_resolved_in_stmt(
+    stmt: &mut verum_ast::Stmt,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    use verum_ast::stmt::StmtKind;
+    use verum_common::Maybe;
+    match &mut stmt.kind {
+        StmtKind::Let { value, .. } => {
+            if let Maybe::Some(v) = value {
+                commit_resolved_in_expr(v, table);
+            }
+        }
+        StmtKind::LetElse {
+            value, else_block, ..
+        } => {
+            commit_resolved_in_expr(value, table);
+            commit_resolved_in_block(else_block, table);
+        }
+        StmtKind::Expr { expr, .. } => commit_resolved_in_expr(expr, table),
+        StmtKind::Item(item) => commit_resolved_in_item(item, table),
+        StmtKind::Defer(e) | StmtKind::Errdefer(e) => commit_resolved_in_expr(e, table),
+        StmtKind::Provide { value, .. } => commit_resolved_in_expr(value, table),
+        StmtKind::ProvideScope { value, block, .. } => {
+            commit_resolved_in_expr(value, table);
+            commit_resolved_in_expr(block, table);
+        }
+        _ => {}
+    }
+}
+
+fn commit_resolved_in_expr(
+    expr: &mut verum_ast::Expr,
+    table: &std::collections::HashMap<
+        verum_ast::span::Span,
+        verum_ast::expr::ResolvedCallTarget,
+    >,
+) {
+    use verum_ast::expr::ExprKind;
+    use verum_common::Maybe;
+    // Stamp THIS node first if the table has a resolution for its span.
+    if matches!(expr.kind, ExprKind::MethodCall { .. })
+        && let Some(target) = table.get(&expr.span)
+    {
+        expr.resolved_call_target = Some(target.clone());
+    }
+    // Then recurse into children so nested method calls also get stamped.
+    match &mut expr.kind {
+        ExprKind::MethodCall {
+            receiver, args, ..
+        } => {
+            commit_resolved_in_expr(receiver, table);
+            for a in args.iter_mut() {
+                commit_resolved_in_expr(a, table);
+            }
+        }
+        ExprKind::Call { func, args, .. } => {
+            commit_resolved_in_expr(func, table);
+            for a in args.iter_mut() {
+                commit_resolved_in_expr(a, table);
+            }
+        }
+        ExprKind::Binary { left, right, .. } => {
+            commit_resolved_in_expr(left, table);
+            commit_resolved_in_expr(right, table);
+        }
+        ExprKind::Unary { expr, .. } => commit_resolved_in_expr(expr, table),
+        ExprKind::Field { expr, .. }
+        | ExprKind::OptionalChain { expr, .. }
+        | ExprKind::TupleIndex { expr, .. } => commit_resolved_in_expr(expr, table),
+        ExprKind::Index { expr, index } => {
+            commit_resolved_in_expr(expr, table);
+            commit_resolved_in_expr(index, table);
+        }
+        ExprKind::Pipeline { left, right }
+        | ExprKind::NullCoalesce { left, right } => {
+            commit_resolved_in_expr(left, table);
+            commit_resolved_in_expr(right, table);
+        }
+        ExprKind::Cast { expr, .. } => commit_resolved_in_expr(expr, table),
+        ExprKind::Try(e) | ExprKind::TryBlock(e) => commit_resolved_in_expr(e, table),
+        ExprKind::Block(block) => commit_resolved_in_block(block, table),
+        ExprKind::If {
+            then_branch,
+            else_branch,
+            condition,
+            ..
+        } => {
+            // IfCondition is a SmallVec<ConditionKind> where each
+            // ConditionKind is either a bare Expr or a let-binding
+            // (`let pattern = value`). Recurse into each contained
+            // expression so nested method calls inside `if let`
+            // chains and bool conditions get stamped too.
+            for ck in condition.conditions.iter_mut() {
+                match ck {
+                    verum_ast::expr::ConditionKind::Expr(e) => {
+                        commit_resolved_in_expr(e, table)
+                    }
+                    verum_ast::expr::ConditionKind::Let { value, .. } => {
+                        commit_resolved_in_expr(value, table)
+                    }
+                }
+            }
+            commit_resolved_in_block(then_branch, table);
+            if let Maybe::Some(eb) = else_branch {
+                commit_resolved_in_expr(eb, table);
+            }
+        }
+        ExprKind::Match { expr, arms } => {
+            commit_resolved_in_expr(expr, table);
+            for arm in arms.iter_mut() {
+                if let Maybe::Some(g) = &mut arm.guard {
+                    commit_resolved_in_expr(g, table);
+                }
+                commit_resolved_in_expr(&mut arm.body, table);
+            }
+        }
+        ExprKind::Loop { body, .. } => commit_resolved_in_block(body, table),
+        ExprKind::While { condition, body, .. } => {
+            commit_resolved_in_expr(condition, table);
+            commit_resolved_in_block(body, table);
+        }
+        ExprKind::For { iter, body, .. } => {
+            commit_resolved_in_expr(iter, table);
+            commit_resolved_in_block(body, table);
+        }
+        ExprKind::Closure { body, .. } => commit_resolved_in_expr(body, table),
+        ExprKind::Return(e) => {
+            if let Maybe::Some(e) = e {
+                commit_resolved_in_expr(e, table);
+            }
+        }
+        ExprKind::Async(block) => commit_resolved_in_block(block, table),
+        ExprKind::Await(inner) => commit_resolved_in_expr(inner, table),
+        ExprKind::Paren(inner) => commit_resolved_in_expr(inner, table),
+        ExprKind::Throw(error) => commit_resolved_in_expr(error, table),
+        ExprKind::Range { start, end, .. } => {
+            if let Maybe::Some(s) = start {
+                commit_resolved_in_expr(s, table);
+            }
+            if let Maybe::Some(e) = end {
+                commit_resolved_in_expr(e, table);
+            }
+        }
+        // Leaves and structurally simple kinds: nothing to recurse.
+        _ => {}
+    }
+}
+
+impl TypeChecker {
     /// QTT validation: walk a function body and confirm every
     /// declared binding's runtime usage matches its declared
     /// quantity. Returns `Ok(usage_map)` on success or the first
@@ -246,6 +522,7 @@ impl TypeChecker {
             skolem_tracker: crate::existential::SkolemTracker::new(),
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
+            resolved_call_targets: std::collections::HashMap::new(),
         }
     }
 
@@ -1337,6 +1614,7 @@ impl TypeChecker {
             skolem_tracker: crate::existential::SkolemTracker::new(),
             cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             inference_depth: Cell::new(0),
+            resolved_call_targets: std::collections::HashMap::new(),
         }
     }
 
