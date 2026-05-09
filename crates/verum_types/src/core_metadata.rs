@@ -119,6 +119,43 @@ pub struct TypeDescriptor {
 
     /// Protocol implementations
     pub implements: List<Text>,
+
+    /// #101 — declaration span for diagnostic emission.  When the
+    /// typechecker rejects a user expression that references this
+    /// type, the diagnostic emitter uses this span to point at the
+    /// stdlib declaration site (`note: defined here — see
+    /// core/text/sso.vr:118:1`).  Without this, stdlib-rooted
+    /// errors had no source pointer at all and forced the user to
+    /// guess where the type was declared.  `Maybe::None` for
+    /// descriptors that came in via legacy paths without span
+    /// metadata; defaults to None on legacy bincode payloads
+    /// thanks to `#[serde(default)]`.
+    #[serde(default)]
+    pub decl_span: Maybe<DeclSpan>,
+}
+
+/// Source-span tag carried by [`TypeDescriptor`], [`FunctionDescriptor`],
+/// and [`ProtocolDescriptor`] for diagnostic-emit fast-paths.
+///
+/// Captures the file path (relative to `core/`) and the byte range of
+/// the declaration's `name` token — sufficient for the diagnostic
+/// emitter's `note: defined here` pointer.  We carry *byte ranges*
+/// rather than line/column pairs so the emitter resolves them through
+/// its existing source-map machinery (which expects byte offsets) at
+/// rendering time, instead of duplicating line-counting logic in
+/// every metadata producer.
+///
+/// The file path is rooted at `core/` (no leading `core/` prefix) so
+/// the diagnostic side can compose it with either an embedded source
+/// archive or an on-disk SDK root without re-stripping.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeclSpan {
+    /// Relative file path under `core/` (e.g. `"text/sso.vr"`).
+    pub file: Text,
+    /// Byte offset of the declaration's `name` token start.
+    pub start: u32,
+    /// Byte offset of the declaration's `name` token end (exclusive).
+    pub end: u32,
 }
 
 /// Generic parameter descriptor
@@ -240,6 +277,10 @@ pub struct ProtocolDescriptor {
 
     /// Default methods (have implementations)
     pub default_methods: List<MethodSignature>,
+
+    /// #101 — declaration span; see [`TypeDescriptor::decl_span`].
+    #[serde(default)]
+    pub decl_span: Maybe<DeclSpan>,
 }
 
 /// Function definition descriptor
@@ -300,6 +341,10 @@ pub struct FunctionDescriptor {
     /// zero-arg-fn references as values.
     #[serde(default)]
     pub is_const: bool,
+
+    /// #101 — declaration span; see [`TypeDescriptor::decl_span`].
+    #[serde(default)]
+    pub decl_span: Maybe<DeclSpan>,
 }
 
 /// Implementation descriptor (impl Protocol for Type)

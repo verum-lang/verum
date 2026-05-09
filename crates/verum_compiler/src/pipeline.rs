@@ -1648,6 +1648,8 @@ impl<'s> CompilationPipeline<'s> {
                 alignment: Maybe::None,
                 methods: List::new(),
                 implements: List::new(),
+                // #101 — incremental cached path; spans aren't cached.
+                decl_span: Maybe::None,
             };
             metadata
                 .types
@@ -1687,6 +1689,8 @@ impl<'s> CompilationPipeline<'s> {
                 // markers; default to false (cached path is for
                 // user-side incremental compilation, not stdlib).
                 is_const: false,
+                // #101 — incremental cached path; spans aren't cached.
+                decl_span: Maybe::None,
             };
             metadata
                 .functions

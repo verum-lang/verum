@@ -322,6 +322,8 @@ fn convert_type_descriptor(
                 }
             })
             .collect(),
+        // #101 — span population deferred to source-walk pass.
+        decl_span: Maybe::None,
     })
 }
 
@@ -404,6 +406,8 @@ fn convert_to_protocol_descriptor(
         associated_types,
         required_methods,
         default_methods,
+        // #101 — span population deferred to source-walk pass.
+        decl_span: Maybe::None,
     })
 }
 
@@ -569,6 +573,8 @@ fn convert_function_descriptor(
         // driven typechecker treats `public const X` as a value
         // rather than a callable.
         is_const: vbc_fn.is_const,
+        // #101 — span population deferred to source-walk pass.
+        decl_span: Maybe::None,
     })
 }
 
