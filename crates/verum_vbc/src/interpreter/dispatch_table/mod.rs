@@ -752,15 +752,14 @@ pub(crate) fn call_closure_sync(
     }
 
     let base_ptr = closure_val.as_ptr::<u8>();
-    let header_offset = super::heap::OBJECT_HEADER_SIZE;
 
-    // SAFETY: Closure objects are allocated with layout [header | func_id: u32 | capture_count: u32 | captures...].
-    // base_ptr + header_offset points to the func_id field.
-    let (func_id, capture_count) = unsafe {
-        let func_id = *(base_ptr.add(header_offset) as *const u32);
-        let capture_count = *(base_ptr.add(header_offset + 4) as *const u32);
-        (FunctionId(func_id), capture_count as usize)
-    };
+    // SAFETY: closure_val.is_ptr() + !is_nil() check above + the
+    // closure layout produced by `handle_make_closure` guarantees
+    // `closure_header` reads valid (func_id, capture_count) at the
+    // canonical offsets pinned by `verum_common::layout`.
+    let (raw_func_id, capture_count_u32) = unsafe { super::heap::closure_header(base_ptr) };
+    let func_id = FunctionId(raw_func_id);
+    let capture_count = capture_count_u32 as usize;
 
     let func = state
         .module
@@ -782,17 +781,13 @@ pub(crate) fn call_closure_sync(
             max_depth: crate::interpreter::registers::MAX_SIZE,
         })?;
 
-    // Copy captured values
-    // SAFETY: Closure layout guarantees captures_offset (header + 8) followed by
-    // capture_count Values. Each read is within the allocated closure object.
+    // Copy captured values. SAFETY: capture_count was just read
+    // from the same closure header — every index i < capture_count
+    // is in-bounds.
     unsafe {
-        let captures_offset = header_offset + 8;
         for i in 0..capture_count {
-            let cap_ptr =
-                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
-            state
-                .registers
-                .set(new_base, Reg(i as u16), std::ptr::read(cap_ptr));
+            let val = std::ptr::read(super::heap::closure_captures_ptr(base_ptr, i));
+            state.registers.set(new_base, Reg(i as u16), val);
         }
     }
 
