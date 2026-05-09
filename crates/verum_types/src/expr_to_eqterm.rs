@@ -158,6 +158,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         }
     }
 
@@ -167,6 +168,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         }
     }
 
@@ -190,6 +192,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let term = expr_to_eq_term(&e);
         assert!(matches!(term, EqTerm::Const(EqConst::Bool(true))));
@@ -206,6 +209,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let term = expr_to_eq_term(&call);
         match term {
@@ -230,6 +234,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let transport = Expr {
             kind: ExprKind::Call {
@@ -240,6 +245,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let just_x = path_expr("x");
 
@@ -262,6 +268,7 @@ mod tests {
             span: span(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         assert_eq!(expr_to_eq_term(&paren), expr_to_eq_term(&inner));
     }

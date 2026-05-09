@@ -246,6 +246,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         }
     }
 
@@ -278,6 +279,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["x"]), &e);
         assert_eq!(u.lookup(&Text::from("x")).runtime, 2);
@@ -294,6 +296,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["x", "y"]), &e);
         assert_eq!(u.lookup(&Text::from("x")).runtime, 1);
@@ -307,6 +310,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["x"]), &e);
         assert_eq!(u.lookup(&Text::from("x")).runtime, 1);
@@ -319,6 +323,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["x"]), &e);
         assert!(u.is_empty());
@@ -335,6 +340,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["x"]), &e);
         assert_eq!(u.lookup(&Text::from("x")).runtime, 3);
@@ -350,6 +356,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         };
         let u = walk_expr(&tracked(&["rec"]), &e);
         assert_eq!(u.lookup(&Text::from("rec")).runtime, 1);
