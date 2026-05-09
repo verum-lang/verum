@@ -30026,160 +30026,7 @@ impl TypeChecker {
 
         match ty {
             // Resolve Named types to their underlying type definitions (type aliases)
-            Named { path, args } => {
-                // Convert path to string for lookup (handles both simple and qualified paths)
-                let type_name = self.path_to_string(path);
-
-                // CYCLE GUARD: Detect indirect circular type normalization.
-                // For types like A{b:B} -> B{c:C} -> C{a:A}, direct self-reference
-                // checks fail because A doesn't mention itself directly. The thread-local
-                // stack catches these multi-step cycles and prevents infinite expansion.
-                let _normalize_guard =
-                    match NormalizeTypeCycleGuard::try_enter(type_name.to_string()) {
-                        Some(guard) => guard,
-                        None => {
-                            // Cycle detected: preserve nominal type, normalize args only
-                            let normalized_args: List<Type> = args
-                                .iter()
-                                .map(|a| self.normalize_type_impl(a, depth + 1))
-                                .collect();
-                            return Named {
-                                path: path.clone(),
-                                args: normalized_args,
-                            };
-                        }
-                    };
-
-                // CRITICAL FIX: For generic types like Pair<Int>, we need to:
-                // 1. Look up the struct fields (which have unsubstituted type params like T)
-                // 2. Build a substitution map from type params to concrete args (T -> Int)
-                // 3. Apply substitution to field types before returning
-                //
-
-                // This ensures that `pair.first` where `pair: Pair<Int>` returns `Int`, not `T`
-
-                // Build type parameter substitution map for generic types
-                // This maps type param names to concrete args: e.g., { T -> Int } for Pair<Int>
-                let build_param_subst = || -> indexmap::IndexMap<verum_common::Text, Type> {
-                    if args.is_empty() {
-                        return indexmap::IndexMap::new();
-                    }
-                    let type_params_key = format!("__type_params_{}", type_name);
-                    let type_params: List<verum_common::Text> =
-                        match self.ctx.lookup_type(type_params_key.as_str()) {
-                            Maybe::Some(Type::Record(params_map)) => {
-                                params_map.keys().cloned().collect()
-                            }
-                            _ => List::new(),
-                        };
-
-                    let mut param_subst: indexmap::IndexMap<verum_common::Text, Type> =
-                        indexmap::IndexMap::new();
-                    for (param_name, arg_ty) in type_params.iter().zip(args.iter()) {
-                        param_subst.insert(param_name.clone(), arg_ty.clone());
-                    }
-                    param_subst
-                };
-
-                // For type aliases, first try to resolve via the alias table
-                // This ensures proper substitution for generic aliases like Reducer<Int, Int>
-                if let Maybe::Some(underlying_alias_ty) = self.ctx.resolve_alias(type_name.as_str())
-                {
-                    // Guard against self-referential aliases: if the alias resolves to a Named type
-                    // with the same base name (e.g., Transducer -> Named(Transducer, ...)),
-                    // recursing would loop infinitely. Instead, normalize the args directly.
-                    let is_self_referential = match &underlying_alias_ty {
-                        Named {
-                            path: alias_path, ..
-                        } => {
-                            let alias_name = self.path_to_string(alias_path);
-                            alias_name == type_name
-                        }
-                        Variant(_) | Record(_) => {
-                            Self::type_mentions_name(underlying_alias_ty, &type_name)
-                        }
-                        _ => false,
-                    };
-                    if is_self_referential {
-                        // Self-referential alias: just normalize args in-place
-                        let normalized_args: List<Type> = args
-                            .iter()
-                            .map(|a| self.normalize_type_impl(a, depth + 1))
-                            .collect();
-                        return Named {
-                            path: path.clone(),
-                            args: normalized_args,
-                        };
-                    }
-                    let param_subst = build_param_subst();
-                    let substituted_ty = if param_subst.is_empty() {
-                        underlying_alias_ty.clone()
-                    } else {
-                        self.substitute_type_params(underlying_alias_ty, &param_subst)
-                    };
-                    return self.normalize_type_impl(&substituted_ty, depth + 1);
-                }
-
-                // Look up the type definition using qualified lookup
-                // This handles both simple types (e.g., "Int") and qualified types (e.g., "dto.user_dto.CreateTokenRequestDto")
-                if let Maybe::Some(underlying_ty) =
-                    self.ctx.lookup_qualified_type(type_name.as_str())
-                {
-                    // Check if it's the same type (self-reference) to avoid infinite loop
-                    let is_self_referential = match underlying_ty {
-                        Named { path: p2, .. } => {
-                            let underlying_name = self.path_to_string(p2);
-                            underlying_name == type_name
-                        }
-                        // CRITICAL FIX: Variant types that contain recursive references
-                        // to the defining type (e.g., type Expr is | Lit(Int) | Add(Heap<Expr>, Heap<Expr>))
-                        // must NOT be expanded during normalization. Expanding them creates
-                        // exponential blowup: each level expands N recursive variants, leading to
-                        // O(N^depth) work. Instead, preserve the nominal Named type reference.
-                        Variant(_) | Record(_) => {
-                            Self::type_mentions_name(underlying_ty, &type_name)
-                        }
-                        _ => false,
-                    };
-                    if is_self_referential {
-                        // Self-referential type - preserve nominal identity but normalize args.
-                        let normalized_args: List<Type> = args
-                            .iter()
-                            .map(|a| self.normalize_type_impl(a, depth + 1))
-                            .collect();
-                        return Named {
-                            path: path.clone(),
-                            args: normalized_args,
-                        };
-                    }
-                    // CRITICAL FIX: Apply type parameter substitution before normalizing
-                    // This handles generic types like Maybe<Maybe<Int>> where we need to
-                    // substitute T -> Maybe<Int> in the variant definition
-                    let param_subst = build_param_subst();
-                    let substituted_ty = if param_subst.is_empty() {
-                        underlying_ty.clone()
-                    } else {
-                        self.substitute_type_params(underlying_ty, &param_subst)
-                    };
-                    // Recursively normalize the underlying type
-                    // This handles cases like: type A = B; type B = (Int, Int);
-                    return self.normalize_type_impl(&substituted_ty, depth + 1);
-                }
-
-                // NOMINAL TYPING: Do NOT resolve Named struct types to their underlying Record.
-                // Named struct types are nominal - `User` and `Admin` are different types even
-                // if they have identical fields. The __struct_fields_ lookup is only used
-                // for field access validation, NOT for type equivalence during unification.
-                // Preserve nominal type identity but normalize args to resolve any associated
-                // type projections (e.g., ::Item[Range<Int>] -> Int) inside the type arguments.
-                Named {
-                    path: path.clone(),
-                    args: args
-                        .iter()
-                        .map(|a| self.normalize_type_impl(a, depth + 1))
-                        .collect(),
-                }
-            }
+            Named { path, args } => self.normalize_named_type(path, args, depth),
 
             // Recursively normalize nested types
             Tuple(tys) => {
@@ -30371,155 +30218,7 @@ impl TypeChecker {
                 kind: kind.clone(),
             },
 
-            TypeApp { constructor, args } => {
-                let d = depth + 1;
-                let normalized_ctor = self.normalize_type_impl(constructor, d);
-                let normalized_args: List<Type> = args
-                    .iter()
-                    .map(|t| self.normalize_type_impl(t, d))
-                    .collect();
-
-                // GAT resolution: if the constructor resolved to a concrete type
-                // (e.g., ::Item on CloneableWrapper resolved to List<T>),
-                // substitute the GAT type parameters with the TypeApp args.
-                // This turns TypeApp { ctor: List<$tv>, args: [Int] } into List<Int>.
-
-                // Helper: collect free TypeVars from ctor_args positionally and build
-                // a TypeVar→Type substitution using normalized_args.
-                let try_subst_vars = |ctor_args: &[Type]| -> Option<crate::ty::Substitution> {
-                    let mut subst = crate::ty::Substitution::default();
-                    for (i, arg) in ctor_args.iter().enumerate() {
-                        if let Type::Var(tv) = arg {
-                            if let Some(replacement) = normalized_args.get(i) {
-                                subst.insert(*tv, replacement.clone());
-                            }
-                        }
-                    }
-                    if subst.is_empty() { None } else { Some(subst) }
-                };
-
-                match &normalized_ctor {
-                    Generic {
-                        name,
-                        args: ctor_args,
-                    } if !name.starts_with("::") => {
-                        if let Some(subst) = try_subst_vars(ctor_args) {
-                            return self
-                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
-                        }
-                        // Fallback: if no vars to substitute, merge args
-                        if normalized_args.is_empty() {
-                            normalized_ctor
-                        } else {
-                            Generic {
-                                name: name.clone(),
-                                args: normalized_args,
-                            }
-                        }
-                    }
-                    Named {
-                        path,
-                        args: ctor_args,
-                    } => {
-                        if let Some(subst) = try_subst_vars(ctor_args) {
-                            return self
-                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
-                        }
-                        if normalized_args.is_empty() {
-                            normalized_ctor
-                        } else {
-                            Named {
-                                path: path.clone(),
-                                args: normalized_args,
-                            }
-                        }
-                    }
-                    // Constructor normalized to a Variant type (e.g., Maybe<T> → None(Unit) | Some(T)).
-                    // Substitute free type vars positionally with the TypeApp args.
-                    Variant(_) => {
-                        if let Some(subst) = try_subst_vars(
-                            // Collect all Var nodes from the variant type to build positional subst
-                            &Self::collect_free_vars_ordered(&normalized_ctor)
-                                .into_iter()
-                                .map(Type::Var)
-                                .collect::<Vec<_>>(),
-                        ) {
-                            return self
-                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
-                        }
-                        // No vars to substitute — return as-is
-                        normalized_ctor
-                    }
-                    // Constructor is a :: projection that couldn't be resolved yet.
-                    // Try applying the unifier to resolve type vars in the constructor's
-                    // args, then re-normalize. This handles the case where C.Item<T> has
-                    // C still as a type var at initial normalization time, but the unifier
-                    // has since resolved it to a concrete type (e.g., CloneableWrapper).
-                    Generic {
-                        name,
-                        args: proj_args,
-                    } if name.starts_with("::") => {
-                        let resolved_ctor = self.unifier.apply(&normalized_ctor);
-                        if resolved_ctor != normalized_ctor {
-                            // Type vars were resolved — re-normalize the whole TypeApp
-                            let new_typeapp = TypeApp {
-                                constructor: Box::new(resolved_ctor),
-                                args: normalized_args,
-                            };
-                            return self.normalize_type_impl(&new_typeapp, d);
-                        }
-                        // Still unresolved — return as-is
-                        TypeApp {
-                            constructor: Box::new(normalized_ctor),
-                            args: normalized_args,
-                        }
-                    }
-                    // HKT: TypeConstructor applied to args -> Generic<args>
-                    Type::TypeConstructor { name, arity, .. } => {
-                        if *arity > 0 && normalized_args.len() == *arity {
-                            if let Maybe::Some(underlying) = self.ctx.lookup_type(name.as_str()) {
-                                match underlying {
-                                    Variant(_) | Record(_) => {
-                                        let free_vars = Self::collect_free_vars_ordered(underlying);
-                                        let mut subst = crate::ty::Substitution::default();
-                                        for (i, tv) in free_vars.iter().enumerate() {
-                                            if let Some(arg) = normalized_args.get(i) {
-                                                subst.insert(*tv, arg.clone());
-                                            }
-                                        }
-                                        if !subst.is_empty() {
-                                            return self.normalize_type_impl(
-                                                &underlying.apply_subst(&subst),
-                                                d,
-                                            );
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            Generic {
-                                name: name.clone(),
-                                args: normalized_args,
-                            }
-                        } else if normalized_args.is_empty() {
-                            normalized_ctor
-                        } else {
-                            Generic {
-                                name: name.clone(),
-                                args: normalized_args,
-                            }
-                        }
-                    }
-                    Type::Var(_) => TypeApp {
-                        constructor: Box::new(normalized_ctor),
-                        args: normalized_args,
-                    },
-                    _ => TypeApp {
-                        constructor: Box::new(normalized_ctor),
-                        args: normalized_args,
-                    },
-                }
-            }
+            TypeApp { constructor, args } => self.normalize_type_app(constructor, args, depth),
 
             // Dependent Types (Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — )
             Pi {
@@ -30727,6 +30426,329 @@ impl TypeChecker {
 
     /// # Returns
     /// The instantiated return type with the parameter substituted by the argument.
+    /// Normalize a `Named { path, args }` type.
+    /// Resolves type aliases, applies generic-param substitution, and
+    /// guards against self-referential / mutually-recursive cycles.
+    fn normalize_named_type(
+        &self,
+        path: &verum_ast::ty::Path,
+        args: &List<Type>,
+        depth: usize,
+    ) -> Type {
+        use Type::*;
+                // Convert path to string for lookup (handles both simple and qualified paths)
+                let type_name = self.path_to_string(path);
+
+                // CYCLE GUARD: Detect indirect circular type normalization.
+                // For types like A{b:B} -> B{c:C} -> C{a:A}, direct self-reference
+                // checks fail because A doesn't mention itself directly. The thread-local
+                // stack catches these multi-step cycles and prevents infinite expansion.
+                let _normalize_guard =
+                    match NormalizeTypeCycleGuard::try_enter(type_name.to_string()) {
+                        Some(guard) => guard,
+                        None => {
+                            // Cycle detected: preserve nominal type, normalize args only
+                            let normalized_args: List<Type> = args
+                                .iter()
+                                .map(|a| self.normalize_type_impl(a, depth + 1))
+                                .collect();
+                            return Named {
+                                path: path.clone(),
+                                args: normalized_args,
+                            };
+                        }
+                    };
+
+                // CRITICAL FIX: For generic types like Pair<Int>, we need to:
+                // 1. Look up the struct fields (which have unsubstituted type params like T)
+                // 2. Build a substitution map from type params to concrete args (T -> Int)
+                // 3. Apply substitution to field types before returning
+                //
+
+                // This ensures that `pair.first` where `pair: Pair<Int>` returns `Int`, not `T`
+
+                // Build type parameter substitution map for generic types
+                // This maps type param names to concrete args: e.g., { T -> Int } for Pair<Int>
+                let build_param_subst = || -> indexmap::IndexMap<verum_common::Text, Type> {
+                    if args.is_empty() {
+                        return indexmap::IndexMap::new();
+                    }
+                    let type_params_key = format!("__type_params_{}", type_name);
+                    let type_params: List<verum_common::Text> =
+                        match self.ctx.lookup_type(type_params_key.as_str()) {
+                            Maybe::Some(Type::Record(params_map)) => {
+                                params_map.keys().cloned().collect()
+                            }
+                            _ => List::new(),
+                        };
+
+                    let mut param_subst: indexmap::IndexMap<verum_common::Text, Type> =
+                        indexmap::IndexMap::new();
+                    for (param_name, arg_ty) in type_params.iter().zip(args.iter()) {
+                        param_subst.insert(param_name.clone(), arg_ty.clone());
+                    }
+                    param_subst
+                };
+
+                // For type aliases, first try to resolve via the alias table
+                // This ensures proper substitution for generic aliases like Reducer<Int, Int>
+                if let Maybe::Some(underlying_alias_ty) = self.ctx.resolve_alias(type_name.as_str())
+                {
+                    // Guard against self-referential aliases: if the alias resolves to a Named type
+                    // with the same base name (e.g., Transducer -> Named(Transducer, ...)),
+                    // recursing would loop infinitely. Instead, normalize the args directly.
+                    let is_self_referential = match &underlying_alias_ty {
+                        Named {
+                            path: alias_path, ..
+                        } => {
+                            let alias_name = self.path_to_string(alias_path);
+                            alias_name == type_name
+                        }
+                        Variant(_) | Record(_) => {
+                            Self::type_mentions_name(underlying_alias_ty, &type_name)
+                        }
+                        _ => false,
+                    };
+                    if is_self_referential {
+                        // Self-referential alias: just normalize args in-place
+                        let normalized_args: List<Type> = args
+                            .iter()
+                            .map(|a| self.normalize_type_impl(a, depth + 1))
+                            .collect();
+                        return Named {
+                            path: path.clone(),
+                            args: normalized_args,
+                        };
+                    }
+                    let param_subst = build_param_subst();
+                    let substituted_ty = if param_subst.is_empty() {
+                        underlying_alias_ty.clone()
+                    } else {
+                        self.substitute_type_params(underlying_alias_ty, &param_subst)
+                    };
+                    return self.normalize_type_impl(&substituted_ty, depth + 1);
+                }
+
+                // Look up the type definition using qualified lookup
+                // This handles both simple types (e.g., "Int") and qualified types (e.g., "dto.user_dto.CreateTokenRequestDto")
+                if let Maybe::Some(underlying_ty) =
+                    self.ctx.lookup_qualified_type(type_name.as_str())
+                {
+                    // Check if it's the same type (self-reference) to avoid infinite loop
+                    let is_self_referential = match underlying_ty {
+                        Named { path: p2, .. } => {
+                            let underlying_name = self.path_to_string(p2);
+                            underlying_name == type_name
+                        }
+                        // CRITICAL FIX: Variant types that contain recursive references
+                        // to the defining type (e.g., type Expr is | Lit(Int) | Add(Heap<Expr>, Heap<Expr>))
+                        // must NOT be expanded during normalization. Expanding them creates
+                        // exponential blowup: each level expands N recursive variants, leading to
+                        // O(N^depth) work. Instead, preserve the nominal Named type reference.
+                        Variant(_) | Record(_) => {
+                            Self::type_mentions_name(underlying_ty, &type_name)
+                        }
+                        _ => false,
+                    };
+                    if is_self_referential {
+                        // Self-referential type - preserve nominal identity but normalize args.
+                        let normalized_args: List<Type> = args
+                            .iter()
+                            .map(|a| self.normalize_type_impl(a, depth + 1))
+                            .collect();
+                        return Named {
+                            path: path.clone(),
+                            args: normalized_args,
+                        };
+                    }
+                    // CRITICAL FIX: Apply type parameter substitution before normalizing
+                    // This handles generic types like Maybe<Maybe<Int>> where we need to
+                    // substitute T -> Maybe<Int> in the variant definition
+                    let param_subst = build_param_subst();
+                    let substituted_ty = if param_subst.is_empty() {
+                        underlying_ty.clone()
+                    } else {
+                        self.substitute_type_params(underlying_ty, &param_subst)
+                    };
+                    // Recursively normalize the underlying type
+                    // This handles cases like: type A = B; type B = (Int, Int);
+                    return self.normalize_type_impl(&substituted_ty, depth + 1);
+                }
+
+                // NOMINAL TYPING: Do NOT resolve Named struct types to their underlying Record.
+                // Named struct types are nominal - `User` and `Admin` are different types even
+                // if they have identical fields. The __struct_fields_ lookup is only used
+                // for field access validation, NOT for type equivalence during unification.
+                // Preserve nominal type identity but normalize args to resolve any associated
+                // type projections (e.g., ::Item[Range<Int>] -> Int) inside the type arguments.
+                Named {
+                    path: path.clone(),
+                    args: args
+                        .iter()
+                        .map(|a| self.normalize_type_impl(a, depth + 1))
+                        .collect(),
+                }
+    }
+
+    /// Normalize a `TypeApp { constructor, args }` type.
+    /// Handles GAT resolution, HKT constructor application, and
+    /// associated-type projection re-normalization after unification.
+    fn normalize_type_app(
+        &self,
+        constructor: &Box<Type>,
+        args: &List<Type>,
+        depth: usize,
+    ) -> Type {
+        use Type::*;
+                let d = depth + 1;
+                let normalized_ctor = self.normalize_type_impl(constructor, d);
+                let normalized_args: List<Type> = args
+                    .iter()
+                    .map(|t| self.normalize_type_impl(t, d))
+                    .collect();
+
+                // GAT resolution: if the constructor resolved to a concrete type
+                // (e.g., ::Item on CloneableWrapper resolved to List<T>),
+                // substitute the GAT type parameters with the TypeApp args.
+                // This turns TypeApp { ctor: List<$tv>, args: [Int] } into List<Int>.
+
+                // Helper: collect free TypeVars from ctor_args positionally and build
+                // a TypeVar→Type substitution using normalized_args.
+                let try_subst_vars = |ctor_args: &[Type]| -> Option<crate::ty::Substitution> {
+                    let mut subst = crate::ty::Substitution::default();
+                    for (i, arg) in ctor_args.iter().enumerate() {
+                        if let Type::Var(tv) = arg {
+                            if let Some(replacement) = normalized_args.get(i) {
+                                subst.insert(*tv, replacement.clone());
+                            }
+                        }
+                    }
+                    if subst.is_empty() { None } else { Some(subst) }
+                };
+
+                match &normalized_ctor {
+                    Generic {
+                        name,
+                        args: ctor_args,
+                    } if !name.starts_with("::") => {
+                        if let Some(subst) = try_subst_vars(ctor_args) {
+                            return self
+                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
+                        }
+                        // Fallback: if no vars to substitute, merge args
+                        if normalized_args.is_empty() {
+                            normalized_ctor
+                        } else {
+                            Generic {
+                                name: name.clone(),
+                                args: normalized_args,
+                            }
+                        }
+                    }
+                    Named {
+                        path,
+                        args: ctor_args,
+                    } => {
+                        if let Some(subst) = try_subst_vars(ctor_args) {
+                            return self
+                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
+                        }
+                        if normalized_args.is_empty() {
+                            normalized_ctor
+                        } else {
+                            Named {
+                                path: path.clone(),
+                                args: normalized_args,
+                            }
+                        }
+                    }
+                    // Constructor normalized to a Variant type (e.g., Maybe<T> → None(Unit) | Some(T)).
+                    // Substitute free type vars positionally with the TypeApp args.
+                    Variant(_) => {
+                        if let Some(subst) = try_subst_vars(
+                            // Collect all Var nodes from the variant type to build positional subst
+                            &Self::collect_free_vars_ordered(&normalized_ctor)
+                                .into_iter()
+                                .map(Type::Var)
+                                .collect::<Vec<_>>(),
+                        ) {
+                            return self
+                                .normalize_type_impl(&normalized_ctor.apply_subst(&subst), d);
+                        }
+                        // No vars to substitute — return as-is
+                        normalized_ctor
+                    }
+                    // Constructor is a :: projection that couldn't be resolved yet.
+                    // Try applying the unifier to resolve type vars in the constructor's
+                    // args, then re-normalize. This handles the case where C.Item<T> has
+                    // C still as a type var at initial normalization time, but the unifier
+                    // has since resolved it to a concrete type (e.g., CloneableWrapper).
+                    Generic {
+                        name,
+                        args: proj_args,
+                    } if name.starts_with("::") => {
+                        let resolved_ctor = self.unifier.apply(&normalized_ctor);
+                        if resolved_ctor != normalized_ctor {
+                            // Type vars were resolved — re-normalize the whole TypeApp
+                            let new_typeapp = TypeApp {
+                                constructor: Box::new(resolved_ctor),
+                                args: normalized_args,
+                            };
+                            return self.normalize_type_impl(&new_typeapp, d);
+                        }
+                        // Still unresolved — return as-is
+                        TypeApp {
+                            constructor: Box::new(normalized_ctor),
+                            args: normalized_args,
+                        }
+                    }
+                    // HKT: TypeConstructor applied to args -> Generic<args>
+                    Type::TypeConstructor { name, arity, .. } => {
+                        if *arity > 0 && normalized_args.len() == *arity {
+                            if let Maybe::Some(underlying) = self.ctx.lookup_type(name.as_str()) {
+                                match underlying {
+                                    Variant(_) | Record(_) => {
+                                        let free_vars = Self::collect_free_vars_ordered(underlying);
+                                        let mut subst = crate::ty::Substitution::default();
+                                        for (i, tv) in free_vars.iter().enumerate() {
+                                            if let Some(arg) = normalized_args.get(i) {
+                                                subst.insert(*tv, arg.clone());
+                                            }
+                                        }
+                                        if !subst.is_empty() {
+                                            return self.normalize_type_impl(
+                                                &underlying.apply_subst(&subst),
+                                                d,
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Generic {
+                                name: name.clone(),
+                                args: normalized_args,
+                            }
+                        } else if normalized_args.is_empty() {
+                            normalized_ctor
+                        } else {
+                            Generic {
+                                name: name.clone(),
+                                args: normalized_args,
+                            }
+                        }
+                    }
+                    Type::Var(_) => TypeApp {
+                        constructor: Box::new(normalized_ctor),
+                        args: normalized_args,
+                    },
+                    _ => TypeApp {
+                        constructor: Box::new(normalized_ctor),
+                        args: normalized_args,
+                    },
+                }
+    }
+
     fn apply_pi_type(&self, pi_type: &Type, arg_term: &crate::ty::EqTerm) -> Type {
         match pi_type {
             Type::Pi {
