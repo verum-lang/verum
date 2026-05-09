@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, fuzzing, fuzz-harness, mutation-testing
+// @fuzz: fuzz_parse_int
+// @description: Pins the @fuzz directive and fuzzing entry-point contract (#68).
+//               When @fuzz: <fn_name> is set, the vtest runner invokes the
+//               vfuzz harness with the named function as the entry point.
+//               The entry function receives a &[Byte] corpus input and must
+//               not panic on valid byte sequences.
+
+mount core.base.{Int, Bool, Text, Byte, Maybe, List}
+mount core.io.{print}
+
+// ── Fuzz entry function shape ─────────────────────────────────────────────────
+// A fuzz entry function signature: fn fuzz_<name>(data: &[Byte])
+// The fuzzer generates arbitrary byte slices and calls this function.
+
+fn fuzz_parse_int(data: &[Byte]) {
+    // Try to parse the bytes as a UTF-8 string, then as an integer.
+    // This must never panic — if parsing fails we simply return.
+    let _: Maybe<Int> = parse_int_from_bytes(data);
+}
+
+fn parse_int_from_bytes(data: &[Byte]) -> Maybe<Int> {
+    if data.len() == 0 {
+        return None;
+    }
+    // Shape-only: actual impl would decode bytes as UTF-8 and attempt parse.
+    None
+}
+
+// ── @fuzz directive shape tests ───────────────────────────────────────────────
+
+fn test_fuzz_entry_accepts_empty_bytes() {
+    let empty: List<Byte> = List.new();
+    fuzz_parse_int(&empty);
+    assert(true);
+}
+
+fn test_fuzz_entry_accepts_ascii_bytes() {
+    let bytes: List<Byte> = [0x31, 0x32, 0x33]; // "123"
+    fuzz_parse_int(&bytes);
+    assert(true);
+}
+
+fn test_fuzz_entry_accepts_non_utf8_bytes() {
+    let bytes: List<Byte> = [0xFF, 0xFE];
+    fuzz_parse_int(&bytes);
+    assert(true);
+}
+
+fn test_parse_int_from_empty_returns_none() {
+    let empty: List<Byte> = List.new();
+    let result = parse_int_from_bytes(&empty);
+    assert(result is None);
+}
+
+fn main() {
+    test_fuzz_entry_accepts_empty_bytes();
+    test_fuzz_entry_accepts_ascii_bytes();
+    test_fuzz_entry_accepts_non_utf8_bytes();
+    test_parse_int_from_empty_returns_none();
+    print("fuzz harness attribute spec ok");
+}

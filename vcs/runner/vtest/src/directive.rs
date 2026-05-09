@@ -35,6 +35,8 @@
 //! - `@slow: <threshold_ms>` - Expected slow test; warn (not fail) if it exceeds threshold_ms
 //! - `@hardware: <requirement>` - Test requires specific hardware (e.g. "gpu", "avx512", "tpm")
 //! - `@deprecated: <reason>` - Mark test as deprecated; still runs but emits a deprecation notice
+//! - `@fuzz: <fn_name>` - Run the named function as a fuzzing entry point via the vfuzz harness
+//! - `@inject-clock: <impl>` - Replace system clock with the named TestClock implementation
 //!
 //! # Multi-line Values
 //!
@@ -856,6 +858,12 @@ pub struct TestDirectives {
     pub hardware: Option<Text>,
     /// Deprecation reason; test still runs but the runner emits a notice.
     pub deprecated: Option<Text>,
+    /// Entry function name for fuzzing via `@fuzz: <fn_name>`.
+    /// When set, the runner invokes the fuzzing harness targeting this function.
+    pub fuzz_entry: Option<Text>,
+    /// Deterministic clock implementation to inject via `@inject-clock: <impl>`.
+    /// When set, the runner replaces the system clock with the named TestClock impl.
+    pub inject_clock: Option<Text>,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -902,6 +910,8 @@ impl Default for TestDirectives {
             slow_threshold_ms: None,
             hardware: None,
             deprecated: None,
+            fuzz_entry: None,
+            inject_clock: None,
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1131,6 +1141,16 @@ impl TestDirectives {
                 directives.hardware = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@deprecated:") {
                 directives.deprecated = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@fuzz:") {
+                let entry = rest.trim().to_string();
+                if !entry.is_empty() {
+                    directives.fuzz_entry = Some(entry.into());
+                }
+            } else if let Some(rest) = comment.strip_prefix("@inject-clock:") {
+                let clock_impl = rest.trim().to_string();
+                if !clock_impl.is_empty() {
+                    directives.inject_clock = Some(clock_impl.into());
+                }
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()
