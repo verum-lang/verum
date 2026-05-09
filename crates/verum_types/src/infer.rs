@@ -60319,7 +60319,57 @@ impl TypeChecker {
         }
 
         match &impl_decl.kind {
-            ImplKind::Inherent(for_type) => {
+            ImplKind::Inherent(_) => self.register_inherent_impl_methods(impl_decl, &type_param_names)?,
+            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names)?,
+        }
+
+        // Clean up type parameters
+        for param_name in type_param_names {
+            self.ctx.remove_type(&param_name);
+        }
+
+        Ok(())
+    }
+
+    /// Register a function signature without type-checking the body
+    ///
+
+    /// This enables forward references by registering all function signatures
+    /// before any function bodies are checked. For example:
+    ///
+
+    /// ```verum
+    /// fn main() -> Int {
+    ///  fib(10) // fib is defined below, but this works due to forward ref support
+    /// }
+    ///
+
+    /// fn fib(n: Int) -> Int {
+    ///  if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+    /// }
+    /// ```
+    ///
+
+    /// This should be called in a pass before `check_item` to ensure all
+    /// functions are available in the environment.
+    /// Pre-register a constant declaration's type for forward reference support.
+    ///
+
+    /// This is called before Phase 2 (type checking) so that constants defined
+    /// after functions in source order are still visible within function bodies.
+    /// Register method signatures from an `implement Type { ... }` (inherent) block.
+    /// Processes both static and instance methods, resolves Self type, and wires
+    /// per-instantiation method-gating patterns.
+    fn register_inherent_impl_methods(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        type_param_names: &List<verum_common::Text>,
+    ) -> Result<()> {
+        use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
+        use verum_common::Text;
+        let ImplKind::Inherent(for_type) = &impl_decl.kind
+            else { unreachable!() };
+        let type_param_names = type_param_names.clone();
                 // CRITICAL FIX: Set current_self_type FIRST so Self types in method signatures resolve correctly
                 // This enables patterns like `implement TypeName { fn new() -> Self { ... } }`
                 let self_type = self.ast_to_type(for_type)?;
@@ -60786,12 +60836,22 @@ impl TypeChecker {
 
                 // Restore previous self type
                 self.set_current_self_type(previous_self_type);
-            }
-            ImplKind::Protocol {
-                protocol,
-                protocol_args,
-                for_type,
-            } => {
+        Ok(())
+    }
+
+    /// Register method signatures from a `implement Protocol for Type { ... }` block.
+    /// Processes both instance and static methods, registers blanket impls,
+    /// inherits default methods from the protocol, and commits the ProtocolImpl.
+    fn register_protocol_impl_methods(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        type_param_names: &List<verum_common::Text>,
+    ) -> Result<()> {
+        use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
+        use verum_common::Text;
+        let ImplKind::Protocol { protocol, protocol_args, for_type } = &impl_decl.kind
+            else { unreachable!() };
+        let type_param_names = type_param_names.clone();
                 // CRITICAL FIX: Register protocol implementation methods BEFORE type-checking
                 // This enables method calls like `x.cmp(y)` where cmp is defined in
                 // `implement Ord for Int { fn cmp(&self, other: &Int) -> Ordering { ... } }`
@@ -61567,43 +61627,9 @@ impl TypeChecker {
                     // Restore previous self type
                     self.set_current_self_type(previous_self_type);
                 }
-            }
-        }
-
-        // Clean up type parameters
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
-
         Ok(())
     }
 
-    /// Register a function signature without type-checking the body
-    ///
-
-    /// This enables forward references by registering all function signatures
-    /// before any function bodies are checked. For example:
-    ///
-
-    /// ```verum
-    /// fn main() -> Int {
-    ///  fib(10) // fib is defined below, but this works due to forward ref support
-    /// }
-    ///
-
-    /// fn fib(n: Int) -> Int {
-    ///  if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
-    /// }
-    /// ```
-    ///
-
-    /// This should be called in a pass before `check_item` to ensure all
-    /// functions are available in the environment.
-    /// Pre-register a constant declaration's type for forward reference support.
-    ///
-
-    /// This is called before Phase 2 (type checking) so that constants defined
-    /// after functions in source order are still visible within function bodies.
     pub fn pre_register_const(&mut self, const_decl: &verum_ast::decl::ConstDecl) {
         if let Ok(const_ty) = self.ast_to_type(&const_decl.ty) {
             self.ctx
