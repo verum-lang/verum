@@ -1097,6 +1097,24 @@ pub struct FunctionDescriptor {
     /// gpu_detect.rs` for the corresponding module-level scan.
     #[serde(default)]
     pub is_gpu_only: bool,
+
+    /// `true` when this function descriptor represents a `const` (or
+    /// `static`) declaration converted to a zero-arg function during
+    /// codegen.  Const-as-function is purely a storage strategy — at
+    /// the typechecker level the user sees a *value* of type
+    /// `return_type`, not a callable.  Without this flag the
+    /// archive-driven typechecker path can't tell a const from a
+    /// genuine zero-arg fn (`fn random_seed() -> Int { ... }`) and
+    /// either rejects `let x = SSO_CAPACITY` (registered as fn) or
+    /// silently breaks `let f = random_seed` (registered as value).
+    ///
+    /// Inlinable consts (literal integer initialisers) ALSO carry
+    /// `intrinsic_name = Some("__const_val_<N>")` for zero-cost use-
+    /// site inlining; the two markers are independent — `is_const`
+    /// covers ALL consts, `intrinsic_name` only those whose value
+    /// fits the inline path.
+    #[serde(default)]
+    pub is_const: bool,
 }
 
 /// Debug information for a local variable or parameter.
@@ -1150,6 +1168,7 @@ impl Default for FunctionDescriptor {
             is_test: false,
             is_gpu_only: false,
             intrinsic_name: None,
+            is_const: false,
         }
     }
 }
@@ -2221,6 +2240,8 @@ mod precompile_extension_tests {
             debug_variables: Vec::new(),
             is_test: false,
             is_gpu_only: false,
+            intrinsic_name: None,
+            is_const: false,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -2270,6 +2291,8 @@ mod precompile_extension_tests {
             debug_variables: Vec::new(),
             is_test: false,
             is_gpu_only: false,
+            intrinsic_name: None,
+            is_const: false,
         };
         m.functions.push(desc);
 

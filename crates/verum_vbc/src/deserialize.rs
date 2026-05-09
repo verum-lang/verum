@@ -1199,6 +1199,25 @@ impl<'a> Deserializer<'a> {
  (None, 0)
  };
 
+ // #87 — intrinsic-name marker (trailing optional StringId).
+ // Legacy archives stopped after `suspend_point_count`;
+ // missing trailing bytes default to `None`.  See
+ // `FunctionDescriptor::intrinsic_name`.
+ let intrinsic_name = if self.offset < self.data.len() {
+ self.parse_optional_u32()?.map(StringId)
+ } else {
+ None
+ };
+
+ // #97 — is_const marker (trailing single byte).  Legacy
+ // archives stopped after intrinsic_name; missing trailing
+ // byte defaults to `false`.  See `FunctionDescriptor::is_const`.
+ let is_const = if self.offset < self.data.len() {
+ decode_u8(self.data, &mut self.offset)? != 0
+ } else {
+ false
+ };
+
  Ok(FunctionDescriptor {
  id,
  name,
@@ -1231,6 +1250,8 @@ impl<'a> Deserializer<'a> {
  // attributes; the deserializer can either re-derive it
  // from a future format-version bump or trust the encoder.
  is_gpu_only: false,
+ intrinsic_name,
+ is_const,
  })
  }
 

@@ -1369,6 +1369,8 @@ mod tests {
             debug_variables: Vec::new(),
             is_test: false,
             is_gpu_only: false,
+            intrinsic_name: None,
+            is_const: false,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

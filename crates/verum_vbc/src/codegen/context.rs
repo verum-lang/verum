@@ -465,6 +465,15 @@ pub struct FunctionInfo {
     /// For `fn bar() -> Result<Int, Text>`, this would be `Some(vec!["Int", "Text"])`.
     /// Used for pattern matching to infer types of extracted values (e.g., `c` in `Some(c)`).
     pub return_type_inner: Option<Vec<String>>,
+
+    /// `true` when this entry was created from a `const` (or `static`)
+    /// declaration via [`register_constant_with_value`].  The codegen
+    /// represents consts as zero-arg functions for storage uniformity,
+    /// but the typechecker treats them as values — without this flag
+    /// the archive-driven typechecker can't distinguish `mount X.CONST`
+    /// from `mount X.zero_arg_fn`.  Round-trips through
+    /// `vbc::FunctionDescriptor::is_const`.
+    pub is_const: bool,
 }
 
 /// Statistics collected during codegen.

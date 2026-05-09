@@ -590,6 +590,23 @@ impl Serializer {
             encode_u16(desc.suspend_point_count, &mut self.output);
         }
 
+        // #87 — intrinsic-name marker for inlinable stdlib constants
+        // (`__const_val_<N>` etc.).  Trailing optional StringId for
+        // forward-compatibility — legacy decoders that stop after
+        // `suspend_point_count` simply ignore the trailing bytes; the
+        // deserialiser treats a missing trailing field as `None`
+        // (the safe default — ordinary function with no inline
+        // marker).  See `FunctionDescriptor::intrinsic_name`.
+        self.serialize_optional_u32(desc.intrinsic_name.map(|s| s.0));
+
+        // #97 — is_const marker so the archive-driven typechecker can
+        // distinguish const-as-zero-arg-function from genuine
+        // zero-arg functions.  Trailing single byte for
+        // forward-compatibility; legacy decoders ignore the trailing
+        // byte and `is_const` defaults to `false`.  See
+        // `FunctionDescriptor::is_const`.
+        self.output.push(desc.is_const as u8);
+
         Ok(())
     }
 
