@@ -15960,17 +15960,40 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // CBGR Memory Management — LLVM IR emission
     // ========================================================================
     //
-
-    // AllocationHeader layout (32 bytes, placed BEFORE user data pointer):
-    //  offset 0: generation (i32, atomic)
-    //  offset 4: size (i32)
-    //  offset 8: epoch (i16, atomic)
-    //  offset 10: capabilities (i16)
-    //  offset 12: ref_count (i32, atomic)
-    //  offset 16: flags (i64, atomic)
-    //  offset 24: next_free (ptr)
+    // **Layout is private to the codegen-emitted allocator.** The 32-byte
+    // header below is consumed only by the IR functions in this section
+    // (`verum_cbgr_allocate`, `verum_cbgr_revoke`, `emit_cbgr_get_header`,
+    // and the `ref_count`/`flags` accessors). It is NOT the same struct
+    // as `verum_common::cbgr::AllocationHeader`, which is the **runtime
+    // metadata header** consumed by the Tier-0 interpreter, the SMT
+    // verifier, and the static-analysis layer. Both are 32-byte / 32-byte-
+    // aligned headers preceding heap data, but their field semantics
+    // diverge:
     //
-
+    //   codegen-private (this section):
+    //     0..4   generation (i32, atomic, GEN_INITIAL on alloc)
+    //     4..8   size       (i32, allocation user-payload size)
+    //     8..10  epoch      (i16, atomic, mirrors global_epoch)
+    //     10..12 capabilities (i16, init to CAP_FULL)
+    //     12..16 ref_count  (i32, atomic, init to 1)
+    //     16..24 flags      (i64, atomic — FLAG_REVOKED bit set on revoke)
+    //     24..32 next_free  (ptr, allocator free-list link)
+    //
+    //   canonical runtime metadata (`verum_common::cbgr::AllocationHeader`):
+    //     0..4   size, 4..8 alignment, 8..12 generation,
+    //     12..14 epoch, 14..16 capabilities, 16..20 type_id,
+    //     20..24 flags, 24..32 reserved
+    //
+    // The two schemes coexist because they answer different questions —
+    // the codegen layout is what `verum_alloc` (the bump allocator
+    // emitted in `platform_ir.rs::emit_allocator`) writes; the canonical
+    // layout is what the interpreter and verification code consult.
+    // **Drift contract:** *within* the codegen scheme, every field
+    // offset that appears below MUST be consistent across allocate /
+    // revoke / get_header / ref_release / ref_count / invalidate. When
+    // adding a new emitter or changing a field offset, audit the full
+    // section.
+    //
     // The user pointer is at (raw_ptr + 32). get_header subtracts 32.
 
     /// AllocationHeader size in bytes — re-exports the canonical
