@@ -1827,6 +1827,292 @@ mod meta_consolidation_pins {
     }
 
     #[test]
+    fn reduction_op_round_trip_unique_and_kind_partition() {
+        let all = [
+            ReductionOp::Add.as_str(),
+            ReductionOp::Multiply.as_str(),
+            ReductionOp::Min.as_str(),
+            ReductionOp::Max.as_str(),
+            ReductionOp::BitAnd.as_str(),
+            ReductionOp::BitOr.as_str(),
+            ReductionOp::BitXor.as_str(),
+            ReductionOp::LogicAnd.as_str(),
+            ReductionOp::LogicOr.as_str(),
+        ];
+        assert_eq!(ReductionOp::ALL.len(), 9);
+        assert_round_trip_unique("ReductionOp", all, |s| match ReductionOp::from_str(s) {
+            Maybe::Some(v) => Maybe::Some(v.as_str()),
+            Maybe::None => Maybe::None,
+        });
+
+        // Operator forms also round-trip.
+        for v in ReductionOp::ALL {
+            let op = v.operator();
+            assert_eq!(
+                ReductionOp::from_str(op),
+                Maybe::Some(*v),
+                "ReductionOp::{:?}: operator '{}' must parse back",
+                v,
+                op
+            );
+        }
+        // Legacy `mul` alias preserved.
+        assert_eq!(ReductionOp::from_str("mul"), Maybe::Some(ReductionOp::Multiply));
+
+        // Kind partition: {Arithmetic, Bitwise, Logical} cover ALL.
+        let mut arithmetic = 0;
+        let mut bitwise = 0;
+        let mut logical = 0;
+        for v in ReductionOp::ALL {
+            match v.kind() {
+                ReductionOpKind::Arithmetic => arithmetic += 1,
+                ReductionOpKind::Bitwise => bitwise += 1,
+                ReductionOpKind::Logical => logical += 1,
+            }
+        }
+        assert_eq!(arithmetic, 4, "Arithmetic: Add/Multiply/Min/Max");
+        assert_eq!(bitwise, 3, "Bitwise: BitAnd/BitOr/BitXor");
+        assert_eq!(logical, 2, "Logical: LogicAnd/LogicOr");
+
+        // Spot-pin a few canonical names — multiply not "mul".
+        assert_eq!(ReductionOp::Multiply.as_str(), "multiply");
+        assert_eq!(ReductionOp::BitXor.as_str(), "bitxor");
+        assert_eq!(ReductionOp::LogicAnd.as_str(), "and");
+    }
+
+    #[test]
+    fn injection_scope_round_trip_unique_and_lifetime_hierarchy() {
+        let all = [
+            InjectionScope::Singleton.as_str(),
+            InjectionScope::Request.as_str(),
+            InjectionScope::Transient.as_str(),
+        ];
+        assert_eq!(InjectionScope::ALL.len(), 3);
+        assert_round_trip_unique("InjectionScope", all, |s| {
+            match InjectionScope::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+        // Lowercase aliases parse to the same variants.
+        assert_eq!(
+            InjectionScope::from_str("singleton"),
+            Maybe::Some(InjectionScope::Singleton)
+        );
+        assert_eq!(
+            InjectionScope::from_str("request"),
+            Maybe::Some(InjectionScope::Request)
+        );
+        assert_eq!(
+            InjectionScope::from_str("transient"),
+            Maybe::Some(InjectionScope::Transient)
+        );
+
+        // Lifetime ranks are dense, strictly monotone in declaration
+        // order: Singleton=0 (longest), Transient=2 (shortest).
+        for (i, v) in InjectionScope::ALL.iter().enumerate() {
+            assert_eq!(
+                v.lifetime_rank() as usize,
+                i,
+                "InjectionScope::{:?}: rank drift at {}",
+                v,
+                i
+            );
+        }
+
+        // can_depend_on agrees with the legacy 9-arm match exactly.
+        // Reference table: rows = self, cols = other.
+        //              Singleton  Request  Transient
+        //   Singleton  true       false    false
+        //   Request    true       true     false
+        //   Transient  true       true     true
+        let table: [[bool; 3]; 3] = [
+            [true, false, false],
+            [true, true, false],
+            [true, true, true],
+        ];
+        for (i, a) in InjectionScope::ALL.iter().enumerate() {
+            for (j, b) in InjectionScope::ALL.iter().enumerate() {
+                assert_eq!(
+                    a.can_depend_on(b),
+                    table[i][j],
+                    "can_depend_on drift: {:?} -> {:?}",
+                    a,
+                    b
+                );
+            }
+        }
+
+        // Self-dependency is always allowed (every scope can depend
+        // on the same scope).
+        for v in InjectionScope::ALL {
+            assert!(
+                v.can_depend_on(v),
+                "scope {:?} must be self-compatible",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn access_mode_round_trip_unique_and_capability_classification() {
+        let all = [
+            AccessMode::ReadOnly.as_str(),
+            AccessMode::WriteOnly.as_str(),
+            AccessMode::ReadWrite.as_str(),
+            AccessMode::WriteOneToClear.as_str(),
+            AccessMode::WriteOneToSet.as_str(),
+            AccessMode::Reserved.as_str(),
+        ];
+        assert_eq!(AccessMode::ALL.len(), 6);
+        assert_round_trip_unique("AccessMode", all, |s| match AccessMode::from_str(s) {
+            Maybe::Some(v) => Maybe::Some(v.as_str()),
+            Maybe::None => Maybe::None,
+        });
+        // snake_case alias parses to the same variant.
+        for v in AccessMode::ALL {
+            let snake = v.meta().snake_name;
+            assert_eq!(
+                AccessMode::from_str(snake),
+                Maybe::Some(*v),
+                "AccessMode::{:?}: snake alias '{}' must parse",
+                v,
+                snake
+            );
+        }
+
+        // Capability classification — meta-derived projections agree
+        // with hand-written reference matches!.
+        for v in AccessMode::ALL {
+            let expected_read = matches!(
+                v,
+                AccessMode::ReadOnly
+                    | AccessMode::ReadWrite
+                    | AccessMode::WriteOneToClear
+                    | AccessMode::WriteOneToSet
+            );
+            let expected_write = matches!(
+                v,
+                AccessMode::WriteOnly
+                    | AccessMode::ReadWrite
+                    | AccessMode::WriteOneToClear
+                    | AccessMode::WriteOneToSet
+            );
+            let expected_modify = matches!(
+                v,
+                AccessMode::WriteOneToClear | AccessMode::WriteOneToSet
+            );
+            assert_eq!(v.can_read(), expected_read, "AccessMode::{:?}: can_read", v);
+            assert_eq!(
+                v.can_write(),
+                expected_write,
+                "AccessMode::{:?}: can_write",
+                v
+            );
+            assert_eq!(
+                v.is_write_modify(),
+                expected_modify,
+                "AccessMode::{:?}: is_write_modify",
+                v
+            );
+            // Cross-cutting: write-modify ⇒ both can_read and can_write.
+            if v.is_write_modify() {
+                assert!(
+                    v.can_read() && v.can_write(),
+                    "AccessMode::{:?}: write-modify must allow both read and write",
+                    v
+                );
+            }
+        }
+        // Reserved is the only no-access variant.
+        for v in AccessMode::ALL {
+            let no_access = !v.can_read() && !v.can_write();
+            assert_eq!(
+                no_access,
+                *v == AccessMode::Reserved,
+                "Reserved is the only no-access variant"
+            );
+        }
+    }
+
+    #[test]
+    fn interrupt_kind_round_trip_unique_and_classification_and_aliases() {
+        let all = [
+            InterruptKind::Regular.as_str(),
+            InterruptKind::NMI.as_str(),
+            InterruptKind::Fast.as_str(),
+            InterruptKind::Exception.as_str(),
+            InterruptKind::Trap.as_str(),
+            InterruptKind::Reset.as_str(),
+        ];
+        assert_eq!(InterruptKind::ALL.len(), 6);
+        assert_round_trip_unique("InterruptKind", all, |s| {
+            match InterruptKind::from_str(s) {
+                Maybe::Some(v) => Maybe::Some(v.as_str()),
+                Maybe::None => Maybe::None,
+            }
+        });
+
+        // Architecture-specific aliases all parse to the right variant.
+        let alias_pins: &[(&str, InterruptKind)] = &[
+            ("Regular", InterruptKind::Regular),
+            ("irq", InterruptKind::Regular),
+            ("IRQ", InterruptKind::Regular),
+            ("NMI", InterruptKind::NMI),
+            ("Fast", InterruptKind::Fast),
+            ("fiq", InterruptKind::Fast),
+            ("FIQ", InterruptKind::Fast),
+            ("Exception", InterruptKind::Exception),
+            ("Trap", InterruptKind::Trap),
+            ("syscall", InterruptKind::Trap),
+            ("svc", InterruptKind::Trap),
+            ("SVC", InterruptKind::Trap),
+            ("Reset", InterruptKind::Reset),
+        ];
+        for (alias, expected) in alias_pins {
+            assert_eq!(
+                InterruptKind::from_str(alias),
+                Maybe::Some(*expected),
+                "InterruptKind alias '{}' must parse to {:?}",
+                alias,
+                expected
+            );
+        }
+
+        // Classification — meta-derived projections agree with
+        // hand-written reference matches!.
+        for v in InterruptKind::ALL {
+            let expected_maskable =
+                matches!(v, InterruptKind::Regular | InterruptKind::Fast);
+            let expected_special_stack = matches!(
+                v,
+                InterruptKind::NMI | InterruptKind::Reset | InterruptKind::Exception
+            );
+            assert_eq!(
+                v.is_maskable(),
+                expected_maskable,
+                "InterruptKind::{:?}: is_maskable",
+                v
+            );
+            assert_eq!(
+                v.needs_special_stack(),
+                expected_special_stack,
+                "InterruptKind::{:?}: needs_special_stack",
+                v
+            );
+            // Cross-cutting: needs_special_stack ⇒ ¬is_maskable
+            // (every special-stack variant is non-maskable).
+            if v.needs_special_stack() {
+                assert!(
+                    !v.is_maskable(),
+                    "InterruptKind::{:?}: special-stack variants must be non-maskable",
+                    v
+                );
+            }
+        }
+    }
+
+    #[test]
     fn verification_mode_round_trip_unique_and_rank_strict_monotone() {
         let all = [
             VerificationMode::Runtime.as_str(),
