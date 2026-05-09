@@ -241,6 +241,19 @@ implement Row {
         }
     }
 
+    /// Nullable BYTEA. Returns `Ok(None)` for SQL NULL.
+    public fn get_bytes_opt(&self, name: &str) -> Result<Maybe<List<Byte>>, DbError> {
+        let (col_idx, col) = self.column_or_error(name)?;
+        guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
+        match &self.values[col_idx] {
+            WvNull => Ok(None),
+            WvPresent { bytes, format } => match format {
+                WfBinary => Ok(Some(bytes.clone())),
+                WfText => decode_bytea_hex(bytes, col_idx, name).map(Some),
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Timestamp — TIMESTAMP, TIMESTAMPTZ
     // -------------------------------------------------------------------------
