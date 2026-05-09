@@ -272,6 +272,9 @@ fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
     if let Some(v) = verum_common::os_memory::os_memory_const_value(name, target_os) {
         return v;
     }
+    if let Some(v) = verum_common::os_events::os_event_const_for_target(name, target_os) {
+        return v;
+    }
     match name {
         // Atomic ordering (core/intrinsics/atomic.vr) — target-independent.
         "ORDERING_RELAXED" => 0,
@@ -26665,6 +26668,28 @@ mod tests {
             0x1000,
         );
         assert_eq!(resolve_stdlib_constant_value("MADV_FREE", "darwin"), 5);
+    }
+
+    /// kqueue (Darwin) and epoll (Linux) event-loop constants
+    /// resolve only on their native platforms — no cross-target
+    /// false matches. Programs targeting Linux that reference
+    /// `@const EVFILT_READ` MUST get a structured response (the
+    /// caller's @cfg guard catches it); same for `@const EPOLLIN` on
+    /// Darwin.
+    #[test]
+    fn target_conditional_constants_event_loops() {
+        // Darwin kqueue → resolves on macOS / darwin / ios.
+        assert_eq!(resolve_stdlib_constant_value("EVFILT_READ", "macos"), -1);
+        assert_eq!(resolve_stdlib_constant_value("EVFILT_WRITE", "darwin"), -2);
+        assert_eq!(resolve_stdlib_constant_value("EV_ADD", "ios"), 0x0001);
+        assert_eq!(resolve_stdlib_constant_value("EV_CLEAR", "macos"), 0x0020);
+
+        // Linux epoll → resolves on linux.
+        assert_eq!(resolve_stdlib_constant_value("EPOLLIN", "linux"), 0x001);
+        assert_eq!(resolve_stdlib_constant_value("EPOLLOUT", "linux"), 0x004);
+        assert_eq!(resolve_stdlib_constant_value("EPOLLET", "linux"), 1 << 31);
+        assert_eq!(resolve_stdlib_constant_value("EPOLL_CTL_ADD", "linux"), 1);
+        assert_eq!(resolve_stdlib_constant_value("EPOLL_CTL_DEL", "linux"), 2);
     }
 
     /// Windows-only constants resolve correctly when target is windows.
