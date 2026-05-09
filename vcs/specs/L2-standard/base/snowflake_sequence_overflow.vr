@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, snowflake, sequence, overflow, bit-layout
+// @timeout: 10000
+// @description: Pins the sequence-overflow-into-next-ms invariant for the
+//               Snowflake 64-bit ID layout (#72).
+//
+// When a Snowflake generator has emitted MAX_SEQUENCE (4095) IDs within the
+// same millisecond the sequence field saturates.  The generator then spins
+// until the clock ticks to the next ms and resets the sequence to 0.  The
+// resulting IDs from the *next* ms must:
+//   1. Have sequence = 0 (reset).
+//   2. Have a timestamp strictly greater than the pre-overflow timestamp.
+//
+// This spec exercises these invariants via the `parse()` function on
+// hand-crafted synthetic IDs built from the public bit-layout constants
+// (TIMESTAMP_SHIFT, WORKER_SHIFT, MAX_SEQUENCE, MAX_WORKER) — no wall-clock
+// dependency.
+
+mount core.base.snowflake.{
+    SnowflakeParts,
+    parse,
+    WORKER_BITS, SEQUENCE_BITS,
+    MAX_WORKER, MAX_SEQUENCE,
+    WORKER_SHIFT, TIMESTAMP_SHIFT,
+    DEFAULT_EPOCH_MS,
+};
+
+// -----------------------------------------------------------------------------
+// 1. MAX_SEQUENCE is exactly 4095 (2^12 − 1)
+// -----------------------------------------------------------------------------
+
+fn constants_have_expected_values() {
+    assert_eq(SEQUENCE_BITS, 12);
+    assert_eq(WORKER_BITS,   10);
+    assert_eq(MAX_SEQUENCE,  4095_u64);
+    assert_eq(MAX_WORKER,    1023_u64);
+    assert_eq(WORKER_SHIFT,  12_u64);
+    assert_eq(TIMESTAMP_SHIFT, 22_u64);
+}
+
+// -----------------------------------------------------------------------------
+// 2. ID at overflow boundary: ts_offset=1, worker=0, sequence=MAX_SEQUENCE
+//    parse() must return sequence == MAX_SEQUENCE
+// -----------------------------------------------------------------------------
+
+fn parse_at_max_sequence() {
+    // Build: (ts_offset=1 << 22) | (worker=0 << 12) | sequence=4095
+    let id_at_max: UInt64 = (1_u64 << TIMESTAMP_SHIFT) | MAX_SEQUENCE;
+    let parts: SnowflakeParts = parse(id_at_max, 0_u64);
+
+    assert_eq(parts.sequence,    MAX_SEQUENCE);
+    assert_eq(parts.worker_id,   0_u64);
+    assert_eq(parts.timestamp_ms, 1_u64);  // epoch=0, offset=1
+}
+
+// -----------------------------------------------------------------------------
+// 3. ID after overflow reset: ts_offset=2, worker=0, sequence=0
+//    Sequence field must be zero; timestamp must be strictly greater
+// -----------------------------------------------------------------------------
+
+fn parse_after_overflow_reset() {
+    let id_at_max: UInt64    = (1_u64 << TIMESTAMP_SHIFT) | MAX_SEQUENCE;
+    let id_after_overflow: UInt64 = 2_u64 << TIMESTAMP_SHIFT;  // sequence=0
+
+    let parts_last  = parse(id_at_max,         0_u64);
+    let parts_first = parse(id_after_overflow, 0_u64);
+
+    assert_eq(parts_first.sequence, 0_u64);
+    // Timestamp must have advanced by exactly 1 ms.
+    assert_eq(parts_first.timestamp_ms, parts_last.timestamp_ms + 1_u64);
+}
+
+// -----------------------------------------------------------------------------
+// 4. Bit-mask isolation: sequence is exactly the low SEQUENCE_BITS bits
+// -----------------------------------------------------------------------------
+
+fn sequence_occupies_only_low_bits() {
+    // Saturated sequence: all 12 low bits set.
+    let seq_mask: UInt64 = MAX_SEQUENCE;
+    assert_eq(seq_mask, 0x0FFF_u64);
+
+    // Any ID with worker=0, ts=0 has id == sequence.
+    let id = MAX_SEQUENCE;
+    let parts = parse(id, DEFAULT_EPOCH_MS);
+    assert_eq(parts.sequence, MAX_SEQUENCE);
+    assert_eq(parts.worker_id, 0_u64);
+}
+
+// -----------------------------------------------------------------------------
+// 5. Worker field does not bleed into sequence
+// -----------------------------------------------------------------------------
+
+fn worker_field_isolated_from_sequence() {
+    // Max worker, ts=0, sequence=0 → id = MAX_WORKER << WORKER_SHIFT
+    let id_max_worker: UInt64 = MAX_WORKER << WORKER_SHIFT;
+    let parts = parse(id_max_worker, DEFAULT_EPOCH_MS);
+    assert_eq(parts.worker_id, MAX_WORKER);
+    assert_eq(parts.sequence,  0_u64);
+
+    // Max sequence, max worker, ts=0
+    let id_both: UInt64 = (MAX_WORKER << WORKER_SHIFT) | MAX_SEQUENCE;
+    let parts2 = parse(id_both, DEFAULT_EPOCH_MS);
+    assert_eq(parts2.worker_id, MAX_WORKER);
+    assert_eq(parts2.sequence,  MAX_SEQUENCE);
+}
+
+fn main() {
+    constants_have_expected_values();
+    parse_at_max_sequence();
+    parse_after_overflow_reset();
+    sequence_occupies_only_low_bits();
+    worker_field_isolated_from_sequence();
+    print("snowflake sequence overflow typecheck ok");
+}
