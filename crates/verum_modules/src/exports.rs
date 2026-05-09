@@ -208,20 +208,99 @@ pub enum ExportKind {
     ContextGroup,
 }
 
+/// Per-variant projection for [`ExportKind`].
+///
+/// `display_name` is the human-readable form used by `as_str` /
+/// `Display` — note that `ContextGroup` renders as `"context group"`
+/// (with a space) since it's a diagnostic label, not a parser token.
+/// `parse_name` is the unambiguous snake_case form accepted by
+/// `from_str` (`"context_group"`).
+#[derive(Debug, Clone, Copy)]
+pub struct ExportKindMeta {
+    pub display_name: &'static str,
+    pub parse_name: &'static str,
+}
+
 impl ExportKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::Function,
+        Self::Type,
+        Self::Protocol,
+        Self::Module,
+        Self::Const,
+        Self::Static,
+        Self::Meta,
+        Self::Predicate,
+        Self::Context,
+        Self::ContextGroup,
+    ];
+
+    pub const fn meta(self) -> ExportKindMeta {
         match self {
-            ExportKind::Function => "function",
-            ExportKind::Type => "type",
-            ExportKind::Protocol => "protocol",
-            ExportKind::Module => "module",
-            ExportKind::Const => "const",
-            ExportKind::Static => "static",
-            ExportKind::Meta => "meta",
-            ExportKind::Predicate => "predicate",
-            ExportKind::Context => "context",
-            ExportKind::ContextGroup => "context group",
+            Self::Function => ExportKindMeta {
+                display_name: "function",
+                parse_name: "function",
+            },
+            Self::Type => ExportKindMeta {
+                display_name: "type",
+                parse_name: "type",
+            },
+            Self::Protocol => ExportKindMeta {
+                display_name: "protocol",
+                parse_name: "protocol",
+            },
+            Self::Module => ExportKindMeta {
+                display_name: "module",
+                parse_name: "module",
+            },
+            Self::Const => ExportKindMeta {
+                display_name: "const",
+                parse_name: "const",
+            },
+            Self::Static => ExportKindMeta {
+                display_name: "static",
+                parse_name: "static",
+            },
+            Self::Meta => ExportKindMeta {
+                display_name: "meta",
+                parse_name: "meta",
+            },
+            Self::Predicate => ExportKindMeta {
+                display_name: "predicate",
+                parse_name: "predicate",
+            },
+            Self::Context => ExportKindMeta {
+                display_name: "context",
+                parse_name: "context",
+            },
+            Self::ContextGroup => ExportKindMeta {
+                display_name: "context group",
+                parse_name: "context_group",
+            },
         }
+    }
+
+    /// Human-readable display form. `ContextGroup` returns
+    /// `"context group"` with a space — preserved verbatim from the
+    /// legacy `as_str` so existing diagnostic output stays
+    /// byte-identical.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().display_name
+    }
+
+    /// Parse an export-kind name. Accepts both the human-readable
+    /// display form (`"context group"`) and the unambiguous
+    /// snake_case form (`"context_group"`); for variants where they
+    /// coincide the two paths are degenerate.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            let m = v.meta();
+            if m.display_name == s || m.parse_name == s {
+                return Some(*v);
+            }
+        }
+        None
     }
 }
 
@@ -1607,13 +1686,50 @@ pub enum ContextSourceKind {
     ContextGroup,
 }
 
+/// Per-variant projection for [`ContextSourceKind`]. Same shape as
+/// [`ExportKindMeta`]: `display_name` for diagnostic output (with the
+/// space-separated `"context group"` form preserved), `parse_name`
+/// for the unambiguous snake_case form accepted by `from_str`.
+#[derive(Debug, Clone, Copy)]
+pub struct ContextSourceKindMeta {
+    pub display_name: &'static str,
+    pub parse_name: &'static str,
+}
+
 impl ContextSourceKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] =
+        &[Self::Context, Self::Protocol, Self::ContextGroup];
+
+    pub const fn meta(self) -> ContextSourceKindMeta {
         match self {
-            ContextSourceKind::Context => "context",
-            ContextSourceKind::Protocol => "protocol",
-            ContextSourceKind::ContextGroup => "context group",
+            Self::Context => ContextSourceKindMeta {
+                display_name: "context",
+                parse_name: "context",
+            },
+            Self::Protocol => ContextSourceKindMeta {
+                display_name: "protocol",
+                parse_name: "protocol",
+            },
+            Self::ContextGroup => ContextSourceKindMeta {
+                display_name: "context group",
+                parse_name: "context_group",
+            },
         }
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().display_name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            let m = v.meta();
+            if m.display_name == s || m.parse_name == s {
+                return Some(*v);
+            }
+        }
+        None
     }
 }
 
@@ -1735,5 +1851,97 @@ fn is_context_protocol_type_definition(type_body: &verum_ast::decl::TypeDeclBody
     match type_body {
         TypeDeclBody::Protocol(protocol_body) => protocol_body.is_context,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::*;
+
+    #[test]
+    fn export_kind_round_trip_unique_and_dual_form_parsing() {
+        assert_eq!(ExportKind::ALL.len(), 10);
+        // Display form round-trip — `ContextGroup` uses
+        // `"context group"` (with space) as its diagnostic label;
+        // legacy as_str preserved verbatim.
+        let mut display_seen = Vec::new();
+        for v in ExportKind::ALL {
+            let d = v.as_str();
+            assert_eq!(
+                ExportKind::from_str(d),
+                Some(*v),
+                "ExportKind::{:?}: display form '{}' must round-trip",
+                v,
+                d
+            );
+            assert!(
+                !display_seen.contains(&d),
+                "duplicate display name '{}'",
+                d
+            );
+            display_seen.push(d);
+        }
+        // snake_case parse form — `"context_group"` is the
+        // unambiguous parse alias for `ContextGroup`. For all other
+        // variants the parse form coincides with the display form.
+        for v in ExportKind::ALL {
+            let p = v.meta().parse_name;
+            assert_eq!(
+                ExportKind::from_str(p),
+                Some(*v),
+                "ExportKind::{:?}: parse form '{}' must round-trip",
+                v,
+                p
+            );
+        }
+        // Specific spot pins.
+        assert_eq!(ExportKind::ContextGroup.as_str(), "context group");
+        assert_eq!(
+            ExportKind::ContextGroup.meta().parse_name,
+            "context_group"
+        );
+        assert_eq!(
+            ExportKind::from_str("context_group"),
+            Some(ExportKind::ContextGroup)
+        );
+        assert_eq!(
+            ExportKind::from_str("context group"),
+            Some(ExportKind::ContextGroup)
+        );
+        assert!(ExportKind::from_str("__not_an_export_kind__").is_none());
+    }
+
+    #[test]
+    fn context_source_kind_round_trip_unique_and_dual_form_parsing() {
+        assert_eq!(ContextSourceKind::ALL.len(), 3);
+        for v in ContextSourceKind::ALL {
+            let d = v.as_str();
+            assert_eq!(
+                ContextSourceKind::from_str(d),
+                Some(*v),
+                "ContextSourceKind::{:?}: display '{}' round-trip",
+                v,
+                d
+            );
+            let p = v.meta().parse_name;
+            assert_eq!(
+                ContextSourceKind::from_str(p),
+                Some(*v),
+                "ContextSourceKind::{:?}: parse '{}' round-trip",
+                v,
+                p
+            );
+        }
+        // Same `ContextGroup` "space vs underscore" duality as
+        // ExportKind — pinned independently here so the two enums
+        // stay in lockstep on the wire form.
+        assert_eq!(
+            ContextSourceKind::ContextGroup.as_str(),
+            "context group"
+        );
+        assert_eq!(
+            ContextSourceKind::from_str("context_group"),
+            Some(ContextSourceKind::ContextGroup)
+        );
     }
 }

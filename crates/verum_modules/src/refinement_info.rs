@@ -133,16 +133,90 @@ pub enum PredicateKind {
     Decreases,
 }
 
+/// Per-variant projection for [`PredicateKind`].
+///
+/// `name` matches the attribute name accepted by the parser
+/// (`@requires` → `Requires`, etc.), so a serialised contract round-
+/// trips through `from_str(x.as_str()) == Some(x)` cleanly. The
+/// optional `direction` partitions predicates by their temporal role
+/// (`Pre` for `requires`, `Post` for `ensures`, `Both` for invariant /
+/// modifies / decreases that hold throughout). This was previously
+/// implicit in the `is_requires` / `is_ensures` / `is_invariant`
+/// helper methods on `ContractPredicate`.
+#[derive(Debug, Clone, Copy)]
+pub struct PredicateKindMeta {
+    pub name: &'static str,
+    pub direction: PredicateDirection,
+}
+
+/// Coarse temporal classification of a [`PredicateKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PredicateDirection {
+    /// Holds before function execution (`requires`).
+    Pre,
+    /// Holds after function execution (`ensures`).
+    Post,
+    /// Holds throughout / structurally (`invariant`, `modifies`,
+    /// `decreases`).
+    Both,
+}
+
 impl PredicateKind {
-    /// Get the string representation for error messages
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::Requires,
+        Self::Ensures,
+        Self::Invariant,
+        Self::Modifies,
+        Self::Decreases,
+    ];
+
+    pub const fn meta(self) -> PredicateKindMeta {
         match self {
-            PredicateKind::Requires => "requires",
-            PredicateKind::Ensures => "ensures",
-            PredicateKind::Invariant => "invariant",
-            PredicateKind::Modifies => "modifies",
-            PredicateKind::Decreases => "decreases",
+            Self::Requires => PredicateKindMeta {
+                name: "requires",
+                direction: PredicateDirection::Pre,
+            },
+            Self::Ensures => PredicateKindMeta {
+                name: "ensures",
+                direction: PredicateDirection::Post,
+            },
+            Self::Invariant => PredicateKindMeta {
+                name: "invariant",
+                direction: PredicateDirection::Both,
+            },
+            Self::Modifies => PredicateKindMeta {
+                name: "modifies",
+                direction: PredicateDirection::Both,
+            },
+            Self::Decreases => PredicateKindMeta {
+                name: "decreases",
+                direction: PredicateDirection::Both,
+            },
         }
+    }
+
+    /// Get the string representation for error messages.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a predicate-kind attribute name back to the typed form.
+    /// Closes a drift defect: previously `as_str` was present but no
+    /// inverse mapping existed, so callers reading a serialised
+    /// contract had no symmetric way to recover the typed kind.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn direction(&self) -> PredicateDirection {
+        self.meta().direction
     }
 }
 
@@ -170,6 +244,40 @@ pub enum CaptureTime {
     Old,
     /// Captured after function execution (default)
     New,
+}
+
+/// Per-variant projection for [`CaptureTime`]. `name` is the
+/// surface-syntax form: `"old"` matches the `old(x)` reference form
+/// in postcondition bodies; `"new"` is the default and rarely
+/// written explicitly.
+#[derive(Debug, Clone, Copy)]
+pub struct CaptureTimeMeta {
+    pub name: &'static str,
+}
+
+impl CaptureTime {
+    pub const ALL: &'static [Self] = &[Self::Old, Self::New];
+
+    pub const fn meta(self) -> CaptureTimeMeta {
+        match self {
+            Self::Old => CaptureTimeMeta { name: "old" },
+            Self::New => CaptureTimeMeta { name: "new" },
+        }
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
 }
 
 impl ContractPredicate {
@@ -251,20 +359,89 @@ pub enum VerificationStatus {
     RuntimeCheck,
 }
 
+/// Per-variant projection for [`VerificationStatus`].
+///
+/// `is_verified` and `needs_runtime_check` were previously two
+/// parallel matches!() with overlapping variant sets; they now ride
+/// per-variant boolean flags so adding a new status forces an
+/// explicit classification decision in `meta()` instead of silently
+/// falling through.
+#[derive(Debug, Clone, Copy)]
+pub struct VerificationStatusMeta {
+    pub name: &'static str,
+    pub is_verified: bool,
+    pub needs_runtime_check: bool,
+}
+
 impl VerificationStatus {
-    /// Check if verification succeeded
-    pub fn is_verified(&self) -> bool {
-        matches!(self, VerificationStatus::Verified)
+    pub const ALL: &'static [Self] = &[
+        Self::Unverified,
+        Self::Verified,
+        Self::Failed,
+        Self::Timeout,
+        Self::Skipped,
+        Self::RuntimeCheck,
+    ];
+
+    pub const fn meta(self) -> VerificationStatusMeta {
+        match self {
+            Self::Unverified => VerificationStatusMeta {
+                name: "unverified",
+                is_verified: false,
+                needs_runtime_check: true,
+            },
+            Self::Verified => VerificationStatusMeta {
+                name: "verified",
+                is_verified: true,
+                needs_runtime_check: false,
+            },
+            Self::Failed => VerificationStatusMeta {
+                name: "failed",
+                is_verified: false,
+                needs_runtime_check: false,
+            },
+            Self::Timeout => VerificationStatusMeta {
+                name: "timeout",
+                is_verified: false,
+                needs_runtime_check: true,
+            },
+            Self::Skipped => VerificationStatusMeta {
+                name: "skipped",
+                is_verified: false,
+                needs_runtime_check: false,
+            },
+            Self::RuntimeCheck => VerificationStatusMeta {
+                name: "runtime_check",
+                is_verified: false,
+                needs_runtime_check: true,
+            },
+        }
     }
 
-    /// Check if verification needs runtime fallback
-    pub fn needs_runtime_check(&self) -> bool {
-        matches!(
-            self,
-            VerificationStatus::Unverified
-                | VerificationStatus::Timeout
-                | VerificationStatus::RuntimeCheck
-        )
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Check if verification succeeded.
+    #[inline]
+    pub const fn is_verified(&self) -> bool {
+        self.meta().is_verified
+    }
+
+    /// Check if verification needs runtime fallback.
+    #[inline]
+    pub const fn needs_runtime_check(&self) -> bool {
+        self.meta().needs_runtime_check
     }
 }
 
@@ -666,5 +843,129 @@ mod tests {
 
         let all = contract.all_predicates();
         assert_eq!(all.len(), 2);
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins for PredicateKind / CaptureTime
+    // / VerificationStatus.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_predicate_kind_round_trip_unique_and_direction() {
+        assert_eq!(PredicateKind::ALL.len(), 5);
+        let mut seen = Vec::new();
+        for v in PredicateKind::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                PredicateKind::from_str(s),
+                Some(*v),
+                "PredicateKind::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+            assert!(
+                !seen.contains(&s),
+                "PredicateKind: duplicate name '{}'",
+                s
+            );
+            seen.push(s);
+        }
+        assert!(PredicateKind::from_str("__not_a_predicate__").is_none());
+        // Direction partition: exactly 1 Pre, 1 Post, 3 Both.
+        let pre = PredicateKind::ALL
+            .iter()
+            .filter(|v| v.direction() == PredicateDirection::Pre)
+            .count();
+        let post = PredicateKind::ALL
+            .iter()
+            .filter(|v| v.direction() == PredicateDirection::Post)
+            .count();
+        let both = PredicateKind::ALL
+            .iter()
+            .filter(|v| v.direction() == PredicateDirection::Both)
+            .count();
+        assert_eq!(pre, 1, "Pre: requires");
+        assert_eq!(post, 1, "Post: ensures");
+        assert_eq!(both, 3, "Both: invariant, modifies, decreases");
+        // Spot pins.
+        assert_eq!(
+            PredicateKind::Requires.direction(),
+            PredicateDirection::Pre
+        );
+        assert_eq!(
+            PredicateKind::Ensures.direction(),
+            PredicateDirection::Post
+        );
+        assert_eq!(
+            PredicateKind::Invariant.direction(),
+            PredicateDirection::Both
+        );
+        // Cross-cutting: ContractPredicate's is_requires / is_ensures /
+        // is_invariant agree with the meta-derived direction.
+        for v in PredicateKind::ALL {
+            let p = ContractPredicate {
+                kind: *v,
+                expr: dummy_expr(),
+                label: Maybe::None,
+                bindings: List::new(),
+                span: dummy_span(),
+            };
+            assert_eq!(p.is_requires(), *v == PredicateKind::Requires);
+            assert_eq!(p.is_ensures(), *v == PredicateKind::Ensures);
+            assert_eq!(p.is_invariant(), *v == PredicateKind::Invariant);
+        }
+    }
+
+    #[test]
+    fn meta_pin_capture_time_round_trip_unique() {
+        assert_eq!(CaptureTime::ALL.len(), 2);
+        for v in CaptureTime::ALL {
+            let s = v.as_str();
+            assert_eq!(CaptureTime::from_str(s), Some(*v));
+        }
+        // The default capture is `New` (after function execution); pin
+        // the default-elision contract for `old(x)` syntax.
+        assert_eq!(CaptureTime::Old.as_str(), "old");
+        assert_eq!(CaptureTime::New.as_str(), "new");
+        assert!(CaptureTime::from_str("ancient").is_none());
+    }
+
+    #[test]
+    fn meta_pin_verification_status_round_trip_unique_and_classification() {
+        assert_eq!(VerificationStatus::ALL.len(), 6);
+        let mut seen = Vec::new();
+        for v in VerificationStatus::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                VerificationStatus::from_str(s),
+                Some(*v),
+                "VerificationStatus::{:?}: round-trip",
+                v
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Classification: meta-derived projections agree with the
+        // legacy hand-written matches!.
+        for v in VerificationStatus::ALL {
+            let expected_verified = matches!(v, VerificationStatus::Verified);
+            let expected_runtime = matches!(
+                v,
+                VerificationStatus::Unverified
+                    | VerificationStatus::Timeout
+                    | VerificationStatus::RuntimeCheck
+            );
+            assert_eq!(v.is_verified(), expected_verified);
+            assert_eq!(v.needs_runtime_check(), expected_runtime);
+        }
+        // Verified is the only happy-path variant; Failed is its
+        // antonym (failure verdict, no runtime fallback).
+        assert!(VerificationStatus::Verified.is_verified());
+        assert!(!VerificationStatus::Verified.needs_runtime_check());
+        assert!(!VerificationStatus::Failed.is_verified());
+        assert!(!VerificationStatus::Failed.needs_runtime_check());
+        // Wire-form spot — RuntimeCheck uses snake_case despite the
+        // CamelCase variant name (matches serde rename convention).
+        assert_eq!(VerificationStatus::RuntimeCheck.as_str(), "runtime_check");
     }
 }
