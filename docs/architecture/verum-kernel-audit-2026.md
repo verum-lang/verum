@@ -285,7 +285,8 @@ All items below have been discharged.
 * `crates/verum_kernel/src/soundness/lean.rs` — the Lean emitter
   (now real-`Typing`-aware).
 * `crates/verum_kernel/src/soundness/coq.rs` — the Coq emitter
-  (vacuous-axiom shape; refactor pending).
+  (real `Inductive Typing` with 38 constructors; structural-fragment
+  lemmas proved via `exact T_*`; non-structural lemmas `Admitted.`).
 * `verification/external/lean/VerumExternalReplay/KernelSoundness.lean`
   — the regenerated Lean export the audit gate replays on every
   release.
