@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, glob, negated-class, character-class, pattern-matching
+// @timeout: 10000
+// @description: Glob [!abc] negated character class matching (#75).
+//
+// The glob pattern language supports two negated character class forms:
+//   [!abc]  — matches any character NOT in the set {a, b, c}
+//   [^abc]  — same, '^' is accepted as an alias for '!'
+//
+// Both also support ranges: [!a-z] matches any character NOT in 'a'..'z'.
+//
+// This spec verifies:
+//   1. [!abc] rejects 'a', 'b', 'c' but accepts 'd', '1', etc.
+//   2. [^abc] behaves identically to [!abc].
+//   3. [!a-z] negated range rejects lowercase, accepts uppercase.
+//   4. Combined class + range: [!abc0-9] rejects listed chars AND 0-9.
+//   5. Empty negated class equivalent [!] (degenerate): should NOT crash.
+//   6. Negated class works within a longer pattern: "foo[!0-9]bar".
+
+mount core.base.glob.{matches};
+
+// `matches` takes (&str, &str). In Verum, a &str is a reference to a slice of
+// bytes; Text can be coerced to &str via .as_str().
+
+// -----------------------------------------------------------------------------
+// 1. [!abc] — excludes listed characters
+// -----------------------------------------------------------------------------
+
+fn negated_class_basic() {
+    assert(!matches("[!abc]", "a"));
+    assert(!matches("[!abc]", "b"));
+    assert(!matches("[!abc]", "c"));
+    assert( matches("[!abc]", "d"));
+    assert( matches("[!abc]", "1"));
+    assert( matches("[!abc]", "Z"));
+}
+
+// -----------------------------------------------------------------------------
+// 2. [^abc] — '^' alias identical to '!'
+// -----------------------------------------------------------------------------
+
+fn negated_class_caret_alias() {
+    assert(!matches("[^abc]", "a"));
+    assert(!matches("[^abc]", "b"));
+    assert(!matches("[^abc]", "c"));
+    assert( matches("[^abc]", "x"));
+    assert( matches("[^abc]", "0"));
+}
+
+// -----------------------------------------------------------------------------
+// 3. [!a-z] — negated range rejects lowercase, accepts uppercase / digits
+// -----------------------------------------------------------------------------
+
+fn negated_range() {
+    assert(!matches("[!a-z]", "a"));
+    assert(!matches("[!a-z]", "m"));
+    assert(!matches("[!a-z]", "z"));
+    assert( matches("[!a-z]", "A"));
+    assert( matches("[!a-z]", "Z"));
+    assert( matches("[!a-z]", "0"));
+    assert( matches("[!a-z]", "_"));
+}
+
+// -----------------------------------------------------------------------------
+// 4. Combined negated class + range: [!abc0-9]
+// -----------------------------------------------------------------------------
+
+fn negated_class_and_range() {
+    assert(!matches("[!abc0-9]", "a"));
+    assert(!matches("[!abc0-9]", "5"));
+    assert(!matches("[!abc0-9]", "9"));
+    assert( matches("[!abc0-9]", "d"));
+    assert( matches("[!abc0-9]", "Z"));
+    assert( matches("[!abc0-9]", "_"));
+}
+
+// -----------------------------------------------------------------------------
+// 5. Negated class in a longer pattern: "foo[!0-9]bar"
+// -----------------------------------------------------------------------------
+
+fn negated_class_in_longer_pattern() {
+    assert( matches("foo[!0-9]bar", "fooXbar"));
+    assert( matches("foo[!0-9]bar", "foo_bar"));
+    assert(!matches("foo[!0-9]bar", "foo5bar"));
+    assert(!matches("foo[!0-9]bar", "foo0bar"));
+    assert(!matches("foo[!0-9]bar", "foo9bar"));
+}
+
+// -----------------------------------------------------------------------------
+// 6. Positive class still works (non-regression)
+// -----------------------------------------------------------------------------
+
+fn positive_class_still_works() {
+    assert( matches("[abc]", "a"));
+    assert( matches("[abc]", "b"));
+    assert(!matches("[abc]", "d"));
+    assert( matches("[a-z]", "m"));
+    assert(!matches("[a-z]", "M"));
+}
+
+fn main() {
+    negated_class_basic();
+    negated_class_caret_alias();
+    negated_range();
+    negated_class_and_range();
+    negated_class_in_longer_pattern();
+    positive_class_still_works();
+    print("glob negated char class typecheck ok");
+}
