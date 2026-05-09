@@ -250,8 +250,19 @@ impl Default for RefTier {
     }
 }
 
-/// ThinRef layout: { ptr: *T, generation: u32, epoch_caps: u32 }
-pub const THIN_REF_SIZE: usize = 16;
+/// ThinRef layout: `{ ptr: *T, generation: u32, epoch_caps: u32 }`.
+///
+/// Re-exports the canonical [`verum_common::layout::THIN_REF_SIZE`] —
+/// the single source of truth for CBGR reference layout, shared with
+/// the typechecker, MIR lowering, and `@const` evaluator.
+pub const THIN_REF_SIZE: usize = verum_common::layout::THIN_REF_SIZE as usize;
 
-/// FatRef layout: { ptr: *T, generation: u32, epoch_caps: u32, len: u64 }
-pub const FAT_REF_SIZE: usize = 24;
+/// FatRef layout (canonical, per `core/mem/fat_ref.vr`):
+/// `{ ptr: *T, generation: u32, epoch_and_caps: u32,
+///    metadata: i64, offset_from_base: u32, reserved: u32 }`
+/// — 32 bytes total.
+///
+/// Re-exports the canonical [`verum_common::layout::FAT_REF_SIZE`] —
+/// the single source of truth. `verum_codegen::llvm::cbgr` constructs
+/// the struct with all 6 fields, matching the stdlib declaration.
+pub const FAT_REF_SIZE: usize = verum_common::layout::FAT_REF_SIZE as usize;

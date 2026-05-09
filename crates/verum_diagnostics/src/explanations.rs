@@ -1017,7 +1017,7 @@ let owned = Resource.new();
                 },
             ].into(),
             see_also: vec![
-                "CBGR system: generational references detect double-free by checking allocation state; ThinRef is 16 bytes (ptr + generation + epoch_caps), FatRef is 24 bytes".into(),
+                "CBGR system: generational references detect double-free by checking allocation state; ThinRef is 16 bytes (ptr + generation + epoch_caps), FatRef is 32 bytes (ThinRef + metadata + offset_from_base + reserved)".into(),
                 "Ownership: Verum uses single-owner semantics; each resource has exactly one owner; use RAII patterns for automatic cleanup at scope exit".into(),
             ].into(),
         },

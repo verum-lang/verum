@@ -1482,6 +1482,42 @@ impl fmt::Display for SmallString {
 mod tests {
     use super::*;
 
+    /// CBGR runtime layout drift contract.
+    ///
+    /// `ThinRef` and `FatRef` are FFI-shared with codegen-emitted LLVM IR
+    /// (`verum_codegen::llvm::cbgr`) and the canonical Verum stdlib
+    /// declarations in `core/mem/{thin_ref,fat_ref}.vr`. Their on-stack
+    /// byte total must equal `verum_common::layout::{THIN_REF_SIZE,
+    /// FAT_REF_SIZE}` — drift here means the LLVM lowering writes a
+    /// struct of one shape while the runtime reads it as another, and
+    /// any cross-tier `&T` round-trip silently corrupts memory.
+    ///
+    /// The previous codegen lowering emitted a 24-byte 4-field FatRef
+    /// while runtime + stdlib used the canonical 32-byte 6-field shape;
+    /// these assertions pin the shape so the bug cannot recur silently.
+    #[test]
+    fn cbgr_runtime_layout_matches_canonical() {
+        assert_eq!(
+            std::mem::size_of::<ThinRef>(),
+            verum_common::layout::THIN_REF_SIZE as usize,
+            "ThinRef runtime layout drifted from canonical THIN_REF_SIZE",
+        );
+        assert_eq!(
+            std::mem::size_of::<FatRef>(),
+            verum_common::layout::FAT_REF_SIZE as usize,
+            "FatRef runtime layout drifted from canonical FAT_REF_SIZE — \
+             check `core/mem/fat_ref.vr` and `verum_codegen::llvm::cbgr`",
+        );
+        // Alignment also matters for FFI: every field must land on its
+        // natural boundary, otherwise codegen-emitted struct GEPs will
+        // disagree with the Rust layout.
+        assert_eq!(
+            std::mem::align_of::<FatRef>(),
+            std::mem::align_of::<u64>(),
+            "FatRef must be 8-byte-aligned (per @repr(C, align(8)) in core/mem/fat_ref.vr)",
+        );
+    }
+
     #[test]
     fn test_float_values() {
         let v = Value::from_f64(3.14);

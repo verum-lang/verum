@@ -18,7 +18,7 @@
 //! into `@sizeof` and stack-budget violations.
 //!
 //! Every constant here is a mirror of an architectural decision
-//! documented in `docs/detailed/26-cbgr-implementation.md` and
+//! documented in `docs/detailed/cbgr-implementation.md` and
 //! `docs/architecture/no-libc-architecture.md`. Editing a value here
 //! is a load-bearing change requiring matching updates to the runtime
 //! header layout in `verum_common::cbgr` and the LLVM lowering in
@@ -49,14 +49,31 @@ pub const POINTER_SIZE: u64 = 8;
 /// `cbgr_layout_invariants` test in this file pins the equality.
 pub const THIN_REF_SIZE: u64 = 16;
 
-/// Size of a CBGR FatRef (slice / dynamic-bound reference).
+/// Size of a CBGR FatRef (reference for unsized types — slices,
+/// trait objects).
 ///
+/// **Authoritative source:** `core/mem/fat_ref.vr` declares
+/// `@repr(C, size(32), align(8))` with the layout
 /// ```text
-///     FatRef<T> = ThinRef<T> + { metadata: 8, offset: 4, reserved: 4 }
+///     FatRef<T> = {
+///         ptr: &unsafe Byte,        //  8
+///         generation: UInt32,        //  4
+///         epoch_and_caps: UInt32,    //  4
+///         metadata: Int,             //  8  (len for slices, vtable* for dyn)
+///         offset_from_base: UInt32,  //  4  (subslice view offset)
+///         reserved: UInt32,          //  4
+///     }
 /// ```
+/// **32 bytes total**, matching the stdlib `core/mem` declaration.
 ///
-/// 32 bytes total. Used for slice references where additional length /
-/// stride / vtable metadata is required alongside the base pointer.
+/// **Drift contract:** runtime LLVM lowering in
+/// `verum_codegen::llvm::cbgr` MUST construct a struct whose byte
+/// total equals this constant. The previous 4-field LLVM lowering
+/// (24 bytes) was a real correctness bug — it caused ABI-boundary
+/// corruption when stdlib `core/mem/fat_ref.vr` 32-byte methods
+/// were called against the codegen's 24-byte struct. Fixed in tandem
+/// with this constant (commit aligning LLVM cbgr emission to the
+/// canonical 6-field layout).
 pub const FAT_REF_SIZE: u64 = 32;
 
 /// Size of a Tier-0 reference (`&T`). Alias of [`THIN_REF_SIZE`].
@@ -190,7 +207,10 @@ mod tests {
     fn cbgr_layout_invariants() {
         assert_eq!(POINTER_SIZE, 8, "Verum targets 64-bit only");
         assert_eq!(THIN_REF_SIZE, 16, "ThinRef = ptr + gen + epoch_caps");
-        assert_eq!(FAT_REF_SIZE, 32, "FatRef = ThinRef + 16 bytes metadata");
+        assert_eq!(
+            FAT_REF_SIZE, 32,
+            "FatRef = ThinRef + metadata:8 + offset:4 + reserved:4 (per core/mem/fat_ref.vr @repr(C, size(32), align(8)))",
+        );
         assert_eq!(REF_TIER0_SIZE, THIN_REF_SIZE);
         assert_eq!(REF_TIER1_SIZE, THIN_REF_SIZE);
         assert_eq!(REF_TIER2_SIZE, POINTER_SIZE);
