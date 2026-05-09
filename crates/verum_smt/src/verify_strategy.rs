@@ -202,24 +202,64 @@ pub enum NuOrdinal {
     OmegaThricePlusOne,
 }
 
+/// Co-located metadata for one `NuOrdinal` variant.  Rank +
+/// display string live together so the strict-monotone ordering
+/// pinned in tests cannot drift from the rendered glyph sequence.
+#[derive(Debug, Clone, Copy)]
+pub struct NuOrdinalMeta {
+    /// Strict total-order rank on the ladder — bumping the
+    /// constant in one variant requires bumping every higher
+    /// variant.  Pinned identical to the matching
+    /// `VerifyStrategy::rank()` so the two enums share a single
+    /// monotone numbering.
+    pub rank: u8,
+    /// Human-readable rendering of the ordinal (`"0"`, `"ω+1"`,
+    /// `"ω·2+5"`).
+    pub as_str: &'static str,
+}
+
 impl NuOrdinal {
-    /// Human-readable rendering of the ordinal.
-    pub fn as_str(&self) -> &'static str {
+    /// All ordinals in strict-monotone order (rank 0 → 12).
+    pub const ALL: &'static [Self] = &[
+        Self::Zero,
+        Self::FiniteOne,
+        Self::FiniteTwo,
+        Self::FiniteThree,
+        Self::Omega,
+        Self::OmegaPlusOne,
+        Self::OmegaTwice,
+        Self::OmegaTwicePlusOne,
+        Self::OmegaTwicePlusTwo,
+        Self::OmegaTwicePlusThree,
+        Self::OmegaTwicePlusFour,
+        Self::OmegaTwicePlusFive,
+        Self::OmegaThricePlusOne,
+    ];
+
+    /// Returns co-located metadata for this ordinal.  Single
+    /// source of truth for `rank` and `as_str`.
+    pub const fn meta(self) -> NuOrdinalMeta {
         match self {
-            Self::Zero => "0",
-            Self::FiniteOne => "1",
-            Self::FiniteTwo => "2",
-            Self::FiniteThree => "3",
-            Self::Omega => "ω",
-            Self::OmegaPlusOne => "ω+1",
-            Self::OmegaTwice => "ω·2",
-            Self::OmegaTwicePlusOne => "ω·2+1",
-            Self::OmegaTwicePlusTwo => "ω·2+2",
-            Self::OmegaTwicePlusThree => "ω·2+3",
-            Self::OmegaTwicePlusFour => "ω·2+4",
-            Self::OmegaTwicePlusFive => "ω·2+5",
-            Self::OmegaThricePlusOne => "≤ω·3+1",
+            Self::Zero                 => NuOrdinalMeta { rank: 0,  as_str: "0" },
+            Self::FiniteOne            => NuOrdinalMeta { rank: 1,  as_str: "1" },
+            Self::FiniteTwo            => NuOrdinalMeta { rank: 2,  as_str: "2" },
+            Self::FiniteThree          => NuOrdinalMeta { rank: 3,  as_str: "3" },
+            Self::Omega                => NuOrdinalMeta { rank: 4,  as_str: "ω" },
+            Self::OmegaPlusOne         => NuOrdinalMeta { rank: 5,  as_str: "ω+1" },
+            Self::OmegaTwice           => NuOrdinalMeta { rank: 6,  as_str: "ω·2" },
+            Self::OmegaTwicePlusOne    => NuOrdinalMeta { rank: 7,  as_str: "ω·2+1" },
+            Self::OmegaTwicePlusTwo    => NuOrdinalMeta { rank: 8,  as_str: "ω·2+2" },
+            Self::OmegaTwicePlusThree  => NuOrdinalMeta { rank: 9,  as_str: "ω·2+3" },
+            Self::OmegaTwicePlusFour   => NuOrdinalMeta { rank: 10, as_str: "ω·2+4" },
+            Self::OmegaTwicePlusFive   => NuOrdinalMeta { rank: 11, as_str: "ω·2+5" },
+            Self::OmegaThricePlusOne   => NuOrdinalMeta { rank: 12, as_str: "≤ω·3+1" },
         }
+    }
+
+    /// Human-readable rendering of the ordinal.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().as_str
     }
 
     /// Strict total order on the ladder — mirrors the strict-monotone
@@ -227,22 +267,9 @@ impl NuOrdinal {
     /// has an upper bound but its exact ν depends on the synthesised
     /// witness's strategy; callers that care about the orthogonality
     /// should use [`VerifyStrategy::is_synthesis`] explicitly.
-    pub fn rank(&self) -> u8 {
-        match self {
-            Self::Zero => 0,
-            Self::FiniteOne => 1,
-            Self::FiniteTwo => 2,
-            Self::FiniteThree => 3,
-            Self::Omega => 4,
-            Self::OmegaPlusOne => 5,
-            Self::OmegaTwice => 6,
-            Self::OmegaTwicePlusOne => 7,
-            Self::OmegaTwicePlusTwo => 8,
-            Self::OmegaTwicePlusThree => 9,
-            Self::OmegaTwicePlusFour => 10,
-            Self::OmegaTwicePlusFive => 11,
-            Self::OmegaThricePlusOne => 12,
-        }
+    #[inline]
+    pub const fn rank(&self) -> u8 {
+        self.meta().rank
     }
 }
 
@@ -250,6 +277,88 @@ impl std::fmt::Display for NuOrdinal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
+}
+
+// =========================================================================
+// VerifyStrategy metadata — single source of truth for the 13 variants.
+//
+// Pre-refactor VerifyStrategy carried fourteen parallel match-arm
+// accessors (`as_str` / `nu_ordinal` / `rank` / `requires_*` /
+// `is_*` / `timeout_multiplier`) plus a separate cfg-gated
+// `to_backend_choice`.  Several latent drift defects:
+//
+// * `VerifyStrategy::rank()` and `NuOrdinal::rank()` independently
+//   maintained 0..=12 sequences that MUST agree (the two enums share
+//   one monotone numbering) but the legacy code spelled out both
+//   tables by hand.
+// * `prefers_thoroughness()` and `requires_explicit_specs()` had
+//   IDENTICAL match arms (Thorough / Reliable / Certified +
+//   Coherent triad) — the legacy code spelled the same set out
+//   twice and the two predicates could drift on rename.
+// * `requires_smt() ⇔ to_backend_choice().is_some()` invariant
+//   lived implicitly across the two methods.
+// * `is_coherent ⇒ requires_certificate` invariant lived
+//   implicitly across the two methods.
+//
+// `VerifyStrategyMeta` collapses every reference-data field into
+// one struct and `meta()` is the sole match site mapping
+// variant → metadata.  All sibling accessors become `#[inline]
+// const fn` projections; cross-cutting invariants are pinned by
+// drift tests at the bottom of this module.
+//
+// Same drift-collapse pattern as the verum_vbc sub-opcode meta()
+// series (commits 4b2792881 → 9fc5ce6cd), the verum_compiler
+// LintMeta / Profile consolidations, and the verum_ast BinOpMeta
+// refactor.
+// =========================================================================
+
+/// Co-located metadata for one `VerifyStrategy` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct VerifyStrategyMeta {
+    /// Canonical attribute-value spelling (`"runtime"`, `"coherent_static"`).
+    pub name: &'static str,
+    /// Diakrisis ν-invariant ordinal.
+    pub nu_ordinal: NuOrdinal,
+    /// Strict total-order rank on the verification ladder.
+    /// Pinned identical to `nu_ordinal.rank()` so both enums
+    /// share one monotone numbering.
+    pub rank: u8,
+    /// Strategy demands cross-validation (primary + secondary
+    /// solver agreement).
+    pub requires_cross_validation: bool,
+    /// Strategy must produce a kernel-rechecked certificate
+    /// artifact.
+    pub requires_certificate: bool,
+    /// Strategy requires formal SMT infrastructure.
+    /// Pin: `requires_smt ⇔ to_backend_choice().is_some()` (cvc5).
+    pub requires_smt: bool,
+    /// Strategy is one of the Coherent verification variants
+    /// (CoherentStatic / CoherentRuntime / Coherent strict).
+    /// Pin: `is_coherent ⇒ requires_certificate`.
+    pub is_coherent: bool,
+    /// Strategy emits a runtime ε-monitor (only CoherentRuntime).
+    pub requires_runtime_epsilon_monitor: bool,
+    /// Strategy needs compile-time discharge of the ε-coordinate
+    /// (CoherentStatic / Coherent strict).
+    pub requires_static_epsilon: bool,
+    /// Strategy is a synthesis problem (Synthesize) rather than
+    /// a decision problem.
+    pub is_synthesis: bool,
+    /// Strategy prefers thorough verification over speed.
+    /// Pinned identical to `requires_explicit_specs` — the two
+    /// predicates carry different consumer intent but cover the
+    /// same set of variants.
+    pub prefers_thoroughness: bool,
+    /// Strategy expects a user-supplied `proof { … }` tactic
+    /// block (only Proof).
+    pub requires_tactic_proof: bool,
+    /// Strategy requires explicit frame / invariant / decreases
+    /// specifications on every obligation.  Pinned identical to
+    /// `prefers_thoroughness`.
+    pub requires_explicit_specs: bool,
+    /// Recommended timeout multiplier (base = `Formal` at 1.0×).
+    /// `0.0` for non-SMT strategies (Runtime / Static / Proof).
+    pub timeout_multiplier: f64,
 }
 
 impl VerifyStrategy {
@@ -309,76 +418,249 @@ impl VerifyStrategy {
         }
     }
 
-    /// Render back to the canonical attribute-value form.
-    pub fn as_str(&self) -> &'static str {
+    /// Returns co-located metadata for this strategy.  Single
+    /// source of truth for `as_str` / `nu_ordinal` / `rank` /
+    /// every `requires_*` / `is_*` predicate / `timeout_multiplier`.
+    /// Sibling accessors are `#[inline] const fn` projections.
+    pub const fn meta(self) -> VerifyStrategyMeta {
         match self {
-            Self::Runtime => "runtime",
-            Self::Static => "static",
-            Self::Fast => "fast",
-            Self::ComplexityTyped => "complexity_typed",
-            Self::Formal => "formal",
-            Self::Proof => "proof",
-            Self::Thorough => "thorough",
-            Self::Reliable => "reliable",
-            Self::Certified => "certified",
-            Self::CoherentStatic => "coherent_static",
-            Self::CoherentRuntime => "coherent_runtime",
-            Self::Coherent => "coherent",
-            Self::Synthesize => "synthesize",
+            Self::Runtime => VerifyStrategyMeta {
+                name: "runtime",
+                nu_ordinal: NuOrdinal::Zero,
+                rank: 0,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: false,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 0.0,
+            },
+            Self::Static => VerifyStrategyMeta {
+                name: "static",
+                nu_ordinal: NuOrdinal::FiniteOne,
+                rank: 1,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: false,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 0.0,
+            },
+            Self::Fast => VerifyStrategyMeta {
+                name: "fast",
+                nu_ordinal: NuOrdinal::FiniteTwo,
+                rank: 2,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 0.3,
+            },
+            Self::ComplexityTyped => VerifyStrategyMeta {
+                name: "complexity_typed",
+                nu_ordinal: NuOrdinal::FiniteThree,
+                rank: 3,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 6.0,
+            },
+            Self::Formal => VerifyStrategyMeta {
+                name: "formal",
+                nu_ordinal: NuOrdinal::Omega,
+                rank: 4,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 1.0,
+            },
+            Self::Proof => VerifyStrategyMeta {
+                name: "proof",
+                nu_ordinal: NuOrdinal::OmegaPlusOne,
+                rank: 5,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: false,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: false,
+                requires_tactic_proof: true,
+                requires_explicit_specs: false,
+                timeout_multiplier: 0.0,
+            },
+            Self::Thorough => VerifyStrategyMeta {
+                name: "thorough",
+                nu_ordinal: NuOrdinal::OmegaTwice,
+                rank: 6,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 2.0,
+            },
+            Self::Reliable => VerifyStrategyMeta {
+                name: "reliable",
+                nu_ordinal: NuOrdinal::OmegaTwicePlusOne,
+                rank: 7,
+                requires_cross_validation: true,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 3.0,
+            },
+            Self::Certified => VerifyStrategyMeta {
+                name: "certified",
+                nu_ordinal: NuOrdinal::OmegaTwicePlusTwo,
+                rank: 8,
+                requires_cross_validation: true,
+                requires_certificate: true,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 3.0,
+            },
+            Self::CoherentStatic => VerifyStrategyMeta {
+                name: "coherent_static",
+                nu_ordinal: NuOrdinal::OmegaTwicePlusThree,
+                rank: 9,
+                requires_cross_validation: true,
+                requires_certificate: true,
+                requires_smt: true,
+                is_coherent: true,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: true,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 12.0,
+            },
+            Self::CoherentRuntime => VerifyStrategyMeta {
+                name: "coherent_runtime",
+                nu_ordinal: NuOrdinal::OmegaTwicePlusFour,
+                rank: 10,
+                requires_cross_validation: true,
+                requires_certificate: true,
+                requires_smt: true,
+                is_coherent: true,
+                requires_runtime_epsilon_monitor: true,
+                requires_static_epsilon: false,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 60.0,
+            },
+            Self::Coherent => VerifyStrategyMeta {
+                name: "coherent",
+                nu_ordinal: NuOrdinal::OmegaTwicePlusFive,
+                rank: 11,
+                requires_cross_validation: true,
+                requires_certificate: true,
+                requires_smt: true,
+                is_coherent: true,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: true,
+                is_synthesis: false,
+                prefers_thoroughness: true,
+                requires_tactic_proof: false,
+                requires_explicit_specs: true,
+                timeout_multiplier: 360.0,
+            },
+            Self::Synthesize => VerifyStrategyMeta {
+                name: "synthesize",
+                nu_ordinal: NuOrdinal::OmegaThricePlusOne,
+                rank: 12,
+                requires_cross_validation: false,
+                requires_certificate: false,
+                requires_smt: true,
+                is_coherent: false,
+                requires_runtime_epsilon_monitor: false,
+                requires_static_epsilon: false,
+                is_synthesis: true,
+                prefers_thoroughness: false,
+                requires_tactic_proof: false,
+                requires_explicit_specs: false,
+                timeout_multiplier: 5.0,
+            },
         }
+    }
+
+    /// Render back to the canonical attribute-value form.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Diakrisis ν-invariant ordinal for this strategy (table).
-    /// Strictly monotone in `<` — every strategy gets a distinct ordinal.
-    pub fn nu_ordinal(&self) -> NuOrdinal {
-        match self {
-            Self::Runtime => NuOrdinal::Zero,
-            Self::Static => NuOrdinal::FiniteOne,
-            Self::Fast => NuOrdinal::FiniteTwo,
-            Self::ComplexityTyped => NuOrdinal::FiniteThree,
-            Self::Formal => NuOrdinal::Omega,
-            Self::Proof => NuOrdinal::OmegaPlusOne,
-            Self::Thorough => NuOrdinal::OmegaTwice,
-            Self::Reliable => NuOrdinal::OmegaTwicePlusOne,
-            Self::Certified => NuOrdinal::OmegaTwicePlusTwo,
-            Self::CoherentStatic => NuOrdinal::OmegaTwicePlusThree,
-            Self::CoherentRuntime => NuOrdinal::OmegaTwicePlusFour,
-            Self::Coherent => NuOrdinal::OmegaTwicePlusFive,
-            Self::Synthesize => NuOrdinal::OmegaThricePlusOne,
-        }
+    /// Strictly monotone in `<` — every strategy gets a distinct
+    /// ordinal.
+    #[inline]
+    pub const fn nu_ordinal(&self) -> NuOrdinal {
+        self.meta().nu_ordinal
     }
 
-    /// Monotone-lift rank on the verification ladder .
-    /// Higher rank ⇒ stricter strategy. A function passing rank `k`
-    /// MUST also pass every rank `< k` (the compiler enforces this
-    /// by construction — any strategy implies all weaker ones).
-    ///
-
-    /// `Synthesize` is ranked at the top of the ordering for
-    /// convenience; use [`Self::is_synthesis`] when the orthogonal
-    /// semantics matter.
-    pub fn rank(&self) -> u8 {
-        match self {
-            Self::Runtime => 0,
-            Self::Static => 1,
-            Self::Fast => 2,
-            Self::ComplexityTyped => 3,
-            Self::Formal => 4,
-            Self::Proof => 5,
-            Self::Thorough => 6,
-            Self::Reliable => 7,
-            Self::Certified => 8,
-            Self::CoherentStatic => 9,
-            Self::CoherentRuntime => 10,
-            Self::Coherent => 11,
-            Self::Synthesize => 12,
-        }
+    /// Monotone-lift rank on the verification ladder.
+    /// Higher rank ⇒ stricter strategy.  Pinned identical to
+    /// `nu_ordinal().rank()` so the two enums share one monotone
+    /// numbering.
+    #[inline]
+    pub const fn rank(&self) -> u8 {
+        self.meta().rank
     }
 
-    /// True when `self` is at least as strict as `other`. Used by
-    /// the compiler when a module declares a floor strategy and a
-    /// function inside it carries a per-function override.
-    pub fn at_least(&self, other: &Self) -> bool {
+    /// True when `self` is at least as strict as `other`.
+    #[inline]
+    pub const fn at_least(&self, other: &Self) -> bool {
         self.rank() >= other.rank()
     }
 
@@ -420,121 +702,81 @@ impl VerifyStrategy {
         }
     }
 
-    /// True if the strategy requires cross-validation (both primary
-    /// and secondary solvers must agree). Applies to `Reliable`,
-    /// `Certified` (cross-validation is part of the certified pipeline),
-    /// the three `Coherent*` variants (their α-side is `certified`-style),
-    /// and `Coherent` strict (which adds an ε-side cross-check).
-    pub fn requires_cross_validation(&self) -> bool {
-        matches!(
-            self,
-            Self::Reliable
-                | Self::Certified
-                | Self::CoherentStatic
-                | Self::CoherentRuntime
-                | Self::Coherent
-        )
+    /// True if the strategy requires cross-validation (primary +
+    /// secondary solvers must agree).
+    #[inline]
+    pub const fn requires_cross_validation(&self) -> bool {
+        self.meta().requires_cross_validation
     }
 
     /// True if the strategy must produce a kernel-rechecked
-    /// certificate artifact. `Certified` produces the α-cert; the
-    /// `Coherent*` variants produce α + ε certificates per Coherent verification.
-    pub fn requires_certificate(&self) -> bool {
-        matches!(
-            self,
-            Self::Certified | Self::CoherentStatic | Self::CoherentRuntime | Self::Coherent
-        )
+    /// certificate artifact.
+    #[inline]
+    pub const fn requires_certificate(&self) -> bool {
+        self.meta().requires_certificate
     }
 
     /// True if the strategy requires formal SMT infrastructure.
     /// `Runtime`, `Static`, `Proof` all bypass the SMT portfolio.
-    pub fn requires_smt(&self) -> bool {
-        !matches!(self, Self::Runtime | Self::Static | Self::Proof)
+    #[inline]
+    pub const fn requires_smt(&self) -> bool {
+        self.meta().requires_smt
     }
 
-    /// True if the strategy is one of the three Coherent verification coherent
-    /// variants (α/ε bidirectional or α + symbolic ε / α + runtime ε).
-    pub fn is_coherent(&self) -> bool {
-        matches!(
-            self,
-            Self::CoherentStatic | Self::CoherentRuntime | Self::Coherent
-        )
+    /// True if the strategy is one of the Coherent verification
+    /// coherent variants.
+    #[inline]
+    pub const fn is_coherent(&self) -> bool {
+        self.meta().is_coherent
     }
 
-    /// True if the strategy emits a runtime ε-monitor in addition to
-    /// compile-time obligations. Applies only to `CoherentRuntime`
-    /// among the coherent family.
-    pub fn requires_runtime_epsilon_monitor(&self) -> bool {
-        matches!(self, Self::CoherentRuntime)
+    /// True if the strategy emits a runtime ε-monitor (only
+    /// `CoherentRuntime`).
+    #[inline]
+    pub const fn requires_runtime_epsilon_monitor(&self) -> bool {
+        self.meta().requires_runtime_epsilon_monitor
     }
 
-    /// True if the strategy needs a complete compile-time discharge
-    /// of the ε-coordinate (no runtime monitor allowed). Applies to
-    /// `CoherentStatic` (symbolic ε-claim) and `Coherent` (bidirectional
-    /// check); `CoherentRuntime` defers ε to the monitor.
-    pub fn requires_static_epsilon(&self) -> bool {
-        matches!(self, Self::CoherentStatic | Self::Coherent)
+    /// True if the strategy needs compile-time discharge of the
+    /// ε-coordinate.
+    #[inline]
+    pub const fn requires_static_epsilon(&self) -> bool {
+        self.meta().requires_static_epsilon
     }
 
     /// True if the strategy is a synthesis problem rather than a
     /// decision problem.
-    pub fn is_synthesis(&self) -> bool {
-        matches!(self, Self::Synthesize)
+    #[inline]
+    pub const fn is_synthesis(&self) -> bool {
+        self.meta().is_synthesis
     }
 
     /// True if the strategy prefers thorough/robust verification
-    /// over speed. The `Coherent*` family inherits thoroughness from
-    /// their `Certified`-style α-side discharge.
-    pub fn prefers_thoroughness(&self) -> bool {
-        matches!(
-            self,
-            Self::Thorough
-                | Self::Reliable
-                | Self::Certified
-                | Self::CoherentStatic
-                | Self::CoherentRuntime
-                | Self::Coherent
-        )
+    /// over speed.  Pinned identical to `requires_explicit_specs`.
+    #[inline]
+    pub const fn prefers_thoroughness(&self) -> bool {
+        self.meta().prefers_thoroughness
     }
 
     /// True when the strategy expects a user-supplied `proof { … }`
-    /// tactic block (not auto-discharged).
-    pub fn requires_tactic_proof(&self) -> bool {
-        matches!(self, Self::Proof)
+    /// tactic block (only `Proof`).
+    #[inline]
+    pub const fn requires_tactic_proof(&self) -> bool {
+        self.meta().requires_tactic_proof
     }
 
     /// True when the strategy requires explicit frame / invariant /
-    /// decreases specifications on every obligation. The `Coherent*`
-    /// family inherits this requirement from `Certified`.
-    pub fn requires_explicit_specs(&self) -> bool {
-        matches!(
-            self,
-            Self::Thorough
-                | Self::Reliable
-                | Self::Certified
-                | Self::CoherentStatic
-                | Self::CoherentRuntime
-                | Self::Coherent
-        )
+    /// decreases specifications on every obligation.
+    #[inline]
+    pub const fn requires_explicit_specs(&self) -> bool {
+        self.meta().requires_explicit_specs
     }
 
-    /// Recommended timeout multiplier for this strategy. The base
-    /// is `Formal` at 1.0× (5 s). Bounded-arithmetic and the coherent
-    /// variants get longer budgets per Coherent verification/Bounded-arithmetic .
-    pub fn timeout_multiplier(&self) -> f64 {
-        match self {
-            Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
-            Self::Fast => 0.3,                                 // 30% of base (≤100ms)
-            Self::ComplexityTyped => 6.0, // Bounded-arithmetic CI budget ≤ 30 s
-            Self::Formal => 1.0,          // base (5 s)
-            Self::Thorough => 2.0,        // 2× formal
-            Self::Reliable => 3.0,        // two solvers, agreement required
-            Self::Certified => 3.0,       // reliable + cert materialisation
-            Self::CoherentStatic => 12.0, // Coherent verification weak — CI budget ≤ 60 s
-            Self::CoherentRuntime => 60.0, // Coherent verification hybrid — CI budget ≤ 5 min
-            Self::Coherent => 360.0,      // Coherent verification strict — CI budget ≤ 30 min
-            Self::Synthesize => 5.0,      // synthesis is hard
-        }
+    /// Recommended timeout multiplier for this strategy.  Base is
+    /// `Formal` at 1.0× (5 s); `0.0` for non-SMT strategies.
+    #[inline]
+    pub const fn timeout_multiplier(&self) -> f64 {
+        self.meta().timeout_multiplier
     }
 
     /// timeout semantics
@@ -1229,5 +1471,160 @@ mod tests {
             format!("{}", TimeoutSemantics::SolverResourceCounter),
             "solver-resource-counter"
         );
+    }
+}
+
+// =========================================================================
+// Drift-pin tests for the meta() consolidation
+// =========================================================================
+
+#[cfg(test)]
+mod meta_drift_pins {
+    use super::*;
+
+    #[test]
+    fn verify_strategy_count_pinned_at_thirteen() {
+        assert_eq!(VerifyStrategy::LADDER.len(), 13,
+            "VerifyStrategy variant count drift: expected 13");
+    }
+
+    #[test]
+    fn nu_ordinal_count_pinned_at_thirteen() {
+        assert_eq!(NuOrdinal::ALL.len(), 13,
+            "NuOrdinal variant count drift: expected 13");
+    }
+
+    /// `VerifyStrategy::rank()` and `NuOrdinal::rank()` MUST agree
+    /// — the two enums share one monotone numbering.  Closes the
+    /// legacy drift potential where the two ladders were
+    /// hand-maintained independently.
+    #[test]
+    fn rank_matches_nu_ordinal_rank_for_every_strategy() {
+        for &s in &VerifyStrategy::LADDER {
+            assert_eq!(s.rank(), s.nu_ordinal().rank(),
+                "{:?}: VerifyStrategy::rank() = {} but nu_ordinal().rank() = {}",
+                s, s.rank(), s.nu_ordinal().rank());
+        }
+    }
+
+    /// Ranks are exactly 0..=12 with no gaps or duplicates —
+    /// strict monotone permutation of the ladder.
+    #[test]
+    fn rank_is_strict_zero_to_twelve_permutation() {
+        let mut ranks: Vec<u8> = VerifyStrategy::LADDER.iter().map(|s| s.rank()).collect();
+        ranks.sort();
+        let expected: Vec<u8> = (0..=12).collect();
+        assert_eq!(ranks, expected, "rank() must be strict 0..=12 permutation");
+    }
+
+    /// `requires_smt ⇔ to_backend_choice().is_some()` — the
+    /// invariant the legacy code maintained implicitly across
+    /// two methods.
+    #[cfg(feature = "cvc5")]
+    #[test]
+    fn requires_smt_iff_backend_choice_some() {
+        for &s in &VerifyStrategy::LADDER {
+            assert_eq!(s.requires_smt(), s.to_backend_choice().is_some(),
+                "{:?}: requires_smt={} but to_backend_choice().is_some()={}",
+                s, s.requires_smt(), s.to_backend_choice().is_some());
+        }
+    }
+
+    /// `is_coherent ⇒ requires_certificate` — every Coherent
+    /// variant inherits certified-style discharge.
+    #[test]
+    fn is_coherent_implies_requires_certificate() {
+        for &s in &VerifyStrategy::LADDER {
+            if s.is_coherent() {
+                assert!(s.requires_certificate(),
+                    "{:?}: is_coherent but does not require_certificate", s);
+            }
+        }
+    }
+
+    /// `prefers_thoroughness ⇔ requires_explicit_specs` — the two
+    /// predicates have always been the same set; the meta()
+    /// consolidation pins them to stay synchronised even though
+    /// their consumer-facing intent differs.
+    #[test]
+    fn prefers_thoroughness_iff_requires_explicit_specs() {
+        for &s in &VerifyStrategy::LADDER {
+            assert_eq!(s.prefers_thoroughness(), s.requires_explicit_specs(),
+                "{:?}: prefers_thoroughness={} but requires_explicit_specs={} — must agree",
+                s, s.prefers_thoroughness(), s.requires_explicit_specs());
+        }
+    }
+
+    /// `requires_tactic_proof` is unique to `Proof`.
+    #[test]
+    fn requires_tactic_proof_only_for_proof() {
+        for &s in &VerifyStrategy::LADDER {
+            assert_eq!(s.requires_tactic_proof(), matches!(s, VerifyStrategy::Proof),
+                "{:?}: requires_tactic_proof={} but this is Proof: {}",
+                s, s.requires_tactic_proof(), matches!(s, VerifyStrategy::Proof));
+        }
+    }
+
+    /// `is_synthesis` is unique to `Synthesize`.
+    #[test]
+    fn is_synthesis_only_for_synthesize() {
+        for &s in &VerifyStrategy::LADDER {
+            assert_eq!(s.is_synthesis(), matches!(s, VerifyStrategy::Synthesize));
+        }
+    }
+
+    /// `timeout_multiplier == 0.0` ⇔ `!requires_smt()` — non-SMT
+    /// strategies have no SMT timeout to scale.
+    #[test]
+    fn timeout_multiplier_zero_iff_non_smt() {
+        for &s in &VerifyStrategy::LADDER {
+            let zero_mul = s.timeout_multiplier() == 0.0;
+            assert_eq!(zero_mul, !s.requires_smt(),
+                "{:?}: timeout_multiplier={}, requires_smt={}, expected zero ⇔ non-SMT",
+                s, s.timeout_multiplier(), s.requires_smt());
+        }
+    }
+
+    /// `from_attribute_value(s.as_str())` round-trips for every
+    /// canonical name.  Catches drift between the meta() table
+    /// and the `from_attribute_value` parse table.
+    #[test]
+    fn name_from_attribute_value_round_trip() {
+        for &s in &VerifyStrategy::LADDER {
+            let name = s.as_str();
+            assert_eq!(VerifyStrategy::from_attribute_value(name), Some(s),
+                "round-trip drift on {:?}: name={:?}", s, name);
+        }
+    }
+
+    /// Every canonical name is unique.
+    #[test]
+    fn names_unique() {
+        let mut seen: Vec<&'static str> = Vec::new();
+        for &s in &VerifyStrategy::LADDER {
+            let n = s.as_str();
+            assert!(!seen.contains(&n), "duplicate name {:?}", n);
+            seen.push(n);
+        }
+    }
+
+    /// NuOrdinal display strings are unique.
+    #[test]
+    fn nu_ordinal_strings_unique() {
+        let mut seen: Vec<&'static str> = Vec::new();
+        for &o in NuOrdinal::ALL {
+            let n = o.as_str();
+            assert!(!seen.contains(&n), "duplicate ordinal {:?}", n);
+            seen.push(n);
+        }
+    }
+
+    /// NuOrdinal::ALL is sorted by rank — strict monotone.
+    #[test]
+    fn nu_ordinal_all_sorted_by_rank() {
+        for (i, &o) in NuOrdinal::ALL.iter().enumerate() {
+            assert_eq!(o.rank() as usize, i,
+                "NuOrdinal::ALL[{}] = {:?} but its rank is {}", i, o, o.rank());
+        }
     }
 }
