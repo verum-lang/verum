@@ -47,7 +47,7 @@ use verum_kernel::differential_fuzz::{
     apply_mutation, run_fuzz_campaign, run_generative_campaign,
     sample_mutation, FuzzRng,
 };
-use verum_kernel::canonical_battery::{canonical_battery, expected_verdict};
+use verum_kernel::canonical_battery::canonical_battery;
 use verum_kernel::kernel_registry::{AgreementVerdict, KernelRegistry};
 
 // =============================================================================
@@ -342,14 +342,15 @@ fn generative_campaign_500_iterations_zero_disagreements() {
 
 #[test]
 fn canonical_battery_expected_verdicts_match_trusted_base_and_registry() {
-    // Cross-check: trusted-base verdict + multi-kernel agreement + expected_verdict
-    // must all agree for every canonical cert.
+    // Cross-check: trusted-base verdict + multi-kernel agreement +
+    // the cert's own `expected_outcome` must all agree for every
+    // canonical cert.
     let registry = KernelRegistry::default();
     let mut mismatches: Vec<String> = Vec::new();
 
     for cert in canonical_battery() {
         let trusted = cert.certificate.verify().is_ok();
-        let expected = expected_verdict(cert.id).expect("all battery ids have expected verdicts");
+        let expected = cert.expected_outcome;
         let multi = registry.verify_all(&cert.certificate);
 
         if trusted != expected {

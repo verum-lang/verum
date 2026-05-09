@@ -217,6 +217,27 @@ impl KernelRuleId {
             KernelRuleId::AdjCounit,
         ]
     }
+
+    /// Canonical strict-intrinsic suffix used by the
+    /// `dispatch_intrinsic` registry. The full intrinsic name is
+    /// `kernel_<suffix>_strict` — e.g. `kernel_var_strict` for
+    /// `K-Refine`, `kernel_pi_form_strict` for `K-Adj-Unit`.
+    ///
+    /// Pinned alongside the enum so the rule-id ↔ intrinsic mapping
+    /// has one home. Drift between this method and the strict-
+    /// intrinsic registry surfaces as a kernel_v0 disagreement on
+    /// every certificate (see [`crate::kernel_registry::KernelV0Kernel`]).
+    pub fn strict_intrinsic_suffix(self) -> &'static str {
+        match self {
+            KernelRuleId::Refine => "var",
+            KernelRuleId::Univ => "universe_intro",
+            KernelRuleId::Pos => "positivity",
+            KernelRuleId::Norm => "beta",
+            KernelRuleId::FwAx => "forward_axiom",
+            KernelRuleId::AdjUnit => "pi_form",
+            KernelRuleId::AdjCounit => "app_elim",
+        }
+    }
 }
 
 // =============================================================================
