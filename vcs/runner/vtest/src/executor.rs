@@ -373,6 +373,12 @@ pub struct ExecutorConfig {
     pub vbc_output_dir: Option<PathBuf>,
     /// Preserve test-relative paths in VBC output (vs flat directory)
     pub vbc_preserve_paths: bool,
+    /// Enable coverage instrumentation for all test executions.
+    /// When true, sets VERUM_COVERAGE=1 in subprocess environments and
+    /// requests the compiler to emit per-line hit counters.
+    pub coverage: bool,
+    /// Output path for the coverage report (lcov format).  None = stdout.
+    pub coverage_output: Option<PathBuf>,
 }
 
 impl Default for ExecutorConfig {
@@ -412,6 +418,9 @@ impl Default for ExecutorConfig {
             // VBC output disabled by default
             vbc_output_dir: None,
             vbc_preserve_paths: false,
+            // Coverage disabled by default
+            coverage: false,
+            coverage_output: None,
         }
     }
 }
@@ -2695,6 +2704,15 @@ impl Executor {
         // Add environment variables
         for (key, value) in &self.config.env {
             cmd.env(key.as_str(), value.as_str());
+        }
+
+        // Wire coverage instrumentation: set VERUM_COVERAGE=1 so the runtime
+        // emits per-line hit counters when --coverage was requested.
+        if self.config.coverage {
+            cmd.env("VERUM_COVERAGE", "1");
+            if let Some(ref out) = self.config.coverage_output {
+                cmd.env("VERUM_COVERAGE_OUTPUT", out.as_os_str());
+            }
         }
 
         // Start the child in its own process group. Without this, a test

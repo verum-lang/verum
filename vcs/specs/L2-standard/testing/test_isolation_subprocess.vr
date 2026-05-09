@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: testing, isolation, subprocess, stateful, process-isolation
+// @timeout: 10000
+// @isolation: process
+// @description: Pins the @isolation directive for subprocess-per-test execution (#59).
+//
+// `@isolation: <level>` requests a specific isolation level for this spec:
+//
+//   none      — tests share the same process environment (fastest; no isolation).
+//   process   — each test function runs in a fresh subprocess (DEFAULT for
+//                stateful tests — filesystem writes, global state, singletons).
+//   directory — each test gets a unique temp directory (implies process).
+//   container — tests run in an isolated container (most isolation; slowest).
+//
+// When `@isolation: process` is set, the vtest runner forks a fresh process for
+// each top-level function call in `main()`.  Panics in the subprocess do not
+// crash the parent runner.  Exit-code 0 = pass, non-zero = fail.
+//
+// This spec verifies the type-shapes for patterns that REQUIRE process isolation:
+//   1. Global mutable state (static / module-level variables) reset per-test.
+//   2. Filesystem writes that must not bleed across test functions.
+//   3. Process-exit behavior (verum's `process.exit()` in a subprocess context).
+//   4. Signal handlers that are per-process.
+//   5. Singleton initialization that can only run once per process.
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.{List};
+
+// ── 1. Stateful singleton shape ───────────────────────────────────────────────
+//
+// `OnceCell<T>` is initialized at most once per process.
+// When @isolation: process is set, each test fn gets a fresh OnceCell.
+
+type OnceCell<T> is { value: Maybe<T> };
+
+implement<T> OnceCell<T> {
+    fn new() -> OnceCell<T> { OnceCell { value: None } }
+
+    fn get_or_init(&mut self, init: fn() -> T) -> &T {
+        if self.value.is_none() {
+            self.value = Some(init());
+        }
+        self.value.as_ref().unwrap()
+    }
+
+    fn is_initialized(&self) -> Bool {
+        self.value.is_some()
+    }
+}
+
+fn test_once_cell_initializes_exactly_once() {
+    let mut cell: OnceCell<Int> = OnceCell.new();
+    assert(!cell.is_initialized());
+    let v = cell.get_or_init(|| 42);
+    assert_eq(*v, 42);
+    assert(cell.is_initialized());
+}
+
+// ── 2. Filesystem write pattern ───────────────────────────────────────────────
+//
+// Each subprocess test gets its own temp directory (when @isolation: directory).
+// Shape-only: the actual tmpdir injection is the runner's concern.
+
+fn test_temp_path_shape_typechecks() {
+    // In a real isolated test the runner injects the temp path.
+    // Here we verify the Result<(), Text> write pattern typechecks.
+    let path: Text = Text.from("/tmp/test_output.txt");
+    let content: Text = Text.from("test data");
+    let _result: Result<(), Text> = write_to_path(&path, &content);
+}
+
+fn write_to_path(path: &Text, content: &Text) -> Result<(), Text> {
+    Ok(())
+}
+
+// ── 3. Process-exit in subprocess context ────────────────────────────────────
+//
+// Calling process.exit() in a subprocess should not crash the parent runner.
+// Shape: the exit function has type fn(Int) -> !
+
+fn exit_shape_typechecks(code: Int) -> ! {
+    core.sys.process.exit(code)
+}
+
+// ── 4. Signal handler registration shape ─────────────────────────────────────
+//
+// Signal handlers are per-process. Under @isolation: process each test fn
+// registers its own handlers without interfering with other tests.
+
+type SignalHandler is fn(Int) -> ();
+
+fn register_signal_handler(_sig: Int, _handler: SignalHandler) -> Result<(), Text> {
+    Ok(())
+}
+
+fn test_signal_handler_shape() {
+    let handler: SignalHandler = |_sig| {};
+    let r: Result<(), Text> = register_signal_handler(2, handler);
+    assert(r.is_ok());
+}
+
+// ── 5. Isolation level parsing: valid values ─────────────────────────────────
+//
+// The @isolation directive accepts: none | process | directory | container.
+// This function models the runner's parse logic shape.
+
+fn isolation_level_from_text(s: &Text) -> Maybe<Text> {
+    if *s == Text.from("none")
+        || *s == Text.from("process")
+        || *s == Text.from("directory")
+        || *s == Text.from("container")
+    {
+        Some(s.clone())
+    } else {
+        None
+    }
+}
+
+fn test_isolation_level_parse() {
+    assert(isolation_level_from_text(&Text.from("process")).is_some());
+    assert(isolation_level_from_text(&Text.from("none")).is_some());
+    assert(isolation_level_from_text(&Text.from("directory")).is_some());
+    assert(isolation_level_from_text(&Text.from("container")).is_some());
+    assert(isolation_level_from_text(&Text.from("unknown")).is_none());
+}
+
+fn main() {
+    test_once_cell_initializes_exactly_once();
+    test_temp_path_shape_typechecks();
+    test_signal_handler_shape();
+    test_isolation_level_parse();
+    print("@isolation subprocess-per-test typecheck ok");
+}
