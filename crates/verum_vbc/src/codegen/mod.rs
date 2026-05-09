@@ -1823,9 +1823,9 @@ impl VbcCodegen {
             ("True", 1),
             ("False", 0),
             // File seek constants (core/io/file.vr)
-            ("SEEK_SET", 0),
-            ("SEEK_CUR", 1),
-            ("SEEK_END", 2),
+            ("SEEK_SET", verum_common::posix_files::SEEK_SET),
+            ("SEEK_CUR", verum_common::posix_files::SEEK_CUR),
+            ("SEEK_END", verum_common::posix_files::SEEK_END),
             // CBGR generation constants (core/mem/allocator.vr, core/mem/header.vr)
             ("GEN_INITIAL", 1),
             ("GEN_DEAD", 0),
@@ -1913,14 +1913,18 @@ impl VbcCodegen {
             ("SOL_SOCKET", verum_common::posix_sockets::darwin::SOL_SOCKET),   // 0xFFFF (Darwin)
             ("SO_REUSEADDR", verum_common::posix_sockets::linux::SO_REUSEADDR), // 2 (Linux)
             ("SO_KEEPALIVE", verum_common::posix_sockets::darwin::SO_KEEPALIVE), // 8 (Darwin)
-            // File open flags
-            ("O_RDONLY", 0),
-            ("O_WRONLY", 1),
-            ("O_RDWR", 2),
-            ("O_CREAT", 0x200),
-            ("O_TRUNC", 0x400),
-            ("O_APPEND", 8),
-            ("O_CLOEXEC", 0x1000000),
+            // Cross-platform POSIX file-open flags (Linux + Darwin agree).
+            ("O_RDONLY", verum_common::posix_files::O_RDONLY),
+            ("O_WRONLY", verum_common::posix_files::O_WRONLY),
+            ("O_RDWR", verum_common::posix_files::O_RDWR),
+            // Platform-divergent file flags. Values below are
+            // Darwin-canonical per the historical hand-table; future
+            // work (TODO #53-phase-2) makes this target-conditional via
+            // `posix_files::file_flag_for_target(name, target_os)`.
+            ("O_CREAT", verum_common::posix_files::darwin::O_CREAT),     // 0x200 (Darwin)
+            ("O_TRUNC", verum_common::posix_files::darwin::O_TRUNC),     // 0x400 (Darwin)
+            ("O_APPEND", verum_common::posix_files::darwin::O_APPEND),   // 8 (Darwin)
+            ("O_CLOEXEC", verum_common::posix_files::darwin::O_CLOEXEC), // 0x1000000 (Darwin)
             // Io_uring constants (core/async/executor.vr)
             ("DEFAULT_SQ_ENTRIES", 256),
             ("DEFAULT_CQ_ENTRIES", 512),
@@ -1946,9 +1950,10 @@ impl VbcCodegen {
             ("CAP_REVOKE", 8),
             ("CAP_IMMUTABLE", 16),
             // File open flags (additional)
-            ("O_DIRECTORY", 0x100000),
-            ("O_NOFOLLOW", 0x100),
-            ("O_NONBLOCK", 0x4),
+            // Additional Darwin-canonical file flags (see note above).
+            ("O_DIRECTORY", verum_common::posix_files::darwin::O_DIRECTORY), // 0x100000 (Darwin)
+            ("O_NOFOLLOW", verum_common::posix_files::darwin::O_NOFOLLOW),   // 0x100 (Darwin)
+            ("O_NONBLOCK", verum_common::posix_files::darwin::O_NONBLOCK),   // 0x4 (Darwin)
             // Memory bin constants (core/mem/heap.vr)
             ("BIN_COUNT", 64),
             ("SIZE_CLASSES", 0),
