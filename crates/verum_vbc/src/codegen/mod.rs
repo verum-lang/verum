@@ -1747,12 +1747,15 @@ impl VbcCodegen {
     /// "undefined variable" errors because the VBC codegen starts fresh.
     pub fn register_stdlib_constants(&mut self) {
         let constants: &[(&str, i64)] = &[
-            // Atomic ordering constants (core/intrinsics/atomic.vr)
-            ("ORDERING_RELAXED", 0),
-            ("ORDERING_ACQUIRE", 1),
-            ("ORDERING_RELEASE", 2),
-            ("ORDERING_ACQ_REL", 3),
-            ("ORDERING_SEQ_CST", 4),
+            // Atomic ordering constants — sourced from
+            // `verum_common::atomic_ordering` (single source of truth
+            // shared with the runtime atomic-op dispatcher and stdlib
+            // `core/intrinsics/atomic.vr`).
+            ("ORDERING_RELAXED", verum_common::atomic_ordering::ORDERING_RELAXED),
+            ("ORDERING_ACQUIRE", verum_common::atomic_ordering::ORDERING_ACQUIRE),
+            ("ORDERING_RELEASE", verum_common::atomic_ordering::ORDERING_RELEASE),
+            ("ORDERING_ACQ_REL", verum_common::atomic_ordering::ORDERING_ACQ_REL),
+            ("ORDERING_SEQ_CST", verum_common::atomic_ordering::ORDERING_SEQ_CST),
             // POSIX errno constants — sourced from `verum_common::errno`
             // single source of truth. Cross-platform values use module-
             // level constants; platform-divergent values reference
@@ -1849,10 +1852,18 @@ impl VbcCodegen {
             // (single source of truth shared with the runtime + stdlib).
             ("GEN_INITIAL", verum_common::cbgr::GEN_INITIAL as i64),
             ("GEN_DEAD", 0), // Sentinel: 0 generation = freed/uninitialised
-            ("HEADER_SIZE", 16), // CbgrHeader::SIZE — separate from
-                                 // ObjectHeader (24) and AllocationHeader (32).
-                                 // 16 bytes = ptr + gen + epoch_caps. See
-                                 // verum_common::cbgr module docs.
+            // HEADER_SIZE — canonical stdlib `core/mem/header.vr`
+            // value is 32 (AllocationHeader). Pre-fix codegen carried
+            // 16 here (likely confused with ThinRef = 16 bytes),
+            // which broke user code computing offsets from
+            // `@const HEADER_SIZE` — stdlib-declared HEADER_SIZE = 32
+            // disagreed with codegen emission. Now sourced from
+            // `verum_common::layout::ALLOCATION_HEADER_SIZE` (= 32),
+            // matching `core/mem/header.vr` exactly.
+            (
+                "HEADER_SIZE",
+                verum_common::layout::ALLOCATION_HEADER_SIZE as i64,
+            ),
             ("FLAG_ARENA", 4),
             // CBGR capability constants — sourced from
             // `verum_common::cbgr::caps`. Each canonical name maps to
@@ -5074,6 +5085,99 @@ impl VbcCodegen {
                     .register_function((*variant_name).to_string(), info);
             }
         }
+
+        // ALSO push minimal TypeDescriptors for Maybe / Result /
+        // Ordering so the typed-form gate at `emit_make_variant`
+        // succeeds and the runtime's `format_variant_for_print_depth`
+        // resolves variant names type-scoped instead of guessing via
+        // the global tag scan.  Without these descriptors, variant
+        // constructors like `Some(3)` / `None` lose their TypeId at
+        // the `MakeVariant` boundary and the runtime renders them as
+        // whichever unrelated stdlib variant happens to share their
+        // tag (e.g. `AliasError.NonFiniteWeight(3)` instead of
+        // `Some(3)` when `core.collections.alias_sampler` is loaded).
+        self.register_builtin_type_descriptor(
+            "Maybe",
+            crate::types::TypeId::MAYBE,
+            verum_common::well_known_types::MAYBE_VARIANT_LAYOUT,
+            "Maybe",
+        );
+        self.register_builtin_type_descriptor(
+            "Result",
+            crate::types::TypeId::RESULT,
+            verum_common::well_known_types::RESULT_VARIANT_LAYOUT,
+            "Result",
+        );
+        // Ordering has no dedicated WKT TypeId — descriptor lands
+        // via the regular archive import path.  Variant tags are
+        // registered as functions above so call-site resolution
+        // still works for `Ordering.Less` / `Ordering.Greater`.
+    }
+
+    /// Push a minimal `TypeDescriptor` for a built-in variant carrier
+    /// (`Maybe`, `Result`, `Ordering`).  Idempotent: skips when the
+    /// id slot is already populated by an earlier archive import or
+    /// user `type` declaration.
+    fn register_builtin_type_descriptor(
+        &mut self,
+        type_name: &str,
+        type_id: crate::types::TypeId,
+        layout: &[(&'static str, u32)],
+        carrier: &str,
+    ) {
+        // First-wins: if the id slot already carries a descriptor, the
+        // earlier registration is canonical.
+        if self.types.iter().any(|t| t.id == type_id) {
+            return;
+        }
+        let name_id = StringId(self.intern_string(type_name));
+        let mut variants: smallvec::SmallVec<[crate::types::VariantDescriptor; 4]> =
+            smallvec::SmallVec::new();
+        for (variant_name, tag) in layout.iter() {
+            // Arity convention from the layout constants:
+            //   Maybe: None=0, Some=1
+            //   Result: Ok=1, Err=1
+            //   Ordering: Less=0, Equal=0, Greater=0
+            let arity: u8 = match (carrier, *variant_name) {
+                ("Maybe", n) if n == verum_common::well_known_types::variant_tags::SOME => 1,
+                ("Result", _) => 1,
+                _ => 0,
+            };
+            let v_name_id = StringId(self.intern_string(variant_name));
+            variants.push(crate::types::VariantDescriptor {
+                name: v_name_id,
+                tag: *tag,
+                payload: None,
+                kind: if arity == 0 {
+                    crate::types::VariantKind::Unit
+                } else {
+                    crate::types::VariantKind::Tuple
+                },
+                arity,
+                fields: smallvec::SmallVec::new(),
+            });
+        }
+        let desc = crate::types::TypeDescriptor {
+            id: type_id,
+            name: name_id,
+            kind: crate::types::TypeKind::Sum,
+            type_params: smallvec::SmallVec::new(),
+            fields: smallvec::SmallVec::new(),
+            variants,
+            size: 0,
+            alignment: 8,
+            drop_fn: None,
+            clone_fn: None,
+            protocols: smallvec::SmallVec::new(),
+            visibility: crate::types::Visibility::Public,
+            alias_target: None,
+            is_transparent_wrapper: false,
+        };
+        // Make sure type_name_to_id agrees with the canonical id.
+        self.type_name_to_id
+            .entry(type_name.to_string())
+            .or_insert(type_id);
+        self.types.push(desc);
     }
 
     /// Registers runtime I/O and networking functions as builtins.
@@ -12376,13 +12480,40 @@ impl VbcCodegen {
             Some(s) => s.to_string(),
             None => return,
         };
-        // First-wins: user-defined / earlier-archive type with the
-        // same name already owns the slot.
-        if self.type_name_to_id.contains_key(&name_str) {
-            return;
-        }
-        let new_id = self.alloc_user_type_id();
-        self.type_name_to_id.insert(name_str.clone(), new_id);
+        // First-wins for the `type_name_to_id` slot: user-defined or
+        // earlier-archive registration owns it.  But — and this is
+        // the load-bearing fix for stdlib variant-tag-collision —
+        // when an earlier registration set the name→id mapping
+        // WITHOUT pushing a real `TypeDescriptor` into `self.types`
+        // (the case for built-in well-known types like Maybe /
+        // Result / Ordering whose ids are pre-allocated by
+        // `register_builtin_variants` but whose descriptors only
+        // arrive via this archive-import path), we must still push
+        // the imported descriptor under that pre-existing id.  Without
+        // this, `emit_make_variant` finds the id but `self.types`
+        // misses the descriptor and demotes to the untyped
+        // `MakeVariant` form — runtime then guesses the variant
+        // name via the global tag scan and lands on whichever
+        // unrelated type's variant ALSO has tag 0/1
+        // (`AliasError.EmptyWeights` vs `Maybe.None`,
+        // `AliasError.NonFiniteWeight` vs `Maybe.Some`).
+        let new_id = match self.type_name_to_id.get(&name_str).copied() {
+            Some(existing_id) => {
+                // Reuse the pre-allocated id IF no descriptor exists
+                // yet for it.  When a descriptor IS already present,
+                // the earlier registration is authoritative — bail
+                // (mirrors the prior first-wins discipline).
+                if self.types.iter().any(|d| d.id == existing_id) {
+                    return;
+                }
+                existing_id
+            }
+            None => {
+                let id = self.alloc_user_type_id();
+                self.type_name_to_id.insert(name_str.clone(), id);
+                id
+            }
+        };
         let new_name_id = crate::types::StringId(self.ctx.intern_string_raw(&name_str));
 
         // Type parameters

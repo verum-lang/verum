@@ -278,13 +278,12 @@ fn resolve_stdlib_constant_value(name: &str, target_os: &str) -> i64 {
     if let Some(v) = verum_common::posix_signals::signal_value(name, target_os) {
         return v;
     }
+    if let Some(v) = verum_common::atomic_ordering::ordering_value(name) {
+        return v;
+    }
     match name {
-        // Atomic ordering (core/intrinsics/atomic.vr) — target-independent.
-        "ORDERING_RELAXED" => 0,
-        "ORDERING_ACQUIRE" => 1,
-        "ORDERING_RELEASE" => 2,
-        "ORDERING_ACQ_REL" => 3,
-        "ORDERING_SEQ_CST" => 4,
+        // (Atomic ordering values handled above by the canonical
+        // `verum_common::atomic_ordering::ordering_value` lookup.)
         // kqueue filters (core/sys/darwin/libsystem.vr)
         "EVFILT_READ" => -1,
         "EVFILT_WRITE" => -2,
@@ -434,15 +433,6 @@ impl VbcCodegen {
         // would reject leak out.
         let parent_type_id =
             parent_type_name.and_then(|name| self.type_name_to_id.get(name).copied());
-        if std::env::var("VERUM_DIAG_MAKEVARIANT").is_ok() {
-            let desc_variants_len = parent_type_id
-                .and_then(|tid| self.types.iter().find(|d| d.id == tid))
-                .map(|d| d.variants.len());
-            eprintln!(
-                "[diag-makevariant] parent={:?} parent_tid={:?} tag={} field_count={} desc_variants_len={:?} self.types.len={}",
-                parent_type_name, parent_type_id, tag, field_count, desc_variants_len, self.types.len()
-            );
-        }
         let typed_ok = parent_type_id.and_then(|tid| {
             let desc = self.types.iter().find(|d| d.id == tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
