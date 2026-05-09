@@ -844,6 +844,15 @@ impl<'a> Deserializer<'a> {
  None
  };
 
+ // `is_transparent_wrapper` is encoded after `alias_target` as a
+ // single-byte flag; legacy archives without this trailing byte
+ // (decoded from streams that ran out before reaching it) default
+ // to `false` — record-form representation is the safe default.
+ let is_transparent_wrapper = if self.offset < self.data.len() {
+ decode_u8(self.data, &mut self.offset)? == 1
+ } else {
+ false
+ };
  Ok(TypeDescriptor {
  id,
  name,
@@ -858,6 +867,7 @@ impl<'a> Deserializer<'a> {
  protocols,
  visibility,
  alias_target,
+ is_transparent_wrapper,
  })
  }
 

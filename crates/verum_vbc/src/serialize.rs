@@ -385,6 +385,13 @@ impl Serializer {
             self.output.push(0);
         }
 
+        // Transparent-wrapper flag — appended last so legacy decoders
+        // that stop after `alias_target` simply ignore it; the
+        // deserializer treats a missing trailing byte as `false` (the
+        // safe default — record-form representation).  See
+        // `TypeDescriptor::is_transparent_wrapper`.
+        self.output.push(desc.is_transparent_wrapper as u8);
+
         Ok(())
     }
 

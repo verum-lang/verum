@@ -3676,21 +3676,48 @@ impl VbcCodegen {
         // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
         // to work when the intrinsic isn't wired yet.
 
-        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
-        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
-        // At the VBC level, newtypes are zero-cost wrappers.
+        // Handle type constructors with sentinel IDs.  These are
+        // registered by `compile_type_decl` at `FunctionId(u32::MAX / 2)`
+        // and have no compiled body — their semantics are encoded by
+        // the type-decl arm that registered them (Newtype / Tuple /
+        // Record / Unit).
+        //
+        // Representation invariant — see `TypeDescriptor::is_transparent_wrapper`:
+        //
+        //   * Newtype (`type X is T;`)   → 1-arg sentinel, pass through inner.
+        //   * Tuple `(T,)`               → 1-arg sentinel, pass through inner.
+        //   * Quotient `quotient X is T` → 1-arg sentinel, pass through inner.
+        //   * Record (`type X is { f: T }`)  → ALLOCATE a record even
+        //     when fields.len() == 1.  Single-field records carry a
+        //     method table and field-name addressing; collapsing them
+        //     to the inner value loses both and corrupts every later
+        //     `self.field` access in the type's methods.
+        //   * Unit  (`type X is { }` or `type X is ();`)  → LoadUnit.
+        //
+        // The codegen-local `newtype_names` HashSet is the runtime fast
+        // path for the transparent-wrapper question; it is populated
+        // by every `compile_type_decl` arm that flips
+        // `TypeDescriptor::is_transparent_wrapper = true`.
         if func_info.id.0 == u32::MAX / 2 {
-            if args.len() == 1 {
-                // Newtype constructor — zero-cost wrapper, pass through the inner value
-                return self.compile_expr(&args[0]);
-            } else if args.is_empty() {
-                // Unit type constructor
+            if args.is_empty() {
+                // Unit-type / nullary record constructor.
                 let dest = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadUnit { dst: dest });
                 return Ok(Some(dest));
             }
-            // Multi-field record constructors should use struct literal syntax,
-            // but handle gracefully by allocating an object if they come through here
+            let is_transparent = self.ctx.newtype_names.contains(&func_name);
+            if is_transparent && args.len() == 1 {
+                // Transparent wrapper: zero-cost pass-through.  The
+                // value IS the inner value at runtime; no boxing.
+                return self.compile_expr(&args[0]);
+            }
+            // Named-field record constructor (single OR multi-field).
+            // Allocate a heap record with the type's actual id and
+            // field count so per-field SetF resolves to the correct
+            // slot — same shape `compile_record` produces for the
+            // literal `Type { f1: a, f2: b }` form, here applied to
+            // the call form `Type(a, b)`.
+            return self.compile_record_call_form(&func_name, &func_info, args);
         }
 
         // Check argument count — allow fewer args if function has default params
@@ -12999,6 +13026,101 @@ impl VbcCodegen {
                         self.ctx.free_temp(value_reg);
                     }
                 }
+            }
+        }
+
+        Ok(Some(result))
+    }
+
+    /// Compile a record-constructor call in the call form
+    /// (`Type(arg1, arg2, ...)`), as opposed to the literal form
+    /// (`Type { f1: arg1, f2: arg2 }`) which is handled by
+    /// `compile_record`.
+    ///
+    /// Allocates a heap record with the type's actual `type_id` and
+    /// declared field count, then sets each positional arg into the
+    /// corresponding field slot.  Field-name resolution uses the
+    /// `func_info.param_names` registered by `compile_type_decl`'s
+    /// Record arm — those names are the declared field names, in
+    /// declaration order.
+    ///
+    /// Single-field records flow through here too: a record like
+    /// `type Duration is { nanos: Int }` allocates a one-field heap
+    /// object so the type identity survives for method dispatch and
+    /// `self.nanos` field accesses resolve to slot 0.
+    fn compile_record_call_form(
+        &mut self,
+        type_name: &str,
+        func_info: &crate::codegen::context::FunctionInfo,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+
+        // Resolve TypeId for the New instruction.  Fallback to 0 when
+        // the type isn't yet in `type_name_to_id` — preserves the
+        // pre-existing tolerant-walk behaviour for cross-module record
+        // ctors loaded via archive metadata before the local type
+        // table is fully populated.
+        let type_id = self
+            .type_name_to_id
+            .get(type_name)
+            .map(|id| id.0)
+            .unwrap_or(0);
+
+        // Use the type's declared field count when available; this
+        // lets New allocate the correct slot count even when the call
+        // omits trailing default-valued fields.  Fallback to args.len()
+        // for types whose layout hasn't been registered.
+        let alloc_slots = self
+            .type_field_count(type_name)
+            .unwrap_or(args.len() as u32);
+
+        self.ctx.emit(Instruction::New {
+            dst: result,
+            type_id,
+            field_count: alloc_slots,
+        });
+
+        // Compile each arg and SetF into the corresponding field slot.
+        // Field name → slot mapping comes from `func_info.param_names`
+        // (filled at type-decl time with the declared field names in
+        // declaration order). When that's absent or short, fall back
+        // to positional indices — same shape `compile_record`'s
+        // plain-record arm uses.
+        for (idx, arg_expr) in args.iter().enumerate() {
+            let value_reg = self
+                .compile_expr(arg_expr)?
+                .ok_or_else(|| CodegenError::internal("record ctor arg has no value"))?;
+
+            let field_idx = func_info
+                .param_names
+                .get(idx)
+                .map(|name| self.resolve_field_index(Some(type_name), name))
+                .unwrap_or(idx as u32);
+
+            // Clone for value semantics — same exception as
+            // `compile_record` for raw pointers (the pointer's
+            // contents may not be a valid ObjectHeader).
+            if self.ctx.is_raw_pointer(value_reg) {
+                self.ctx.emit(Instruction::SetF {
+                    obj: result,
+                    field_idx,
+                    value: value_reg,
+                });
+                self.ctx.free_temp(value_reg);
+            } else {
+                let cloned_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Clone {
+                    dst: cloned_reg,
+                    src: value_reg,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: result,
+                    field_idx,
+                    value: cloned_reg,
+                });
+                self.ctx.free_temp(cloned_reg);
+                self.ctx.free_temp(value_reg);
             }
         }
 
