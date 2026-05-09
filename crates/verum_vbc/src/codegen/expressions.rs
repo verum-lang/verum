@@ -5896,272 +5896,9 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        // Check if receiver is a type path (for static method calls like List.new())
-        // If so, try to look up Type::method as a registered function.
-        //
-        // Wrapped in a labeled block so we can early-exit and fall through to
-        // value method dispatch when the receiver is a local variable. This
-        // prevents `r.stdout()` (where `r` is a local) from being miscompiled
-        // as `stdout()` (a free function brought in by `mount core.io.stdio`).
-        'static_resolution: {
-        if let ExprKind::Path(ref path) = receiver.kind
-            && path.segments.len() == 1
-            && let PathSegment::Name(ref type_ident) = path.segments[0]
-        {
-            let type_name = type_ident.name.to_string();
-            let method_name = method.name.to_string();
-
-            // Gate: if the receiver name is a local variable AND not a known
-            // type name, dispatch as value method — never as static. Without
-            // this, a `mount`-imported free function whose simple name matches
-            // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
-            // method dispatch on the local.
-            let receiver_is_local_value =
-                !is_type_name(&type_name) && self.ctx.registers.contains(&type_name);
-            if receiver_is_local_value {
-                break 'static_resolution;
-            }
-
-            // Intercept builtin collection constructors — emit CallM with the
-            // type name string as receiver so the interpreter's builtin handler
-            // creates heap objects with the correct TypeId and memory layout.
-            // Without this, stdlib user-defined constructors (e.g., Map.new()
-            // from core/collections/map.vr) would create plain struct records
-            // that don't work with builtin instance methods (insert, get, len, etc.).
-            let is_builtin_collection_ctor =
-                method_name == "new" && self.is_builtin_ctor_collection(&type_name);
-            if is_builtin_collection_ctor {
-                let receiver_reg = self.ctx.alloc_temp();
-                let type_const = self.ctx.add_const_string(&type_name);
-                self.ctx.emit(Instruction::LoadK {
-                    dst: receiver_reg,
-                    const_id: type_const.0,
-                });
-                let args_start = if !args.is_empty() {
-                    let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-                    for arg in args.iter() {
-                        let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
-                            CodegenError::internal("collection .new() arg has no value")
-                        })?;
-                        arg_vals.push(arg_val);
-                    }
-                    let first = self.ctx.registers.alloc_fresh();
-                    for _ in 1..args.len() {
-                        self.ctx.registers.alloc_fresh();
-                    }
-                    for (i, arg_val) in arg_vals.iter().enumerate() {
-                        let d = Reg(first.0 + i as u16);
-                        if *arg_val != d {
-                            self.ctx.emit(Instruction::Mov {
-                                dst: d,
-                                src: *arg_val,
-                            });
-                            self.ctx.free_temp(*arg_val);
-                        }
-                    }
-                    first
-                } else {
-                    Reg(0)
-                };
-                let dst = self.ctx.alloc_temp();
-                let method_id = self.intern_string("new");
-                self.ctx.emit(Instruction::CallM {
-                    dst,
-                    receiver: receiver_reg,
-                    method_id,
-                    args: crate::instruction::RegRange {
-                        start: args_start,
-                        count: args.len() as u8,
-                    },
-                });
-                self.ctx.free_temp(receiver_reg);
-                return Ok(Some(dst));
-            }
-
-            // First, ALWAYS try to find Type.method as a registered static method.
-            // This takes precedence even if the type is also registered as a type constructor,
-            // because static method calls like `Time.now()` should resolve to Time.now,
-            // not treat `Time` as a value.
-            //
-
-            // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
-            // are registered under the qualified name too (variant_tag set), but they
-            // don't have an ordinary bytecode body — compile_static_method_call would
-            // emit a plain Call to a non-existent function, and the runtime would fall
-            // through to method dispatch which panics with
-            // "method 'Some' not found on value". Dispatch them through
-            // compile_variant_constructor instead so a MakeVariant opcode is emitted.
-            let qualified_name = format!("{}.{}", type_name, method_name);
-            if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
-                // Only use if argument count matches to avoid wrong function resolution
-                if func_info.param_count == args.len() {
-                    if func_info.variant_tag.is_some() {
-                        return self.compile_variant_constructor(&method_name, args);
-                    }
-                    return self.compile_static_method_call(&func_info, args);
-                }
-            }
-
-            // Check if this type name is NOT a local variable and NOT a static/const
-            // If it's a variable or static/const, treat as regular method call on a value
-            let is_static_or_const = self
-                .ctx
-                .lookup_function(&type_name)
-                .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
-                .unwrap_or(false);
-
-            let registers_contains = self.ctx.registers.contains(&type_name);
-            let known_type = is_type_name(&type_name);
-
-            if known_type || (!registers_contains && !is_static_or_const) {
-                // Static method not found by qualified name, try other resolution paths
-                let qualified_name = format!("{}.{}", type_name, method_name);
-                if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
-                    // Only use if argument count matches to avoid wrong function resolution
-                    if func_info.param_count == args.len() {
-                        // Check if this is an associated constant with a known value
-                        // (registered via __const_val_N naming convention).
-                        if func_info.param_count == 0
-                            && let Some(ref iname) = func_info.intrinsic_name
-                            && let Some(val_str) = iname.strip_prefix("__const_val_")
-                        {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                            return Ok(Some(dest));
-                        }
-                        // Found static method - compile as direct function call
-                        return self.compile_static_method_call(&func_info, args);
-                    }
-                }
-
-                // Try resolving user-defined type aliases (Vec4f -> Vec, etc.)
-                // This enables method calls like Vec4f.splat() to resolve to Vec.splat()
-                // when `type Vec4f = Vec<Float32, 4>` is defined.
-                let resolved_type = self.resolve_type_alias(&type_name);
-                if resolved_type != type_name {
-                    let aliased_qualified = format!("{}.{}", resolved_type, method_name);
-                    if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
-                        // Only use if argument count matches
-                        if func_info.param_count == args.len() {
-                            return self.compile_static_method_call(&func_info, args);
-                        }
-                    }
-                }
-
-                // Try resolving built-in numeric type aliases (u8, u16, u32, u64, i8, i16, i32, i64 -> Int)
-                // These types are defined as aliases in the type system and their methods
-                // are implemented on the base type (Int).
-                if let Some(base_type) = resolve_numeric_type_alias(&type_name) {
-                    let aliased_qualified = format!("{}.{}", base_type, method_name);
-                    if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
-                        // Only use if argument count matches
-                        if func_info.param_count == args.len() {
-                            return self.compile_static_method_call(&func_info, args);
-                        }
-                    }
-                }
-
-                // Try to resolve primitive type static constants (MIN, MAX, BITS)
-                if args.is_empty()
-                    && let Some(value) = resolve_type_static_constant(&type_name, &method_name)
-                {
-                    let result = self.ctx.alloc_temp();
-                    let is_float_type = matches!(
-                        type_name.as_str(),
-                        "Float" | "Float32" | "Float64" | "f32" | "f64"
-                    );
-                    if is_float_type && method_name != "BITS" {
-                        // Float constants: value is stored as bit pattern, convert back
-                        let f = f64::from_bits(value as u64);
-                        self.ctx.emit(Instruction::LoadF {
-                            dst: result,
-                            value: f,
-                        });
-                    } else {
-                        self.ctx.emit(Instruction::LoadI {
-                            dst: result,
-                            value: value as i64,
-                        });
-                    }
-                    return Ok(Some(result));
-                }
-
-                // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok)
-                // Variant constructors are registered as functions with variant_tag set.
-                if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
-                    && func_info.variant_tag.is_some()
-                    && func_info.param_count == args.len()
-                {
-                    return self.compile_variant_constructor(&method_name, args);
-                }
-
-                // For primitive types with static methods (e.g., Int.from_le_bytes,
-                // Char.from_digit), emit as method call on a zero receiver.
-                // The interpreter dispatches these via dispatch_primitive_method.
-                if is_primitive_type(&type_name) {
-                    let receiver_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: receiver_reg,
-                        value: 0,
-                    });
-
-                    // Compile args into consecutive registers
-                    let first = if args.is_empty() {
-                        Reg(0) // dummy, won't be used
-                    } else {
-                        let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-                        for arg in args.iter() {
-                            let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
-                                CodegenError::internal("static method arg has no value")
-                            })?;
-                            arg_vals.push(arg_val);
-                        }
-                        let f = self.ctx.registers.alloc_fresh();
-                        for _ in 1..args.len() {
-                            self.ctx.registers.alloc_fresh();
-                        }
-                        for (i, arg_val) in arg_vals.iter().enumerate() {
-                            let dst = Reg(f.0 + i as u16);
-                            if *arg_val != dst {
-                                self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
-                                self.ctx.free_temp(*arg_val);
-                            }
-                        }
-                        f
-                    };
-
-                    // Prefix method name with type for typed primitives
-                    let prefixed_method = match type_name.as_str() {
-                        "Int32" | "i32" => format!("int32${}", method_name),
-                        "UInt64" | "u64" => format!("uint64${}", method_name),
-                        "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
-                        _ => method_name.clone(),
-                    };
-
-                    let result = self.ctx.alloc_temp();
-                    let method_id = self.intern_string(&prefixed_method);
-                    self.ctx.emit(Instruction::CallM {
-                        dst: result,
-                        receiver: receiver_reg,
-                        method_id,
-                        args: crate::instruction::RegRange {
-                            start: first,
-                            count: args.len() as u8,
-                        },
-                    });
-                    self.ctx.free_temp(receiver_reg);
-                    return Ok(Some(result));
-                }
-
-                // For generic type parameters (like T.default()), emit a type method call.
-                // This will be resolved during monomorphization when T is replaced
-                // with a concrete type. For now, emit a CallTypeMethod instruction
-                // that stores the type parameter name and method name.
-                return self.compile_type_param_method_call(&type_name, method, args);
-            }
+        if let Some(result) = self.try_resolve_static_method(receiver, method, args)? {
+            return Ok(result);
         }
-        } // 'static_resolution
 
         // Compile receiver as value
         let receiver_reg = self
@@ -7370,6 +7107,279 @@ impl VbcCodegen {
         self.ctx.free_temp(receiver_reg);
 
         Ok(Some(result))
+    }
+
+    /// Attempts to resolve a method call as a static dispatch (`Type.method` form).
+    ///
+    /// Returns `Ok(None)` when the receiver is not a static type path (or is a local
+    /// variable), so the caller falls through to value-method dispatch.
+    /// Returns `Ok(Some(r))` when compiled as a static method; `r` mirrors the
+    /// `Option<Reg>` that `compile_method_call` would return.
+    fn try_resolve_static_method(
+        &mut self,
+        receiver: &Expr,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Option<Reg>>> {
+        let ExprKind::Path(ref path) = receiver.kind else {
+            return Ok(None);
+        };
+        if path.segments.len() != 1 {
+            return Ok(None);
+        }
+        let PathSegment::Name(ref type_ident) = path.segments[0] else {
+            return Ok(None);
+        };
+
+        let type_name = type_ident.name.to_string();
+        let method_name = method.name.to_string();
+
+        // Gate: if the receiver name is a local variable AND not a known
+        // type name, dispatch as value method — never as static. Without
+        // this, a `mount`-imported free function whose simple name matches
+        // the method (e.g. `stdout`, `stderr`, `len`) silently shadows
+        // method dispatch on the local.
+        let receiver_is_local_value =
+            !is_type_name(&type_name) && self.ctx.registers.contains(&type_name);
+        if receiver_is_local_value {
+            return Ok(None);
+        }
+
+        // Intercept builtin collection constructors — emit CallM with the
+        // type name string as receiver so the interpreter's builtin handler
+        // creates heap objects with the correct TypeId and memory layout.
+        // Without this, stdlib user-defined constructors (e.g., Map.new()
+        // from core/collections/map.vr) would create plain struct records
+        // that don't work with builtin instance methods (insert, get, len, etc.).
+        let is_builtin_collection_ctor =
+            method_name == "new" && self.is_builtin_ctor_collection(&type_name);
+        if is_builtin_collection_ctor {
+            let receiver_reg = self.ctx.alloc_temp();
+            let type_const = self.ctx.add_const_string(&type_name);
+            self.ctx.emit(Instruction::LoadK {
+                dst: receiver_reg,
+                const_id: type_const.0,
+            });
+            let args_start = if !args.is_empty() {
+                let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                for arg in args.iter() {
+                    let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                        CodegenError::internal("collection .new() arg has no value")
+                    })?;
+                    arg_vals.push(arg_val);
+                }
+                let first = self.ctx.registers.alloc_fresh();
+                for _ in 1..args.len() {
+                    self.ctx.registers.alloc_fresh();
+                }
+                for (i, arg_val) in arg_vals.iter().enumerate() {
+                    let d = Reg(first.0 + i as u16);
+                    if *arg_val != d {
+                        self.ctx.emit(Instruction::Mov {
+                            dst: d,
+                            src: *arg_val,
+                        });
+                        self.ctx.free_temp(*arg_val);
+                    }
+                }
+                first
+            } else {
+                Reg(0)
+            };
+            let dst = self.ctx.alloc_temp();
+            let method_id = self.intern_string("new");
+            self.ctx.emit(Instruction::CallM {
+                dst,
+                receiver: receiver_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: args.len() as u8,
+                },
+            });
+            self.ctx.free_temp(receiver_reg);
+            return Ok(Some(Some(dst)));
+        }
+
+        // First, ALWAYS try to find Type.method as a registered static method.
+        // This takes precedence even if the type is also registered as a type constructor,
+        // because static method calls like `Time.now()` should resolve to Time.now,
+        // not treat `Time` as a value.
+        //
+
+        // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
+        // are registered under the qualified name too (variant_tag set), but they
+        // don't have an ordinary bytecode body — compile_static_method_call would
+        // emit a plain Call to a non-existent function, and the runtime would fall
+        // through to method dispatch which panics with
+        // "method 'Some' not found on value". Dispatch them through
+        // compile_variant_constructor instead so a MakeVariant opcode is emitted.
+        let qualified_name = format!("{}.{}", type_name, method_name);
+        if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+            // Only use if argument count matches to avoid wrong function resolution
+            if func_info.param_count == args.len() {
+                if func_info.variant_tag.is_some() {
+                    return Ok(Some(self.compile_variant_constructor(&method_name, args)?));
+                }
+                return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+            }
+        }
+
+        // Check if this type name is NOT a local variable and NOT a static/const.
+        // If it's a variable or static/const, treat as regular method call on a value.
+        let is_static_or_const = self
+            .ctx
+            .lookup_function(&type_name)
+            .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
+            .unwrap_or(false);
+
+        let registers_contains = self.ctx.registers.contains(&type_name);
+        let known_type = is_type_name(&type_name);
+
+        if known_type || (!registers_contains && !is_static_or_const) {
+            // Static method not found by qualified name, try other resolution paths.
+            let qualified_name = format!("{}.{}", type_name, method_name);
+            if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+                // Only use if argument count matches to avoid wrong function resolution.
+                if func_info.param_count == args.len() {
+                    // Check if this is an associated constant with a known value
+                    // (registered via __const_val_N naming convention).
+                    if func_info.param_count == 0
+                        && let Some(ref iname) = func_info.intrinsic_name
+                        && let Some(val_str) = iname.strip_prefix("__const_val_")
+                    {
+                        let value: i64 = val_str.parse().unwrap_or(0);
+                        let dest = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        return Ok(Some(Some(dest)));
+                    }
+                    return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                }
+            }
+
+            // Try resolving user-defined type aliases (Vec4f -> Vec, etc.)
+            // This enables method calls like Vec4f.splat() to resolve to Vec.splat()
+            // when `type Vec4f = Vec<Float32, 4>` is defined.
+            let resolved_type = self.resolve_type_alias(&type_name);
+            if resolved_type != type_name {
+                let aliased_qualified = format!("{}.{}", resolved_type, method_name);
+                if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
+                    if func_info.param_count == args.len() {
+                        return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                    }
+                }
+            }
+
+            // Try resolving built-in numeric type aliases (u8, u16, u32, u64, i8, i16, i32, i64 -> Int).
+            // These types are defined as aliases in the type system and their methods
+            // are implemented on the base type (Int).
+            if let Some(base_type) = resolve_numeric_type_alias(&type_name) {
+                let aliased_qualified = format!("{}.{}", base_type, method_name);
+                if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
+                    if func_info.param_count == args.len() {
+                        return Ok(Some(self.compile_static_method_call(&func_info, args)?));
+                    }
+                }
+            }
+
+            // Try to resolve primitive type static constants (MIN, MAX, BITS).
+            if args.is_empty()
+                && let Some(value) = resolve_type_static_constant(&type_name, &method_name)
+            {
+                let result = self.ctx.alloc_temp();
+                let is_float_type = matches!(
+                    type_name.as_str(),
+                    "Float" | "Float32" | "Float64" | "f32" | "f64"
+                );
+                if is_float_type && method_name != "BITS" {
+                    let f = f64::from_bits(value as u64);
+                    self.ctx.emit(Instruction::LoadF {
+                        dst: result,
+                        value: f,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: result,
+                        value: value as i64,
+                    });
+                }
+                return Ok(Some(Some(result)));
+            }
+
+            // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok).
+            // Variant constructors are registered as functions with variant_tag set.
+            if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
+                && func_info.variant_tag.is_some()
+                && func_info.param_count == args.len()
+            {
+                return Ok(Some(self.compile_variant_constructor(&method_name, args)?));
+            }
+
+            // For primitive types with static methods (e.g., Int.from_le_bytes,
+            // Char.from_digit), emit as method call on a zero receiver.
+            // The interpreter dispatches these via dispatch_primitive_method.
+            if is_primitive_type(&type_name) {
+                let receiver_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: receiver_reg,
+                    value: 0,
+                });
+
+                let first = if args.is_empty() {
+                    Reg(0)
+                } else {
+                    let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                    for arg in args.iter() {
+                        let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                            CodegenError::internal("static method arg has no value")
+                        })?;
+                        arg_vals.push(arg_val);
+                    }
+                    let f = self.ctx.registers.alloc_fresh();
+                    for _ in 1..args.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, arg_val) in arg_vals.iter().enumerate() {
+                        let dst = Reg(f.0 + i as u16);
+                        if *arg_val != dst {
+                            self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
+                            self.ctx.free_temp(*arg_val);
+                        }
+                    }
+                    f
+                };
+
+                // Prefix method name with type for typed primitives.
+                let prefixed_method = match type_name.as_str() {
+                    "Int32" | "i32" => format!("int32${}", method_name),
+                    "UInt64" | "u64" => format!("uint64${}", method_name),
+                    "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
+                    _ => method_name.clone(),
+                };
+
+                let result = self.ctx.alloc_temp();
+                let method_id = self.intern_string(&prefixed_method);
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: receiver_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: first,
+                        count: args.len() as u8,
+                    },
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(Some(result)));
+            }
+
+            // For generic type parameters (like T.default()), emit a type method call.
+            // Resolved during monomorphization when T is replaced with a concrete type.
+            return Ok(Some(
+                self.compile_type_param_method_call(&type_name, method, args)?,
+            ));
+        }
+
+        Ok(None)
     }
 
     /// Determines the method name prefix based on the return type of a method call.
