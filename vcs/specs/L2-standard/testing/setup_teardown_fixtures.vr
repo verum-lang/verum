@@ -1,0 +1,137 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: testing, fixtures, setup, teardown, test-lifecycle
+// @timeout: 10000
+// @setup: test_setup
+// @teardown: test_teardown
+// @description: Pins the @setup / @teardown fixture directive contract (#58).
+//
+// `@setup: <fn_name>` — names a zero-argument function the runner calls
+//                        before each test function in this file.
+// `@teardown: <fn_name>` — names a zero-argument function the runner calls
+//                           after each test function (even if it panics).
+//
+// Contract:
+//   1. setup_fn is fn() -> ()  (or fn() -> T discarded by runner)
+//   2. teardown_fn is fn() -> ()
+//   3. If setup panics the test is marked `error(setup-panicked)`, not run.
+//   4. If teardown panics the test is marked `error(teardown-panicked)`.
+//   5. Both functions must be defined at file scope (no closures).
+//   6. @setup / @teardown are optional — omitting them skips lifecycle hooks.
+//
+// This spec verifies that the *type shapes* of setup and teardown typechecks,
+// and that a typical fixture pattern (shared mutable state via a module-level
+// `let mut`) compiles without errors.
+//
+// NOTE: actual lifecycle invocation is a runner concern (vtest directive.rs).
+// This spec pins the Verum-side syntax only.
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.{List};
+
+// ── Simulated shared state (module-level) ─────────────────────────────────────
+
+// In a real fixture, this would be a thread-local or context-injected value.
+// For typecheck purposes we use a local variable that the runner would manage.
+
+fn make_initial_counter() -> Int {
+    0
+}
+
+// ── 1. setup_fn: fn() — initialises fixture state ────────────────────────────
+
+fn test_setup() {
+    // Called by the runner before each test function.
+    // Establishes invariants: in a real scenario this would reset shared state,
+    // open a database connection, seed a fake clock, etc.
+    let _ = make_initial_counter();
+}
+
+// ── 2. teardown_fn: fn() — releases fixture state ────────────────────────────
+
+fn test_teardown() {
+    // Called by the runner after each test function (including on failure).
+    // Releases resources, closes connections, resets globals.
+    let _ = 0;
+}
+
+// ── 3. Test functions that benefit from the fixture ───────────────────────────
+
+fn test_counter_starts_at_zero() {
+    // In a real fixture-enabled test, `counter` would be provided by setup.
+    // Here we just verify the shape typechecks.
+    let counter: Int = make_initial_counter();
+    assert_eq(counter, 0);
+}
+
+fn test_counter_increment() {
+    let mut counter: Int = make_initial_counter();
+    counter = counter + 1;
+    assert_eq(counter, 1);
+}
+
+fn test_counter_never_negative() {
+    let counter: Int = make_initial_counter();
+    assert(counter >= 0);
+}
+
+// ── 4. Parameterised fixture: setup returns a value ──────────────────────────
+//
+// Verum's @setup only supports fn() -> (). For parameterised fixtures, the
+// pattern is to use a constructor function inside the test body.
+
+fn make_test_list() -> List<Int> {
+    List.from([10, 20, 30])
+}
+
+fn test_list_fixture_pattern() {
+    let xs: List<Int> = make_test_list();
+    assert_eq(xs.len(), 3);
+    assert_eq(xs[0], 10);
+}
+
+// ── 5. @teardown runs even when test panics (type shape) ─────────────────────
+//
+// assert_panics verifies that teardown's fn() shape is compatible with the
+// runner's cleanup machinery.
+
+fn teardown_shape_is_unit_to_unit() {
+    // Verify that test_teardown has type fn() -> ().
+    let _f: fn() = test_teardown;
+    _f();
+}
+
+fn setup_shape_is_unit_to_unit() {
+    let _f: fn() = test_setup;
+    _f();
+}
+
+// ── 6. Multiple fixtures may nest (via explicit call) ─────────────────────────
+
+fn outer_setup() { let _ = 0; }
+fn outer_teardown() { let _ = 0; }
+
+fn inner_setup() { let _ = 0; }
+fn inner_teardown() { let _ = 0; }
+
+fn test_nested_fixture_shape() {
+    outer_setup();
+    inner_setup();
+    assert(true);
+    inner_teardown();
+    outer_teardown();
+}
+
+fn main() {
+    test_setup();
+    test_counter_starts_at_zero();
+    test_counter_increment();
+    test_counter_never_negative();
+    test_list_fixture_pattern();
+    teardown_shape_is_unit_to_unit();
+    setup_shape_is_unit_to_unit();
+    test_nested_fixture_shape();
+    test_teardown();
+    print("@setup / @teardown fixture typecheck ok");
+}

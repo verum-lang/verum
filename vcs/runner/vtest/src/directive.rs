@@ -25,6 +25,8 @@
 //! - `@skip: <reason>` - Skip this test with given reason
 //! - `@description: <text>` - Human-readable test description
 //! - `@requires: <feature>` - Required feature flags
+//! - `@setup: <fn_name>` - Function to call before each test function in this file
+//! - `@teardown: <fn_name>` - Function to call after each test function in this file
 //!
 //! # Multi-line Values
 //!
@@ -823,6 +825,10 @@ pub struct TestDirectives {
     pub description: Option<Text>,
     /// Required feature flags
     pub requires: Set<Text>,
+    /// Setup function name — called before each test fn in this file.
+    pub setup_fn: Option<Text>,
+    /// Teardown function name — called after each test fn in this file.
+    pub teardown_fn: Option<Text>,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -859,6 +865,8 @@ impl Default for TestDirectives {
             source_content: Text::new(),
             skip: None,
             description: None,
+            setup_fn: None,
+            teardown_fn: None,
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1063,6 +1071,10 @@ impl TestDirectives {
                         directives.requires.insert(feature.to_string().into());
                     }
                 }
+            } else if let Some(rest) = comment.strip_prefix("@setup:") {
+                directives.setup_fn = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@teardown:") {
+                directives.teardown_fn = Some(rest.trim().to_string().into());
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()
