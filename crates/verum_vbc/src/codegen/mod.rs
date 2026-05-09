@@ -2075,7 +2075,59 @@ impl VbcCodegen {
         tag_map.insert("True", 1);
         tag_map.insert("False", 0);
 
+        // Pre-built `parent_type_name` lookup so variant ctors registered
+        // by this pass carry the same `Some("Maybe")` / `Some("Result")` /
+        // etc. info that `register_builtin_variants` set on its own
+        // entries.  Pre-this-fix the const path emitted
+        // `parent_type_name: None`, and because `prefer_existing_functions
+        // = false` at this point in the pipeline, the const-side
+        // registration OVERWROTE the builtin's correctly-parented entry.
+        // `compile_simple_path` then read `parent_type_name = None` for
+        // bare `None` / `Ok` / `Err`, called `emit_make_variant(.., None)`,
+        // and the typed-form gate failed for lack of a parent — codegen
+        // demoted to legacy `MakeVariant` (synthetic 0x8000+tag id).
+        // The runtime's `format_variant_for_print_depth` global tag-scan
+        // then picked whichever stdlib variant happened to share the
+        // same tag (`AliasError.EmptyWeights` for tag=0,
+        // `ProductivityResult.Productive` for tag=0, depending on type-table
+        // order) — `let b: Maybe<Int> = None;` rendered as the colliding
+        // variant.  Bare `Some(3)` worked because `compile_call` resolves
+        // parent through `emit_make_variant_for_function` which re-reads
+        // the live function table at emit time, but by the time of the
+        // second registration the bare `Some` entry's parent had already
+        // been clobbered too — `Some(3)` only worked by coincidence
+        // (the alt-key path triggered for `Some` because its
+        // `param_count = 1` mismatched the const-path's 0).
+        let mut parent_map: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for (layout, parent) in [
+            (verum_common::well_known_types::MAYBE_VARIANT_LAYOUT, "Maybe"),
+            (verum_common::well_known_types::RESULT_VARIANT_LAYOUT, "Result"),
+            (verum_common::well_known_types::ORDERING_VARIANT_LAYOUT, "Ordering"),
+            (verum_common::well_known_types::CONTROLFLOW_VARIANT_LAYOUT, "ControlFlow"),
+        ] {
+            for &(vname, _) in layout.iter() {
+                parent_map.insert(vname, parent);
+            }
+        }
+
         for &(name, _value) in constants {
+            // Skip variant-ctor entries that `register_builtin_variants`
+            // already registered with full parent_type_name — overwriting
+            // would null out the parent metadata.  The builtin's
+            // FunctionInfo carries `intrinsic_name = None` while a
+            // const-path entry would set `__const_<name>`; downstream
+            // `compile_simple_path` checks `variant_tag` first
+            // (line ~1426), so the missing `__const_*` marker is fine.
+            // Names not in `parent_map` (errno, EVFILT_*, MEM_*, …) keep
+            // the legacy const-registration path unchanged.
+            if parent_map.contains_key(name)
+                && let Some(existing) = self.ctx.lookup_function(name)
+                && existing.variant_tag.is_some()
+                && existing.parent_type_name.is_some()
+            {
+                continue;
+            }
             let id = FunctionId(self.next_func_id);
             self.next_func_id = self.next_func_id.saturating_add(1);
             let info = FunctionInfo {
@@ -2090,7 +2142,14 @@ impl VbcCodegen {
                 yield_type: None,
                 intrinsic_name: Some(format!("__const_{}", name)),
                 variant_tag: tag_map.get(name).copied(),
-                parent_type_name: None,
+                // Carry the parent type name when this const corresponds
+                // to a known variant.  Without this, names that were
+                // never registered as variant ctors (the variant-name
+                // wasn't in `register_builtin_variants`'s table — e.g.
+                // `True`/`False` — but ARE in `tag_map`) lose the parent
+                // link, and pattern-match dispatch falls through to the
+                // global tag scan.
+                parent_type_name: parent_map.get(name).map(|p| (*p).to_string()),
                 variant_payload_types: None,
                 is_partial_pattern: false,
                 takes_self_mut_ref: false,
@@ -11788,20 +11847,55 @@ impl VbcCodegen {
                 Some(s) if !s.is_empty() => s,
                 _ => continue,
             };
-            // Skip if the method name itself contains a dot — it's
-            // already a qualified call and the FunctionId-driven path
-            // (above) handles it via `find_function_by_name`.
-            if method_name.contains('.') {
-                continue;
-            }
+            // For QUALIFIED method names (e.g. `Maybe.is_some`,
+            // `PathBuf.as_path`), the bucket key is the trailing
+            // segment AFTER the last dot — that's how
+            // `suffix_index` was built above.  Without splitting
+            // here, the lookup hits an empty bucket (the full
+            // dotted name is never a bucket key) and the qualified
+            // ctx.functions entry never gets a stub.  Result at
+            // runtime: `find_function_by_name("Maybe.is_some")`
+            // misses (no entry in `self.functions` named
+            // `Maybe.is_some` and no entry whose suffix is
+            // `.Maybe.is_some`), method dispatch falls through
+            // every path, and the receiver-of-runtime-kind panic
+            // fires.  Dotted call sites then have to rely on the
+            // FunctionId-driven path above — but THAT path only
+            // sees Call/CallG/TailCall/NewClosure/Spawn/GenCreate
+            // sites, NOT CallM, so dotted-method CallMs were
+            // structurally orphaned.
+            //
+            // Fundamental fix: treat the trailing segment as the
+            // bucket key for both bare and dotted forms, and (for
+            // dotted forms) additionally constrain the candidate
+            // set to entries whose qualified name ENDS WITH the
+            // full dotted method name.  This filters out
+            // `Result.is_some` when looking up `Maybe.is_some`
+            // (both bucket under "is_some") so the synthesised
+            // stub matches the call site's intent.
+            let (bucket_key, qualified_constraint): (&str, Option<&str>) =
+                match method_name.rsplit_once('.') {
+                    Some((_, tail)) => (tail, Some(method_name.as_str())),
+                    None => (method_name.as_str(), None),
+                };
             // O(1) lookup via the suffix index — buckets every
             // ctx.functions entry whose trailing dotted segment
-            // matches `method_name`.  Empty bucket → no candidates,
+            // matches `bucket_key`.  Empty bucket → no candidates,
             // skip without allocating.
             let candidates: Vec<(String, FunctionInfo)> = suffix_index
-                .get(method_name.as_str())
+                .get(bucket_key)
                 .cloned()
                 .unwrap_or_default();
+            let candidates: Vec<(String, FunctionInfo)> = match qualified_constraint {
+                Some(qual) => {
+                    let dot_qual = format!(".{}", qual);
+                    candidates
+                        .into_iter()
+                        .filter(|(name, _)| name == qual || name.ends_with(&dot_qual))
+                        .collect()
+                }
+                None => candidates,
+            };
             for (qualified_name, info) in candidates {
                 if emitted.contains(&info.id.0) {
                     continue;
@@ -12559,6 +12653,316 @@ impl VbcCodegen {
     /// Returns the current configuration.
     pub fn config(&self) -> &CodegenConfig {
         &self.config
+    }
+
+    /// Merge archive-driven function bodies into the user codegen.
+    ///
+    /// Phase 2 of the precompiled-stdlib body-merge epic. The archive
+    /// loader (`verum_compiler::archive_ctx_loader::register_module_filtered`)
+    /// registers stdlib `FunctionInfo` metadata into `ctx.functions`
+    /// for every wanted symbol; without a matching VBC body, the
+    /// finalize-time stub-emitter synthesises a `RetV` placeholder
+    /// that returns `Unit` — every `Some(x).is_some()` evaluates to
+    /// `()` instead of `true`. This method copies the archive's real
+    /// bytecode bodies into `self.functions` so the stub fallback
+    /// only fires for symbols that genuinely have no body in the
+    /// archive (FFI extern, user-supplied stubs, etc.).
+    ///
+    /// `archive_module` is a single decoded archive module (e.g. the
+    /// `core.base` module bundling Maybe/Result impls).
+    /// `func_id_remap` maps each archive-local `FunctionId` to the
+    /// codegen-global `FunctionId` that the loader allocated for it
+    /// during the metadata pass.
+    ///
+    /// Returns the number of bodies successfully copied. Skips:
+    ///
+    ///   * Functions whose new id was already pushed (idempotent —
+    ///     repeat calls don't duplicate).
+    ///   * Functions whose archive descriptor has zero bytecode
+    ///     length (FFI extern / stub-only declarations).
+    ///   * Functions referencing archive constants of variants the
+    ///     codegen's `ConstantEntry` table can't represent
+    ///     (`Constant::Function` / `Constant::Protocol` /
+    ///     `Constant::Array` — currently rare in stdlib bodies).
+    ///
+    /// **Performance**: O(N_func × M_instr_per_func). All ID remaps
+    /// are HashMap lookups (O(1) avg); the per-function decode reuses
+    /// the descriptor's pre-decoded `instructions` field when set,
+    /// falling back to a fresh decode of the raw bytecode region.
+    /// Lazy: only the functions in `func_id_remap` are touched, so a
+    /// hello-world that mounts five stdlib symbols pays for five
+    /// bodies, not the full archive's ~7000.
+    pub fn merge_archive_function_bodies(
+        &mut self,
+        archive_module: &crate::module::VbcModule,
+        func_id_remap: &std::collections::HashMap<u32, crate::module::FunctionId>,
+    ) -> usize {
+        use std::collections::HashMap;
+        if func_id_remap.is_empty() {
+            return 0;
+        }
+
+        // Cache of archive-side ids already in `self.functions` to
+        // make this call idempotent.
+        let already_emitted: std::collections::HashSet<u32> = self
+            .functions
+            .iter()
+            .map(|f| f.descriptor.id.0)
+            .collect();
+
+        // ----- Build per-archive-module ID remap tables -----
+
+        // archive type id → codegen type id (via type-name lookup;
+        // codegen.type_name_to_id was populated by
+        // `import_archive_module_types`).
+        let mut type_id_remap: HashMap<u32, u32> = HashMap::new();
+        for ty in archive_module.types.iter() {
+            let archive_name = match archive_module.strings.get(ty.name) {
+                Some(s) => s,
+                None => continue,
+            };
+            if let Some(&codegen_tid) = self.type_name_to_id.get(archive_name) {
+                type_id_remap.insert(ty.id.0, codegen_tid.0);
+            }
+        }
+
+        // archive const id → codegen const id. Deep-copy each
+        // referenced constant into ctx.constants. We only need to
+        // import constants that the bodies actually reference, but
+        // pre-walking instructions is wasted work — copy them all
+        // up-front (typical archive module has <100 constants).
+        let mut const_id_remap: HashMap<u32, u32> = HashMap::new();
+        for (idx, src_const) in archive_module.constants.iter().enumerate() {
+            let archive_cid = idx as u32;
+            let codegen_cid = match src_const {
+                crate::module::Constant::Int(v) => self.ctx.add_const_int(*v),
+                crate::module::Constant::Float(v) => self.ctx.add_const_float(*v),
+                crate::module::Constant::String(sid) => {
+                    let text = archive_module.strings.get(*sid).unwrap_or("");
+                    self.ctx.add_const_string(text)
+                }
+                crate::module::Constant::Bytes(bytes) => {
+                    self.ctx.add_const_bytes(bytes.clone())
+                }
+                crate::module::Constant::Type(type_ref) => {
+                    let remapped = remap_type_ref_archive(type_ref, &type_id_remap);
+                    let id = crate::module::ConstId(self.ctx.constants.len() as u32);
+                    self.ctx
+                        .constants
+                        .push(context::ConstantEntry::Type(remapped));
+                    id
+                }
+                // Function / Protocol / Array constants don't have a
+                // direct ConstantEntry variant. Skip (very rare in
+                // stdlib bodies; the body that loads such a constant
+                // will fail at runtime when its LoadK lands on a
+                // dangling const id, surfacing as a typed error
+                // rather than a silent miscompile).
+                crate::module::Constant::Function(_)
+                | crate::module::Constant::Protocol(_)
+                | crate::module::Constant::Array(_) => continue,
+            };
+            const_id_remap.insert(archive_cid, codegen_cid.0);
+        }
+
+        // ----- Walk archive functions and copy bodies -----
+
+        let remap = ArchiveBodyRemap {
+            funcs: func_id_remap,
+            types: &type_id_remap,
+            consts: &const_id_remap,
+        };
+
+        let mut copied = 0usize;
+        for archive_desc in archive_module.functions.iter() {
+            let archive_fid = archive_desc.id.0;
+            let codegen_fid = match func_id_remap.get(&archive_fid) {
+                Some(&fid) => fid,
+                None => continue, // not in wanted set
+            };
+            if already_emitted.contains(&codegen_fid.0) {
+                continue;
+            }
+            // Decode instructions: prefer the descriptor's cached
+            // `instructions` field (populated post-deserialize); fall
+            // back to a fresh bytecode decode.
+            let mut instructions = if let Some(ref decoded) = archive_desc.instructions {
+                decoded.clone()
+            } else {
+                let off = archive_desc.bytecode_offset as usize;
+                let len = archive_desc.bytecode_length as usize;
+                if len == 0 || off + len > archive_module.bytecode.len() {
+                    continue;
+                }
+                let region = &archive_module.bytecode[off..off + len];
+                match crate::bytecode::decode_instructions(region) {
+                    Ok(decoded) => decoded,
+                    Err(_) => continue,
+                }
+            };
+            for instr in instructions.iter_mut() {
+                crate::bytecode_remap::rewrite_instruction_ids(instr, &remap);
+            }
+
+            // Build the new descriptor with codegen-namespace ids /
+            // strings. Param + return types pull from the
+            // (already-remapped) codegen type table.
+            let mut new_desc = archive_desc.clone();
+            new_desc.id = codegen_fid;
+            // Re-intern the function name into the codegen string
+            // table so the finalize-time `string_id_map` can resolve
+            // it to the final-module StringId.
+            if let Some(name_text) = archive_module.strings.get(archive_desc.name) {
+                let codegen_sid = self.ctx.intern_string_raw(name_text);
+                new_desc.name = StringId(codegen_sid);
+            }
+            // Param names → re-intern; param type refs → remap.
+            for param in new_desc.params.iter_mut() {
+                if let Some(pname_text) = archive_module.strings.get(param.name) {
+                    let pname_id = self.ctx.intern_string_raw(pname_text);
+                    param.name = StringId(pname_id);
+                }
+                param.type_ref = remap_type_ref_archive(&param.type_ref, &type_id_remap);
+            }
+            new_desc.return_type =
+                remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
+            if let Some(parent) = new_desc.parent_type {
+                if let Some(&codegen_parent) = type_id_remap.get(&parent.0) {
+                    new_desc.parent_type = Some(crate::types::TypeId(codegen_parent));
+                }
+            }
+            // The codegen finalize re-encodes from `instructions` —
+            // clear bytecode_offset / bytecode_length so finalize
+            // doesn't try to use stale archive offsets.
+            new_desc.bytecode_offset = 0;
+            new_desc.bytecode_length = 0;
+            new_desc.instructions = Some(instructions.clone());
+
+            self.functions
+                .push(crate::module::VbcFunction::new(new_desc, instructions));
+            copied += 1;
+        }
+
+        copied
+    }
+}
+
+/// Helper IdRemap implementation used by [`VbcCodegen::merge_archive_function_bodies`]
+/// during the per-instruction id rewrite. The lookup tables are
+/// borrowed from the calling scope so we don't pay the
+/// allocate-per-instruction cost of cloning HashMaps.
+struct ArchiveBodyRemap<'a> {
+    funcs: &'a std::collections::HashMap<u32, crate::module::FunctionId>,
+    types: &'a std::collections::HashMap<u32, u32>,
+    consts: &'a std::collections::HashMap<u32, u32>,
+}
+
+impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
+    fn map_function(&self, src: crate::module::FunctionId) -> crate::module::FunctionId {
+        self.funcs.get(&src.0).copied().unwrap_or(src)
+    }
+    fn map_type_id(&self, src: crate::types::TypeId) -> crate::types::TypeId {
+        self.types
+            .get(&src.0)
+            .copied()
+            .map(crate::types::TypeId)
+            .unwrap_or(src)
+    }
+    fn map_const(&self, src: crate::module::ConstId) -> crate::module::ConstId {
+        self.consts
+            .get(&src.0)
+            .copied()
+            .map(crate::module::ConstId)
+            .unwrap_or(src)
+    }
+    // String / Protocol use the IdRemap default (identity) — strings
+    // don't appear as instruction operands, and protocol ids in the
+    // user codegen's namespace match the archive's namespace for
+    // built-in protocols (Eq/Ord/Hash/...).
+}
+
+/// Recursive [`TypeRef`] remap shared by
+/// [`VbcCodegen::merge_archive_function_bodies`] descriptor + constant
+/// rewrites. Mirrors `linker::VbcLinker::remap_type_ref` but takes a
+/// borrowed `HashMap` and returns identity for unmapped ids (rather
+/// than `Err(LinkError::DanglingReference)`) because the loader's
+/// "wanted" filter intentionally subsets the archive — references to
+/// unimported types resolve at runtime via the codegen's type-name
+/// global lookup.
+fn remap_type_ref_archive(
+    src: &crate::types::TypeRef,
+    type_id_remap: &std::collections::HashMap<u32, u32>,
+) -> crate::types::TypeRef {
+    use crate::types::TypeRef;
+    match src {
+        TypeRef::Concrete(tid) => {
+            let new_id = type_id_remap
+                .get(&tid.0)
+                .copied()
+                .map(crate::types::TypeId)
+                .unwrap_or(*tid);
+            TypeRef::Concrete(new_id)
+        }
+        TypeRef::Generic(p) => TypeRef::Generic(*p),
+        TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
+            base: type_id_remap
+                .get(&base.0)
+                .copied()
+                .map(crate::types::TypeId)
+                .unwrap_or(*base),
+            args: args
+                .iter()
+                .map(|a| remap_type_ref_archive(a, type_id_remap))
+                .collect(),
+        },
+        TypeRef::Function {
+            params,
+            return_type,
+            contexts,
+        } => TypeRef::Function {
+            params: params
+                .iter()
+                .map(|p| remap_type_ref_archive(p, type_id_remap))
+                .collect(),
+            return_type: Box::new(remap_type_ref_archive(return_type, type_id_remap)),
+            contexts: contexts.clone(),
+        },
+        TypeRef::Rank2Function {
+            type_param_count,
+            params,
+            return_type,
+            contexts,
+        } => TypeRef::Rank2Function {
+            type_param_count: *type_param_count,
+            params: params
+                .iter()
+                .map(|p| remap_type_ref_archive(p, type_id_remap))
+                .collect(),
+            return_type: Box::new(remap_type_ref_archive(return_type, type_id_remap)),
+            contexts: contexts.clone(),
+        },
+        TypeRef::Reference {
+            inner,
+            mutability,
+            tier,
+        } => TypeRef::Reference {
+            inner: Box::new(remap_type_ref_archive(inner, type_id_remap)),
+            mutability: *mutability,
+            tier: *tier,
+        },
+        TypeRef::Tuple(elems) => TypeRef::Tuple(
+            elems
+                .iter()
+                .map(|e| remap_type_ref_archive(e, type_id_remap))
+                .collect(),
+        ),
+        TypeRef::Array { element, length } => TypeRef::Array {
+            element: Box::new(remap_type_ref_archive(element, type_id_remap)),
+            length: *length,
+        },
+        TypeRef::Slice(inner) => {
+            TypeRef::Slice(Box::new(remap_type_ref_archive(inner, type_id_remap)))
+        }
     }
 }
 
