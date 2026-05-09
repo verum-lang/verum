@@ -251,44 +251,53 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
         "ORDERING_RELEASE" => 2,
         "ORDERING_ACQ_REL" => 3,
         "ORDERING_SEQ_CST" => 4,
-        // POSIX errno (core/sys/darwin/errno.vr)
-        "EPERM" => 1,
-        "ENOENT" => 2,
-        "ESRCH" => 3,
-        "EINTR" => 4,
-        "EIO" => 5,
-        "ENXIO" => 6,
-        "E2BIG" => 7,
-        "ENOEXEC" => 8,
-        "EBADF" => 9,
-        "ECHILD" => 10,
-        "EAGAIN" => 11,
-        "ENOMEM" => 12,
-        "EACCES" => 13,
-        "EFAULT" => 14,
-        "EBUSY" => 16,
-        "EEXIST" => 17,
-        "ENODEV" => 19,
-        "ENOTDIR" => 20,
-        "EISDIR" => 21,
-        "EINVAL" => 22,
-        "EMFILE" => 24,
-        "ENOSPC" => 28,
-        "EPIPE" => 32,
-        "ERANGE" => 34,
-        "ENOSYS" => 78,
-        "ENOTEMPTY" => 66,
-        "ECONNREFUSED" => 61,
-        "ECONNRESET" => 54,
-        "ECONNABORTED" => 53,
-        "ETIMEDOUT" => 60,
-        "EADDRINUSE" => 48,
-        "EADDRNOTAVAIL" => 49,
-        "ENETUNREACH" => 51,
-        "EALREADY" => 37,
-        "EINPROGRESS" => 36,
-        "ENOTCONN" => 57,
-        "EWOULDBLOCK" => 35,
+        // Cross-platform POSIX errno values (Linux + Darwin agree
+        // bit-for-bit). Sourced from `verum_common::errno` — single
+        // source of truth shared with the runtime handlers and stdlib.
+        "EPERM" => verum_common::errno::EPERM,
+        "ENOENT" => verum_common::errno::ENOENT,
+        "ESRCH" => verum_common::errno::ESRCH,
+        "EINTR" => verum_common::errno::EINTR,
+        "EIO" => verum_common::errno::EIO,
+        "ENXIO" => verum_common::errno::ENXIO,
+        "E2BIG" => verum_common::errno::E2BIG,
+        "ENOEXEC" => verum_common::errno::ENOEXEC,
+        "EBADF" => verum_common::errno::EBADF,
+        "ECHILD" => verum_common::errno::ECHILD,
+        "ENOMEM" => verum_common::errno::ENOMEM,
+        "EACCES" => verum_common::errno::EACCES,
+        "EFAULT" => verum_common::errno::EFAULT,
+        "EBUSY" => verum_common::errno::EBUSY,
+        "EEXIST" => verum_common::errno::EEXIST,
+        "ENODEV" => verum_common::errno::ENODEV,
+        "ENOTDIR" => verum_common::errno::ENOTDIR,
+        "EISDIR" => verum_common::errno::EISDIR,
+        "EINVAL" => verum_common::errno::EINVAL,
+        "EMFILE" => verum_common::errno::EMFILE,
+        "ENOSPC" => verum_common::errno::ENOSPC,
+        "EPIPE" => verum_common::errno::EPIPE,
+        "ERANGE" => verum_common::errno::ERANGE,
+        // Platform-divergent errno values — Linux and Darwin disagree
+        // (see `verum_common::errno::{linux, darwin}` modules for the
+        // canonical per-platform values). The values below are a mix
+        // of Linux and Darwin assignments preserved for ABI continuity
+        // with code compiled before this lookup table was introduced;
+        // future work (TODO #51-phase-2) makes resolve_stdlib_constant_value
+        // target-conditional via `errno_for_target(name, target_os)`.
+        "EAGAIN" => verum_common::errno::linux::EAGAIN,        // 11 (Linux)
+        "EWOULDBLOCK" => verum_common::errno::darwin::EWOULDBLOCK, // 35 (Darwin)
+        "ENOSYS" => verum_common::errno::darwin::ENOSYS,        // 78 (Darwin)
+        "ENOTEMPTY" => verum_common::errno::darwin::ENOTEMPTY,  // 66 (Darwin)
+        "ECONNREFUSED" => verum_common::errno::darwin::ECONNREFUSED, // 61 (Darwin)
+        "ECONNRESET" => verum_common::errno::darwin::ECONNRESET,     // 54 (Darwin)
+        "ECONNABORTED" => verum_common::errno::darwin::ECONNABORTED, // 53 (Darwin)
+        "ETIMEDOUT" => verum_common::errno::darwin::ETIMEDOUT,       // 60 (Darwin)
+        "EADDRINUSE" => verum_common::errno::darwin::EADDRINUSE,     // 48 (Darwin)
+        "EADDRNOTAVAIL" => verum_common::errno::darwin::EADDRNOTAVAIL, // 49 (Darwin)
+        "ENETUNREACH" => verum_common::errno::darwin::ENETUNREACH,   // 51 (Darwin)
+        "EALREADY" => verum_common::errno::darwin::EALREADY,         // 37 (Darwin)
+        "EINPROGRESS" => verum_common::errno::darwin::EINPROGRESS,   // 36 (Darwin)
+        "ENOTCONN" => verum_common::errno::darwin::ENOTCONN,         // 57 (Darwin)
         // kqueue filters (core/sys/darwin/libsystem.vr)
         "EVFILT_READ" => -1,
         "EVFILT_WRITE" => -2,

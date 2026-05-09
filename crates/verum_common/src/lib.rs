@@ -109,6 +109,7 @@ pub use semantic_types::{List, Map, OrderedMap, OrderedSet, Set, Text};
 // Well-known type name constants (used throughout the compiler to replace hardcoded strings)
 pub mod layout;
 pub mod platform_libs;
+pub mod errno;
 pub mod well_known_types;
 pub use well_known_types::{
     WellKnownProtocol, WellKnownType, method_to_protocol, primitive_implements_protocol,
