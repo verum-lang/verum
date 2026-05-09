@@ -16025,6 +16025,47 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// `verum_cbgr_revoke`; checked on every dereference path.
     const FLAG_REVOKED: u64 = verum_common::cbgr::flags::REVOKED as u64;
 
+    // ----------------------------------------------------------------
+    // Codegen-private AllocationHeader field offsets
+    // ----------------------------------------------------------------
+    //
+    // The 32-byte header consumed by the IR functions in this section
+    // (allocate / revoke / get_header / ref_release / ref_count /
+    // invalidate / realloc) is structurally separate from the canonical
+    // `verum_common::cbgr::AllocationHeader` — see the section header
+    // comment for the two-scheme rationale.
+    //
+    // Pre-this-block, every emitter open-coded field offsets as raw
+    // `i64_type.const_int(4, false)` / `const_int(10, false)` /
+    // `const_int(12, false)` / `const_int(16, false)` literals across
+    // 10+ sites. A single misplaced digit would have allocate write
+    // a field at one offset while revoke read it at another, silently
+    // splitting allocations into halves visible to one path but not
+    // the other.
+
+    /// Offset of the atomic `generation` u32 field. (First field —
+    /// the generation lives at the user pointer's `-32` baseline.)
+    const AOT_HDR_GENERATION_OFFSET: u64 = 0;
+
+    /// Offset of the `size` u32 field.
+    const AOT_HDR_SIZE_OFFSET: u64 = 4;
+
+    /// Offset of the atomic `epoch` u16 field.
+    const AOT_HDR_EPOCH_OFFSET: u64 = 8;
+
+    /// Offset of the `capabilities` u16 field.
+    const AOT_HDR_CAPABILITIES_OFFSET: u64 = 10;
+
+    /// Offset of the atomic `ref_count` u32 field.
+    const AOT_HDR_REF_COUNT_OFFSET: u64 = 12;
+
+    /// Offset of the atomic `flags` u64 field
+    /// (FLAG_REVOKED bit — set by `verum_cbgr_revoke`).
+    const AOT_HDR_FLAGS_OFFSET: u64 = 16;
+
+    /// Offset of the `next_free` pointer (allocator free-list link).
+    const AOT_HDR_NEXT_FREE_OFFSET: u64 = 24;
+
     /// Emit all CBGR LLVM IR functions.
     fn emit_verum_cbgr_functions(&self, module: &Module<'ctx>) -> Result<()> {
         self.emit_cbgr_allocate(module)?;
@@ -16184,7 +16225,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the epoch field at a fixed offset; the header layout is defined by the allocator
         let size_ptr = unsafe {
             builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(4, false)], "size_ptr")
+                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_SIZE_OFFSET, false)], "size_ptr")
                 .or_llvm_err()?
         };
         let size_u32 = builder
@@ -16201,7 +16242,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP at offset 10 within a struct of known layout; the offset is within the allocation
         let cap_ptr = unsafe {
             builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(10, false)], "cap_ptr")
+                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_CAPABILITIES_OFFSET, false)], "cap_ptr")
                 .or_llvm_err()?
         };
         builder
@@ -16212,7 +16253,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
         let rc_ptr = unsafe {
             builder
-                .build_gep(i8_type, raw, &[i64_type.const_int(12, false)], "rc_ptr")
+                .build_gep(i8_type, raw, &[i64_type.const_int(Self::AOT_HDR_REF_COUNT_OFFSET, false)], "rc_ptr")
                 .or_llvm_err()?
         };
         builder
@@ -16322,12 +16363,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the epoch field at a fixed offset; the header layout is defined by the allocator
         let epoch_ptr = unsafe {
             builder
-                .build_gep(
-                    i8_type,
-                    header,
-                    &[i64_type.const_int(8, false)],
-                    "epoch_ptr",
-                )
+                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_EPOCH_OFFSET, false)], "epoch_ptr")
                 .or_llvm_err()?
         };
         let i16_type = self.context.i16_type();
@@ -16347,7 +16383,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
         let rc_ptr = unsafe {
             builder
-                .build_gep(i8_type, header, &[i64_type.const_int(12, false)], "rc_ptr")
+                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_REF_COUNT_OFFSET, false)], "rc_ptr")
                 .or_llvm_err()?
         };
         builder
@@ -16716,12 +16752,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the flags field; the header layout is a compile-time constant
         let flags_ptr = unsafe {
             builder
-                .build_gep(
-                    i8_type,
-                    header,
-                    &[i64_type.const_int(16, false)],
-                    "flags_ptr",
-                )
+                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_FLAGS_OFFSET, false)], "flags_ptr")
                 .or_llvm_err()?
         };
         builder
@@ -16784,7 +16815,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
         let rc_ptr = unsafe {
             builder
-                .build_gep(i8_type, header, &[i64_type.const_int(12, false)], "rc_ptr")
+                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_REF_COUNT_OFFSET, false)], "rc_ptr")
                 .or_llvm_err()?
         };
         let old_count = builder
@@ -16871,7 +16902,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
         let rc_ptr = unsafe {
             builder
-                .build_gep(i8_type, header, &[i64_type.const_int(12, false)], "rc_ptr")
+                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_REF_COUNT_OFFSET, false)], "rc_ptr")
                 .or_llvm_err()?
         };
         let rc = builder
