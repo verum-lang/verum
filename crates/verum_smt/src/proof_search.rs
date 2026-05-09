@@ -5783,6 +5783,40 @@ impl ProofSearchEngine {
                     return Maybe::Some(Expr::new(ExprKind::Try(Box::new(new_inner)), expr.span));
                 }
             }
+            // `x |> f` and `a ?? b` are 2-child binary-ish nodes that
+            // `expr_eq` matches structurally — the rewriter MUST mirror
+            // that coverage or `Rewrite` proof steps silently fail to
+            // descend into pipelines / null-coalesce expressions.
+            ExprKind::Pipeline { left, right } => {
+                let new_left = Self::try_rewrite_once(left, from, to);
+                let new_right = Self::try_rewrite_once(right, from, to);
+                if new_left.is_some() || new_right.is_some() {
+                    let result_left = new_left.unwrap_or_else(|| (**left).clone());
+                    let result_right = new_right.unwrap_or_else(|| (**right).clone());
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Pipeline {
+                            left: Box::new(result_left),
+                            right: Box::new(result_right),
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::NullCoalesce { left, right } => {
+                let new_left = Self::try_rewrite_once(left, from, to);
+                let new_right = Self::try_rewrite_once(right, from, to);
+                if new_left.is_some() || new_right.is_some() {
+                    let result_left = new_left.unwrap_or_else(|| (**left).clone());
+                    let result_right = new_right.unwrap_or_else(|| (**right).clone());
+                    return Maybe::Some(Expr::new(
+                        ExprKind::NullCoalesce {
+                            left: Box::new(result_left),
+                            right: Box::new(result_right),
+                        },
+                        expr.span,
+                    ));
+                }
+            }
             _ => {}
         }
 
