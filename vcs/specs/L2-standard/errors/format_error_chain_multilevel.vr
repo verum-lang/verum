@@ -1,0 +1,170 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, format_error_chain, ErrorChain, ErrorSource, error-chaining, multilevel
+// @timeout: 10000
+// @description: Pins multi-level chain traversal in format_error_chain and
+//               ErrorChain iterator (#47, #49).
+//
+// `format_error_chain(error)` produces:
+//   "<root description>\ncaused by: <L1>\ncaused by: <L2>\n..."
+// traversing the full chain via ErrorSource.source() until None.
+//
+// `ErrorChain` implements `Iterator<Item=Text>` so the chain can also be
+// consumed with a for loop or any iterator combinator.
+//
+// This spec verifies:
+//   1. Single-level chain: format_error_chain returns just the description.
+//   2. Two-level chain:    two lines separated by "\ncaused by: ".
+//   3. Three-level chain:  three levels all appear in the output.
+//   4. ErrorChain iterator yields each description in order.
+//   5. ErrorChain.collect() gathers all descriptions into List<Text>.
+//   6. Root cause via ErrorChain.last() returns the deepest link.
+
+mount core.base.error.{format_error_chain, ErrorChain};
+mount core.base.protocols.{ErrorSource, Describable};
+
+// ── User-defined error types forming a 3-level chain ─────────────────────────
+
+// Level 2 (root): no source
+type DiskError is { msg: Text };
+
+implement Describable for DiskError {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for DiskError {
+    fn source(&self) -> Maybe<&dyn ErrorSource> { None }
+}
+
+// Level 1: wraps DiskError
+type FileError is { msg: Text, disk: DiskError };
+
+implement Describable for FileError {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for FileError {
+    fn source(&self) -> Maybe<&dyn ErrorSource> {
+        Some(&self.disk)
+    }
+}
+
+// Level 0 (top): wraps FileError
+type AppError is { msg: Text, file: FileError };
+
+implement Describable for AppError {
+    fn description(&self) -> Text { self.msg.clone() }
+}
+
+implement ErrorSource for AppError {
+    fn source(&self) -> Maybe<&dyn ErrorSource> {
+        Some(&self.file)
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn make_three_level_chain() -> AppError {
+    AppError {
+        msg:  Text.from("application error"),
+        file: FileError {
+            msg:  Text.from("file not found"),
+            disk: DiskError {
+                msg: Text.from("permission denied"),
+            },
+        },
+    }
+}
+
+// ── 1. Single-level chain ─────────────────────────────────────────────────────
+
+fn single_level_chain() {
+    let e = DiskError { msg: Text.from("no space left") };
+    let out = format_error_chain(&e);
+    assert(out == Text.from("no space left"));
+}
+
+// ── 2. Two-level chain ────────────────────────────────────────────────────────
+
+fn two_level_chain() {
+    let e = FileError {
+        msg:  Text.from("write failed"),
+        disk: DiskError { msg: Text.from("disk full") },
+    };
+    let out = format_error_chain(&e);
+    assert(out.contains(Text.from("write failed")));
+    assert(out.contains(Text.from("caused by:")));
+    assert(out.contains(Text.from("disk full")));
+}
+
+// ── 3. Three-level chain ──────────────────────────────────────────────────────
+
+fn three_level_chain() {
+    let e = make_three_level_chain();
+    let out = format_error_chain(&e);
+    assert(out.contains(Text.from("application error")));
+    assert(out.contains(Text.from("file not found")));
+    assert(out.contains(Text.from("permission denied")));
+    // Two "caused by:" separators
+    let count_cb: Int = {
+        let needle = Text.from("caused by:");
+        let mut n = 0;
+        let mut pos = 0;
+        while pos < out.len() {
+            match out.find_from(&needle, pos) {
+                Some(i) => { n = n + 1; pos = i + needle.len(); }
+                None    => { break; }
+            }
+        }
+        n
+    };
+    assert_eq(count_cb, 2);
+}
+
+// ── 4. ErrorChain iterator yields descriptions in order ───────────────────────
+
+fn error_chain_iterator_order() {
+    let e = make_three_level_chain();
+    let mut chain = ErrorChain.new(&e);
+    let first  = chain.next();
+    let second = chain.next();
+    let third  = chain.next();
+    let done   = chain.next();
+    match first  { Some(d) => assert(d == Text.from("application error")), None => panic("expected first") }
+    match second { Some(d) => assert(d == Text.from("file not found")), None => panic("expected second") }
+    match third  { Some(d) => assert(d == Text.from("permission denied")), None => panic("expected third") }
+    match done   { None => {}, Some(_) => panic("expected end of chain") }
+}
+
+// ── 5. ErrorChain.collect() gathers all descriptions ─────────────────────────
+
+fn error_chain_collect() {
+    let e = make_three_level_chain();
+    let chain = ErrorChain.new(&e);
+    let descriptions: List<Text> = chain.collect();
+    assert_eq(descriptions.len(), 3);
+    assert(descriptions[0] == Text.from("application error"));
+    assert(descriptions[2] == Text.from("permission denied"));
+}
+
+// ── 6. Root cause is the last element ────────────────────────────────────────
+
+fn error_chain_last_is_root_cause() {
+    let e = make_three_level_chain();
+    let chain = ErrorChain.new(&e);
+    match chain.last() {
+        Some(d) => assert(d == Text.from("permission denied")),
+        None    => panic("chain must not be empty"),
+    }
+}
+
+fn main() {
+    single_level_chain();
+    two_level_chain();
+    three_level_chain();
+    error_chain_iterator_order();
+    error_chain_collect();
+    error_chain_last_is_root_cause();
+    print("format_error_chain multi-level typecheck ok");
+}
