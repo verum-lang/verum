@@ -649,6 +649,29 @@ impl Context {
     pub fn depth(&self) -> usize {
         self.types.len()
     }
+
+    /// Raw inner-first slice of binder types — types are stored in
+    /// the order they were `extend`ed (so the first element is the
+    /// outermost binder, the last element is the innermost).  Each
+    /// type is in its **binding-site** frame: free variables refer
+    /// to binders that already existed when this binder was added.
+    ///
+    /// Use this when you need to reconstruct a context type-by-type
+    /// (e.g. for context-level transformations).  Prefer [`Self::lookup`]
+    /// when you need a type viewed from a specific de Bruijn index —
+    /// `lookup` applies the appropriate frame-shift; this slice does
+    /// not.
+    pub fn types(&self) -> &[Term] {
+        &self.types
+    }
+
+    /// Iterate raw binder types from outer to inner — the order in
+    /// which they were `extend`ed.  Equivalent to
+    /// `self.types().iter()`.  Provided as a convenience for
+    /// rebuilding a context one extension at a time.
+    pub fn iter_outer_to_inner(&self) -> std::slice::Iter<'_, Term> {
+        self.types.iter()
+    }
 }
 
 // =============================================================================
