@@ -49,13 +49,45 @@ pub enum Layer {
     Meta,
 }
 
+/// Per-variant projection for [`Layer`].
+///
+/// `name` is the canonical kebab-case form returned by `as_str` and
+/// matches the `#[serde(rename_all = "snake_case")]` form on the
+/// enum, so a serialised manifest stays round-trip-clean through
+/// `from_str(x.as_str()) == Some(x)`.
+#[derive(Debug, Clone, Copy)]
+pub struct LayerMeta {
+    pub name: &'static str,
+}
+
 impl Layer {
-    pub fn as_str(self) -> &'static str {
+    pub const ALL: &'static [Self] = &[Self::Runtime, Self::Proof, Self::Meta];
+
+    pub const fn meta(self) -> LayerMeta {
         match self {
-            Layer::Runtime => "runtime",
-            Layer::Proof => "proof",
-            Layer::Meta => "meta",
+            Self::Runtime => LayerMeta { name: "runtime" },
+            Self::Proof => LayerMeta { name: "proof" },
+            Self::Meta => LayerMeta { name: "meta" },
         }
+    }
+
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a layer name back to its typed form. Closes a drift
+    /// defect: previously `as_str` was present but no inverse
+    /// mapping existed, so callers receiving a serialised layer
+    /// name (e.g. from a precompiled-stdlib manifest) had no
+    /// symmetric way to recover the typed enum.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
     }
 }
 
@@ -575,6 +607,34 @@ fn snippet(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meta_pin_layer_round_trip_unique() {
+        assert_eq!(Layer::ALL.len(), 3);
+        for v in Layer::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                Layer::from_str(s),
+                Some(*v),
+                "Layer::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Names are unique.
+        let names: Vec<&str> = Layer::ALL.iter().map(|v| v.as_str()).collect();
+        let mut dedup = names.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), names.len());
+        // Names match the `#[serde(rename_all = "snake_case")]`
+        // contract on the enum — so a serialised manifest
+        // round-trips through both serde and `from_str`.
+        assert_eq!(Layer::Runtime.as_str(), "runtime");
+        assert_eq!(Layer::Proof.as_str(), "proof");
+        assert_eq!(Layer::Meta.as_str(), "meta");
+        assert!(Layer::from_str("__not_a_layer__").is_none());
+    }
 
     #[test]
     fn smoke_classify_full_stdlib() {
