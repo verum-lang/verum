@@ -764,9 +764,19 @@ impl<'c> CbgrTypeBuilder<'c> {
     }
 
     /// Create a fat reference type (with metadata).
+    ///
+    /// Layout matches `core/mem/fat_ref.vr` `@repr(C, size(32), align(8))`:
+    /// 6 fields totalling 32 bytes —
+    ///   `{ ptr, generation: i32, epoch_and_caps: i32,
+    ///      metadata: i64, offset_from_base: i32, reserved: i32 }`.
+    /// Drift contract pinned by `verum_common::layout::FAT_REF_SIZE = 32`
+    /// and the runtime `verum_vbc::value::FatRef` size assertion.
     pub fn fat_ref_type(&self) -> Result<Type<'c>> {
-        Type::parse(self.context, "!llvm.struct<(ptr, i32, i32, i64)>")
-            .ok_or_else(|| MlirError::type_translation("fat_ref", "failed to parse"))
+        Type::parse(
+            self.context,
+            "!llvm.struct<(ptr, i32, i32, i64, i32, i32)>",
+        )
+        .ok_or_else(|| MlirError::type_translation("fat_ref", "failed to parse"))
     }
 
     /// Create a checked/unsafe pointer type.
