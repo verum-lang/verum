@@ -11460,353 +11460,12 @@ impl TypeChecker {
 
         match &expr.kind {
             // Lambda with known function type
-            Closure {
-                params,
-                body: closure_body,
-                return_type,
-                async_,
-                ..
-            } => {
-                // Flip `in_async_context` for async closures so their body
-                // may use `.await`. Mirrors the synth-mode handler at
-                // ~11725. The flag is restored by the `AsyncCtxGuard`
-                // below on every return path (including early `?` errors
-                // and success).
-                struct AsyncCtxGuard<'a> {
-                    checker: *mut TypeChecker,
-                    prev: Option<bool>,
-                    _lt: std::marker::PhantomData<&'a ()>,
-                }
-                impl Drop for AsyncCtxGuard<'_> {
-                    fn drop(&mut self) {
-                        if let Some(prev) = self.prev {
-                            // SAFETY: the guard borrows `self` through the
-                            // raw pointer for its lifetime only; the
-                            // surrounding `&mut self` enforces uniqueness.
-                            unsafe {
-                                (*self.checker).in_async_context = prev;
-                            }
-                        }
-                    }
-                }
-                let _async_ctx_guard = if *async_ {
-                    let prev = std::mem::replace(&mut self.in_async_context, true);
-                    AsyncCtxGuard {
-                        checker: self as *mut TypeChecker,
-                        prev: Some(prev),
-                        _lt: std::marker::PhantomData,
-                    }
-                } else {
-                    AsyncCtxGuard {
-                        checker: self as *mut TypeChecker,
-                        prev: None,
-                        _lt: std::marker::PhantomData,
-                    }
-                };
-                // ============================================================
-                // Rank-2 Polymorphic Closure Checking
-                // Spec: grammar/verum.ebnf - rank2_function_type
-                // ============================================================
-                // When checking a closure against a Forall type (rank-2), we
-                // instantiate the quantified type variables and check against
-                // the instantiated function type. The closure itself becomes
-                // rank-2 polymorphic.
-                if let Type::Forall {
-                    vars,
-                    body: forall_body,
-                } = expected
-                {
-                    // Instantiate the quantified type variables with fresh type vars
-                    let mut subst: Map<TypeVar, Type> = Map::new();
-                    for qvar in vars.iter() {
-                        let fresh = TypeVar::fresh();
-                        subst.insert(*qvar, Type::Var(fresh));
-                    }
-
-                    // Apply substitution to get the instantiated function type
-                    let instantiated_body = self.substitute_type_vars(forall_body, &subst);
-
-                    // Normalize the instantiated body to resolve type aliases
-                    // This handles cases like `fn<R>(Reducer<N, R>) -> Reducer<N, R>` where
-                    // `Reducer<N, R>` needs to be resolved to `fn(R, N) -> R`
-                    let normalized_body = self.normalize_type(&instantiated_body);
-
-                    // Check the closure against the instantiated function type
-                    if let Type::Function {
-                        params: expected_params,
-                        return_type: expected_return,
-                        ..
-                    } = &normalized_body
-                    {
-                        if params.len() != expected_params.len() {
-                            return Err(TypeError::Mismatch {
-                                expected: expected.to_text(),
-                                actual: format!("function with {} parameters", params.len()).into(),
-                                span: expr.span,
-                            });
-                        }
-
-                        // Enter new scope for lambda
-                        self.ctx.enter_scope();
-
-                        // Bind parameters with the instantiated types.
-                        // Normalize each param type to resolve associated type projections
-                        // (e.g., ::Item[Range<Int>] → Int) before binding.
-                        for (param, param_ty) in params.iter().zip(expected_params.iter()) {
-                            let normalized_param_ty = self.normalize_type(param_ty);
-                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
-                        }
-
-                        // Check body against return type
-                        let ret_ty = if let Some(rt) = return_type {
-                            self.ast_to_type(rt)?
-                        } else {
-                            (**expected_return).clone()
-                        };
-
-                        // Check body against expected return type with bidirectional inference.
-                        // We do NOT synth first: synth would resolve variant constructors
-                        // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
-                        // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
-                        // Bidirectional check_expr correctly propagates the expected type through
-                        // blocks, if/else expressions, and variant constructors.
-                        // Never-returning bodies (e.g., panic("...")) are handled correctly too:
-                        // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                        self.check_expr(closure_body, &ret_ty)?;
-
-                        self.ctx.exit_scope();
-
-                        // Register closure type in the type registry for codegen
-                        let resolved_expected = self.unifier.apply(expected);
-                        self.type_registry
-                            .register_expr(expr.span, resolved_expected);
-
-                        // Return the original Forall type (the closure is rank-2 polymorphic)
-                        Ok(InferResult::new(expected.clone()))
-                    } else {
-                        // Forall body is not a function type
-                        self.synth_and_check(expr, expected)
-                    }
-                } else {
-                    // Normalize expected type to resolve type aliases to function types
-                    // This handles cases like `Reducer<B, Maybe<B>>` which is an alias for `fn(Maybe<B>, B) -> Maybe<B>`
-                    let mut normalized_expected = self.normalize_type(expected);
-
-                    // If the expected type is a type variable, check for function type bounds.
-                    // This enables proper closure inference for generics like `F: fn() -> T`.
-                    // Generic function type bounds: "fn foo<T: Protocol>(...)" constrains T to types implementing Protocol
-                    if let Type::Var(tvar) = &normalized_expected {
-                        if let Maybe::Some(fn_bound) = self.get_function_type_bound(tvar) {
-                            // Apply the unifier to resolve any type variables in the bound
-                            // (e.g., fn(&T_fresh) -> Bool where T_fresh was already unified with Int)
-                            normalized_expected = self.unifier.apply(&fn_bound);
-                        }
-                    }
-
-                    if let Type::Function {
-                        params: expected_params,
-                        return_type: expected_return,
-                        ..
-                    } = &normalized_expected
-                    {
-                        if params.len() != expected_params.len() {
-                            return Err(TypeError::Mismatch {
-                                expected: expected.to_text(),
-                                actual: format!("function with {} parameters", params.len()).into(),
-                                span: expr.span,
-                            });
-                        }
-
-                        // Enter new scope for lambda
-                        self.ctx.enter_scope();
-
-                        // Bind parameters.
-                        // Normalize each param type to resolve associated type projections
-                        // (e.g., ::Item[Range<Int>] → Int) before binding, so that the
-                        // closure body sees concrete types rather than un-resolved projections.
-                        for (param, param_ty) in params.iter().zip(expected_params.iter()) {
-                            let normalized_param_ty = self.normalize_type(param_ty);
-                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
-                        }
-
-                        // Check body against return type
-                        let ret_ty = if let Some(rt) = return_type {
-                            self.ast_to_type(rt)?
-                        } else {
-                            (**expected_return).clone()
-                        };
-
-                        // Check body against expected return type with bidirectional inference.
-                        // We do NOT synth first: synth would resolve variant constructors
-                        // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
-                        // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
-                        // Bidirectional check_expr correctly propagates the expected type through
-                        // blocks, if/else expressions, and variant constructors.
-                        // Never-returning bodies (e.g., panic("...")) are handled correctly too:
-                        // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                        self.check_expr(closure_body, &ret_ty)?;
-
-                        self.ctx.exit_scope();
-
-                        // Register closure type in the type registry for codegen
-                        // Apply unifier substitution to resolve type variables
-                        // This enables closure parameter type inference during LLVM codegen
-                        let resolved_expected = self.unifier.apply(expected);
-                        self.type_registry
-                            .register_expr(expr.span, resolved_expected);
-
-                        Ok(InferResult::new(expected.clone()))
-                    } else {
-                        // Not a function type (even after normalization), fall back to synthesis + subsumption
-                        self.synth_and_check(expr, expected)
-                    }
-                }
-            }
+            Closure { .. } => self.check_closure_expr(expr, expected),
 
             // If expression with expected type
             // If expressions: both branches must unify to same type; if-let patterns narrow types in the then-branch
             // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-            If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                use crate::refinement_evidence::EvidencePropagator;
-
-                // Handle all conditions (expression and/or let conditions)
-                // Bindings from let conditions are available in the then branch
-                self.ctx.env.push_scope();
-                self.refinement_evidence.push_scope();
-
-                // Collect condition expressions for evidence propagation
-                let mut condition_exprs: Vec<&Expr> = Vec::new();
-
-                for cond in &condition.conditions {
-                    match cond {
-                        verum_ast::expr::ConditionKind::Expr(cond_expr) => {
-                            // Check if this is an `is` pattern test (e.g., `v is IntVal(n)`)
-                            // If so, bind pattern variables for the then-branch.
-                            if let ExprKind::Is {
-                                expr: test_expr,
-                                pattern,
-                                negated,
-                            } = &cond_expr.kind
-                            {
-                                let test_result = self.synth_expr(test_expr)?;
-                                if !*negated {
-                                    self.bind_pattern(pattern, &test_result.ty)?;
-                                }
-                            } else if let ExprKind::Binary {
-                                op: verum_ast::expr::BinOp::And,
-                                left,
-                                right,
-                            } = &cond_expr.kind
-                            {
-                                // Handle `v is Pattern && guard` by extracting Is from left of &&
-                                if let ExprKind::Is {
-                                    expr: test_expr,
-                                    pattern,
-                                    negated,
-                                } = &left.kind
-                                {
-                                    let test_result = self.synth_expr(test_expr)?;
-                                    if !negated {
-                                        self.bind_pattern(pattern, &test_result.ty)?;
-                                    }
-                                    // Check the guard condition with bindings in scope
-                                    self.check_expr(right, &Type::bool())?;
-                                } else {
-                                    // Regular && expression
-                                    self.check_expr(cond_expr, &Type::bool())?;
-                                }
-                            } else {
-                                // Expression condition - must be Bool
-                                self.check_expr(cond_expr, &Type::bool())?;
-                            }
-                            condition_exprs.push(cond_expr);
-
-                            // Add positive evidence for the then-branch
-                            // e.g., after `if x.is_empty()`, we know x.is_empty() == true in then
-                            self.refinement_evidence
-                                .add_evidence_from_condition(cond_expr, cond_expr.span);
-
-                            // Flow-sensitive type narrowing: narrow variable types based on condition
-                            self.narrow_variable_types_from_condition(cond_expr, false);
-
-                            // Track method-based conditions for better evidence
-                            if let Maybe::Some((var_name, method_name, negated)) =
-                                EvidencePropagator::analyze_method_condition(cond_expr)
-                            {
-                                // Note: The evidence is already added above, but we can
-                                // also track it by variable for faster lookup
-                                self.refinement_evidence.add_method_evidence(
-                                    var_name,
-                                    method_name.as_str(),
-                                    negated,
-                                    cond_expr.span,
-                                );
-                            }
-                        }
-                        verum_ast::expr::ConditionKind::Let { pattern, value } => {
-                            // Let condition - bind pattern to value type in scope
-                            let value_result = self.synth_expr(value)?;
-                            self.bind_pattern(pattern, &value_result.ty)?;
-                            // Pattern matching also provides evidence about the matched value
-                        }
-                    }
-                }
-
-                // Check then branch with evidence in scope
-                self.check_block(then_branch, expected)?;
-
-                // Check if then branch unconditionally exits
-                let then_exits = EvidencePropagator::block_unconditionally_exits(then_branch);
-
-                self.ctx.env.pop_scope();
-                self.refinement_evidence.pop_scope();
-
-                // If then branch exits and there's no else, propagate negated evidence
-                // to the continuation (the code after the if)
-                // e.g., `if data.is_empty() { return 0; }` means !data.is_empty() after
-                if then_exits && else_branch.is_none() {
-                    for cond_expr in &condition_exprs {
-                        self.refinement_evidence
-                            .add_negated_evidence(cond_expr, cond_expr.span);
-                        // Narrow variable types with negated condition in continuation
-                        self.narrow_variable_types_from_condition(cond_expr, true);
-
-                        // Track negated method conditions
-                        if let Maybe::Some((var_name, method_name, was_negated)) =
-                            EvidencePropagator::analyze_method_condition(cond_expr)
-                        {
-                            // Flip the negation: if condition was `x.is_empty()`,
-                            // we now know `!x.is_empty()` (negated=true)
-                            self.refinement_evidence.add_method_evidence(
-                                var_name,
-                                method_name.as_str(),
-                                !was_negated,
-                                cond_expr.span,
-                            );
-                        }
-                    }
-                }
-
-                if let Some(else_expr) = else_branch {
-                    // In else branch, we have the negation of the condition
-                    self.ctx.env.push_scope();
-                    self.refinement_evidence.push_scope();
-                    for cond_expr in &condition_exprs {
-                        self.refinement_evidence
-                            .add_negated_evidence(cond_expr, cond_expr.span);
-                        self.narrow_variable_types_from_condition(cond_expr, true);
-                    }
-                    self.check_expr(else_expr, expected)?;
-                    self.ctx.env.pop_scope();
-                    self.refinement_evidence.pop_scope();
-                }
-
-                Ok(InferResult::new(expected.clone()))
-            }
+            If { .. } => self.check_if_expr(expr, expected),
 
             // Block with expected type
             Block(block) => self.check_block(block, expected),
@@ -11892,170 +11551,7 @@ impl TypeChecker {
 
             // Record literal with expected type - enables bidirectional inference for generics
             // e.g., `Box { value: 42 }` with expected type `Box<Int>` should infer T = Int
-            Record { path, fields, base } => {
-                // For generic struct instantiation, extract type args from expected type
-                // and substitute them into the field types
-                let type_name = self.path_to_string(path);
-                let struct_key = format!("__struct_fields_{}", type_name);
-
-                // Check if type_name is a variant record constructor by looking it up in the env.
-                // If it's a constructor function returning a Variant type, delegate to synth_and_check
-                // which correctly handles variant record constructors via env lookup.
-                // This prevents stdlib struct "Rect { x, y, width, height }" from shadowing
-                // user-defined variant "Rect { w, h }" in `type Shape is ... | Rect { w: Int, h: Int }`
-                let is_variant_constructor =
-                    if let Some(scheme) = self.ctx.env.lookup(type_name.as_str()) {
-                        let ty = scheme.instantiate();
-                        matches!(&ty, Type::Function { return_type, .. }
-                        if matches!(return_type.as_ref(), Type::Variant(_)))
-                    } else {
-                        false
-                    };
-
-                if is_variant_constructor {
-                    return self.synth_and_check(expr, expected);
-                }
-
-                // Get the stored field types (may contain type variables like T)
-                let stored_fields = match self.ctx.lookup_type(struct_key.as_str()) {
-                    Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
-                    _ => match self.ctx.lookup_type(type_name.as_str()) {
-                        Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
-                        _ => {
-                            if let Type::Variant(variants) = expected {
-                                variants.get(type_name.as_str()).and_then(|payload| {
-                                    if let Type::Record(field_types) = payload {
-                                        Some(field_types.clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                            } else {
-                                None
-                            }
-                        }
-                    },
-                };
-
-                // Get type parameters from the stored type definition
-                let type_params_key = format!("__type_params_{}", type_name);
-                let type_params: List<verum_common::Text> = match self
-                    .ctx
-                    .lookup_type(type_params_key.as_str())
-                {
-                    Option::Some(Type::Record(params_map)) => params_map.keys().cloned().collect(),
-                    _ => List::new(), // No type parameters
-                };
-
-                // Extract concrete type args from expected type (e.g., Int from Box<Int>)
-                // CRITICAL FIX: If expected is a type variable and this is a generic type,
-                // create fresh type variables for the type parameters.
-                let type_args: List<Type> = match expected {
-                    Type::Named { args, .. } if !args.is_empty() => args.clone(),
-                    Type::Named { args, .. } if args.is_empty() && !type_params.is_empty() => {
-                        // Named type without args but we have type params - create fresh vars
-                        type_params
-                            .iter()
-                            .map(|_| Type::Var(TypeVar::fresh()))
-                            .collect()
-                    }
-                    _ if !type_params.is_empty() => {
-                        // Expected is a type variable or other - create fresh type vars for generic types
-                        type_params
-                            .iter()
-                            .map(|_| Type::Var(TypeVar::fresh()))
-                            .collect()
-                    }
-                    _ => List::new(),
-                };
-
-                // Build a substitution from type parameters to type arguments
-                let mut param_subst = indexmap::IndexMap::new();
-                for (param_name, arg_ty) in type_params.iter().zip(type_args.iter()) {
-                    param_subst.insert(param_name.clone(), arg_ty.clone());
-                }
-
-                // Apply the substitution to get resolved field types
-                let expected_fields = if let Some(field_types) = stored_fields {
-                    let mut resolved_fields = indexmap::IndexMap::new();
-                    for (fname, fty) in field_types.iter() {
-                        // Substitute type variables with concrete types
-                        let resolved_ty = self.substitute_type_params(fty, &param_subst);
-                        // CRITICAL FIX: Also resolve any placeholder types (forward references)
-                        // When types are defined out of order, field types may contain placeholders
-                        // like <placeholder:Metadata> that need to be resolved to the actual type.
-                        let resolved_ty = self.substitute_placeholders(&resolved_ty);
-                        resolved_fields.insert(fname.clone(), resolved_ty);
-                    }
-                    resolved_fields
-                } else {
-                    return self.synth_and_check(expr, expected);
-                };
-
-                // Handle base record spread
-                if let Some(base_expr) = base {
-                    self.check_expr(base_expr, expected)?;
-                }
-
-                // Check each field against the resolved expected types
-                for field_init in fields {
-                    let field_name: Text = field_init.name.name.as_str().into();
-
-                    let expected_field_ty = match expected_fields.get(&field_name) {
-                        Some(ty) => ty,
-                        None => {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "field '{}' not found in type '{}'",
-                                field_name,
-                                self.path_to_string(path)
-                            ))));
-                        }
-                    };
-
-                    if let Some(ref value_expr) = field_init.value {
-                        self.check_expr(value_expr, expected_field_ty)?;
-                    } else {
-                        // Shorthand syntax
-                        if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()) {
-                            let var_ty = scheme.instantiate();
-                            self.unifier
-                                .unify(&var_ty, expected_field_ty, field_init.span)?;
-                        } else {
-                            return Err(TypeError::UnboundVariable {
-                                name: field_name,
-                                span: field_init.span,
-                            });
-                        }
-                    }
-                }
-
-                // CRITICAL FIX: Unify the actual struct type with the expected type
-                // This is essential for generic type inference: when expected is a type
-                // variable τ37, we need to bind it to the actual struct type (e.g., Handle)
-                // so that outer generic structs like Wrapper<T> can resolve T correctly.
-                // NOTE: Resolve Self to actual type path if needed
-                let resolved_path = if path.segments.len() == 1
-                    && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
-                {
-                    if let Maybe::Some(Type::Named {
-                        path: self_path, ..
-                    }) = &self.current_self_type
-                    {
-                        self_path.clone()
-                    } else {
-                        path.clone()
-                    }
-                } else {
-                    path.clone()
-                };
-                let actual_struct_ty = Type::Named {
-                    path: resolved_path,
-                    args: type_args,
-                };
-                self.unifier.unify(&actual_struct_ty, expected, expr.span)?;
-
-                Ok(InferResult::new(expected.clone()))
-            }
+            Record { .. } => self.check_record_expr(expr, expected),
 
             // Array with expected type - enables bidirectional inference for element types
             // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .5.1 - Meta Parameters
@@ -12559,6 +12055,525 @@ impl TypeChecker {
 
     /// Includes auto-borrow coercion: T → &T when expected is immutable reference.
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow в позиции вызова)
+    /// Bidirectional type-check a closure expression.
+    /// When `expected` is a `Forall` (rank-2), instantiates the quantified
+    /// variables. When a `Function` type is known, uses it to bind params;
+    /// otherwise falls back to synthesis + subsumption.
+    fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Closure { params, body: closure_body, return_type, async_, .. } = &expr.kind
+            else { unreachable!() };
+                // Flip `in_async_context` for async closures so their body
+                // may use `.await`. Mirrors the synth-mode handler at
+                // ~11725. The flag is restored by the `AsyncCtxGuard`
+                // below on every return path (including early `?` errors
+                // and success).
+                struct AsyncCtxGuard<'a> {
+                    checker: *mut TypeChecker,
+                    prev: Option<bool>,
+                    _lt: std::marker::PhantomData<&'a ()>,
+                }
+                impl Drop for AsyncCtxGuard<'_> {
+                    fn drop(&mut self) {
+                        if let Some(prev) = self.prev {
+                            // SAFETY: the guard borrows `self` through the
+                            // raw pointer for its lifetime only; the
+                            // surrounding `&mut self` enforces uniqueness.
+                            unsafe {
+                                (*self.checker).in_async_context = prev;
+                            }
+                        }
+                    }
+                }
+                let _async_ctx_guard = if *async_ {
+                    let prev = std::mem::replace(&mut self.in_async_context, true);
+                    AsyncCtxGuard {
+                        checker: self as *mut TypeChecker,
+                        prev: Some(prev),
+                        _lt: std::marker::PhantomData,
+                    }
+                } else {
+                    AsyncCtxGuard {
+                        checker: self as *mut TypeChecker,
+                        prev: None,
+                        _lt: std::marker::PhantomData,
+                    }
+                };
+                // ============================================================
+                // Rank-2 Polymorphic Closure Checking
+                // Spec: grammar/verum.ebnf - rank2_function_type
+                // ============================================================
+                // When checking a closure against a Forall type (rank-2), we
+                // instantiate the quantified type variables and check against
+                // the instantiated function type. The closure itself becomes
+                // rank-2 polymorphic.
+                if let Type::Forall {
+                    vars,
+                    body: forall_body,
+                } = expected
+                {
+                    // Instantiate the quantified type variables with fresh type vars
+                    let mut subst: Map<TypeVar, Type> = Map::new();
+                    for qvar in vars.iter() {
+                        let fresh = TypeVar::fresh();
+                        subst.insert(*qvar, Type::Var(fresh));
+                    }
+
+                    // Apply substitution to get the instantiated function type
+                    let instantiated_body = self.substitute_type_vars(forall_body, &subst);
+
+                    // Normalize the instantiated body to resolve type aliases
+                    // This handles cases like `fn<R>(Reducer<N, R>) -> Reducer<N, R>` where
+                    // `Reducer<N, R>` needs to be resolved to `fn(R, N) -> R`
+                    let normalized_body = self.normalize_type(&instantiated_body);
+
+                    // Check the closure against the instantiated function type
+                    if let Type::Function {
+                        params: expected_params,
+                        return_type: expected_return,
+                        ..
+                    } = &normalized_body
+                    {
+                        if params.len() != expected_params.len() {
+                            return Err(TypeError::Mismatch {
+                                expected: expected.to_text(),
+                                actual: format!("function with {} parameters", params.len()).into(),
+                                span: expr.span,
+                            });
+                        }
+
+                        // Enter new scope for lambda
+                        self.ctx.enter_scope();
+
+                        // Bind parameters with the instantiated types.
+                        // Normalize each param type to resolve associated type projections
+                        // (e.g., ::Item[Range<Int>] → Int) before binding.
+                        for (param, param_ty) in params.iter().zip(expected_params.iter()) {
+                            let normalized_param_ty = self.normalize_type(param_ty);
+                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
+                        }
+
+                        // Check body against return type
+                        let ret_ty = if let Some(rt) = return_type {
+                            self.ast_to_type(rt)?
+                        } else {
+                            (**expected_return).clone()
+                        };
+
+                        // Check body against expected return type with bidirectional inference.
+                        // We do NOT synth first: synth would resolve variant constructors
+                        // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
+                        // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
+                        // Bidirectional check_expr correctly propagates the expected type through
+                        // blocks, if/else expressions, and variant constructors.
+                        // Never-returning bodies (e.g., panic("...")) are handled correctly too:
+                        // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
+                        self.check_expr(closure_body, &ret_ty)?;
+
+                        self.ctx.exit_scope();
+
+                        // Register closure type in the type registry for codegen
+                        let resolved_expected = self.unifier.apply(expected);
+                        self.type_registry
+                            .register_expr(expr.span, resolved_expected);
+
+                        // Return the original Forall type (the closure is rank-2 polymorphic)
+                        Ok(InferResult::new(expected.clone()))
+                    } else {
+                        // Forall body is not a function type
+                        self.synth_and_check(expr, expected)
+                    }
+                } else {
+                    // Normalize expected type to resolve type aliases to function types
+                    // This handles cases like `Reducer<B, Maybe<B>>` which is an alias for `fn(Maybe<B>, B) -> Maybe<B>`
+                    let mut normalized_expected = self.normalize_type(expected);
+
+                    // If the expected type is a type variable, check for function type bounds.
+                    // This enables proper closure inference for generics like `F: fn() -> T`.
+                    // Generic function type bounds: "fn foo<T: Protocol>(...)" constrains T to types implementing Protocol
+                    if let Type::Var(tvar) = &normalized_expected {
+                        if let Maybe::Some(fn_bound) = self.get_function_type_bound(tvar) {
+                            // Apply the unifier to resolve any type variables in the bound
+                            // (e.g., fn(&T_fresh) -> Bool where T_fresh was already unified with Int)
+                            normalized_expected = self.unifier.apply(&fn_bound);
+                        }
+                    }
+
+                    if let Type::Function {
+                        params: expected_params,
+                        return_type: expected_return,
+                        ..
+                    } = &normalized_expected
+                    {
+                        if params.len() != expected_params.len() {
+                            return Err(TypeError::Mismatch {
+                                expected: expected.to_text(),
+                                actual: format!("function with {} parameters", params.len()).into(),
+                                span: expr.span,
+                            });
+                        }
+
+                        // Enter new scope for lambda
+                        self.ctx.enter_scope();
+
+                        // Bind parameters.
+                        // Normalize each param type to resolve associated type projections
+                        // (e.g., ::Item[Range<Int>] → Int) before binding, so that the
+                        // closure body sees concrete types rather than un-resolved projections.
+                        for (param, param_ty) in params.iter().zip(expected_params.iter()) {
+                            let normalized_param_ty = self.normalize_type(param_ty);
+                            self.bind_pattern(&param.pattern, &normalized_param_ty)?;
+                        }
+
+                        // Check body against return type
+                        let ret_ty = if let Some(rt) = return_type {
+                            self.ast_to_type(rt)?
+                        } else {
+                            (**expected_return).clone()
+                        };
+
+                        // Check body against expected return type with bidirectional inference.
+                        // We do NOT synth first: synth would resolve variant constructors
+                        // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
+                        // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
+                        // Bidirectional check_expr correctly propagates the expected type through
+                        // blocks, if/else expressions, and variant constructors.
+                        // Never-returning bodies (e.g., panic("...")) are handled correctly too:
+                        // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
+                        self.check_expr(closure_body, &ret_ty)?;
+
+                        self.ctx.exit_scope();
+
+                        // Register closure type in the type registry for codegen
+                        // Apply unifier substitution to resolve type variables
+                        // This enables closure parameter type inference during LLVM codegen
+                        let resolved_expected = self.unifier.apply(expected);
+                        self.type_registry
+                            .register_expr(expr.span, resolved_expected);
+
+                        Ok(InferResult::new(expected.clone()))
+                    } else {
+                        // Not a function type (even after normalization), fall back to synthesis + subsumption
+                        self.synth_and_check(expr, expected)
+                    }
+                }
+    }
+
+    /// Bidirectional type-check an `if` expression.
+    /// Propagates refinement evidence from conditions into the then-branch,
+    /// checks both branches against the expected type, and unifies the results.
+    fn check_if_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::If { condition, then_branch, else_branch } = &expr.kind
+            else { unreachable!() };
+                use crate::refinement_evidence::EvidencePropagator;
+
+                // Handle all conditions (expression and/or let conditions)
+                // Bindings from let conditions are available in the then branch
+                self.ctx.env.push_scope();
+                self.refinement_evidence.push_scope();
+
+                // Collect condition expressions for evidence propagation
+                let mut condition_exprs: Vec<&Expr> = Vec::new();
+
+                for cond in &condition.conditions {
+                    match cond {
+                        verum_ast::expr::ConditionKind::Expr(cond_expr) => {
+                            // Check if this is an `is` pattern test (e.g., `v is IntVal(n)`)
+                            // If so, bind pattern variables for the then-branch.
+                            if let ExprKind::Is {
+                                expr: test_expr,
+                                pattern,
+                                negated,
+                            } = &cond_expr.kind
+                            {
+                                let test_result = self.synth_expr(test_expr)?;
+                                if !*negated {
+                                    self.bind_pattern(pattern, &test_result.ty)?;
+                                }
+                            } else if let ExprKind::Binary {
+                                op: verum_ast::expr::BinOp::And,
+                                left,
+                                right,
+                            } = &cond_expr.kind
+                            {
+                                // Handle `v is Pattern && guard` by extracting Is from left of &&
+                                if let ExprKind::Is {
+                                    expr: test_expr,
+                                    pattern,
+                                    negated,
+                                } = &left.kind
+                                {
+                                    let test_result = self.synth_expr(test_expr)?;
+                                    if !negated {
+                                        self.bind_pattern(pattern, &test_result.ty)?;
+                                    }
+                                    // Check the guard condition with bindings in scope
+                                    self.check_expr(right, &Type::bool())?;
+                                } else {
+                                    // Regular && expression
+                                    self.check_expr(cond_expr, &Type::bool())?;
+                                }
+                            } else {
+                                // Expression condition - must be Bool
+                                self.check_expr(cond_expr, &Type::bool())?;
+                            }
+                            condition_exprs.push(cond_expr);
+
+                            // Add positive evidence for the then-branch
+                            // e.g., after `if x.is_empty()`, we know x.is_empty() == true in then
+                            self.refinement_evidence
+                                .add_evidence_from_condition(cond_expr, cond_expr.span);
+
+                            // Flow-sensitive type narrowing: narrow variable types based on condition
+                            self.narrow_variable_types_from_condition(cond_expr, false);
+
+                            // Track method-based conditions for better evidence
+                            if let Maybe::Some((var_name, method_name, negated)) =
+                                EvidencePropagator::analyze_method_condition(cond_expr)
+                            {
+                                // Note: The evidence is already added above, but we can
+                                // also track it by variable for faster lookup
+                                self.refinement_evidence.add_method_evidence(
+                                    var_name,
+                                    method_name.as_str(),
+                                    negated,
+                                    cond_expr.span,
+                                );
+                            }
+                        }
+                        verum_ast::expr::ConditionKind::Let { pattern, value } => {
+                            // Let condition - bind pattern to value type in scope
+                            let value_result = self.synth_expr(value)?;
+                            self.bind_pattern(pattern, &value_result.ty)?;
+                            // Pattern matching also provides evidence about the matched value
+                        }
+                    }
+                }
+
+                // Check then branch with evidence in scope
+                self.check_block(then_branch, expected)?;
+
+                // Check if then branch unconditionally exits
+                let then_exits = EvidencePropagator::block_unconditionally_exits(then_branch);
+
+                self.ctx.env.pop_scope();
+                self.refinement_evidence.pop_scope();
+
+                // If then branch exits and there's no else, propagate negated evidence
+                // to the continuation (the code after the if)
+                // e.g., `if data.is_empty() { return 0; }` means !data.is_empty() after
+                if then_exits && else_branch.is_none() {
+                    for cond_expr in &condition_exprs {
+                        self.refinement_evidence
+                            .add_negated_evidence(cond_expr, cond_expr.span);
+                        // Narrow variable types with negated condition in continuation
+                        self.narrow_variable_types_from_condition(cond_expr, true);
+
+                        // Track negated method conditions
+                        if let Maybe::Some((var_name, method_name, was_negated)) =
+                            EvidencePropagator::analyze_method_condition(cond_expr)
+                        {
+                            // Flip the negation: if condition was `x.is_empty()`,
+                            // we now know `!x.is_empty()` (negated=true)
+                            self.refinement_evidence.add_method_evidence(
+                                var_name,
+                                method_name.as_str(),
+                                !was_negated,
+                                cond_expr.span,
+                            );
+                        }
+                    }
+                }
+
+                if let Some(else_expr) = else_branch {
+                    // In else branch, we have the negation of the condition
+                    self.ctx.env.push_scope();
+                    self.refinement_evidence.push_scope();
+                    for cond_expr in &condition_exprs {
+                        self.refinement_evidence
+                            .add_negated_evidence(cond_expr, cond_expr.span);
+                        self.narrow_variable_types_from_condition(cond_expr, true);
+                    }
+                    self.check_expr(else_expr, expected)?;
+                    self.ctx.env.pop_scope();
+                    self.refinement_evidence.pop_scope();
+                }
+
+                Ok(InferResult::new(expected.clone()))
+    }
+
+    /// Bidirectional type-check a record literal expression against an expected type.
+    /// Checks each field against its declared type, handles optional base spread,
+    /// and propagates narrowed type information for refinement fields.
+    fn check_record_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Record { path, fields, base } = &expr.kind
+            else { unreachable!() };
+                // For generic struct instantiation, extract type args from expected type
+                // and substitute them into the field types
+                let type_name = self.path_to_string(path);
+                let struct_key = format!("__struct_fields_{}", type_name);
+
+                // Check if type_name is a variant record constructor by looking it up in the env.
+                // If it's a constructor function returning a Variant type, delegate to synth_and_check
+                // which correctly handles variant record constructors via env lookup.
+                // This prevents stdlib struct "Rect { x, y, width, height }" from shadowing
+                // user-defined variant "Rect { w, h }" in `type Shape is ... | Rect { w: Int, h: Int }`
+                let is_variant_constructor =
+                    if let Some(scheme) = self.ctx.env.lookup(type_name.as_str()) {
+                        let ty = scheme.instantiate();
+                        matches!(&ty, Type::Function { return_type, .. }
+                        if matches!(return_type.as_ref(), Type::Variant(_)))
+                    } else {
+                        false
+                    };
+
+                if is_variant_constructor {
+                    return self.synth_and_check(expr, expected);
+                }
+
+                // Get the stored field types (may contain type variables like T)
+                let stored_fields = match self.ctx.lookup_type(struct_key.as_str()) {
+                    Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
+                    _ => match self.ctx.lookup_type(type_name.as_str()) {
+                        Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
+                        _ => {
+                            if let Type::Variant(variants) = expected {
+                                variants.get(type_name.as_str()).and_then(|payload| {
+                                    if let Type::Record(field_types) = payload {
+                                        Some(field_types.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                    },
+                };
+
+                // Get type parameters from the stored type definition
+                let type_params_key = format!("__type_params_{}", type_name);
+                let type_params: List<verum_common::Text> = match self
+                    .ctx
+                    .lookup_type(type_params_key.as_str())
+                {
+                    Option::Some(Type::Record(params_map)) => params_map.keys().cloned().collect(),
+                    _ => List::new(), // No type parameters
+                };
+
+                // Extract concrete type args from expected type (e.g., Int from Box<Int>)
+                // CRITICAL FIX: If expected is a type variable and this is a generic type,
+                // create fresh type variables for the type parameters.
+                let type_args: List<Type> = match expected {
+                    Type::Named { args, .. } if !args.is_empty() => args.clone(),
+                    Type::Named { args, .. } if args.is_empty() && !type_params.is_empty() => {
+                        // Named type without args but we have type params - create fresh vars
+                        type_params
+                            .iter()
+                            .map(|_| Type::Var(TypeVar::fresh()))
+                            .collect()
+                    }
+                    _ if !type_params.is_empty() => {
+                        // Expected is a type variable or other - create fresh type vars for generic types
+                        type_params
+                            .iter()
+                            .map(|_| Type::Var(TypeVar::fresh()))
+                            .collect()
+                    }
+                    _ => List::new(),
+                };
+
+                // Build a substitution from type parameters to type arguments
+                let mut param_subst = indexmap::IndexMap::new();
+                for (param_name, arg_ty) in type_params.iter().zip(type_args.iter()) {
+                    param_subst.insert(param_name.clone(), arg_ty.clone());
+                }
+
+                // Apply the substitution to get resolved field types
+                let expected_fields = if let Some(field_types) = stored_fields {
+                    let mut resolved_fields = indexmap::IndexMap::new();
+                    for (fname, fty) in field_types.iter() {
+                        // Substitute type variables with concrete types
+                        let resolved_ty = self.substitute_type_params(fty, &param_subst);
+                        // CRITICAL FIX: Also resolve any placeholder types (forward references)
+                        // When types are defined out of order, field types may contain placeholders
+                        // like <placeholder:Metadata> that need to be resolved to the actual type.
+                        let resolved_ty = self.substitute_placeholders(&resolved_ty);
+                        resolved_fields.insert(fname.clone(), resolved_ty);
+                    }
+                    resolved_fields
+                } else {
+                    return self.synth_and_check(expr, expected);
+                };
+
+                // Handle base record spread
+                if let Some(base_expr) = base {
+                    self.check_expr(base_expr, expected)?;
+                }
+
+                // Check each field against the resolved expected types
+                for field_init in fields {
+                    let field_name: Text = field_init.name.name.as_str().into();
+
+                    let expected_field_ty = match expected_fields.get(&field_name) {
+                        Some(ty) => ty,
+                        None => {
+                            return Err(TypeError::Other(verum_common::Text::from(format!(
+                                "field '{}' not found in type '{}'",
+                                field_name,
+                                self.path_to_string(path)
+                            ))));
+                        }
+                    };
+
+                    if let Some(ref value_expr) = field_init.value {
+                        self.check_expr(value_expr, expected_field_ty)?;
+                    } else {
+                        // Shorthand syntax
+                        if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()) {
+                            let var_ty = scheme.instantiate();
+                            self.unifier
+                                .unify(&var_ty, expected_field_ty, field_init.span)?;
+                        } else {
+                            return Err(TypeError::UnboundVariable {
+                                name: field_name,
+                                span: field_init.span,
+                            });
+                        }
+                    }
+                }
+
+                // CRITICAL FIX: Unify the actual struct type with the expected type
+                // This is essential for generic type inference: when expected is a type
+                // variable τ37, we need to bind it to the actual struct type (e.g., Handle)
+                // so that outer generic structs like Wrapper<T> can resolve T correctly.
+                // NOTE: Resolve Self to actual type path if needed
+                let resolved_path = if path.segments.len() == 1
+                    && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
+                {
+                    if let Maybe::Some(Type::Named {
+                        path: self_path, ..
+                    }) = &self.current_self_type
+                    {
+                        self_path.clone()
+                    } else {
+                        path.clone()
+                    }
+                } else {
+                    path.clone()
+                };
+                let actual_struct_ty = Type::Named {
+                    path: resolved_path,
+                    args: type_args,
+                };
+                self.unifier.unify(&actual_struct_ty, expected, expr.span)?;
+
+                Ok(InferResult::new(expected.clone()))
+    }
+
     fn synth_and_check(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let result = self.synth_expr(expr)?;
 
