@@ -1009,6 +1009,67 @@ mod tests {
         );
     }
 
+    /// AllocationHeader per-field offset drift contract.
+    ///
+    /// The Rust `#[repr(C, align(32))]` lowering MUST place each field
+    /// at the canonical offset declared in `verum_common::layout` — drift
+    /// here means downstream readers (LLVM codegen, MLIR codegen, SMT
+    /// verifier, static-analysis layer) GEP into wrong slots and
+    /// silently corrupt allocation state.
+    ///
+    /// Mirrors the `cbgr_runtime_field_offsets_match_canonical` pattern
+    /// for ThinRef / FatRef in `verum_vbc::value::tests`.
+    #[test]
+    fn allocation_header_field_offsets_pinned() {
+        use crate::layout::*;
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, size) as u64,
+            ALLOCATION_HEADER_SIZE_OFFSET,
+            "AllocationHeader::size offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, alignment) as u64,
+            ALLOCATION_HEADER_ALIGNMENT_OFFSET,
+            "AllocationHeader::alignment offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, generation) as u64,
+            ALLOCATION_HEADER_GENERATION_OFFSET,
+            "AllocationHeader::generation offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, epoch) as u64,
+            ALLOCATION_HEADER_EPOCH_OFFSET,
+            "AllocationHeader::epoch offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, capabilities) as u64,
+            ALLOCATION_HEADER_CAPABILITIES_OFFSET,
+            "AllocationHeader::capabilities offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, type_id) as u64,
+            ALLOCATION_HEADER_TYPE_ID_OFFSET,
+            "AllocationHeader::type_id offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(AllocationHeader, flags) as u64,
+            ALLOCATION_HEADER_FLAGS_OFFSET,
+            "AllocationHeader::flags offset drifted",
+        );
+        // Total struct size matches the canonical constant.
+        assert_eq!(
+            std::mem::size_of::<AllocationHeader>() as u64,
+            ALLOCATION_HEADER_SIZE,
+        );
+        // Alignment matches the @repr(C, align(32)) declaration.
+        assert_eq!(
+            std::mem::align_of::<AllocationHeader>(),
+            32,
+            "AllocationHeader must be 32-byte aligned (per #[repr(C, align(32))])",
+        );
+    }
+
     #[test]
     fn test_cbgr_header_new() {
         let header = CbgrHeader::new(42);

@@ -185,12 +185,57 @@ pub const EPOCH_MASK_U32: u32 = (1u32 << EPOCH_BITS) - 1; // 0xFFFF
 ///
 /// **Authoritative source:** `core/mem/header.vr` declares
 /// `HEADER_SIZE: Int = 32`. The runtime mirror is
-/// `verum_common::cbgr::AllocationHeader::SIZE` (also 32). The header
-/// stores `{ generation: u32, epoch_and_caps: u32, type_id: u32,
-/// size: u32, ... }` — codegen back-pointer arithmetic
-/// (`user_ptr - ALLOCATION_HEADER_SIZE`) recovers the header from a
-/// data pointer for runtime CBGR validation.
+/// `verum_common::cbgr::AllocationHeader::SIZE` (also 32).
+///
+/// Codegen back-pointer arithmetic (`user_ptr - ALLOCATION_HEADER_SIZE`)
+/// recovers the header from a data pointer for runtime CBGR validation.
 pub const ALLOCATION_HEADER_SIZE: u64 = 32;
+
+// ----------------------------------------------------------------------------
+// AllocationHeader per-field byte offsets
+// ----------------------------------------------------------------------------
+//
+// Layout (`core/mem/header.vr`, mirrored by
+// `verum_common::cbgr::AllocationHeader` `#[repr(C, align(32))]`):
+// ```text
+//     size:         u32        @  0
+//     alignment:    u32        @  4
+//     generation:   AtomicU32  @  8
+//     epoch:        AtomicU16  @ 12
+//     capabilities: AtomicU16  @ 14
+//     type_id:      u32        @ 16
+//     flags:        AtomicU32  @ 20
+//     reserved:     [u32; 2]   @ 24
+// ```
+// Drift contract pinned by the `offset_of!`-based tests in
+// `verum_common::cbgr::tests::allocation_header_field_offsets_pinned`.
+// Codegen / SMT verifier / static analysis layers that materialise
+// allocation headers MUST consult these constants — never magic
+// numbers.
+
+/// Offset of the `size` field in `AllocationHeader`.
+pub const ALLOCATION_HEADER_SIZE_OFFSET: u64 = 0;
+
+/// Offset of the `alignment` field.
+pub const ALLOCATION_HEADER_ALIGNMENT_OFFSET: u64 = 4;
+
+/// Offset of the atomic `generation` u32 field.
+pub const ALLOCATION_HEADER_GENERATION_OFFSET: u64 = 8;
+
+/// Offset of the atomic `epoch` u16 field.
+pub const ALLOCATION_HEADER_EPOCH_OFFSET: u64 = 12;
+
+/// Offset of the atomic `capabilities` u16 field.
+pub const ALLOCATION_HEADER_CAPABILITIES_OFFSET: u64 = 14;
+
+/// Offset of the `type_id` u32 field.
+pub const ALLOCATION_HEADER_TYPE_ID_OFFSET: u64 = 16;
+
+/// Offset of the atomic `flags` u32 field.
+pub const ALLOCATION_HEADER_FLAGS_OFFSET: u64 = 20;
+
+/// Offset of the `reserved` `[u32; 2]` padding field.
+pub const ALLOCATION_HEADER_RESERVED_OFFSET: u64 = 24;
 
 // ============================================================================
 // Heap object header (Tier-0 interpreter / Tier-1 codegen shared)
@@ -513,6 +558,32 @@ mod tests {
         // Variants — tag in slot 0, payload in slot 1.
         assert_eq!(VARIANT_TAG_OFFSET, OBJECT_HEADER_SIZE);
         assert_eq!(VARIANT_PAYLOAD_OFFSET, OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE);
+    }
+
+    /// AllocationHeader field offsets are derived from
+    /// `ALLOCATION_HEADER_SIZE_OFFSET = 0` plus declared field widths.
+    /// Layout: `size(4) + alignment(4) + generation(4) + epoch(2) +
+    /// capabilities(2) + type_id(4) + flags(4) + reserved(8)` = 32 bytes.
+    /// Each next offset must equal previous offset + previous field
+    /// width — pinning here guarantees the constants stay self-
+    /// consistent independent of the actual `#[repr(C)]` struct.
+    #[test]
+    fn allocation_header_offsets_pinned() {
+        // Derived offsets: each field starts where the previous ended.
+        assert_eq!(ALLOCATION_HEADER_SIZE_OFFSET, 0);
+        assert_eq!(ALLOCATION_HEADER_ALIGNMENT_OFFSET, 4);   // size: u32 → 4
+        assert_eq!(ALLOCATION_HEADER_GENERATION_OFFSET, 8);  // alignment: u32 → 8
+        assert_eq!(ALLOCATION_HEADER_EPOCH_OFFSET, 12);      // generation: u32 → 12
+        assert_eq!(ALLOCATION_HEADER_CAPABILITIES_OFFSET, 14); // epoch: u16 → 14
+        assert_eq!(ALLOCATION_HEADER_TYPE_ID_OFFSET, 16);    // capabilities: u16 → 16
+        assert_eq!(ALLOCATION_HEADER_FLAGS_OFFSET, 20);      // type_id: u32 → 20
+        assert_eq!(ALLOCATION_HEADER_RESERVED_OFFSET, 24);   // flags: u32 → 24
+        // Reserved is 8 bytes (u32 × 2), filling out to 32.
+        assert_eq!(
+            ALLOCATION_HEADER_RESERVED_OFFSET + 8,
+            ALLOCATION_HEADER_SIZE,
+            "reserved [u32; 2] fits exactly into the 32-byte total",
+        );
     }
 
     /// Heap-configuration invariants. Both interpreter heap impls and
