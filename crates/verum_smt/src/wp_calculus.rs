@@ -420,6 +420,7 @@ impl<'ctx> WpEngine<'ctx> {
                 },
                 span: right.span,
                 check_eliminated: false,
+        resolved_call_target: None,
                 ref_kind: None,
             }
         };
@@ -909,6 +910,7 @@ impl<'a> DataflowAnalyzer<'a> {
             },
             span: right.span,
             check_eliminated: false,
+        resolved_call_target: None,
             ref_kind: None,
         }
     }

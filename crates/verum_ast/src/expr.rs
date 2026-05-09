@@ -29,6 +29,23 @@ pub struct Expr {
     /// Whether CBGR check has been eliminated for this expression
     #[serde(skip)]
     pub check_eliminated: bool,
+    /// Typechecker-resolved call target — populated during type
+    /// inference for `Type.method(...)` and `obj.method(...)`
+    /// expressions where the dispatch resolves to a single global
+    /// function or variant constructor. Codegen consults this
+    /// sidecar BEFORE replaying the legacy 7-step name-resolution
+    /// cascade in `compile_method_call`; when present it provides
+    /// O(1) static dispatch with no string lookups.
+    ///
+    /// Architectural intent: the typechecker is the single source of
+    /// truth for "which function does `Foo.bar(x)` actually call?"
+    /// Persisting the resolution onto the AST closes the duplication
+    /// where codegen re-derives the same answer through a string-
+    /// based cascade.  The legacy cascade remains as a fallback for
+    /// AST nodes built outside the typechecker (legacy or
+    /// `--verify=runtime` modes).
+    #[serde(skip)]
+    pub resolved_call_target: Option<ResolvedCallTarget>,
 }
 
 impl Expr {
@@ -38,6 +55,7 @@ impl Expr {
             span,
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         }
     }
 
@@ -74,6 +92,23 @@ impl Expr {
     /// Mark CBGR check as eliminated
     pub fn mark_check_eliminated(&mut self) {
         self.check_eliminated = true;
+    }
+
+    /// The resolved call target — Some when the typechecker has
+    /// pre-resolved the dispatch (`Type.method(...)` → global
+    /// FunctionId, or variant constructor → tag).  See the field's
+    /// docstring on [`Expr::resolved_call_target`] for the
+    /// architectural rationale.
+    pub fn resolved_call_target(&self) -> Option<&ResolvedCallTarget> {
+        self.resolved_call_target.as_ref()
+    }
+
+    /// Record a typechecker-resolved call target on this expression.
+    /// Called by `verum_types::infer::infer_method_call` when
+    /// dispatch resolves unambiguously to a single function or
+    /// variant.
+    pub fn set_resolved_call_target(&mut self, target: ResolvedCallTarget) {
+        self.resolved_call_target = Some(target);
     }
 }
 
@@ -2490,6 +2525,46 @@ pub enum ReferenceKind {
     Checked,
     /// &unsafe T - Manual safety proof required (0ns)
     Unsafe,
+}
+
+/// Typechecker-resolved dispatch target for a `MethodCall`
+/// expression.
+///
+/// Populated by `verum_types::infer::infer_method_call` when the
+/// dispatch unambiguously resolves to a single global symbol; read
+/// by `verum_vbc::codegen::expressions::compile_method_call` as a
+/// fast path before its legacy 7-step name-resolution cascade.
+///
+/// SOURCE OF TRUTH discipline: the typechecker knows which
+/// `function_id` corresponds to `Foo.bar(...)` because it already
+/// performed the full lookup during inference.  Without this
+/// sidecar, the codegen re-derived the same answer through
+/// `lookup_function(format!("{}.{}", type, method))` plus six
+/// fallback paths — duplicating the typechecker's work and (when
+/// the cascade missed) silently producing nonsense bytecode.
+/// Persisting the resolution onto the AST closes that gap.
+///
+/// `function_id` is the `verum_vbc::module::FunctionId.0` carrier;
+/// stored as `u32` to keep this enum free of a verum_vbc dependency
+/// (verum_ast must not depend on verum_vbc — separation of layers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedCallTarget {
+    /// Direct call to a registered global function — both inherent
+    /// methods (`Duration.nanos`) and free functions reachable via
+    /// method-syntax dispatch.
+    StaticCall { function_id: u32 },
+    /// Variant constructor: `Maybe.Some(x)`, `Result.Ok(y)`,
+    /// `Ordering.Less`, …  Codegen emits `MakeVariant{Typed}` rather
+    /// than `Call` for these so the heap object carries the correct
+    /// tag + parent type id.
+    VariantCtor {
+        tag: u32,
+        /// Carrier-type id for the typed variant emit path.  Zero
+        /// when the typechecker resolved to an untyped variant
+        /// (legacy archives, or variants whose parent type lost its
+        /// TypeId during cross-module loading).
+        parent_type_id: u32,
+    },
 }
 
 /// Macro invocation arguments with delimiter type.
