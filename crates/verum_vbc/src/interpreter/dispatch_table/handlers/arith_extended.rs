@@ -1135,10 +1135,11 @@ mod tests {
         .unwrap();
         // Set payload field 0 = 99 (mirrors what SetVariantData does).
         let val5 = state.registers.get(state.reg_base(), Reg(5));
+        // SAFETY: val5 was just produced by alloc_variant_with_payload
+        // and points at a live heap variant whose payload area covers
+        // at least one Value slot.
         unsafe {
-            let ptr = val5.as_ptr::<u8>();
-            let payload_ptr = ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
-            *payload_ptr = Value::from_i64(99);
+            *heap::variant_payload_ptr_mut(val5.as_ptr::<u8>(), 0) = Value::from_i64(99);
         }
         let (b_tag, b_fc, b_tid) = read_variant_header(&state, Reg(5));
 

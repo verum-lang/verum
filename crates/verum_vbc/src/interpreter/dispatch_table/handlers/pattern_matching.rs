@@ -480,11 +480,11 @@ pub(in super::super) fn handle_match_tag(
     let matches = if value.is_ptr() && !value.is_nil() {
         let base_ptr = value.as_ptr::<u8>();
         if !base_ptr.is_null() {
-            unsafe {
-                let tag_ptr = base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32;
-                let actual_tag = *tag_ptr;
-                actual_tag == expected_tag
-            }
+            // SAFETY: base_ptr is non-null and points at a live
+            // heap object whose data section starts with the
+            // variant `(tag, field_count)` header — see
+            // `heap.rs::variant_tag` docstring for the layout pin.
+            unsafe { heap::variant_tag(base_ptr) == expected_tag }
         } else {
             false
         }
@@ -677,24 +677,24 @@ pub(in super::super) fn handle_make_pi(
     // id widened to u64 so it is bit-compatible with the Value slot width.
     let data_size = 8 + 2 * std::mem::size_of::<Value>();
     let obj = state.heap.alloc_with_init(TypeId::PI, data_size, |data| {
-        // Write 0 at the tag word so it is never confused with a variant.
-        let tag_ptr = data.as_mut_ptr() as *mut u32;
-        unsafe {
-            *tag_ptr = 0;
-            *tag_ptr.add(1) = 2; // field_count, for observer helpers
-        }
+        // Tag = 0 so this never collides with a real variant; field_count
+        // = 2 lets observer helpers read it like a 2-payload variant.
+        // SAFETY: `data` is the freshly-allocated object's data section
+        // sized to fit at least the (tag, field_count) pair.
+        unsafe { heap::write_variant_data_header(data.as_mut_ptr(), 0, 2) };
     })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: alloc_with_init produced a live heap object with the
+    // variant-shaped header; both payload slots are within `data_size`.
     unsafe {
-        let payload = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
-        std::ptr::write(payload as *mut Value, param_value);
+        std::ptr::write(heap::variant_payload_ptr_mut(base_ptr, 0), param_value);
         // The second slot holds the return type id. We store it as a u64
         // cast so a future projection opcode can read it via the same
         // Value-wide load path.
         std::ptr::write(
-            payload.add(std::mem::size_of::<Value>()) as *mut u64,
+            heap::variant_payload_ptr_mut(base_ptr, 1) as *mut u64,
             return_type_id as u64,
         );
     }
@@ -721,22 +721,18 @@ pub(in super::super) fn handle_make_sigma(
     let obj = state
         .heap
         .alloc_with_init(TypeId::SIGMA, data_size, |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = 0;
-                *tag_ptr.add(1) = 2;
-            }
+            // SAFETY: `data` is the freshly-allocated data section of an
+            // object sized for (tag, field_count, slot0, slot1).
+            unsafe { heap::write_variant_data_header(data.as_mut_ptr(), 0, 2) };
         })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: same shape as the matching MakePi path — Σ-pair payload
+    // is bit-identical to a 2-field variant.
     unsafe {
-        let slot0 = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
-        std::ptr::write(slot0 as *mut Value, witness);
-        std::ptr::write(
-            slot0.add(std::mem::size_of::<Value>()) as *mut Value,
-            payload,
-        );
+        std::ptr::write(heap::variant_payload_ptr_mut(base_ptr, 0), witness);
+        std::ptr::write(heap::variant_payload_ptr_mut(base_ptr, 1), payload);
     }
 
     state.set_reg(dst, Value::from_ptr(base_ptr));
@@ -760,20 +756,19 @@ pub(in super::super) fn handle_make_witness(
     let obj = state
         .heap
         .alloc_with_init(TypeId::WITNESS, data_size, |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = 0;
-                *tag_ptr.add(1) = 2;
-            }
+            // SAFETY: `data` is the freshly-allocated data section of an
+            // object sized for (tag, field_count, value, proof_hash).
+            unsafe { heap::write_variant_data_header(data.as_mut_ptr(), 0, 2) };
         })?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
+    // SAFETY: same variant-shaped payload layout as MakePi / MakeSigma —
+    // slot 0 = the refined value, slot 1 = the proof hash widened to u64.
     unsafe {
-        let slot0 = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
-        std::ptr::write(slot0 as *mut Value, value);
+        std::ptr::write(heap::variant_payload_ptr_mut(base_ptr, 0), value);
         std::ptr::write(
-            slot0.add(std::mem::size_of::<Value>()) as *mut u64,
+            heap::variant_payload_ptr_mut(base_ptr, 1) as *mut u64,
             proof_hash as u64,
         );
     }

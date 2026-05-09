@@ -119,21 +119,11 @@ pub unsafe fn variant_tag(ptr: *const u8) -> u32 {
     }
 }
 
-/// Read the `field_count` from a heap variant pointer.
-///
-/// # Safety
-/// Same contract as [`variant_tag`].
-#[inline]
-pub unsafe fn variant_field_count(ptr: *const u8) -> u32 {
-    unsafe {
-        *(ptr.add(verum_common::layout::VARIANT_TAG_OFFSET as usize) as *const u32).add(1)
-    }
-}
-
-/// Read the `(tag, field_count)` pair from a heap variant pointer in a
-/// single function call.  Equivalent to `(variant_tag(ptr),
-/// variant_field_count(ptr))` but reads the two adjacent u32 slots in
-/// one cache-friendly access.
+/// Read the `(tag, field_count)` pair from a heap variant pointer in
+/// a single function call.  Two adjacent u32 slots read in one cache-
+/// friendly access — callers that need only the field count
+/// pattern-match `(_, fc)` rather than calling a dedicated helper, so
+/// no `variant_field_count`-only function exists.
 ///
 /// # Safety
 /// Same contract as [`variant_tag`].
@@ -1007,7 +997,7 @@ mod tests {
         assert_eq!(heap.object_count(), 0);
     }
 
-    /// `variant_tag` / `variant_field_count` round-trip with
+    /// `variant_tag` / `variant_header_pair` round-trip with
     /// `write_variant_data_header` — the canonical writer used by
     /// `pattern_matching::alloc_variant_into_with_type_id`'s
     /// `alloc_with_init` closure.
@@ -1027,7 +1017,6 @@ mod tests {
         // valid variant header at the data section.
         unsafe {
             assert_eq!(variant_tag(obj_ptr), 7);
-            assert_eq!(variant_field_count(obj_ptr), 1);
             assert_eq!(variant_header_pair(obj_ptr), (7, 1));
         }
     }
