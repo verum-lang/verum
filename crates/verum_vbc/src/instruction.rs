@@ -6598,6 +6598,104 @@ pub enum ArithSubOpcode {
     F64FromBits = 0x78,
 }
 
+// =========================================================================
+// ArithSubOpcode metadata — single source of truth for the 58 variants.
+//
+// The legacy implementation maintained seven parallel match-arm
+// methods (`mnemonic`, `category`, `is_checked`, `is_overflowing`,
+// `is_polymorphic`, `is_binary_float`, `operand_count`).
+// `category()` was driven by `match self.to_byte()` over 16-byte
+// windows so renumbering a variant could silently move it between
+// bands.  Three latent drift-defect undercounts:
+//
+// * `is_checked()` flagged 7 of the 9 Checked-band variants —
+//   `CheckedNeg` and `CheckedAbs` (added later for the T::MIN
+//   gap) weren't tagged as checked.
+// * `is_polymorphic()` flagged 6 of the 11 Polymorphic-band
+//   variants — `PolyAbs`, `PolySignum`, `PolyMin`, `PolyMax`,
+//   `PolyClamp` (added later) weren't tagged as polymorphic.
+// * `operand_count()` defaulted everything that wasn't a hand-
+//   listed unary/ternary variant to 2.  This silently
+//   misclassified 13 unary variants — `CheckedNeg`, `CheckedAbs`,
+//   `SaturatingNeg`, `SaturatingAbs`, plus nine type-conversion
+//   ops (`SextI`, `ZextI`, `FptruncF`, `FpextF`, `IntTrunc`,
+//   `F32ToBits`, `F32FromBits`, `F64ToBits`, `F64FromBits`) — as
+//   binary, breaking diagnostic / scheduler / verifier passes
+//   that consumed the count.
+//
+// Same drift-collapse pattern as TensorSubOpcode.meta()
+// (79369267d), GpuSubOpcode.meta() (dd84a929b), SystemSubOpcode
+// (60b4cc3b9), MathSubOpcode (4b2792881), KernelRule (ec9cfc411).
+// =========================================================================
+
+/// Functional band an `ArithSubOpcode` belongs to.  Bands are
+/// stamped per-variant in `meta()` rather than inferred from
+/// byte-range arithmetic, so renumbering a variant cannot
+/// silently move it between bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArithCategory {
+    /// `Checked*` ops returning `Maybe<T>` on overflow.
+    CheckedArithmetic,
+    /// `Overflowing*` ops returning `(result, overflow_flag)`.
+    OverflowingArithmetic,
+    /// `Poly*` ops dispatching on operand type at runtime.
+    PolymorphicArithmetic,
+    /// `Saturating*` ops clamping at type bounds.
+    SaturatingArithmetic,
+    /// `Wrapping*` ops with modular arithmetic semantics.
+    WrappingArithmetic,
+    /// Bit-counting ops: `Clz`, `Ctz`, `Popcnt`, `Bswap`,
+    /// `BitReverse`, `RotateLeft`, `RotateRight`.
+    BitCounting,
+    /// Two-argument float-only ops: `Atan2`, `Hypot`, `Copysign`,
+    /// `Pow`, `LogBase`, `Fmod`, `Remainder`, `Fdim`.
+    BinaryFloat,
+    /// Width / precision / bit-pattern conversions: `SextI`,
+    /// `ZextI`, `FptruncF`, `FpextF`, `IntTrunc`, `F*ToBits`,
+    /// `F*FromBits`.
+    TypeConversions,
+}
+
+impl ArithCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CheckedArithmetic     => "Checked Arithmetic",
+            Self::OverflowingArithmetic => "Overflowing Arithmetic",
+            Self::PolymorphicArithmetic => "Polymorphic Arithmetic",
+            Self::SaturatingArithmetic  => "Saturating Arithmetic",
+            Self::WrappingArithmetic    => "Wrapping Arithmetic",
+            Self::BitCounting           => "Bit Counting",
+            Self::BinaryFloat           => "Binary Float",
+            Self::TypeConversions       => "Type Conversions",
+        }
+    }
+}
+
+/// Co-located metadata for one `ArithSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; `ArithSubOpcode::meta()` is the only site that
+/// constructs values of this type, so a single match keeps every
+/// accessor consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct ArithOpMeta {
+    /// All-caps mnemonic (`"CHECKED_ADD_I"`, `"WRAPPING_NEG"`).
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: ArithCategory,
+    /// The op returns `Maybe<T>` (None on overflow).
+    pub is_checked: bool,
+    /// The op returns `(result, did_overflow)`.
+    pub is_overflowing: bool,
+    /// The op dispatches on operand type at runtime.
+    pub is_polymorphic: bool,
+    /// The op is a two-argument float-only operation.
+    pub is_binary_float: bool,
+    /// Number of source operands (1 = unary, 2 = binary, 3 = ternary).
+    pub operand_count: u8,
+}
+
 impl ArithSubOpcode {
     /// Creates an arithmetic sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -6680,147 +6778,167 @@ impl ArithSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this arithmetic sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::CheckedAddI => "CHECKED_ADD_I",
-            Self::CheckedSubI => "CHECKED_SUB_I",
-            Self::CheckedMulI => "CHECKED_MUL_I",
-            Self::CheckedDivI => "CHECKED_DIV_I",
-            Self::CheckedAddU => "CHECKED_ADD_U",
-            Self::CheckedSubU => "CHECKED_SUB_U",
-            Self::CheckedMulU => "CHECKED_MUL_U",
-            Self::CheckedNeg => "CHECKED_NEG",
-            Self::CheckedAbs => "CHECKED_ABS",
-            Self::OverflowingAddI => "OVERFLOWING_ADD_I",
-            Self::OverflowingSubI => "OVERFLOWING_SUB_I",
-            Self::OverflowingMulI => "OVERFLOWING_MUL_I",
-            Self::PolyAdd => "POLY_ADD",
-            Self::PolySub => "POLY_SUB",
-            Self::PolyMul => "POLY_MUL",
-            Self::PolyDiv => "POLY_DIV",
-            Self::PolyNeg => "POLY_NEG",
-            Self::PolyRem => "POLY_REM",
-            Self::PolyAbs => "POLY_ABS",
-            Self::PolySignum => "POLY_SIGNUM",
-            Self::PolyMin => "POLY_MIN",
-            Self::PolyMax => "POLY_MAX",
-            Self::PolyClamp => "POLY_CLAMP",
-            Self::SaturatingAdd => "SATURATING_ADD",
-            Self::SaturatingSub => "SATURATING_SUB",
-            Self::SaturatingMul => "SATURATING_MUL",
-            Self::SaturatingNeg => "SATURATING_NEG",
-            Self::SaturatingAbs => "SATURATING_ABS",
-            Self::WrappingAdd => "WRAPPING_ADD",
-            Self::WrappingSub => "WRAPPING_SUB",
-            Self::WrappingMul => "WRAPPING_MUL",
-            Self::WrappingNeg => "WRAPPING_NEG",
-            Self::WrappingShl => "WRAPPING_SHL",
-            Self::WrappingShr => "WRAPPING_SHR",
-            Self::Clz => "CLZ",
-            Self::Ctz => "CTZ",
-            Self::Popcnt => "POPCNT",
-            Self::Bswap => "BSWAP",
-            Self::BitReverse => "BIT_REVERSE",
-            Self::RotateLeft => "ROTATE_LEFT",
-            Self::RotateRight => "ROTATE_RIGHT",
-            Self::Atan2 => "ATAN2",
-            Self::Hypot => "HYPOT",
-            Self::Copysign => "COPYSIGN",
-            Self::Pow => "POW",
-            Self::LogBase => "LOG_BASE",
-            Self::Fmod => "FMOD",
-            Self::Remainder => "REMAINDER",
-            Self::Fdim => "FDIM",
-            Self::SextI => "SEXT_I",
-            Self::ZextI => "ZEXT_I",
-            Self::FptruncF => "FPTRUNC_F",
-            Self::FpextF => "FPEXT_F",
-            Self::IntTrunc => "INT_TRUNC",
-            Self::F32ToBits => "F32_TO_BITS",
-            Self::F32FromBits => "F32_FROM_BITS",
-            Self::F64ToBits => "F64_TO_BITS",
-            Self::F64FromBits => "F64_FROM_BITS",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `is_checked` / `is_overflowing` / `is_polymorphic` /
+    /// `is_binary_float` / `operand_count`.  Adding a new variant
+    /// requires exactly one entry here; sibling accessors are
+    /// `#[inline]` projections through this method's return value.
+    pub const fn meta(self) -> ArithOpMeta {
+        use ArithCategory::{
+            BinaryFloat, BitCounting, CheckedArithmetic, OverflowingArithmetic,
+            PolymorphicArithmetic, SaturatingArithmetic, TypeConversions, WrappingArithmetic,
+        };
+
+        // Field order: mnemonic, category, checked, overflowing,
+        // polymorphic, binary_float, operand_count.  Single-line
+        // entries keep drift between sibling rows obvious.
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             ck=$ck:literal, ov=$ov:literal, poly=$poly:literal,
+             bf=$bf:literal, oc=$oc:expr $(,)?) => {
+                ArithOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    is_checked: $ck,
+                    is_overflowing: $ov,
+                    is_polymorphic: $poly,
+                    is_binary_float: $bf,
+                    operand_count: $oc,
+                }
+            };
         }
+
+        match self {
+            // ===== Checked Arithmetic (0x00-0x0F) — Returns Maybe<T> =====
+            // is_checked=true uniformly across the band — closes
+            // the legacy CheckedNeg / CheckedAbs undercount.
+            Self::CheckedAddI       => m!("CHECKED_ADD_I",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedSubI       => m!("CHECKED_SUB_I",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedMulI       => m!("CHECKED_MUL_I",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedDivI       => m!("CHECKED_DIV_I",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedAddU       => m!("CHECKED_ADD_U",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedSubU       => m!("CHECKED_SUB_U",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            Self::CheckedMulU       => m!("CHECKED_MUL_U",      CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=2),
+            // CheckedNeg / CheckedAbs are unary — closes legacy
+            // operand_count gap that defaulted them to 2.
+            Self::CheckedNeg        => m!("CHECKED_NEG",        CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=1),
+            Self::CheckedAbs        => m!("CHECKED_ABS",        CheckedArithmetic,     ck=true,  ov=false, poly=false, bf=false, oc=1),
+
+            // ===== Overflowing Arithmetic (0x10-0x1F) =====
+            Self::OverflowingAddI   => m!("OVERFLOWING_ADD_I",  OverflowingArithmetic, ck=false, ov=true,  poly=false, bf=false, oc=2),
+            Self::OverflowingSubI   => m!("OVERFLOWING_SUB_I",  OverflowingArithmetic, ck=false, ov=true,  poly=false, bf=false, oc=2),
+            Self::OverflowingMulI   => m!("OVERFLOWING_MUL_I",  OverflowingArithmetic, ck=false, ov=true,  poly=false, bf=false, oc=2),
+
+            // ===== Polymorphic Arithmetic (0x20-0x2F) =====
+            // is_polymorphic=true uniformly across the band —
+            // closes the legacy PolyAbs / PolySignum / PolyMin /
+            // PolyMax / PolyClamp undercount.
+            Self::PolyAdd           => m!("POLY_ADD",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolySub           => m!("POLY_SUB",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyMul           => m!("POLY_MUL",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyDiv           => m!("POLY_DIV",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyNeg           => m!("POLY_NEG",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=1),
+            Self::PolyRem           => m!("POLY_REM",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyAbs           => m!("POLY_ABS",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=1),
+            Self::PolySignum        => m!("POLY_SIGNUM",        PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=1),
+            Self::PolyMin           => m!("POLY_MIN",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyMax           => m!("POLY_MAX",           PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=2),
+            Self::PolyClamp         => m!("POLY_CLAMP",         PolymorphicArithmetic, ck=false, ov=false, poly=true,  bf=false, oc=3),
+
+            // ===== Saturating Arithmetic (0x30-0x3F) =====
+            // SaturatingNeg / SaturatingAbs are unary — closes
+            // legacy operand_count default-to-2 gap.
+            Self::SaturatingAdd     => m!("SATURATING_ADD",     SaturatingArithmetic,  ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::SaturatingSub     => m!("SATURATING_SUB",     SaturatingArithmetic,  ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::SaturatingMul     => m!("SATURATING_MUL",     SaturatingArithmetic,  ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::SaturatingNeg     => m!("SATURATING_NEG",     SaturatingArithmetic,  ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::SaturatingAbs     => m!("SATURATING_ABS",     SaturatingArithmetic,  ck=false, ov=false, poly=false, bf=false, oc=1),
+
+            // ===== Wrapping Arithmetic (0x40-0x4F) =====
+            Self::WrappingAdd       => m!("WRAPPING_ADD",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingSub       => m!("WRAPPING_SUB",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingMul       => m!("WRAPPING_MUL",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingNeg       => m!("WRAPPING_NEG",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::WrappingShl       => m!("WRAPPING_SHL",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::WrappingShr       => m!("WRAPPING_SHR",       WrappingArithmetic,    ck=false, ov=false, poly=false, bf=false, oc=2),
+
+            // ===== Bit Counting (0x50-0x5F) =====
+            Self::Clz               => m!("CLZ",                BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::Ctz               => m!("CTZ",                BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::Popcnt            => m!("POPCNT",             BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::Bswap             => m!("BSWAP",              BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::BitReverse        => m!("BIT_REVERSE",        BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::RotateLeft        => m!("ROTATE_LEFT",        BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::RotateRight       => m!("ROTATE_RIGHT",       BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=2),
+
+            // ===== Binary Float (0x60-0x6F) =====
+            // is_binary_float=true uniformly across the band.
+            Self::Atan2             => m!("ATAN2",              BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Hypot             => m!("HYPOT",              BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Copysign          => m!("COPYSIGN",           BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Pow               => m!("POW",                BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::LogBase           => m!("LOG_BASE",           BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Fmod              => m!("FMOD",               BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Remainder         => m!("REMAINDER",          BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+            Self::Fdim              => m!("FDIM",               BinaryFloat,           ck=false, ov=false, poly=false, bf=true,  oc=2),
+
+            // ===== Type Conversions (0x70-0x7F) =====
+            // All unary — closes the legacy operand_count default-
+            // to-2 gap on every entry in this band.
+            Self::SextI             => m!("SEXT_I",             TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::ZextI             => m!("ZEXT_I",             TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::FptruncF          => m!("FPTRUNC_F",          TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::FpextF            => m!("FPEXT_F",            TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::IntTrunc          => m!("INT_TRUNC",          TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::F32ToBits         => m!("F32_TO_BITS",        TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::F32FromBits       => m!("F32_FROM_BITS",      TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::F64ToBits         => m!("F64_TO_BITS",        TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+            Self::F64FromBits       => m!("F64_FROM_BITS",      TypeConversions,       ck=false, ov=false, poly=false, bf=false, oc=1),
+        }
+    }
+
+    /// Returns the mnemonic string for this arithmetic sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode range.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "Checked Arithmetic",
-            0x10..=0x1F => "Overflowing Arithmetic",
-            0x20..=0x2F => "Polymorphic Arithmetic",
-            0x30..=0x3F => "Saturating Arithmetic",
-            0x40..=0x4F => "Wrapping Arithmetic",
-            0x50..=0x5F => "Bit Counting",
-            0x60..=0x6F => "Binary Float",
-            0x70..=0x7F => "Type Conversions",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this is a checked operation (returns Maybe<T>).
+    #[inline]
     pub fn is_checked(self) -> bool {
-        matches!(
-            self,
-            Self::CheckedAddI
-                | Self::CheckedSubI
-                | Self::CheckedMulI
-                | Self::CheckedDivI
-                | Self::CheckedAddU
-                | Self::CheckedSubU
-                | Self::CheckedMulU
-        )
+        self.meta().is_checked
     }
 
     /// Returns true if this is an overflowing operation (returns (result, flag)).
+    #[inline]
     pub fn is_overflowing(self) -> bool {
-        matches!(
-            self,
-            Self::OverflowingAddI | Self::OverflowingSubI | Self::OverflowingMulI
-        )
+        self.meta().is_overflowing
     }
 
     /// Returns true if this is a polymorphic operation (type-dispatched).
+    #[inline]
     pub fn is_polymorphic(self) -> bool {
-        matches!(
-            self,
-            Self::PolyAdd
-                | Self::PolySub
-                | Self::PolyMul
-                | Self::PolyDiv
-                | Self::PolyNeg
-                | Self::PolyRem
-        )
+        self.meta().is_polymorphic
     }
 
     /// Returns true if this is a binary float operation (float-only, two operands).
+    #[inline]
     pub fn is_binary_float(self) -> bool {
-        matches!(
-            self,
-            Self::Atan2
-                | Self::Hypot
-                | Self::Copysign
-                | Self::Pow
-                | Self::LogBase
-                | Self::Fmod
-                | Self::Remainder
-                | Self::Fdim
-        )
+        self.meta().is_binary_float
     }
 
     /// Returns the number of source operands for this operation.
+    #[inline]
     pub fn operand_count(self) -> usize {
-        match self {
-            // Unary operations
-            Self::PolyNeg | Self::PolyAbs | Self::PolySignum | Self::WrappingNeg => 1,
-            // Unary bit counting
-            Self::Clz | Self::Ctz | Self::Popcnt | Self::Bswap | Self::BitReverse => 1,
-            // Ternary operations
-            Self::PolyClamp => 3,
-            // Binary operations (default)
-            _ => 2,
-        }
+        self.meta().operand_count as usize
     }
 }
 
@@ -15933,5 +16051,208 @@ mod tests {
         // collision back.
         assert_eq!(TensorSubOpcode::Norm.mnemonic(), "TENSOR_MATRIX_NORM");
         assert_eq!(TensorSubOpcode::TensorNorm.mnemonic(), "TENSOR_NORM");
+    }
+
+    // ========================================================================
+    // ArithSubOpcode meta() drift pins
+    //
+    // Three latent drift defects fixed by structural per-variant
+    // tagging: (a) is_checked() was missing CheckedNeg / CheckedAbs
+    // (7→9); (b) is_polymorphic() was missing PolyAbs / PolySignum
+    // / PolyMin / PolyMax / PolyClamp (6→11); (c) operand_count()
+    // defaulted 13 unary variants (CheckedNeg, CheckedAbs,
+    // SaturatingNeg, SaturatingAbs, plus 9 type-conversion ops) to
+    // 2 instead of 1.
+    // ========================================================================
+
+    fn for_every_arith_sub_opcode<F: FnMut(ArithSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = ArithSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "ArithSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn arith_meta_count_pinned_at_fifty_eight() {
+        let mut count = 0;
+        for_every_arith_sub_opcode(|_| count += 1);
+        assert_eq!(count, 58,
+            "ArithSubOpcode variant count drift: expected 58, got {}", count);
+    }
+
+    #[test]
+    fn arith_meta_category_matches_byte_range_band() {
+        for_every_arith_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => ArithCategory::CheckedArithmetic,
+                0x10..=0x1F => ArithCategory::OverflowingArithmetic,
+                0x20..=0x2F => ArithCategory::PolymorphicArithmetic,
+                0x30..=0x3F => ArithCategory::SaturatingArithmetic,
+                0x40..=0x4F => ArithCategory::WrappingArithmetic,
+                0x50..=0x5F => ArithCategory::BitCounting,
+                0x60..=0x6F => ArithCategory::BinaryFloat,
+                0x70..=0x7F => ArithCategory::TypeConversions,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn arith_meta_is_checked_iff_checked_band() {
+        // is_checked ⇔ CheckedArithmetic band — closes the legacy
+        // CheckedNeg / CheckedAbs undercount.
+        for_every_arith_sub_opcode(|op| {
+            let in_band = op.meta().category == ArithCategory::CheckedArithmetic;
+            assert_eq!(op.is_checked(), in_band,
+                "{:?}: is_checked={} but CheckedArithmetic band={}",
+                op, op.is_checked(), in_band);
+        });
+        assert!(ArithSubOpcode::CheckedNeg.is_checked(),
+            "CheckedNeg must be tagged checked");
+        assert!(ArithSubOpcode::CheckedAbs.is_checked(),
+            "CheckedAbs must be tagged checked");
+    }
+
+    #[test]
+    fn arith_meta_is_polymorphic_iff_polymorphic_band() {
+        // is_polymorphic ⇔ PolymorphicArithmetic band — closes the
+        // legacy PolyAbs / PolySignum / PolyMin / PolyMax /
+        // PolyClamp undercount.
+        for_every_arith_sub_opcode(|op| {
+            let in_band = op.meta().category == ArithCategory::PolymorphicArithmetic;
+            assert_eq!(op.is_polymorphic(), in_band,
+                "{:?}: is_polymorphic={} but PolymorphicArithmetic band={}",
+                op, op.is_polymorphic(), in_band);
+        });
+        for op in [
+            ArithSubOpcode::PolyAbs,
+            ArithSubOpcode::PolySignum,
+            ArithSubOpcode::PolyMin,
+            ArithSubOpcode::PolyMax,
+            ArithSubOpcode::PolyClamp,
+        ] {
+            assert!(op.is_polymorphic(),
+                "{:?} must be tagged polymorphic (closes legacy gap)", op);
+        }
+    }
+
+    #[test]
+    fn arith_meta_is_overflowing_iff_overflowing_band() {
+        for_every_arith_sub_opcode(|op| {
+            let in_band = op.meta().category == ArithCategory::OverflowingArithmetic;
+            assert_eq!(op.is_overflowing(), in_band,
+                "{:?}: is_overflowing={} but OverflowingArithmetic band={}",
+                op, op.is_overflowing(), in_band);
+        });
+    }
+
+    #[test]
+    fn arith_meta_is_binary_float_iff_binary_float_band() {
+        for_every_arith_sub_opcode(|op| {
+            let in_band = op.meta().category == ArithCategory::BinaryFloat;
+            assert_eq!(op.is_binary_float(), in_band,
+                "{:?}: is_binary_float={} but BinaryFloat band={}",
+                op, op.is_binary_float(), in_band);
+            // Every binary-float op is exactly 2-operand.
+            if op.is_binary_float() {
+                assert_eq!(op.operand_count(), 2,
+                    "{:?}: is_binary_float requires operand_count == 2", op);
+            }
+        });
+    }
+
+    #[test]
+    fn arith_meta_operand_count_unary_set_pinned() {
+        // The set of unary (1-operand) variants — 22 total after
+        // closing the legacy 13-variant default-to-2 gap.  Pinning
+        // the set as a whole means a regression on any of these
+        // surfaces here as a count mismatch.
+        let unary = [
+            // Bit counting unary
+            ArithSubOpcode::Clz,
+            ArithSubOpcode::Ctz,
+            ArithSubOpcode::Popcnt,
+            ArithSubOpcode::Bswap,
+            ArithSubOpcode::BitReverse,
+            // Polymorphic unary
+            ArithSubOpcode::PolyNeg,
+            ArithSubOpcode::PolyAbs,
+            ArithSubOpcode::PolySignum,
+            // Wrapping unary
+            ArithSubOpcode::WrappingNeg,
+            // Checked unary — closes legacy gap
+            ArithSubOpcode::CheckedNeg,
+            ArithSubOpcode::CheckedAbs,
+            // Saturating unary — closes legacy gap
+            ArithSubOpcode::SaturatingNeg,
+            ArithSubOpcode::SaturatingAbs,
+            // Type conversion unary — closes legacy gap (9 entries)
+            ArithSubOpcode::SextI,
+            ArithSubOpcode::ZextI,
+            ArithSubOpcode::FptruncF,
+            ArithSubOpcode::FpextF,
+            ArithSubOpcode::IntTrunc,
+            ArithSubOpcode::F32ToBits,
+            ArithSubOpcode::F32FromBits,
+            ArithSubOpcode::F64ToBits,
+            ArithSubOpcode::F64FromBits,
+        ];
+        for op in &unary {
+            assert_eq!(op.operand_count(), 1,
+                "{:?}: expected unary (1 operand)", op);
+        }
+        let mut unary_count = 0;
+        for_every_arith_sub_opcode(|op| {
+            if op.operand_count() == 1 { unary_count += 1; }
+        });
+        assert_eq!(unary_count, unary.len(),
+            "unary count drift: enumerated set has {} variants, count is {}",
+            unary.len(), unary_count);
+    }
+
+    #[test]
+    fn arith_meta_operand_count_ternary_set_pinned() {
+        // Only PolyClamp is ternary.
+        let mut ternary_count = 0;
+        for_every_arith_sub_opcode(|op| {
+            if op.operand_count() == 3 { ternary_count += 1; }
+        });
+        assert_eq!(ternary_count, 1, "ternary count drift: expected 1 (PolyClamp)");
+        assert_eq!(ArithSubOpcode::PolyClamp.operand_count(), 3);
+    }
+
+    #[test]
+    fn arith_meta_capability_flags_at_most_one_per_variant() {
+        // is_checked / is_overflowing / is_polymorphic /
+        // is_binary_float partition the variant set: at most one
+        // can be true for any given variant (variants outside the
+        // four flagged bands have all four false).
+        for_every_arith_sub_opcode(|op| {
+            let count = (op.is_checked() as u32)
+                + (op.is_overflowing() as u32)
+                + (op.is_polymorphic() as u32)
+                + (op.is_binary_float() as u32);
+            assert!(count <= 1,
+                "{:?}: has {} capability flags set; at most one allowed", op, count);
+        });
+    }
+
+    #[test]
+    fn arith_meta_mnemonic_uniqueness() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(58);
+        for_every_arith_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 58);
     }
 }

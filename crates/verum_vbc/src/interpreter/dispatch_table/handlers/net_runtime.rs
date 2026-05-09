@@ -2858,9 +2858,10 @@ fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
     if ptr.is_null() {
         return None;
     }
-    let tag = unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const u32) };
-    let payload =
-        unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE + 8) as *const Value) };
+    // SAFETY: pointer non-null (just checked) and caller verified
+    // it's a SocketAddr-shaped variant via type_id check above.
+    let tag = unsafe { crate::interpreter::heap::variant_tag(ptr) };
+    let payload = unsafe { crate::interpreter::heap::variant_payload(ptr, 0) };
     match tag {
         0 => decode_socket_addr_v4_record(payload),
         1 => decode_socket_addr_v6_record(payload),

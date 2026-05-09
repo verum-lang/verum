@@ -84,6 +84,121 @@ pub const MIN_ALIGNMENT: usize = verum_common::layout::MIN_HEAP_ALIGNMENT;
 /// this limit is rejected with OutOfMemory.
 pub const MAX_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
 
+// ============================================================================
+// Variant heap-object header read helpers
+// ============================================================================
+//
+// Variant heap layout (matches `pattern_matching::alloc_variant_into` and
+// `method_dispatch::alloc_variant_with_payload`):
+//
+//   [ObjectHeader (24)][tag: u32][field_count: u32][payload: Value * N]
+//
+// Offsets are pinned at `verum_common::layout::{VARIANT_TAG_OFFSET = 24,
+// VARIANT_PAYLOAD_OFFSET = 32}`.  Pre-this-helper, 16+ dispatch handler
+// sites each repeated the unsafe-pointer-arithmetic dance:
+//
+//   let tag = unsafe { *(ptr.add(OBJECT_HEADER_SIZE) as *const u32) };
+//   let payload = unsafe { *(ptr.add(OBJECT_HEADER_SIZE + 8) as *const Value) };
+//
+// Each site carried its own bounds reasoning, the magic `+ 8` was duplicated
+// (the `(tag, field_count)` pair occupies 8 bytes), and editing the variant
+// header layout would have required touching every site.  The helpers below
+// centralise the offsets via `verum_common::layout::VARIANT_*_OFFSET` and
+// the safety reasoning lives once.
+
+/// Read the variant `tag` from a heap variant pointer.
+///
+/// # Safety
+/// `ptr` must point to a live heap object whose data section starts with
+/// the variant `(tag: u32, field_count: u32)` pair — `MakeVariant` and
+/// `MakeVariantTyped` both produce this shape.
+#[inline]
+pub unsafe fn variant_tag(ptr: *const u8) -> u32 {
+    unsafe {
+        *(ptr.add(verum_common::layout::VARIANT_TAG_OFFSET as usize) as *const u32)
+    }
+}
+
+/// Read the `field_count` from a heap variant pointer.
+///
+/// # Safety
+/// Same contract as [`variant_tag`].
+#[inline]
+pub unsafe fn variant_field_count(ptr: *const u8) -> u32 {
+    unsafe {
+        *(ptr.add(verum_common::layout::VARIANT_TAG_OFFSET as usize) as *const u32).add(1)
+    }
+}
+
+/// Read the `(tag, field_count)` pair from a heap variant pointer in a
+/// single function call.  Equivalent to `(variant_tag(ptr),
+/// variant_field_count(ptr))` but reads the two adjacent u32 slots in
+/// one cache-friendly access.
+///
+/// # Safety
+/// Same contract as [`variant_tag`].
+#[inline]
+pub unsafe fn variant_header_pair(ptr: *const u8) -> (u32, u32) {
+    let data = unsafe { ptr.add(verum_common::layout::VARIANT_TAG_OFFSET as usize) as *const u32 };
+    unsafe { (*data, *data.add(1)) }
+}
+
+/// Read the `idx`-th payload `Value` from a heap variant pointer.
+///
+/// # Safety
+/// `ptr` must satisfy [`variant_tag`]'s contract AND `idx` must be
+/// strictly less than the variant's `field_count`.
+#[inline]
+pub unsafe fn variant_payload(ptr: *const u8, idx: usize) -> Value {
+    unsafe { *variant_payload_ptr(ptr, idx) }
+}
+
+/// Get a `*const Value` to the `idx`-th payload slot of a heap variant
+/// pointer.
+///
+/// # Safety
+/// `ptr` must satisfy [`variant_tag`]'s contract; `idx` must be in
+/// `0..field_count` of the underlying variant.
+#[inline]
+pub unsafe fn variant_payload_ptr(ptr: *const u8, idx: usize) -> *const Value {
+    let base = unsafe { ptr.add(verum_common::layout::VARIANT_PAYLOAD_OFFSET as usize) as *const Value };
+    unsafe { base.add(idx) }
+}
+
+/// Mutable counterpart to [`variant_payload_ptr`] — for codegen-side
+/// payload writes (e.g. `make_some_value` materialising the inner value
+/// after `alloc_with_init`).
+///
+/// # Safety
+/// Same contract as [`variant_payload_ptr`]; the underlying memory must
+/// be uniquely owned for the duration of the write.
+#[inline]
+pub unsafe fn variant_payload_ptr_mut(ptr: *mut u8, idx: usize) -> *mut Value {
+    let base = unsafe { ptr.add(verum_common::layout::VARIANT_PAYLOAD_OFFSET as usize) as *mut Value };
+    unsafe { base.add(idx) }
+}
+
+/// Write the `(tag, field_count)` pair into the data section of a freshly
+/// allocated variant heap object.  The canonical writer used by
+/// `pattern_matching::alloc_variant_into_with_type_id` and
+/// `method_dispatch::alloc_variant_with_payload`'s init closures —
+/// previously each callsite open-coded
+/// `*(data.as_mut_ptr() as *mut u32) = tag; *(...).add(1) = fc`.
+///
+/// # Safety
+/// `ptr` must point to a live heap object's data section
+/// (`heap.alloc_with_init`'s closure receives this; the helper does the
+/// pointer arithmetic). The write touches 8 bytes
+/// `[VARIANT_TAG_OFFSET..VARIANT_PAYLOAD_OFFSET]`.
+#[inline]
+pub unsafe fn write_variant_data_header(data: *mut u8, tag: u32, field_count: u32) {
+    let tag_ptr = data as *mut u32;
+    unsafe {
+        *tag_ptr = tag;
+        *tag_ptr.add(1) = field_count;
+    }
+}
+
 bitflags! {
     /// Object flags for runtime state.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -814,6 +929,76 @@ mod tests {
         let heap = Heap::new();
         assert_eq!(heap.allocated(), 0);
         assert_eq!(heap.object_count(), 0);
+    }
+
+    /// `variant_tag` / `variant_field_count` round-trip with
+    /// `write_variant_data_header` — the canonical writer used by
+    /// `pattern_matching::alloc_variant_into_with_type_id`'s
+    /// `alloc_with_init` closure.
+    #[test]
+    fn variant_header_helpers_roundtrip() {
+        let mut heap = Heap::new();
+        let obj = heap
+            .alloc_with_init(TypeId(0x8000), 8 + std::mem::size_of::<Value>(), |data| {
+                // SAFETY: data is the variant data section, exactly
+                // 16 bytes (8-byte (tag, fc) header + 8-byte payload).
+                unsafe { write_variant_data_header(data.as_mut_ptr(), 7, 1) };
+            })
+            .unwrap();
+
+        let obj_ptr = obj.as_ptr() as *const u8;
+        // SAFETY: `obj_ptr` is the full heap-object pointer; we just wrote a
+        // valid variant header at the data section.
+        unsafe {
+            assert_eq!(variant_tag(obj_ptr), 7);
+            assert_eq!(variant_field_count(obj_ptr), 1);
+            assert_eq!(variant_header_pair(obj_ptr), (7, 1));
+        }
+    }
+
+    /// `variant_payload_ptr` / `variant_payload` correctly index into
+    /// the payload area at `VARIANT_PAYLOAD_OFFSET = 32`.
+    #[test]
+    fn variant_payload_helpers_at_canonical_offset() {
+        let mut heap = Heap::new();
+        let obj = heap
+            .alloc_with_init(TypeId(0x8001), 8 + 2 * std::mem::size_of::<Value>(), |data| {
+                unsafe {
+                    write_variant_data_header(data.as_mut_ptr(), 1, 2);
+                    // Write payload[0] = 42, payload[1] = 99 directly so we
+                    // can read them back via the helpers.
+                    let payload = data.as_mut_ptr().add(8) as *mut Value;
+                    *payload = Value::from_i64(42);
+                    *payload.add(1) = Value::from_i64(99);
+                }
+            })
+            .unwrap();
+
+        let obj_ptr = obj.as_ptr() as *const u8;
+        unsafe {
+            assert_eq!(variant_payload(obj_ptr, 0).as_i64(), 42);
+            assert_eq!(variant_payload(obj_ptr, 1).as_i64(), 99);
+            assert!(!variant_payload_ptr(obj_ptr, 0).is_null());
+        }
+    }
+
+    /// Drift-protection: the helpers compose `OBJECT_HEADER_SIZE +
+    /// (8 = tag+fc width)` to find the payload base; this MUST equal
+    /// `VARIANT_PAYLOAD_OFFSET` from the canonical layout.  Pre-this-pin,
+    /// the magic `+ 8` was duplicated at every callsite and could drift
+    /// from the layout module silently.
+    #[test]
+    fn variant_payload_offset_canonical() {
+        assert_eq!(
+            verum_common::layout::OBJECT_HEADER_SIZE + 8,
+            verum_common::layout::VARIANT_PAYLOAD_OFFSET,
+            "VARIANT_PAYLOAD_OFFSET must equal OBJECT_HEADER_SIZE + sizeof((tag,fc))",
+        );
+        assert_eq!(
+            verum_common::layout::VARIANT_TAG_OFFSET,
+            verum_common::layout::OBJECT_HEADER_SIZE,
+            "VARIANT_TAG_OFFSET must equal OBJECT_HEADER_SIZE (tag is the first data field)",
+        );
     }
 
     #[test]

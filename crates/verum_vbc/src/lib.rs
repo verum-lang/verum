@@ -174,10 +174,10 @@ pub use archive::{
 pub use error::{VbcError, VbcResult};
 pub use format::{MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader};
 pub use instruction::{
-    ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode, FloatWidth, GpuCategory, GpuOpMeta,
-    GpuSubOpcode, Instruction, MachSubOpcode, MathCategory, MathOpMeta, MathSubOpcode, Opcode,
-    Reg, RegRange, SyncSubOpcode, SysSubOpcode, SystemCategory, SystemOpMeta, SystemSubOpcode,
-    TensorCategory, TensorOpMeta, TensorSubOpcode, TimeSubOpcode,
+    ArithCategory, ArithOpMeta, ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode,
+    FloatWidth, GpuCategory, GpuOpMeta, GpuSubOpcode, Instruction, MachSubOpcode, MathCategory,
+    MathOpMeta, MathSubOpcode, Opcode, Reg, RegRange, SyncSubOpcode, SysSubOpcode, SystemCategory,
+    SystemOpMeta, SystemSubOpcode, TensorCategory, TensorOpMeta, TensorSubOpcode, TimeSubOpcode,
 };
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{
