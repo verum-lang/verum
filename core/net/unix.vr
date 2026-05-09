@@ -269,6 +269,11 @@ const SUN_PATH_MAX: Int = 104;
 @cfg(target_os = "windows")
 const SUN_PATH_MAX: Int = 108;
 
+/// Stack-allocated chunk size for non-blocking poll_read / poll_write.
+/// Mirrors `core.net.tcp::STREAM_CHUNK_SIZE` so the two stream
+/// implementations cannot drift on read/write upper bounds.
+const STREAM_CHUNK_SIZE: Int = 65536;
+
 /// Serialize an AF_UNIX path to sockaddr_un bytes.
 ///
 
@@ -451,8 +456,8 @@ implement Write for UnixStream {
 implement AsyncRead for UnixStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>> {
         let cap = buf.capacity();
-        let mut byte_buf = [0_u8; 65536];
-        let read_len = if cap < 65536 { cap } else { 65536 };
+        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        let read_len = if cap < STREAM_CHUNK_SIZE { cap } else { STREAM_CHUNK_SIZE };
         if read_len == 0 {
             return Poll.Ready(Ok(0));
         }
@@ -487,8 +492,8 @@ implement AsyncWrite for UnixStream {
             return Poll.Ready(Ok(0));
         }
 
-        let mut byte_buf = [0_u8; 65536];
-        let write_len = if buf.len() < 65536 { buf.len() } else { 65536 };
+        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        let write_len = if buf.len() < STREAM_CHUNK_SIZE { buf.len() } else { STREAM_CHUNK_SIZE };
         for i in 0..write_len { byte_buf[i] = buf[i]; }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
