@@ -26349,12 +26349,570 @@ impl TypeChecker {
                 Ok(Type::function(param_types, ret_type))
             }
 
-            TypeKind::Rank2Function {
-                type_params,
-                params,
-                return_type,
-                ..
+            TypeKind::Rank2Function { .. } => self.ast_to_rank2_function_type(ast_ty),
+
+            TypeKind::Tuple(types) => {
+                let types: Result<List<_>> = types.iter().map(|t| self.ast_to_type(t)).collect();
+                Ok(Type::tuple(types?))
+            }
+
+            TypeKind::Array { element, size } => {
+                let elem_ty = self.ast_to_type(element)?;
+                // Extract array size via const evaluation if size expression is present
+                let array_size = if let verum_common::Maybe::Some(size_expr) = size {
+                    match self.const_eval.eval(size_expr) {
+                        Ok(const_val) => const_val.as_u128().map(|n| n as usize),
+                        Err(_) => None, // Not a compile-time constant
+                    }
+                } else {
+                    None
+                };
+                Ok(Type::array(elem_ty, array_size))
+            }
+
+            TypeKind::Slice(element) => {
+                let elem_ty = self.ast_to_type(element)?;
+                Ok(Type::slice(elem_ty))
+            }
+
+            TypeKind::Reference { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::reference(*mutable, inner_ty))
+            }
+
+            TypeKind::CheckedReference { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::checked_reference(*mutable, inner_ty))
+            }
+
+            TypeKind::UnsafeReference { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::unsafe_reference(*mutable, inner_ty))
+            }
+
+            // Path type: Path<A>(a, b) → Type::Eq { ty: A, lhs, rhs }
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                let carrier_ty = self.ast_to_type(carrier)?;
+                let lhs_eq = crate::expr_to_eqterm::expr_to_eq_term(lhs);
+                let rhs_eq = crate::expr_to_eqterm::expr_to_eq_term(rhs);
+                Ok(Type::Eq {
+                    ty: Box::new(carrier_ty),
+                    lhs: Box::new(lhs_eq),
+                    rhs: Box::new(rhs_eq),
+                })
+            }
+
+            // General dependent type application `T<A>(v..)`. We do not
+            // yet check index expressions against a dependent type's
+            // signature here — the carrier carries full generic info,
+            // and the value indices are retained for downstream
+            // verification passes (see refinement / dependent solver).
+            TypeKind::DependentApp { carrier, .. } => {
+                // For now, ignore the value indices and resolve as the
+                // carrier type. A follow-up lands an index-checking
+                // pass that re-unifies these against the type
+                // constructor declaration. This matches how `Path<A>(a,
+                // b)` worked before the sugared `PathType` split, so it
+                // is the smallest change that keeps the stdlib parsing
+                // without silently dropping index info (we still retain
+                // the AST node for later passes).
+                self.ast_to_type(carrier)
+            }
+
+            TypeKind::Path(path) => {
+                // `@builtin_*` meta-type markers are language-level primitives
+                // referenced from stdlib (e.g. `type I is @builtin_interval;`,
+                // `type Path<A>(a, b) is @builtin_path;` in core/math/hott.vr).
+                // They are not looked up in the user type environment — they
+                // name compiler intrinsics directly and resolve here.
+                if path.segments.len() == 1 {
+                    if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
+                        let name = ident.name.as_str();
+                        if let Some(builtin) = resolve_builtin_meta_type(name) {
+                            return Ok(builtin);
+                        }
+                    }
+                }
+                // Named type (user-defined type or type alias)
+                // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
+                // Use the new resolver for qualified paths
+                self.resolve_qualified_type(path, ast_ty.span)
+            }
+
+            TypeKind::Generic { .. } => self.ast_to_generic_type(ast_ty),
+
+            TypeKind::Refined { base, predicate } => {
+                use crate::refinement::{
+                    RefinementBinding, RefinementPredicate as TyRefinementPredicate,
+                };
+                use Option;
+
+                let base_ty = self.ast_to_type(base)?;
+                // Post collapse, `TypeKind::Refined` carries all three
+                // surface forms. The sigma form reaches us with a
+                // `predicate.binding = Some(name)`; preserve that distinction
+                // by emitting a `RefinementBinding::Sigma` when the binding
+                // came from the sigma surface syntax. We can no longer tell
+                // sigma apart from lambda `T where |x| expr` at this layer
+                // (both share the same AST shape), so both are treated as
+                // Sigma — semantically equivalent in the type system.
+                let binding = match &predicate.binding {
+                    Some(ident) => RefinementBinding::Sigma(ident.name.clone()),
+                    None => RefinementBinding::Inline,
+                };
+                let pred = TyRefinementPredicate {
+                    predicate: predicate.expr.clone(),
+                    binding: binding.clone(),
+                    span: predicate.span,
+                };
+
+                // Verify dependent type constraint using SMT if enabled for
+                // sigma-form refinements (previously the `TypeKind::Sigma`
+                // arm's behaviour). Sigma types (dependent pairs):
+                // `(x: A, B(x))` where second component type depends on first
+                // value — refinement types desugar to Sigma.
+                if let Some(name) = &predicate.binding {
+                    if self.has_dependent_types() {
+                        use crate::dependent_helpers::convert_internal_to_ast;
+                        use crate::dependent_integration::DependentTypeConstraint;
+
+                        let constraint = DependentTypeConstraint::SigmaType {
+                            fst_name: name.name.clone(),
+                            fst_type: convert_internal_to_ast(&base_ty),
+                            snd_type: convert_internal_to_ast(&Type::Bool),
+                            span: ast_ty.span,
+                        };
+
+                        match self.verify_dependent_type(&constraint) {
+                            Ok(result) => {
+                                if let crate::refinement::VerificationResult::Invalid {
+                                    counterexample,
+                                } = result
+                                {
+                                    // Log verification failure but don't fail type checking
+                                    // This allows gradual adoption of dependent types
+                                    // The constraint will be checked at runtime if not proven
+                                    if let Maybe::Some(ref ce) = counterexample {
+                                        // Record that this constraint needs runtime checking
+                                        // (could be tracked in a separate data structure for diagnostics)
+                                        let _ = ce; // Suppress unused warning for now
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // SMT verification failed - continue with type checking
+                                // The constraint will be checked at runtime
+                            }
+                        }
+                    }
+                }
+
+                Ok(Type::refined(base_ty, pred))
+            }
+
+            TypeKind::Inferred => {
+                // Type inference placeholder
+                Ok(Type::Var(TypeVar::fresh()))
+            }
+
+            TypeKind::Pointer { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::Pointer {
+                    mutable: *mutable,
+                    inner: Box::new(inner_ty),
+                })
+            }
+
+            TypeKind::VolatilePointer { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::VolatilePointer {
+                    mutable: *mutable,
+                    inner: Box::new(inner_ty),
+                })
+            }
+
+            TypeKind::Ownership { mutable, inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::Ownership {
+                    mutable: *mutable,
+                    inner: Box::new(inner_ty),
+                })
+            }
+
+            TypeKind::GenRef { inner } => {
+                let inner_ty = self.ast_to_type(inner)?;
+                Ok(Type::genref(inner_ty))
+            }
+
+            TypeKind::Tensor {
+                element,
+                shape,
+                layout: _,
             } => {
+                use crate::const_eval::ConstEvaluator;
+                use verum_common::ConstValue;
+
+                let element_ty = self.ast_to_type(element)?;
+
+                // Evaluate shape expressions to const values.
+                // SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor types with compile-time shape
+                //
+
+                // Tensor dimensions can be:
+                // 1. Literal integers (e.g., 3, 4, 5) - evaluated directly
+                // 2. Meta parameters (e.g., N, M) - represented symbolically
+                // 3. Expressions (e.g., N * 2) - evaluated if possible
+                let mut shape_values = List::new();
+                let mut const_eval = ConstEvaluator::new();
+
+                for dim_expr in shape {
+                    match const_eval.eval(dim_expr) {
+                        Ok(val) => shape_values.push(val),
+                        Err(_) => {
+                            // Cannot evaluate at compile time.
+                            // Check if this is a meta parameter reference that will be
+                            // resolved during monomorphization.
+                            if let verum_ast::expr::ExprKind::Path(path) = &dim_expr.kind {
+                                if let Some(ident) = path.as_ident() {
+                                    // Simple identifier - likely a meta parameter.
+                                    // Use u128::MAX as sentinel for symbolic dimension.
+                                    tracing::debug!(
+                                        "Tensor dimension '{}' deferred to monomorphization",
+                                        ident.name
+                                    );
+                                    shape_values.push(ConstValue::UInt(u128::MAX));
+                                    continue;
+                                }
+                            }
+                            // Complex expression - also defer to monomorphization.
+                            // This handles cases like N * 2 where N is a meta parameter.
+                            shape_values.push(ConstValue::UInt(u128::MAX));
+                        }
+                    }
+                }
+
+                Ok(Type::tensor(element_ty, shape_values, ast_ty.span))
+            }
+
+            TypeKind::TypeConstructor { base, arity } => {
+                use crate::advanced_protocols::Kind;
+
+                // Extract the name from the base type
+                let name = if let TypeKind::Path(path) = &base.kind {
+                    if let Some(ident) = path.as_ident() {
+                        ident.name.clone()
+                    } else {
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Type constructor must have simple name, got: {}",
+                            path
+                        ))));
+                    }
+                } else {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Type constructor base must be a path, got: {}",
+                        type_kind_description(&base.kind)
+                    ))));
+                };
+
+                // Create appropriate kind based on arity
+                let kind = match *arity {
+                    0 => Kind::type_kind(),
+                    1 => Kind::unary_constructor(),
+                    2 => Kind::binary_constructor(),
+                    _ => {
+                        // For higher arities, build the kind recursively
+                        let mut k = Kind::Type;
+                        for _ in 0..*arity {
+                            k = Kind::Arrow(Box::new(Kind::Type), Box::new(k));
+                        }
+                        k
+                    }
+                };
+
+                Ok(Type::type_constructor(name, *arity, kind))
+            }
+
+            TypeKind::Qualified { .. } => self.ast_to_qualified_type(ast_ty),
+
+            TypeKind::Bounded { base, bounds: _ } => {
+                // Bounded type: T where T: Protocol
+                // For type conversion purposes, we just use the base type
+                // The bounds are checked separately during constraint solving
+                self.ast_to_type(base)
+            }
+
+            TypeKind::DynProtocol { bounds, bindings } => {
+                // Dynamic protocol object: dyn Display + Debug
+                // Use the proper Type::DynProtocol representation
+                let mut bound_names = List::new();
+                for bound in bounds {
+                    if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
+                        && let Some(ident) = path.as_ident()
+                    {
+                        bound_names.push(ident.name.clone());
+                    }
+                }
+
+                // Convert associated type bindings to a map
+                let mut bindings_map = Map::new();
+                if let Some(bindings_vec) = bindings {
+                    for binding in bindings_vec {
+                        let binding_ty = self.ast_to_type(&binding.ty)?;
+                        bindings_map.insert(binding.name.name.clone(), binding_ty);
+                    }
+                }
+
+                // Object safety check: verify each protocol bound is object-safe.
+                // Object-unsafe protocols (generic methods, Self-returning, etc.)
+                // cannot be used with `dyn`.
+                for bound_name in &bound_names {
+                    let pc = self.protocol_checker.read();
+                    if let Err(errors) = pc.check_object_safety(bound_name) {
+                        let error_msgs: Vec<String> =
+                            errors.iter().map(|e| format!("{}", e)).collect();
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Protocol '{}' is not object-safe and cannot be used with `dyn`: {}",
+                            bound_name,
+                            error_msgs.join(", ")
+                        ))));
+                    }
+                }
+
+                Ok(Type::DynProtocol {
+                    bounds: bound_names,
+                    bindings: bindings_map,
+                })
+            }
+
+            TypeKind::Existential { name, bounds } => {
+                // Existential type: some T: Bound
+                // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — Existential Types
+                //
+
+                // Creates an existentially quantified type: ∃T. T where T: Bound
+                // Used for opaque return types and type erasure.
+                //
+
+                // The existential hides the concrete implementation type while
+                // exposing only the protocol interface.
+                let type_var = TypeVar::fresh();
+
+                // Convert AST bounds to protocol bounds and register them
+                let protocol_bounds: List<crate::protocol::ProtocolBound> = bounds
+                    .iter()
+                    .filter_map(|bound| {
+                        match &bound.kind {
+                            verum_ast::ty::TypeBoundKind::Protocol(path) => {
+                                Some(crate::protocol::ProtocolBound {
+                                    protocol: path.clone(),
+                                    args: List::new(),
+                                    is_negative: false,
+                                })
+                            }
+                            verum_ast::ty::TypeBoundKind::NegativeProtocol(path) => {
+                                Some(crate::protocol::ProtocolBound {
+                                    protocol: path.clone(),
+                                    args: List::new(),
+                                    is_negative: true,
+                                })
+                            }
+                            _ => None, // Handle other bound kinds as needed
+                        }
+                    })
+                    .collect();
+
+                // Register bounds on the type variable for method resolution
+                self.register_type_var_bounds(type_var, protocol_bounds);
+
+                // Create the existential type: ∃T. T
+                // The body is just the type variable, bounds are tracked separately
+                Ok(Type::Exists {
+                    var: type_var,
+                    body: Box::new(Type::Var(type_var)),
+                })
+            }
+
+            TypeKind::AssociatedType { base, assoc } => {
+                // Associated type path: T.Item or Self.Item
+                // Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
+                //
+
+                // Represents a projection from a type to its associated type.
+                // E.g., Iterator.Item, Container.Element, W.Inner.Item (chained)
+                //
+
+                // Resolution happens during protocol checking when the concrete
+                // implementing type is known and we can look up the associated type
+                // in the implementation.
+                let base_ty = self.ast_to_type(base)?;
+
+                // Represent associated types as Generic with projection naming convention.
+                // Format: "::AssocName" with base_ty stored in args[0] for later resolution.
+                // This allows chained projections like W.Inner.Item to be resolved iteratively.
+                //
+
+                // Example: Iterator<T>.Item becomes Generic { name: "::Item", args: [Iterator<T>] }
+                // Chained: W.Inner.Item becomes Generic { name: "::Item", args: [W.Inner] }
+                //  where W.Inner is also Generic { name: "::Inner", args: [W] }
+                let assoc_name = assoc.name.as_str();
+                let projection_name = verum_common::Text::from(format!("::{}", assoc_name));
+
+                Ok(Type::Generic {
+                    name: projection_name,
+                    args: List::from(vec![base_ty]),
+                })
+            }
+
+            TypeKind::CapabilityRestricted { base, capabilities } => {
+                // Capability-restricted type: T with [Capabilities]
+                // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
+                //
+
+                // Check the base type and track capabilities for capability-based
+                // method filtering. The type system ensures that:
+                // - T with [A, B, C] <: T with [A, B] (more caps = subtype of fewer caps)
+                // - Method calls requiring capability C are only valid if C is in the set
+                let base_ty = self.ast_to_type(base)?;
+
+                // Convert AST CapabilitySet to structured TypeCapabilitySet
+                // This enables proper set operations (subset, superset, intersection)
+                // for capability attenuation subtyping
+                let type_caps = crate::capability::TypeCapabilitySet::from_ast(capabilities);
+
+                Ok(Type::CapabilityRestricted {
+                    base: Box::new(base_ty),
+                    capabilities: type_caps,
+                })
+            }
+
+            // Unknown type - a safe top type (like `any` in TypeScript but safe)
+            // It represents an unknown concrete type and doesn't unify with other types
+            TypeKind::Unknown => Ok(Type::Unknown),
+
+            // Record types: { field1: Type1, field2: Type2, ... }
+            TypeKind::Record { fields, .. } => {
+                use indexmap::IndexMap;
+                let mut field_types: IndexMap<Text, Type> = IndexMap::new();
+                for f in fields {
+                    let ty = self.ast_to_type(&f.ty)?;
+                    field_types.insert(f.name.name.clone(), ty);
+                }
+                Ok(Type::Record(field_types))
+            }
+
+            // Universe types: Type, Type(0), Type(1), Type(u)
+            TypeKind::Universe { level } => {
+                use crate::ty::UniverseLevel;
+                // Honour `[types].universe_polymorphism = false`:
+                // reject POLYMORPHIC universe forms (level variable
+                // `Type(u)`, or expressions containing one — `Max`,
+                // `Succ`). Concrete forms (`Type` and `Type(N)`)
+                // are always allowed: the universe level is fixed
+                // at declaration time, so no polymorphism is
+                // introduced.
+                //
+
+                // Pre-fix the manifest field was tracing-only at
+                // session.rs:472; the elaborator unconditionally
+                // synthesised `UniverseLevel::Variable` for
+                // `Type(u)` regardless of the flag — silently
+                // permitting the language feature even when the
+                // user explicitly disabled it.
+                let level_is_polymorphic = matches!(
+                    level,
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(_))
+                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(_, _))
+                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(_))
+                );
+                if level_is_polymorphic && !self.universe_poly_enabled {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        "universe-polymorphic types (e.g. `Type(u)`, `Type(max(a,b))`, \
+                         `Type(succ u)`) require `[types].universe_polymorphism = true` \
+                         in Verum.toml — concrete `Type` / `Type(N)` are always \
+                         allowed",
+                    )));
+                }
+                let uni_level = match level {
+                    verum_common::Maybe::None => UniverseLevel::TYPE,
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
+                        UniverseLevel::Concrete(*n)
+                    }
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
+                        // Look up the level variable in scope
+                        // For now, assign a fresh variable ID based on the name
+                        let var_id = self.fresh_universe_var_id(&ident.name);
+                        UniverseLevel::Variable(var_id)
+                    }
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(a, b)) => {
+                        let la = self.ast_universe_level_to_internal(a);
+                        let lb = self.ast_universe_level_to_internal(b);
+                        la.max(lb)
+                    }
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(inner)) => {
+                        let l = self.ast_universe_level_to_internal(inner);
+                        l.succ()
+                    }
+                };
+                Ok(Type::Universe { level: uni_level })
+            }
+
+            // Meta type: meta T - compile-time type-level value
+            TypeKind::Meta { inner } => {
+                // For now, treat meta T as T at the type level
+                // The meta qualifier is tracked for dependent type checking
+                self.ast_to_type(inner)
+            }
+
+            // Type lambda: |x| T - used in sigma types and dependent type positions
+            TypeKind::TypeLambda { params: _, body } => {
+                // For now, evaluate the body type
+                // Full dependent type support would track the lambda structure
+                self.ast_to_type(body)
+            }
+        }
+    }
+
+    /// Infer the type for the `?` operator (try operator).
+    ///
+
+    /// Try operator type checking: ? operator desugars to match with From conversion, requires Result/Maybe return type — Error propagation with ?
+    ///
+
+    /// The `?` operator has the following semantics:
+    /// - `expr?: T` where `expr: Result<T, E1>` and function returns `Result<U, E2>`
+    /// - Requires `From<E1> for E2` to be implemented
+    /// - Extracts the success value or early-returns the error (converted to E2)
+    ///
+
+    /// # Type Checking Rules
+    ///
+
+    /// 1. The inner expression must have type `Result<T, E>` or `Maybe<T>`
+    /// 2. The enclosing function must return `Result<U, E2>` or `Maybe<U>`
+    /// 3. For Result types: `E` must be convertible to `E2` via `From<E> for E2`
+    /// 4. For Maybe types: no conversion needed
+    ///
+
+    /// # Error Diagnostics
+    ///
+
+    /// - **E0203**: Result type mismatch - error types not compatible
+    /// - **E0204**: Multiple conversion paths - ambiguous From implementations
+    /// - **E0205**: Cannot use `?` in non-Result context
+    ///
+
+    /// # Returns
+    ///
+
+    /// Returns `Ok(InferResult<T>)` where `T` is the success type from the Result/Maybe.
+    /// Convert a rank-2 polymorphic function type `fn<R>(...) -> ...`
+    /// to an internal `Type::Forall { vars, body: Function }`.
+    /// Pushes/pops a scope for the universally-quantified type parameters;
+    /// handles Type/HKT/Const/Meta/KindAnnotated param kinds.
+    fn ast_to_rank2_function_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        use verum_ast::ty::TypeKind;
+        let TypeKind::Rank2Function { type_params, params, return_type, .. } = &ast_ty.kind
+            else { unreachable!() };
                 // Rank-2 polymorphic function types: fn<R>(Reducer<B, R>) -> Reducer<A, R>
                 // Spec: grammar/verum.ebnf - rank2_function_type
                 //
@@ -26552,97 +27110,16 @@ impl TypeChecker {
                         body: Box::new(fn_type),
                     })
                 }
-            }
+    }
 
-            TypeKind::Tuple(types) => {
-                let types: Result<List<_>> = types.iter().map(|t| self.ast_to_type(t)).collect();
-                Ok(Type::tuple(types?))
-            }
-
-            TypeKind::Array { element, size } => {
-                let elem_ty = self.ast_to_type(element)?;
-                // Extract array size via const evaluation if size expression is present
-                let array_size = if let verum_common::Maybe::Some(size_expr) = size {
-                    match self.const_eval.eval(size_expr) {
-                        Ok(const_val) => const_val.as_u128().map(|n| n as usize),
-                        Err(_) => None, // Not a compile-time constant
-                    }
-                } else {
-                    None
-                };
-                Ok(Type::array(elem_ty, array_size))
-            }
-
-            TypeKind::Slice(element) => {
-                let elem_ty = self.ast_to_type(element)?;
-                Ok(Type::slice(elem_ty))
-            }
-
-            TypeKind::Reference { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::reference(*mutable, inner_ty))
-            }
-
-            TypeKind::CheckedReference { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::checked_reference(*mutable, inner_ty))
-            }
-
-            TypeKind::UnsafeReference { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::unsafe_reference(*mutable, inner_ty))
-            }
-
-            // Path type: Path<A>(a, b) → Type::Eq { ty: A, lhs, rhs }
-            TypeKind::PathType { carrier, lhs, rhs } => {
-                let carrier_ty = self.ast_to_type(carrier)?;
-                let lhs_eq = crate::expr_to_eqterm::expr_to_eq_term(lhs);
-                let rhs_eq = crate::expr_to_eqterm::expr_to_eq_term(rhs);
-                Ok(Type::Eq {
-                    ty: Box::new(carrier_ty),
-                    lhs: Box::new(lhs_eq),
-                    rhs: Box::new(rhs_eq),
-                })
-            }
-
-            // General dependent type application `T<A>(v..)`. We do not
-            // yet check index expressions against a dependent type's
-            // signature here — the carrier carries full generic info,
-            // and the value indices are retained for downstream
-            // verification passes (see refinement / dependent solver).
-            TypeKind::DependentApp { carrier, .. } => {
-                // For now, ignore the value indices and resolve as the
-                // carrier type. A follow-up lands an index-checking
-                // pass that re-unifies these against the type
-                // constructor declaration. This matches how `Path<A>(a,
-                // b)` worked before the sugared `PathType` split, so it
-                // is the smallest change that keeps the stdlib parsing
-                // without silently dropping index info (we still retain
-                // the AST node for later passes).
-                self.ast_to_type(carrier)
-            }
-
-            TypeKind::Path(path) => {
-                // `@builtin_*` meta-type markers are language-level primitives
-                // referenced from stdlib (e.g. `type I is @builtin_interval;`,
-                // `type Path<A>(a, b) is @builtin_path;` in core/math/hott.vr).
-                // They are not looked up in the user type environment — they
-                // name compiler intrinsics directly and resolve here.
-                if path.segments.len() == 1 {
-                    if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
-                        let name = ident.name.as_str();
-                        if let Some(builtin) = resolve_builtin_meta_type(name) {
-                            return Ok(builtin);
-                        }
-                    }
-                }
-                // Named type (user-defined type or type alias)
-                // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
-                // Use the new resolver for qualified paths
-                self.resolve_qualified_type(path, ast_ty.span)
-            }
-
-            TypeKind::Generic { base, args } => {
+    /// Convert a `TypeKind::Generic` AST node (e.g. `List<T>`, `Matrix<Float,2,3>`)
+    /// to an internal `Type`.
+    /// Handles: type-args (Type/Const/Lifetime/Binding), arity validation,
+    /// variant substitution, HKT TypeApp, dependent Eq/Fin well-formedness.
+    fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        use verum_ast::ty::TypeKind;
+        let TypeKind::Generic { base, args } = &ast_ty.kind
+            else { unreachable!() };
                 // Generic type with arguments: List<T>, Tensor<Float, [2, 3]>
                 // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Generic type arguments
                 let base_ty = self.ast_to_type(base)?;
@@ -27052,204 +27529,16 @@ impl TypeChecker {
                 }
 
                 Ok(result_type)
-            }
+    }
 
-            TypeKind::Refined { base, predicate } => {
-                use crate::refinement::{
-                    RefinementBinding, RefinementPredicate as TyRefinementPredicate,
-                };
-                use Option;
-
-                let base_ty = self.ast_to_type(base)?;
-                // Post collapse, `TypeKind::Refined` carries all three
-                // surface forms. The sigma form reaches us with a
-                // `predicate.binding = Some(name)`; preserve that distinction
-                // by emitting a `RefinementBinding::Sigma` when the binding
-                // came from the sigma surface syntax. We can no longer tell
-                // sigma apart from lambda `T where |x| expr` at this layer
-                // (both share the same AST shape), so both are treated as
-                // Sigma — semantically equivalent in the type system.
-                let binding = match &predicate.binding {
-                    Some(ident) => RefinementBinding::Sigma(ident.name.clone()),
-                    None => RefinementBinding::Inline,
-                };
-                let pred = TyRefinementPredicate {
-                    predicate: predicate.expr.clone(),
-                    binding: binding.clone(),
-                    span: predicate.span,
-                };
-
-                // Verify dependent type constraint using SMT if enabled for
-                // sigma-form refinements (previously the `TypeKind::Sigma`
-                // arm's behaviour). Sigma types (dependent pairs):
-                // `(x: A, B(x))` where second component type depends on first
-                // value — refinement types desugar to Sigma.
-                if let Some(name) = &predicate.binding {
-                    if self.has_dependent_types() {
-                        use crate::dependent_helpers::convert_internal_to_ast;
-                        use crate::dependent_integration::DependentTypeConstraint;
-
-                        let constraint = DependentTypeConstraint::SigmaType {
-                            fst_name: name.name.clone(),
-                            fst_type: convert_internal_to_ast(&base_ty),
-                            snd_type: convert_internal_to_ast(&Type::Bool),
-                            span: ast_ty.span,
-                        };
-
-                        match self.verify_dependent_type(&constraint) {
-                            Ok(result) => {
-                                if let crate::refinement::VerificationResult::Invalid {
-                                    counterexample,
-                                } = result
-                                {
-                                    // Log verification failure but don't fail type checking
-                                    // This allows gradual adoption of dependent types
-                                    // The constraint will be checked at runtime if not proven
-                                    if let Maybe::Some(ref ce) = counterexample {
-                                        // Record that this constraint needs runtime checking
-                                        // (could be tracked in a separate data structure for diagnostics)
-                                        let _ = ce; // Suppress unused warning for now
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // SMT verification failed - continue with type checking
-                                // The constraint will be checked at runtime
-                            }
-                        }
-                    }
-                }
-
-                Ok(Type::refined(base_ty, pred))
-            }
-
-            TypeKind::Inferred => {
-                // Type inference placeholder
-                Ok(Type::Var(TypeVar::fresh()))
-            }
-
-            TypeKind::Pointer { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::Pointer {
-                    mutable: *mutable,
-                    inner: Box::new(inner_ty),
-                })
-            }
-
-            TypeKind::VolatilePointer { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::VolatilePointer {
-                    mutable: *mutable,
-                    inner: Box::new(inner_ty),
-                })
-            }
-
-            TypeKind::Ownership { mutable, inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::Ownership {
-                    mutable: *mutable,
-                    inner: Box::new(inner_ty),
-                })
-            }
-
-            TypeKind::GenRef { inner } => {
-                let inner_ty = self.ast_to_type(inner)?;
-                Ok(Type::genref(inner_ty))
-            }
-
-            TypeKind::Tensor {
-                element,
-                shape,
-                layout: _,
-            } => {
-                use crate::const_eval::ConstEvaluator;
-                use verum_common::ConstValue;
-
-                let element_ty = self.ast_to_type(element)?;
-
-                // Evaluate shape expressions to const values.
-                // SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor types with compile-time shape
-                //
-
-                // Tensor dimensions can be:
-                // 1. Literal integers (e.g., 3, 4, 5) - evaluated directly
-                // 2. Meta parameters (e.g., N, M) - represented symbolically
-                // 3. Expressions (e.g., N * 2) - evaluated if possible
-                let mut shape_values = List::new();
-                let mut const_eval = ConstEvaluator::new();
-
-                for dim_expr in shape {
-                    match const_eval.eval(dim_expr) {
-                        Ok(val) => shape_values.push(val),
-                        Err(_) => {
-                            // Cannot evaluate at compile time.
-                            // Check if this is a meta parameter reference that will be
-                            // resolved during monomorphization.
-                            if let verum_ast::expr::ExprKind::Path(path) = &dim_expr.kind {
-                                if let Some(ident) = path.as_ident() {
-                                    // Simple identifier - likely a meta parameter.
-                                    // Use u128::MAX as sentinel for symbolic dimension.
-                                    tracing::debug!(
-                                        "Tensor dimension '{}' deferred to monomorphization",
-                                        ident.name
-                                    );
-                                    shape_values.push(ConstValue::UInt(u128::MAX));
-                                    continue;
-                                }
-                            }
-                            // Complex expression - also defer to monomorphization.
-                            // This handles cases like N * 2 where N is a meta parameter.
-                            shape_values.push(ConstValue::UInt(u128::MAX));
-                        }
-                    }
-                }
-
-                Ok(Type::tensor(element_ty, shape_values, ast_ty.span))
-            }
-
-            TypeKind::TypeConstructor { base, arity } => {
-                use crate::advanced_protocols::Kind;
-
-                // Extract the name from the base type
-                let name = if let TypeKind::Path(path) = &base.kind {
-                    if let Some(ident) = path.as_ident() {
-                        ident.name.clone()
-                    } else {
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Type constructor must have simple name, got: {}",
-                            path
-                        ))));
-                    }
-                } else {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Type constructor base must be a path, got: {}",
-                        type_kind_description(&base.kind)
-                    ))));
-                };
-
-                // Create appropriate kind based on arity
-                let kind = match *arity {
-                    0 => Kind::type_kind(),
-                    1 => Kind::unary_constructor(),
-                    2 => Kind::binary_constructor(),
-                    _ => {
-                        // For higher arities, build the kind recursively
-                        let mut k = Kind::Type;
-                        for _ in 0..*arity {
-                            k = Kind::Arrow(Box::new(Kind::Type), Box::new(k));
-                        }
-                        k
-                    }
-                };
-
-                Ok(Type::type_constructor(name, *arity, kind))
-            }
-
-            TypeKind::Qualified {
-                self_ty,
-                trait_ref,
-                assoc_name,
-            } => {
+    /// Resolve a qualified associated-type projection:
+    /// `<T as Protocol>::Item`, `T.Item` (Verum sugar), or module-qualified path
+    /// (`super.X`, `cog.X.Y`). Defers to a Generic projection when self-type
+    /// contains unresolved vars.
+    fn ast_to_qualified_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        use verum_ast::ty::TypeKind;
+        let TypeKind::Qualified { self_ty, trait_ref, assoc_name } = &ast_ty.kind
+            else { unreachable!() };
                 // CRITICAL: Before treating as associated type, check if this is actually a
                 // module-qualified path (super.X, crate.X.Y.Z). The parser decomposes these
                 // into nested Qualified types, but they should be resolved as module paths.
@@ -27458,279 +27747,8 @@ impl TypeChecker {
                         ))))
                     }
                 }
-            }
-
-            TypeKind::Bounded { base, bounds: _ } => {
-                // Bounded type: T where T: Protocol
-                // For type conversion purposes, we just use the base type
-                // The bounds are checked separately during constraint solving
-                self.ast_to_type(base)
-            }
-
-            TypeKind::DynProtocol { bounds, bindings } => {
-                // Dynamic protocol object: dyn Display + Debug
-                // Use the proper Type::DynProtocol representation
-                let mut bound_names = List::new();
-                for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Protocol(path) = &bound.kind
-                        && let Some(ident) = path.as_ident()
-                    {
-                        bound_names.push(ident.name.clone());
-                    }
-                }
-
-                // Convert associated type bindings to a map
-                let mut bindings_map = Map::new();
-                if let Some(bindings_vec) = bindings {
-                    for binding in bindings_vec {
-                        let binding_ty = self.ast_to_type(&binding.ty)?;
-                        bindings_map.insert(binding.name.name.clone(), binding_ty);
-                    }
-                }
-
-                // Object safety check: verify each protocol bound is object-safe.
-                // Object-unsafe protocols (generic methods, Self-returning, etc.)
-                // cannot be used with `dyn`.
-                for bound_name in &bound_names {
-                    let pc = self.protocol_checker.read();
-                    if let Err(errors) = pc.check_object_safety(bound_name) {
-                        let error_msgs: Vec<String> =
-                            errors.iter().map(|e| format!("{}", e)).collect();
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Protocol '{}' is not object-safe and cannot be used with `dyn`: {}",
-                            bound_name,
-                            error_msgs.join(", ")
-                        ))));
-                    }
-                }
-
-                Ok(Type::DynProtocol {
-                    bounds: bound_names,
-                    bindings: bindings_map,
-                })
-            }
-
-            TypeKind::Existential { name, bounds } => {
-                // Existential type: some T: Bound
-                // Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — Existential Types
-                //
-
-                // Creates an existentially quantified type: ∃T. T where T: Bound
-                // Used for opaque return types and type erasure.
-                //
-
-                // The existential hides the concrete implementation type while
-                // exposing only the protocol interface.
-                let type_var = TypeVar::fresh();
-
-                // Convert AST bounds to protocol bounds and register them
-                let protocol_bounds: List<crate::protocol::ProtocolBound> = bounds
-                    .iter()
-                    .filter_map(|bound| {
-                        match &bound.kind {
-                            verum_ast::ty::TypeBoundKind::Protocol(path) => {
-                                Some(crate::protocol::ProtocolBound {
-                                    protocol: path.clone(),
-                                    args: List::new(),
-                                    is_negative: false,
-                                })
-                            }
-                            verum_ast::ty::TypeBoundKind::NegativeProtocol(path) => {
-                                Some(crate::protocol::ProtocolBound {
-                                    protocol: path.clone(),
-                                    args: List::new(),
-                                    is_negative: true,
-                                })
-                            }
-                            _ => None, // Handle other bound kinds as needed
-                        }
-                    })
-                    .collect();
-
-                // Register bounds on the type variable for method resolution
-                self.register_type_var_bounds(type_var, protocol_bounds);
-
-                // Create the existential type: ∃T. T
-                // The body is just the type variable, bounds are tracked separately
-                Ok(Type::Exists {
-                    var: type_var,
-                    body: Box::new(Type::Var(type_var)),
-                })
-            }
-
-            TypeKind::AssociatedType { base, assoc } => {
-                // Associated type path: T.Item or Self.Item
-                // Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
-                //
-
-                // Represents a projection from a type to its associated type.
-                // E.g., Iterator.Item, Container.Element, W.Inner.Item (chained)
-                //
-
-                // Resolution happens during protocol checking when the concrete
-                // implementing type is known and we can look up the associated type
-                // in the implementation.
-                let base_ty = self.ast_to_type(base)?;
-
-                // Represent associated types as Generic with projection naming convention.
-                // Format: "::AssocName" with base_ty stored in args[0] for later resolution.
-                // This allows chained projections like W.Inner.Item to be resolved iteratively.
-                //
-
-                // Example: Iterator<T>.Item becomes Generic { name: "::Item", args: [Iterator<T>] }
-                // Chained: W.Inner.Item becomes Generic { name: "::Item", args: [W.Inner] }
-                //  where W.Inner is also Generic { name: "::Inner", args: [W] }
-                let assoc_name = assoc.name.as_str();
-                let projection_name = verum_common::Text::from(format!("::{}", assoc_name));
-
-                Ok(Type::Generic {
-                    name: projection_name,
-                    args: List::from(vec![base_ty]),
-                })
-            }
-
-            TypeKind::CapabilityRestricted { base, capabilities } => {
-                // Capability-restricted type: T with [Capabilities]
-                // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
-                //
-
-                // Check the base type and track capabilities for capability-based
-                // method filtering. The type system ensures that:
-                // - T with [A, B, C] <: T with [A, B] (more caps = subtype of fewer caps)
-                // - Method calls requiring capability C are only valid if C is in the set
-                let base_ty = self.ast_to_type(base)?;
-
-                // Convert AST CapabilitySet to structured TypeCapabilitySet
-                // This enables proper set operations (subset, superset, intersection)
-                // for capability attenuation subtyping
-                let type_caps = crate::capability::TypeCapabilitySet::from_ast(capabilities);
-
-                Ok(Type::CapabilityRestricted {
-                    base: Box::new(base_ty),
-                    capabilities: type_caps,
-                })
-            }
-
-            // Unknown type - a safe top type (like `any` in TypeScript but safe)
-            // It represents an unknown concrete type and doesn't unify with other types
-            TypeKind::Unknown => Ok(Type::Unknown),
-
-            // Record types: { field1: Type1, field2: Type2, ... }
-            TypeKind::Record { fields, .. } => {
-                use indexmap::IndexMap;
-                let mut field_types: IndexMap<Text, Type> = IndexMap::new();
-                for f in fields {
-                    let ty = self.ast_to_type(&f.ty)?;
-                    field_types.insert(f.name.name.clone(), ty);
-                }
-                Ok(Type::Record(field_types))
-            }
-
-            // Universe types: Type, Type(0), Type(1), Type(u)
-            TypeKind::Universe { level } => {
-                use crate::ty::UniverseLevel;
-                // Honour `[types].universe_polymorphism = false`:
-                // reject POLYMORPHIC universe forms (level variable
-                // `Type(u)`, or expressions containing one — `Max`,
-                // `Succ`). Concrete forms (`Type` and `Type(N)`)
-                // are always allowed: the universe level is fixed
-                // at declaration time, so no polymorphism is
-                // introduced.
-                //
-
-                // Pre-fix the manifest field was tracing-only at
-                // session.rs:472; the elaborator unconditionally
-                // synthesised `UniverseLevel::Variable` for
-                // `Type(u)` regardless of the flag — silently
-                // permitting the language feature even when the
-                // user explicitly disabled it.
-                let level_is_polymorphic = matches!(
-                    level,
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(_))
-                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(_, _))
-                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(_))
-                );
-                if level_is_polymorphic && !self.universe_poly_enabled {
-                    return Err(TypeError::Other(verum_common::Text::from(
-                        "universe-polymorphic types (e.g. `Type(u)`, `Type(max(a,b))`, \
-                         `Type(succ u)`) require `[types].universe_polymorphism = true` \
-                         in Verum.toml — concrete `Type` / `Type(N)` are always \
-                         allowed",
-                    )));
-                }
-                let uni_level = match level {
-                    verum_common::Maybe::None => UniverseLevel::TYPE,
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
-                        UniverseLevel::Concrete(*n)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(ident)) => {
-                        // Look up the level variable in scope
-                        // For now, assign a fresh variable ID based on the name
-                        let var_id = self.fresh_universe_var_id(&ident.name);
-                        UniverseLevel::Variable(var_id)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(a, b)) => {
-                        let la = self.ast_universe_level_to_internal(a);
-                        let lb = self.ast_universe_level_to_internal(b);
-                        la.max(lb)
-                    }
-                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(inner)) => {
-                        let l = self.ast_universe_level_to_internal(inner);
-                        l.succ()
-                    }
-                };
-                Ok(Type::Universe { level: uni_level })
-            }
-
-            // Meta type: meta T - compile-time type-level value
-            TypeKind::Meta { inner } => {
-                // For now, treat meta T as T at the type level
-                // The meta qualifier is tracked for dependent type checking
-                self.ast_to_type(inner)
-            }
-
-            // Type lambda: |x| T - used in sigma types and dependent type positions
-            TypeKind::TypeLambda { params: _, body } => {
-                // For now, evaluate the body type
-                // Full dependent type support would track the lambda structure
-                self.ast_to_type(body)
-            }
-        }
     }
 
-    /// Infer the type for the `?` operator (try operator).
-    ///
-
-    /// Try operator type checking: ? operator desugars to match with From conversion, requires Result/Maybe return type — Error propagation with ?
-    ///
-
-    /// The `?` operator has the following semantics:
-    /// - `expr?: T` where `expr: Result<T, E1>` and function returns `Result<U, E2>`
-    /// - Requires `From<E1> for E2` to be implemented
-    /// - Extracts the success value or early-returns the error (converted to E2)
-    ///
-
-    /// # Type Checking Rules
-    ///
-
-    /// 1. The inner expression must have type `Result<T, E>` or `Maybe<T>`
-    /// 2. The enclosing function must return `Result<U, E2>` or `Maybe<U>`
-    /// 3. For Result types: `E` must be convertible to `E2` via `From<E> for E2`
-    /// 4. For Maybe types: no conversion needed
-    ///
-
-    /// # Error Diagnostics
-    ///
-
-    /// - **E0203**: Result type mismatch - error types not compatible
-    /// - **E0204**: Multiple conversion paths - ambiguous From implementations
-    /// - **E0205**: Cannot use `?` in non-Result context
-    ///
-
-    /// # Returns
-    ///
-
-    /// Returns `Ok(InferResult<T>)` where `T` is the success type from the Result/Maybe.
     fn infer_try_operator(&mut self, inner_expr: &Expr, try_span: Span) -> Result<InferResult> {
         // Step 1: Infer type of inner expression
         let inner_result = self.synth_expr(inner_expr)?;
@@ -55840,7 +55858,266 @@ impl TypeChecker {
                     }
                 }
             }
-            TypeDeclBody::Variant(variants) => {
+            TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name, &type_param_vars, &type_param_names)?,
+            TypeDeclBody::Record(_) => self.register_record_type_body(type_decl, &type_name)?,
+            TypeDeclBody::Tuple(types) => {
+                // Tuple type declaration: type Point is (Float, Float);
+                // Single-element tuples are newtypes: type UserId is (Int);
+                // Zero-element tuples are unit wrappers: type Signal is ();
+                let type_list: Result<List<Type>> =
+                    types.iter().map(|t| self.ast_to_type(t)).collect();
+                let resolved_types = type_list?;
+
+                if resolved_types.is_empty() {
+                    // Zero-element "tuple" is a unit wrapper: type Signal is ();
+                    // This creates a distinct named type that wraps Unit
+                    let newtype_ty = Type::Named {
+                        path: Path::single(type_decl.name.clone()),
+                        args: List::new(),
+                    };
+                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+
+                    // Store inner type as Unit for coercion checks
+                    let inner_key = format!("__newtype_inner_{}", type_name);
+                    self.ctx.define_type(inner_key, Type::Unit);
+
+                    // Register constructor that takes no arguments: Signal: fn() -> Signal
+                    // This allows both `Signal()` and `()` coercion via newtype rules
+                    let constructor_ty = Type::function(List::new(), newtype_ty);
+                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                } else if resolved_types.len() == 1 {
+                    // Single-element "tuple" is a newtype with constructor
+                    // type UserId is (Int); should allow UserId(42)
+                    let inner_type = resolved_types.first().cloned().unwrap_or(Type::Unit);
+
+                    // Create a Named type for the newtype (not an alias)
+                    let newtype_ty = Type::Named {
+                        path: Path::single(type_decl.name.clone()),
+                        args: List::new(),
+                    };
+                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+
+                    // Store inner type for field access (.0)
+                    let inner_key = format!("__newtype_inner_{}", type_name);
+                    self.ctx.define_type(inner_key, inner_type.clone());
+
+                    // Register constructor function: UserId: fn(Int) -> UserId
+                    let constructor_ty =
+                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
+                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                } else {
+                    // Multi-element tuple: create Named type with constructor
+                    let named_tuple_ty = Type::Named {
+                        path: Path::single(type_decl.name.clone()),
+                        args: List::new(),
+                    };
+                    self.ctx
+                        .define_type(type_name.clone(), named_tuple_ty.clone());
+
+                    // Store tuple fields for field access (.0, .1, .2)
+                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
+                    self.ctx
+                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
+
+                    // Register constructor function: Color: fn(Int, Int, Int) -> Color
+                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
+                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+                }
+            }
+            TypeDeclBody::Newtype(inner_type) => {
+                // Newtype: type UserId is Int;
+                // Register as a distinct named type (not just an alias)
+                // This gives the newtype its own type identity
+                let inner_resolved = self.ast_to_type(inner_type)?;
+
+                // Create the newtype as a Named type
+                let newtype_ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+
+                // Store the inner type for field access (.0)
+                let inner_key = format!("__newtype_inner_{}", type_name);
+                self.ctx.define_type(inner_key, inner_resolved.clone());
+
+                // Register a constructor function: UserId: fn(Int) -> UserId
+                // This allows UserId(42) syntax
+                let constructor_ty =
+                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
+                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
+            }
+            TypeDeclBody::Protocol(_) => self.register_protocol_type_body(type_decl, &type_name)?,
+            TypeDeclBody::Unit => {
+                // Unit type (e.g., `type Empty;` or `type Signal is ();`)
+                // Register as Named type wrapping Unit
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty.clone());
+
+                // Store inner type as Unit for newtype coercion checks
+                // This allows `let s: Signal = ();` without explicit wrapping
+                let inner_key = format!("__newtype_inner_{}", type_name);
+                self.ctx.define_type(inner_key, Type::Unit);
+            }
+            TypeDeclBody::Inductive(_) => {
+                // Dependent type features (v2.0+) - register as named type for now
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+            }
+            TypeDeclBody::Coinductive(protocol_body) => {
+                // Coinductive type — register named type and validate that the
+                // protocol body declares at least one destructor (observation method).
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                // Verify that every protocol item that is a function has an explicit
+                // return type declared (destructors must be typed observations).
+                for item in &protocol_body.items {
+                    use verum_ast::decl::ProtocolItemKind;
+                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
+                        if decl.return_type.is_none() {
+                            tracing::warn!(
+                                "coinductive type `{}`: destructor `{}` has no declared return type; \
+                                 observations should have explicit return types",
+                                type_name,
+                                decl.name.name
+                            );
+                        }
+                    }
+                }
+            }
+            TypeDeclBody::SigmaTuple(types) => {
+                // Dependent pair / sigma type (e.g., `type Interval is lo: Int, hi: Int where hi >= lo;`)
+                // The each sigma-binding element parses as
+                // `TypeKind::Refined { base, predicate }` with
+                // `predicate.binding = Some(field_name)`.
+                let element_types: List<Type> = types
+                    .iter()
+                    .map(|t| self.ast_to_type(t))
+                    .collect::<Result<_>>()?;
+
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty.clone());
+
+                // Store element types for tuple-like access
+                let inner_key = format!("__tuple_elements_{}", type_name);
+                self.ctx
+                    .define_type(inner_key.clone(), Type::Tuple(element_types));
+
+                // Also register named fields as struct fields for field access (e.g., iv.lo, iv.hi)
+                // Extract field names from the refined nodes' predicate binder.
+                let mut fields = indexmap::IndexMap::new();
+                for sigma_ty in types {
+                    if let verum_ast::ty::TypeKind::Refined {
+                        ref base,
+                        ref predicate,
+                    } = sigma_ty.kind
+                    {
+                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
+                            let field_type = self.ast_to_type(base)?;
+                            fields.insert(name.name.clone(), field_type);
+                        }
+                    }
+                }
+                if !fields.is_empty() {
+                    let struct_key = format!("__struct_fields_{}", type_name);
+                    self.ctx.define_type(struct_key, Type::Record(fields));
+                }
+            }
+            TypeDeclBody::Quotient { base, .. } => {
+                // Honour `[types].quotient = false` from Verum.toml:
+                // reject the quotient declaration with a hard error
+                // citing the manifest. The pre-fix behaviour was
+                // unconditional alias registration regardless of the
+                // flag — meaning a project that disabled quotient
+                // types in its manifest still elaborated them
+                // silently. Since the equivalence relation is not
+                // yet enforced at runtime (T1-T phase 2 is partial),
+                // permitting quotient declarations under `quotient =
+                // false` would also let users believe the relation
+                // is checked when it isn't — a soundness gap.
+                if !self.quotient_enabled {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "type `{}` declares a quotient body but \
+                             `[types].quotient` is disabled in Verum.toml — \
+                             enable it to use HIT-based modular equivalence \
+                             types, or rewrite as a plain type alias to \
+                             the carrier",
+                        type_name.as_str()
+                    ))));
+                }
+                // T1-T phase 2: register the quotient type as an alias
+                // over its underlying carrier. Values of the quotient
+                // type are represented at runtime by values of the
+                // carrier; the equivalence relation is a compile-time
+                // constraint that the elaborator lowers to HIT path
+                // constructors when full dependent-type codegen lands.
+                //
+
+                // Registering as both (a) the named carrier in the
+                // type context AND (b) an alias to the base type in
+                // the unifier makes the quotient type resolvable from
+                // both name lookups and nominal-unification paths.
+                let base_resolved = self.ast_to_type(base)?;
+                self.ctx
+                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.unifier
+                    .register_type_alias(type_name.clone(), base_resolved.clone());
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+            }
+        }
+
+        // CRITICAL: Clean up type parameters from the type context
+        // This prevents generic type parameters from one type (e.g., T from Maybe<T>)
+        // from polluting the environment and interfering with other types
+        for param_name in type_param_names {
+            self.ctx.remove_type(&param_name);
+        }
+
+        // NOTE: Cleanup of types_being_registered is now done in register_type_declaration_inner
+        // to ensure it happens on BOTH success and error paths. This enables retry after failed
+        // registration attempts (e.g., when a dependency like List wasn't available initially).
+
+        Ok(())
+    }
+
+    /// Register a sum (variant/enum) type declaration body.
+    /// Handles import-provenance guards, placeholder registration for
+    /// recursive types, variant constructor synthesis (with TypeVar substitution),
+    /// and `__type_var_order_*` / `__type_params_*` metadata.
+    fn register_variant_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+        type_param_vars: &indexmap::IndexMap<verum_common::Text, TypeVar>,
+        type_param_names: &List<verum_common::Text>,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let TypeDeclBody::Variant(variants) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
+        let type_param_names = type_param_names.clone();
+        let type_param_vars = type_param_vars.clone();
                 // IMPORT PROVENANCE: If this type name was explicitly imported and the existing
                 // type in ctx has DIFFERENT variant names, skip the entire registration.
                 // This prevents e.g., atomic Ordering (Relaxed|Acquire|...) from overwriting
@@ -56359,8 +56636,25 @@ impl TypeChecker {
                         }
                     }
                 }
-            }
-            TypeDeclBody::Record(fields) => {
+        Ok(())
+    }
+
+    /// Register a record (struct-like) type declaration body.
+    /// Resolves field types, registers `__type_params_*` for generic arity,
+    /// emits the Record type and method-dispatch stubs.
+    fn register_record_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let TypeDeclBody::Record(fields) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
                 // Example: type Node is { next: Maybe<Node> }
@@ -56665,95 +56959,25 @@ impl TypeChecker {
                             .define_type(type_params_key, Type::Record(param_record));
                     }
                 }
-            }
-            TypeDeclBody::Tuple(types) => {
-                // Tuple type declaration: type Point is (Float, Float);
-                // Single-element tuples are newtypes: type UserId is (Int);
-                // Zero-element tuples are unit wrappers: type Signal is ();
-                let type_list: Result<List<Type>> =
-                    types.iter().map(|t| self.ast_to_type(t)).collect();
-                let resolved_types = type_list?;
+        Ok(())
+    }
 
-                if resolved_types.is_empty() {
-                    // Zero-element "tuple" is a unit wrapper: type Signal is ();
-                    // This creates a distinct named type that wraps Unit
-                    let newtype_ty = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: List::new(),
-                    };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
-
-                    // Store inner type as Unit for coercion checks
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, Type::Unit);
-
-                    // Register constructor that takes no arguments: Signal: fn() -> Signal
-                    // This allows both `Signal()` and `()` coercion via newtype rules
-                    let constructor_ty = Type::function(List::new(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-                } else if resolved_types.len() == 1 {
-                    // Single-element "tuple" is a newtype with constructor
-                    // type UserId is (Int); should allow UserId(42)
-                    let inner_type = resolved_types.first().cloned().unwrap_or(Type::Unit);
-
-                    // Create a Named type for the newtype (not an alias)
-                    let newtype_ty = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: List::new(),
-                    };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
-
-                    // Store inner type for field access (.0)
-                    let inner_key = format!("__newtype_inner_{}", type_name);
-                    self.ctx.define_type(inner_key, inner_type.clone());
-
-                    // Register constructor function: UserId: fn(Int) -> UserId
-                    let constructor_ty =
-                        Type::function(vec![inner_type].into_iter().collect(), newtype_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-                } else {
-                    // Multi-element tuple: create Named type with constructor
-                    let named_tuple_ty = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: List::new(),
-                    };
-                    self.ctx
-                        .define_type(type_name.clone(), named_tuple_ty.clone());
-
-                    // Store tuple fields for field access (.0, .1, .2)
-                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                    self.ctx
-                        .define_type(tuple_fields_key, Type::Tuple(resolved_types.clone()));
-
-                    // Register constructor function: Color: fn(Int, Int, Int) -> Color
-                    let constructor_ty = Type::function(resolved_types, named_tuple_ty);
-                    self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-                }
-            }
-            TypeDeclBody::Newtype(inner_type) => {
-                // Newtype: type UserId is Int;
-                // Register as a distinct named type (not just an alias)
-                // This gives the newtype its own type identity
-                let inner_resolved = self.ast_to_type(inner_type)?;
-
-                // Create the newtype as a Named type
-                let newtype_ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), newtype_ty.clone());
-
-                // Store the inner type for field access (.0)
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, inner_resolved.clone());
-
-                // Register a constructor function: UserId: fn(Int) -> UserId
-                // This allows UserId(42) syntax
-                let constructor_ty =
-                    Type::function(vec![inner_resolved].into_iter().collect(), newtype_ty);
-                self.ctx.env.insert_mono(type_name.as_str(), constructor_ty);
-            }
-            TypeDeclBody::Protocol(protocol_body) => {
+    /// Register a protocol (trait-like) type declaration body.
+    /// Sets up Self type, processes method signatures + associated types,
+    /// registers the protocol in protocol_checker, and emits the Named type.
+    fn register_protocol_type_body(
+        &mut self,
+        type_decl: &verum_ast::TypeDecl,
+        type_name: &verum_common::Text,
+    ) -> Result<()> {
+        use crate::context::TypeScheme;
+        use indexmap::IndexMap;
+        use verum_ast::decl::{TypeDeclBody, VariantData};
+        use verum_ast::ty::Path;
+        use verum_common::Text;
+        let TypeDeclBody::Protocol(protocol_body) = &type_decl.body
+            else { unreachable!() };
+        let type_name = type_name.clone();
                 // Protocol types (e.g., `type Database is protocol { ... }`)
                 // Register as Named type for type checking
                 let ty = Type::Named {
@@ -57047,153 +57271,6 @@ impl TypeChecker {
 
                 // Restore the previous current_self_type
                 self.set_current_self_type(old_self_type);
-            }
-            TypeDeclBody::Unit => {
-                // Unit type (e.g., `type Empty;` or `type Signal is ();`)
-                // Register as Named type wrapping Unit
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty.clone());
-
-                // Store inner type as Unit for newtype coercion checks
-                // This allows `let s: Signal = ();` without explicit wrapping
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                self.ctx.define_type(inner_key, Type::Unit);
-            }
-            TypeDeclBody::Inductive(_) => {
-                // Dependent type features (v2.0+) - register as named type for now
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-            }
-            TypeDeclBody::Coinductive(protocol_body) => {
-                // Coinductive type — register named type and validate that the
-                // protocol body declares at least one destructor (observation method).
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-
-                // Verify that every protocol item that is a function has an explicit
-                // return type declared (destructors must be typed observations).
-                for item in &protocol_body.items {
-                    use verum_ast::decl::ProtocolItemKind;
-                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
-                        if decl.return_type.is_none() {
-                            tracing::warn!(
-                                "coinductive type `{}`: destructor `{}` has no declared return type; \
-                                 observations should have explicit return types",
-                                type_name,
-                                decl.name.name
-                            );
-                        }
-                    }
-                }
-            }
-            TypeDeclBody::SigmaTuple(types) => {
-                // Dependent pair / sigma type (e.g., `type Interval is lo: Int, hi: Int where hi >= lo;`)
-                // The each sigma-binding element parses as
-                // `TypeKind::Refined { base, predicate }` with
-                // `predicate.binding = Some(field_name)`.
-                let element_types: List<Type> = types
-                    .iter()
-                    .map(|t| self.ast_to_type(t))
-                    .collect::<Result<_>>()?;
-
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty.clone());
-
-                // Store element types for tuple-like access
-                let inner_key = format!("__tuple_elements_{}", type_name);
-                self.ctx
-                    .define_type(inner_key.clone(), Type::Tuple(element_types));
-
-                // Also register named fields as struct fields for field access (e.g., iv.lo, iv.hi)
-                // Extract field names from the refined nodes' predicate binder.
-                let mut fields = indexmap::IndexMap::new();
-                for sigma_ty in types {
-                    if let verum_ast::ty::TypeKind::Refined {
-                        ref base,
-                        ref predicate,
-                    } = sigma_ty.kind
-                    {
-                        if let verum_common::Maybe::Some(ref name) = predicate.binding {
-                            let field_type = self.ast_to_type(base)?;
-                            fields.insert(name.name.clone(), field_type);
-                        }
-                    }
-                }
-                if !fields.is_empty() {
-                    let struct_key = format!("__struct_fields_{}", type_name);
-                    self.ctx.define_type(struct_key, Type::Record(fields));
-                }
-            }
-            TypeDeclBody::Quotient { base, .. } => {
-                // Honour `[types].quotient = false` from Verum.toml:
-                // reject the quotient declaration with a hard error
-                // citing the manifest. The pre-fix behaviour was
-                // unconditional alias registration regardless of the
-                // flag — meaning a project that disabled quotient
-                // types in its manifest still elaborated them
-                // silently. Since the equivalence relation is not
-                // yet enforced at runtime (T1-T phase 2 is partial),
-                // permitting quotient declarations under `quotient =
-                // false` would also let users believe the relation
-                // is checked when it isn't — a soundness gap.
-                if !self.quotient_enabled {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "type `{}` declares a quotient body but \
-                             `[types].quotient` is disabled in Verum.toml — \
-                             enable it to use HIT-based modular equivalence \
-                             types, or rewrite as a plain type alias to \
-                             the carrier",
-                        type_name.as_str()
-                    ))));
-                }
-                // T1-T phase 2: register the quotient type as an alias
-                // over its underlying carrier. Values of the quotient
-                // type are represented at runtime by values of the
-                // carrier; the equivalence relation is a compile-time
-                // constraint that the elaborator lowers to HIT path
-                // constructors when full dependent-type codegen lands.
-                //
-
-                // Registering as both (a) the named carrier in the
-                // type context AND (b) an alias to the base type in
-                // the unifier makes the quotient type resolvable from
-                // both name lookups and nominal-unification paths.
-                let base_resolved = self.ast_to_type(base)?;
-                self.ctx
-                    .define_alias(type_name.clone(), base_resolved.clone());
-                self.unifier
-                    .register_type_alias(type_name.clone(), base_resolved.clone());
-                let ty = Type::Named {
-                    path: Path::single(type_decl.name.clone()),
-                    args: List::new(),
-                };
-                self.ctx.define_type(type_name.clone(), ty);
-            }
-        }
-
-        // CRITICAL: Clean up type parameters from the type context
-        // This prevents generic type parameters from one type (e.g., T from Maybe<T>)
-        // from polluting the environment and interfering with other types
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
-
-        // NOTE: Cleanup of types_being_registered is now done in register_type_declaration_inner
-        // to ensure it happens on BOTH success and error paths. This enables retry after failed
-        // registration attempts (e.g., when a dependency like List wasn't available initially).
-
         Ok(())
     }
 
