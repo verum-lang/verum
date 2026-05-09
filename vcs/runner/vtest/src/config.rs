@@ -534,6 +534,8 @@ impl VTestConfig {
             compile_time_only: false,
             vbc_output_dir: None,
             vbc_preserve_paths: false,
+            coverage: false,
+            coverage_output: None,
         }
     }
 
