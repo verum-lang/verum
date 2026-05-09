@@ -48533,342 +48533,14 @@ impl TypeChecker {
         }
 
 
-        // SLICE/ARRAY BUILT-IN METHOD FALLBACK
-        // Methods like as_mut_ptr, as_ptr, offset, len on array/slice types
-        {
-            let slice_element: Option<Type> = match &recv_ty {
-                Type::Array { element, .. } => Some(element.as_ref().clone()),
-                Type::Slice { element } => Some(element.as_ref().clone()),
-                _ => None,
-            };
-            if let Some(elem) = slice_element {
-                let method_name_str = method.name.as_str();
-                match method_name_str {
-                    "as_mut_ptr" | "as_ptr" if args.is_empty() => {
-                        return Ok(InferResult::new(Type::Pointer {
-                            inner: Box::new(elem),
-                            mutable: method_name_str == "as_mut_ptr",
-                        }));
-                    }
-                    "len" if args.is_empty() => {
-                        return Ok(InferResult::new(Type::int()));
-                    }
-                    "offset" if args.len() == 1 => {
-                        let _ = self.synth_expr(&args[0])?;
-                        return Ok(InferResult::new(Type::Pointer {
-                            inner: Box::new(elem),
-                            mutable: false,
-                        }));
-                    }
-                    "from_bytes" if args.len() <= 1 => {
-                        for arg in args.iter() {
-                            let _ = self.synth_expr(arg)?;
-                        }
-                        return Ok(InferResult::new(Type::text()));
-                    }
-                    _ => {}
-                }
-            }
+        if let Some(r) = self.try_builtin_type_method_fallback(&recv_ty, method, args, span)? {
+            return Ok(r);
         }
 
-        // NUMERIC TYPE METHOD FALLBACK
-        // from_float, from_int, etc. on Float, Int, numeric types
-        {
-            let method_name_str = method.name.as_str();
-            let is_numeric = match &recv_ty {
-                Type::Int | Type::Float | Type::Char => true,
-                Type::Named { path, .. } => path.as_ident().is_some_and(|id| {
-                    matches!(
-                        id.name.as_str(),
-                        "Float"
-                            | "Float32"
-                            | "Float64"
-                            | "Int"
-                            | "Int8"
-                            | "Int16"
-                            | "Int32"
-                            | "Int64"
-                            | "UInt8"
-                            | "UInt16"
-                            | "UInt32"
-                            | "UInt64"
-                            | "USize"
-                            | "ISize"
-                            | "Byte"
-                    )
-                }),
-                _ => false,
-            };
-            if is_numeric {
-                match method_name_str {
-                    "from_float" | "from_int" | "from_f32" | "from_f64" | "from_u8"
-                    | "from_u16" | "from_u32" | "from_u64" | "from_i8" | "from_i16"
-                    | "from_i32" | "from_i64"
-                        if args.len() == 1 =>
-                    {
-                        let _ = self.synth_expr(&args[0])?;
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    "to_float" | "to_int" | "to_f32" | "to_f64" if args.is_empty() => {
-                        let target_ty = match method_name_str {
-                            "to_float" | "to_f64" => Type::float(),
-                            "to_int" => Type::int(),
-                            "to_f32" => Type::Named {
-                                path: verum_ast::ty::Path::from_ident(verum_ast::Ident::new(
-                                    "Float32", span,
-                                )),
-                                args: List::new(),
-                            },
-                            _ => Type::float(),
-                        };
-                        return Ok(InferResult::new(target_ty));
-                    }
-                    "item" if args.is_empty() => {
-                        // .item() extracts scalar value - returns same type
-                        return Ok(InferResult::new(recv_ty.clone()));
-                    }
-                    _ => {}
-                }
-            }
-        }
 
-        // BOOL METHOD FALLBACK - cast() on Bool returns a tensor/numeric type
-        if matches!(&recv_ty, Type::Bool) {
-            let method_name_str = method.name.as_str();
-            if method_name_str == "cast" {
-                for arg in args.iter() {
-                    let _ = self.synth_expr(arg)?;
-                }
-                let fresh = Type::Var(TypeVar::fresh());
-                return Ok(InferResult::new(fresh));
-            }
-        }
-
-        // TYPE VARIABLE / PLACEHOLDER METHOD FALLBACK
-        // When receiver type is an unresolved type variable or placeholder, return a fresh
-        // type variable rather than erroring. This allows type inference to continue.
-        match &recv_ty {
-            Type::Var(_) | Type::Placeholder { .. } => {
-                for arg in args.iter() {
-                    let _ = self.synth_expr(arg)?;
-                }
-                let fresh = Type::Var(TypeVar::fresh());
-                return Ok(InferResult::new(fresh));
-            }
-            _ => {}
-        }
-
-        // If method was found but rejected by specialization, produce E400 instead of generic "method not found"
-        if specialization_rejected {
-            return Err(TypeError::Mismatch {
-                expected: format!(
-                    "a type implementing `{}` for `{}`",
-                    method.name.as_str(),
-                    recv_ty
-                )
-                .into(),
-                actual: format!("{}", recv_ty).into(),
-                span,
-            });
-        }
-
-        // Method not found — but if the receiver is a context
-        // type and we're in lenient mode (stdlib pre-registered
-        // contexts whose method types can't be fully resolved),
-        // return Unknown instead of erroring. The actual method
-        // will be resolved at VBC codegen time.
-        // In stdlib lenient mode (single-file check on core/*.vr),
-        // accept unknown methods with Unknown return type. Methods
-        // from implement blocks in sibling modules may not be
-        // registered in single-file check mode.
-        if self.stdlib_single_file_mode {
-            return Ok(InferResult::new(Type::Unknown));
-        }
-
-        // #112 Deref-coercion retry: if the receiver implements
-        // `Deref<Target = T>` (e.g. `PathBuf` -> `Path`,
-        // `Heap<T>` -> `T`, `MutexGuard<T>` -> `T`), try
-        // resolving the method against `T` BEFORE falling
-        // through to the diagnostic hint path. This closes the
-        // ergonomic gap where `path_buf.join_str(...)` failed
-        // because the method lived on `Path`, not `PathBuf` —
-        // callers had to write `path_buf.as_path().join_str(...)`.
-        // We walk the chain up to 4 hops (matches the legacy
-        // hint-walk depth) and short-circuit on the first
-        // hop whose method dispatch succeeds. Cycle protection
-        // via `DEREF_COERCION_DEPTH` thread-local; recursive
-        // dispatches fall straight through without re-entering
-        // the retry loop.
-        let already_in_retry =
-            DEREF_COERCION_DEPTH.with(|d| d.get() > 0);
-        if !already_in_retry {
-            let mut target_ty_opt = {
-                let checker = self.protocol_checker.read();
-                checker
-                    .try_find_associated_type(&recv_ty, &Text::from("Target"))
-            };
-            let mut hop = 0usize;
-            while let Some(target) = target_ty_opt.take() {
-                if hop >= 4 {
-                    break;
-                }
-                let normalised = self.normalize_type(self.unwrap_reference_type(&target));
-                // Increment the guard, retry dispatch with the
-                // unwrapped type as `precomputed_recv_ty`,
-                // decrement on the way out regardless of result.
-                DEREF_COERCION_DEPTH.with(|d| d.set(d.get() + 1));
-                let retry = self.infer_method_call_inner_impl(
-                    receiver,
-                    method,
-                    type_args,
-                    args,
-                    span,
-                    Some(normalised.clone()),
-                    skip_static_lookup,
-                );
-                DEREF_COERCION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-                match retry {
-                    Ok(result) => return Ok(result),
-                    Err(TypeError::MethodNotFound { .. }) => {
-                        // Keep walking — maybe a later hop has the method.
-                    }
-                    Err(other) => return Err(other),
-                }
-                let next = {
-                    let checker = self.protocol_checker.read();
-                    checker.try_find_associated_type(&normalised, &Text::from("Target"))
-                };
-                target_ty_opt = next;
-                hop += 1;
-            }
-        }
-
-        // Smart-pointer auto-deref hint: if the receiver is a
-        // type with a Deref::Target (e.g. `Heap<T>`,
-        // `Shared<T>`, `MutexGuard<T>`) and the method exists
-        // on any type in the deref chain, suggest going through
-        // the target. Direct `Heap<dyn P>.method()` dispatch is
-        // wired through the auto-deref cascade + post-cascade
-        // DynProtocol resolution (task #35, closed); this hint
-        // remains for the corner case where the cascade failed
-        // to propagate — it points at the explicit-deref form
-        // `(&*h).method(...)` as a manual workaround.
-        {
-            let method_name_for_hint: Text = method.name.as_str().into();
-            let mut target_ty_opt = {
-                let checker = self.protocol_checker.read();
-                checker.try_find_associated_type(&recv_ty, &verum_common::Text::from("Target"))
-            };
-            let mut hop = 0;
-            while let Some(target) = target_ty_opt.take() {
-                if hop >= 4 {
-                    break;
-                }
-                let normalised = self.normalize_type(self.unwrap_reference_type(&target));
-                // Walk one level at a time — short-circuit if
-                // the target is a dyn-protocol whose protocol
-                // itself defines the method.
-                if let Type::DynProtocol { bounds, .. } = &normalised {
-                    let checker = self.protocol_checker.read();
-                    for proto_name in bounds.iter() {
-                        if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
-                            if proto.methods.contains_key(&method_name_for_hint) {
-                                return Err(TypeError::MethodNotFound {
-                                    ty: recv_ty.to_text(),
-                                    method: method.name.as_str().to_text(),
-                                    span,
-                                    did_you_mean: verum_common::Maybe::Some(
-                                        verum_common::Text::from(format!(
-                                            "try `(&*receiver).{}(...)` to call `{}` on `dyn {}` \
-                                             directly — the auto-deref cascade should have \
-                                             reached it but did not on this call site",
-                                            method.name.as_str(),
-                                            method.name.as_str(),
-                                            proto_name
-                                        )),
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                }
-                // Continue walking — e.g. Shared<Mutex<T>> unwrapping.
-                let next = {
-                    let checker = self.protocol_checker.read();
-                    checker.try_find_associated_type(
-                        &normalised,
-                        &verum_common::Text::from("Target"),
-                    )
-                };
-                target_ty_opt = next;
-                hop += 1;
-            }
-        }
-
-        // "Did you mean ...?" — gather method names registered for
-        // any type that matches the receiver's name, then suggest
-        // the closest Levenshtein match. Tolerant matching handles
-        // generic instantiations ("List<Int>" matching "List").
-        let method_str = method.name.as_str();
-        let recv_name = recv_ty.to_text();
-        let recv_str = recv_name.as_str();
-        // "Did you mean ...?" — search two sources:
-        //  1. protocol_checker.method_registry() — built-in/stdlib method signatures
-        //  2. self.inherent_methods — user-defined `implement` blocks
-        // Match by receiver type name, tolerating generic instantiations
-        // ("List<Int>" contains "List"). Then rank candidates by
-        // Levenshtein distance and return the closest (<=3 edits).
-        let did_you_mean: Option<verum_common::Text> = {
-            let mut best: Option<(usize, verum_common::Text)> = None;
-            let consider = |best: &mut Option<(usize, verum_common::Text)>,
-                            m: &verum_common::Text| {
-                let d = levenshtein_distance(method_str, m.as_str());
-                if d == 0 || d > 3 {
-                    return;
-                }
-                match best {
-                    Some((bd, _)) if *bd <= d => {}
-                    _ => *best = Some((d, m.clone())),
-                }
-            };
-            {
-                let checker = self.protocol_checker.read();
-                for ((ty_name, m_name), _sig) in checker.method_registry().iter() {
-                    if !recv_str.contains(ty_name.as_str())
-                        && !ty_name.as_str().contains(recv_str)
-                    {
-                        continue;
-                    }
-                    consider(&mut best, m_name);
-                }
-            }
-            {
-                let inherents = self.inherent_methods.read();
-                for (ty_name, methods) in inherents.iter() {
-                    if !recv_str.contains(ty_name.as_str())
-                        && !ty_name.as_str().contains(recv_str)
-                    {
-                        continue;
-                    }
-                    for (m_name, _scheme) in methods.iter() {
-                        // Strip static-method marker prefix used by the
-                        // inherent methods table.
-                        let bare = m_name
-                            .as_str()
-                            .strip_prefix("$static$")
-                            .unwrap_or(m_name.as_str());
-                        consider(&mut best, &verum_common::Text::from(bare));
-                    }
-                }
-            }
-            best.map(|(_, n)| n)
-        };
-        return Err(TypeError::MethodNotFound {
-            ty: recv_ty.to_text(),
-            method: method.name.as_str().to_text(),
-            span,
-            did_you_mean,
-        });
+        return self.emit_method_not_found(
+            recv_ty, receiver, method, type_args, args, span, skip_static_lookup, specialization_rejected,
+        );
     }
 
     /// Resolve method calls on synthetic iterator adapter types
@@ -50580,6 +50252,370 @@ impl TypeChecker {
             }
         }
         Ok((None, specialization_rejected))
+    }
+
+    /// Handle method calls on built-in non-nominal types that are not covered by the
+    /// protocol/inherent lookup chain: Array/Slice pointer ops, numeric conversions,
+    /// Bool::cast, and type-variable/placeholder methods.
+    fn try_builtin_type_method_fallback(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // SLICE/ARRAY BUILT-IN METHOD FALLBACK
+        // Methods like as_mut_ptr, as_ptr, offset, len on array/slice types
+        {
+            let slice_element: Option<Type> = match &recv_ty {
+                Type::Array { element, .. } => Some(element.as_ref().clone()),
+                Type::Slice { element } => Some(element.as_ref().clone()),
+                _ => None,
+            };
+            if let Some(elem) = slice_element {
+                let method_name_str = method.name.as_str();
+                match method_name_str {
+                    "as_mut_ptr" | "as_ptr" if args.is_empty() => {
+                        return Ok(Some(InferResult::new(Type::Pointer {
+                            inner: Box::new(elem),
+                            mutable: method_name_str == "as_mut_ptr",
+                        })));
+                    }
+                    "len" if args.is_empty() => {
+                        return Ok(Some(InferResult::new(Type::int())));
+                    }
+                    "offset" if args.len() == 1 => {
+                        let _ = self.synth_expr(&args[0])?;
+                        return Ok(Some(InferResult::new(Type::Pointer {
+                            inner: Box::new(elem),
+                            mutable: false,
+                        })));
+                    }
+                    "from_bytes" if args.len() <= 1 => {
+                        for arg in args.iter() {
+                            let _ = self.synth_expr(arg)?;
+                        }
+                        return Ok(Some(InferResult::new(Type::text())));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // NUMERIC TYPE METHOD FALLBACK
+        // from_float, from_int, etc. on Float, Int, numeric types
+        {
+            let method_name_str = method.name.as_str();
+            let is_numeric = match &recv_ty {
+                Type::Int | Type::Float | Type::Char => true,
+                Type::Named { path, .. } => path.as_ident().is_some_and(|id| {
+                    matches!(
+                        id.name.as_str(),
+                        "Float"
+                            | "Float32"
+                            | "Float64"
+                            | "Int"
+                            | "Int8"
+                            | "Int16"
+                            | "Int32"
+                            | "Int64"
+                            | "UInt8"
+                            | "UInt16"
+                            | "UInt32"
+                            | "UInt64"
+                            | "USize"
+                            | "ISize"
+                            | "Byte"
+                    )
+                }),
+                _ => false,
+            };
+            if is_numeric {
+                match method_name_str {
+                    "from_float" | "from_int" | "from_f32" | "from_f64" | "from_u8"
+                    | "from_u16" | "from_u32" | "from_u64" | "from_i8" | "from_i16"
+                    | "from_i32" | "from_i64"
+                        if args.len() == 1 =>
+                    {
+                        let _ = self.synth_expr(&args[0])?;
+                        return Ok(Some(InferResult::new(recv_ty.clone())));
+                    }
+                    "to_float" | "to_int" | "to_f32" | "to_f64" if args.is_empty() => {
+                        let target_ty = match method_name_str {
+                            "to_float" | "to_f64" => Type::float(),
+                            "to_int" => Type::int(),
+                            "to_f32" => Type::Named {
+                                path: verum_ast::ty::Path::from_ident(verum_ast::Ident::new(
+                                    "Float32", span,
+                                )),
+                                args: List::new(),
+                            },
+                            _ => Type::float(),
+                        };
+                        return Ok(Some(InferResult::new(target_ty)));
+                    }
+                    "item" if args.is_empty() => {
+                        // .item() extracts scalar value - returns same type
+                        return Ok(Some(InferResult::new(recv_ty.clone())));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // BOOL METHOD FALLBACK - cast() on Bool returns a tensor/numeric type
+        if matches!(&recv_ty, Type::Bool) {
+            let method_name_str = method.name.as_str();
+            if method_name_str == "cast" {
+                for arg in args.iter() {
+                    let _ = self.synth_expr(arg)?;
+                }
+                let fresh = Type::Var(TypeVar::fresh());
+                return Ok(Some(InferResult::new(fresh)));
+            }
+        }
+
+        // TYPE VARIABLE / PLACEHOLDER METHOD FALLBACK
+        // When receiver type is an unresolved type variable or placeholder, return a fresh
+        // type variable rather than erroring. This allows type inference to continue.
+        match &recv_ty {
+            Type::Var(_) | Type::Placeholder { .. } => {
+                for arg in args.iter() {
+                    let _ = self.synth_expr(arg)?;
+                }
+                let fresh = Type::Var(TypeVar::fresh());
+                return Ok(Some(InferResult::new(fresh)));
+            }
+            _ => {}
+        }
+        Ok(None)
+    }
+
+    /// Terminal handler when all method resolution strategies have failed.
+    /// Checks specialization_rejected flag, tries deref-coercion chain retry,
+    /// walks smart-pointer Target for diagnostic hints, then emits MethodNotFound.
+    fn emit_method_not_found(
+        &mut self,
+        recv_ty: Type,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        skip_static_lookup: bool,
+        specialization_rejected: bool,
+    ) -> Result<InferResult> {
+        // If method was found but rejected by specialization, produce E400 instead of generic "method not found"
+        if specialization_rejected {
+            return Err(TypeError::Mismatch {
+                expected: format!(
+                    "a type implementing `{}` for `{}`",
+                    method.name.as_str(),
+                    recv_ty
+                )
+                .into(),
+                actual: format!("{}", recv_ty).into(),
+                span,
+            });
+        }
+
+        // Method not found — but if the receiver is a context
+        // type and we're in lenient mode (stdlib pre-registered
+        // contexts whose method types can't be fully resolved),
+        // return Unknown instead of erroring. The actual method
+        // will be resolved at VBC codegen time.
+        // In stdlib lenient mode (single-file check on core/*.vr),
+        // accept unknown methods with Unknown return type. Methods
+        // from implement blocks in sibling modules may not be
+        // registered in single-file check mode.
+        if self.stdlib_single_file_mode {
+            return Ok(InferResult::new(Type::Unknown));
+        }
+
+        // #112 Deref-coercion retry: if the receiver implements
+        // `Deref<Target = T>` (e.g. `PathBuf` -> `Path`,
+        // `Heap<T>` -> `T`, `MutexGuard<T>` -> `T`), try
+        // resolving the method against `T` BEFORE falling
+        // through to the diagnostic hint path. This closes the
+        // ergonomic gap where `path_buf.join_str(...)` failed
+        // because the method lived on `Path`, not `PathBuf` —
+        // callers had to write `path_buf.as_path().join_str(...)`.
+        // We walk the chain up to 4 hops (matches the legacy
+        // hint-walk depth) and short-circuit on the first
+        // hop whose method dispatch succeeds. Cycle protection
+        // via `DEREF_COERCION_DEPTH` thread-local; recursive
+        // dispatches fall straight through without re-entering
+        // the retry loop.
+        let already_in_retry =
+            DEREF_COERCION_DEPTH.with(|d| d.get() > 0);
+        if !already_in_retry {
+            let mut target_ty_opt = {
+                let checker = self.protocol_checker.read();
+                checker
+                    .try_find_associated_type(&recv_ty, &Text::from("Target"))
+            };
+            let mut hop = 0usize;
+            while let Some(target) = target_ty_opt.take() {
+                if hop >= 4 {
+                    break;
+                }
+                let normalised = self.normalize_type(self.unwrap_reference_type(&target));
+                // Increment the guard, retry dispatch with the
+                // unwrapped type as `precomputed_recv_ty`,
+                // decrement on the way out regardless of result.
+                DEREF_COERCION_DEPTH.with(|d| d.set(d.get() + 1));
+                let retry = self.infer_method_call_inner_impl(
+                    receiver,
+                    method,
+                    type_args,
+                    args,
+                    span,
+                    Some(normalised.clone()),
+                    skip_static_lookup,
+                );
+                DEREF_COERCION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+                match retry {
+                    Ok(result) => return Ok(result),
+                    Err(TypeError::MethodNotFound { .. }) => {
+                        // Keep walking — maybe a later hop has the method.
+                    }
+                    Err(other) => return Err(other),
+                }
+                let next = {
+                    let checker = self.protocol_checker.read();
+                    checker.try_find_associated_type(&normalised, &Text::from("Target"))
+                };
+                target_ty_opt = next;
+                hop += 1;
+            }
+        }
+
+        // Smart-pointer auto-deref hint: if the receiver is a
+        // type with a Deref::Target (e.g. `Heap<T>`,
+        // `Shared<T>`, `MutexGuard<T>`) and the method exists
+        // on any type in the deref chain, suggest going through
+        // the target. Direct `Heap<dyn P>.method()` dispatch is
+        // wired through the auto-deref cascade + post-cascade
+        // DynProtocol resolution (task #35, closed); this hint
+        // remains for the corner case where the cascade failed
+        // to propagate — it points at the explicit-deref form
+        // `(&*h).method(...)` as a manual workaround.
+        {
+            let method_name_for_hint: Text = method.name.as_str().into();
+            let mut target_ty_opt = {
+                let checker = self.protocol_checker.read();
+                checker.try_find_associated_type(&recv_ty, &verum_common::Text::from("Target"))
+            };
+            let mut hop = 0;
+            while let Some(target) = target_ty_opt.take() {
+                if hop >= 4 {
+                    break;
+                }
+                let normalised = self.normalize_type(self.unwrap_reference_type(&target));
+                // Walk one level at a time — short-circuit if
+                // the target is a dyn-protocol whose protocol
+                // itself defines the method.
+                if let Type::DynProtocol { bounds, .. } = &normalised {
+                    let checker = self.protocol_checker.read();
+                    for proto_name in bounds.iter() {
+                        if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
+                            if proto.methods.contains_key(&method_name_for_hint) {
+                                return Err(TypeError::MethodNotFound {
+                                    ty: recv_ty.to_text(),
+                                    method: method.name.as_str().to_text(),
+                                    span,
+                                    did_you_mean: verum_common::Maybe::Some(
+                                        verum_common::Text::from(format!(
+                                            "try `(&*receiver).{}(...)` to call `{}` on `dyn {}` \
+                                             directly — the auto-deref cascade should have \
+                                             reached it but did not on this call site",
+                                            method.name.as_str(),
+                                            method.name.as_str(),
+                                            proto_name
+                                        )),
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                // Continue walking — e.g. Shared<Mutex<T>> unwrapping.
+                let next = {
+                    let checker = self.protocol_checker.read();
+                    checker.try_find_associated_type(
+                        &normalised,
+                        &verum_common::Text::from("Target"),
+                    )
+                };
+                target_ty_opt = next;
+                hop += 1;
+            }
+        }
+
+        // "Did you mean ...?" — gather method names registered for
+        // any type that matches the receiver's name, then suggest
+        // the closest Levenshtein match. Tolerant matching handles
+        // generic instantiations ("List<Int>" matching "List").
+        let method_str = method.name.as_str();
+        let recv_name = recv_ty.to_text();
+        let recv_str = recv_name.as_str();
+        // "Did you mean ...?" — search two sources:
+        //  1. protocol_checker.method_registry() — built-in/stdlib method signatures
+        //  2. self.inherent_methods — user-defined `implement` blocks
+        // Match by receiver type name, tolerating generic instantiations
+        // ("List<Int>" contains "List"). Then rank candidates by
+        // Levenshtein distance and return the closest (<=3 edits).
+        let did_you_mean: Option<verum_common::Text> = {
+            let mut best: Option<(usize, verum_common::Text)> = None;
+            let consider = |best: &mut Option<(usize, verum_common::Text)>,
+                            m: &verum_common::Text| {
+                let d = levenshtein_distance(method_str, m.as_str());
+                if d == 0 || d > 3 {
+                    return;
+                }
+                match best {
+                    Some((bd, _)) if *bd <= d => {}
+                    _ => *best = Some((d, m.clone())),
+                }
+            };
+            {
+                let checker = self.protocol_checker.read();
+                for ((ty_name, m_name), _sig) in checker.method_registry().iter() {
+                    if !recv_str.contains(ty_name.as_str())
+                        && !ty_name.as_str().contains(recv_str)
+                    {
+                        continue;
+                    }
+                    consider(&mut best, m_name);
+                }
+            }
+            {
+                let inherents = self.inherent_methods.read();
+                for (ty_name, methods) in inherents.iter() {
+                    if !recv_str.contains(ty_name.as_str())
+                        && !ty_name.as_str().contains(recv_str)
+                    {
+                        continue;
+                    }
+                    for (m_name, _scheme) in methods.iter() {
+                        // Strip static-method marker prefix used by the
+                        // inherent methods table.
+                        let bare = m_name
+                            .as_str()
+                            .strip_prefix("$static$")
+                            .unwrap_or(m_name.as_str());
+                        consider(&mut best, &verum_common::Text::from(bare));
+                    }
+                }
+            }
+            best.map(|(_, n)| n)
+        };
+        return Err(TypeError::MethodNotFound {
+            ty: recv_ty.to_text(),
+            method: method.name.as_str().to_text(),
+            span,
+            did_you_mean,
+        });
     }
 
     fn try_resolve_pre_receiver_method(
