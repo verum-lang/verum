@@ -1,0 +1,136 @@
+// =============================================================================
+// core-tests/base/glob/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.glob` — combining glob patterns with
+// real path-like strings and stdlib collections.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.glob.{compile, compile_with, GlobPattern, GlobOptions};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Filtering a list of paths with a glob
+// =============================================================================
+
+@test
+fn test_filter_paths_with_star_pattern() {
+    let paths: List<Text> = [
+        "src/main.vr",
+        "src/lib.vr",
+        "tests/unit.vr",
+        "README.md",
+    ];
+    let pat = compile("src/*.vr");
+    let matched: List<Text> = paths.filter(|p| pat.matches(p)).collect();
+    assert_eq(matched.len(), 2);
+    assert(matched.contains("src/main.vr"));
+    assert(matched.contains("src/lib.vr"));
+}
+
+@test
+fn test_filter_paths_with_globstar() {
+    let paths: List<Text> = [
+        "a/b/c.vr",
+        "a/c.vr",
+        "b/c.vr",
+        "c.vr",
+    ];
+    let pat = compile("a/**/*.vr");
+    let matched: List<Text> = paths.filter(|p| pat.matches(p)).collect();
+    assert_eq(matched.len(), 2);
+    assert(matched.contains("a/b/c.vr"));
+    assert(matched.contains("a/c.vr"));
+}
+
+@test
+fn test_no_paths_match_impossible_pattern() {
+    let paths: List<Text> = ["foo.rs", "bar.rs", "baz.rs"];
+    let pat = compile("*.vr");
+    let matched: List<Text> = paths.filter(|p| pat.matches(p)).collect();
+    assert_eq(matched.len(), 0);
+}
+
+// =============================================================================
+// Section 2: Negated character classes [!abc]
+// =============================================================================
+
+@test
+fn test_negated_char_class_excludes_listed_chars() {
+    let pat = compile("[!abc].txt");
+    assert(pat.matches("d.txt"));
+    assert(pat.matches("z.txt"));
+    assert(!pat.matches("a.txt"));
+    assert(!pat.matches("b.txt"));
+    assert(!pat.matches("c.txt"));
+}
+
+@test
+fn test_negated_char_class_with_digit() {
+    let pat = compile("[!0-9]oo");
+    assert(pat.matches("foo"));
+    assert(pat.matches("zoo"));
+    assert(!pat.matches("1oo"));
+    assert(!pat.matches("9oo"));
+}
+
+// =============================================================================
+// Section 3: Escape sequences — literal special characters
+// =============================================================================
+
+@test
+fn test_escape_star_matches_literal_star() {
+    let pat = compile("file\\*.txt");
+    assert(pat.matches("file*.txt"));
+    assert(!pat.matches("file_a.txt"));
+    assert(!pat.matches("filea.txt"));
+}
+
+@test
+fn test_escape_question_matches_literal_question() {
+    let pat = compile("what\\?.txt");
+    assert(pat.matches("what?.txt"));
+    assert(!pat.matches("whata.txt"));
+}
+
+// =============================================================================
+// Section 4: compile_with options
+// =============================================================================
+
+@test
+fn test_case_insensitive_option() {
+    let opts = GlobOptions.new().case_insensitive(true);
+    let pat = compile_with("*.TXT", opts);
+    assert(pat.matches("README.txt"));
+    assert(pat.matches("README.TXT"));
+    assert(pat.matches("README.Txt"));
+}
+
+@test
+fn test_case_sensitive_by_default() {
+    let pat = compile("*.txt");
+    assert(pat.matches("file.txt"));
+    assert(!pat.matches("file.TXT"));
+}
+
+// =============================================================================
+// Section 5: Multi-pattern matching via a list of patterns
+// =============================================================================
+
+@test
+fn test_any_pattern_matches() {
+    let patterns: List<GlobPattern> = [
+        compile("*.vr"),
+        compile("*.md"),
+        compile("Makefile"),
+    ];
+    let files: List<Text> = ["main.vr", "README.md", "Makefile", "build.sh"];
+    let matched: List<Text> = files.filter(|f| {
+        patterns.any(|p| p.matches(f))
+    }).collect();
+    assert_eq(matched.len(), 3);
+    assert(!matched.contains("build.sh"));
+}
+
+fn main() {}

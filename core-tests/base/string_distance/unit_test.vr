@@ -104,4 +104,50 @@ fn test_jaro_winkler_identical_returns_one() {
     assert(v >= 0.999 && v <= 1.001);
 }
 
+// =============================================================================
+// Section 5: `closest` autocorrect API
+// =============================================================================
+
+@test
+fn test_closest_returns_exact_match() {
+    let dict: List<Text> = ["cat", "car", "bar"].map(|s| s.to_text()).collect();
+    assert_eq(closest("car".to_text(), &dict), Some("car".to_text()));
+}
+
+@test
+fn test_closest_finds_nearest_by_levenshtein() {
+    let dict: List<Text> = ["hello", "world", "help"].map(|s| s.to_text()).collect();
+    let result = closest("helo".to_text(), &dict);
+    assert(result.is_some());
+    // distance("helo","hello")=1, distance("helo","world")=4, distance("helo","help")=1
+    let best = result.unwrap();
+    assert(best == "hello".to_text() || best == "help".to_text());
+}
+
+@test
+fn test_closest_empty_candidates_returns_none() {
+    let dict: List<Text> = [];
+    assert(closest("query".to_text(), &dict).is_none());
+}
+
+// =============================================================================
+// Section 6: Unicode byte-distance contract
+// =============================================================================
+
+@test
+fn test_ascii_byte_distance_equals_char_distance() {
+    // For pure ASCII, byte-level distance = character-level distance
+    let a: Bytes = "abc".bytes();
+    let b: Bytes = "abd".bytes();
+    assert_eq(levenshtein(&a, &b), 1);
+}
+
+@test
+fn test_empty_vs_nonempty_distance_is_length() {
+    let empty: Bytes = [].to_bytes();
+    let s: Bytes = "hello".bytes();
+    assert_eq(levenshtein(&empty, &s), 5);
+    assert_eq(levenshtein(&s, &empty), 5);
+}
+
 fn main() {}

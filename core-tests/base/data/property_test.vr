@@ -199,6 +199,57 @@ fn parametrised_variant_predicate_truth_table(
 }
 
 // =============================================================================
+// Section: NaN / Inf round-trip behaviour
+// =============================================================================
+
+@test
+fn test_nan_to_json_is_error_or_null() {
+    let d = Data.Float(Float.NAN);
+    // NaN is not representable in JSON — either errors or serialises as null
+    let serialised = d.to_json();
+    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+        "NaN must serialise as error or null, not a valid float");
+}
+
+@test
+fn test_positive_inf_to_json_is_error_or_null() {
+    let d = Data.Float(Float.INFINITY);
+    let serialised = d.to_json();
+    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+        "+Inf must serialise as error or null");
+}
+
+@test
+fn test_negative_inf_to_json_is_error_or_null() {
+    let d = Data.Float(Float.NEG_INFINITY);
+    let serialised = d.to_json();
+    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+        "-Inf must serialise as error or null");
+}
+
+// =============================================================================
+// Section: Integer-overflow boundary at JSON parse
+// =============================================================================
+
+@test
+fn test_json_large_integer_parses_ok() {
+    // 2^53 exactly (max safe integer in IEEE-754 double)
+    let large = "9007199254740992";
+    let parsed = parse_json(f"{large}");
+    assert(parsed.is_ok());
+}
+
+@test
+fn test_json_integer_overflow_64bit_boundary() {
+    // Just above Int64.MAX = 9223372036854775807
+    let overflow = "9223372036854775808";
+    let parsed = parse_json(overflow);
+    // Must either succeed with a truncated value or return a parse error —
+    // must NOT panic
+    assert(parsed.is_ok() || parsed.is_err());
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/base/primitives/arithmetic_edge_test.vr
+// =============================================================================
+//
+// Tests for saturating, wrapping, and checked arithmetic on Int/Float.
+// Pins the overflow contract: saturating → MAX/MIN, wrapping → modular,
+// checked → None on overflow. Also covers Float edge cases.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: Saturating arithmetic
+// =============================================================================
+
+@test
+fn test_saturating_add_at_max() {
+    assert_eq(Int.MAX.saturating_add(1), Int.MAX);
+}
+
+@test
+fn test_saturating_add_at_min() {
+    assert_eq(Int.MIN.saturating_add(-1), Int.MIN);
+}
+
+@test
+fn test_saturating_sub_at_min() {
+    assert_eq(Int.MIN.saturating_sub(1), Int.MIN);
+}
+
+@test
+fn test_saturating_mul_overflow() {
+    assert_eq(Int.MAX.saturating_mul(2), Int.MAX);
+}
+
+@test
+fn test_saturating_mul_underflow() {
+    assert_eq(Int.MIN.saturating_mul(2), Int.MIN);
+}
+
+@test_case(100)
+@test_case(0)
+@test_case(-100)
+fn test_saturating_add_normal_range(v: Int) {
+    // No overflow — saturating and regular must agree
+    assert_eq(v.saturating_add(1), v + 1);
+}
+
+// =============================================================================
+// Section 2: Wrapping arithmetic (modular)
+// =============================================================================
+
+@test
+fn test_wrapping_add_max_plus_one_is_min() {
+    assert_eq(Int.MAX.wrapping_add(1), Int.MIN);
+}
+
+@test
+fn test_wrapping_sub_min_minus_one_is_max() {
+    assert_eq(Int.MIN.wrapping_sub(1), Int.MAX);
+}
+
+@test
+fn test_wrapping_mul_is_lower_64_bits() {
+    // 2^32 * 2^32 in 64-bit = 0 (overflow)
+    let two_32: Int = 1 << 32;
+    assert_eq(two_32.wrapping_mul(two_32), 0);
+}
+
+@test
+fn test_wrapping_neg_of_min_is_min() {
+    // Two's complement: -MIN = MIN (no positive counterpart)
+    assert_eq(Int.MIN.wrapping_neg(), Int.MIN);
+}
+
+// =============================================================================
+// Section 3: Checked arithmetic — None on overflow
+// =============================================================================
+
+@test
+fn test_checked_add_overflow_returns_none() {
+    assert(Int.MAX.checked_add(1).is_none());
+}
+
+@test
+fn test_checked_add_underflow_returns_none() {
+    assert(Int.MIN.checked_add(-1).is_none());
+}
+
+@test
+fn test_checked_mul_overflow_returns_none() {
+    assert(Int.MAX.checked_mul(2).is_none());
+}
+
+@test
+fn test_checked_div_by_zero_returns_none() {
+    assert((42 as Int).checked_div(0).is_none());
+}
+
+@test
+fn test_checked_sub_normal_returns_some() {
+    assert_eq((10 as Int).checked_sub(3), Some(7));
+}
+
+@test
+fn test_checked_neg_of_min_returns_none() {
+    assert(Int.MIN.checked_neg().is_none());
+}
+
+// =============================================================================
+// Section 4: Float edge cases
+// =============================================================================
+
+@test
+fn test_float_nan_not_equal_to_itself() {
+    let nan = Float.NAN;
+    assert_ne(nan, nan);
+}
+
+@test
+fn test_float_inf_comparison() {
+    let inf = Float.INFINITY;
+    let neg_inf = Float.NEG_INFINITY;
+    assert(inf > 1e300);
+    assert(neg_inf < -1e300);
+    assert(inf > neg_inf);
+}
+
+@test
+fn test_float_is_nan_and_is_infinite() {
+    assert(Float.NAN.is_nan());
+    assert(!Float.NAN.is_finite());
+    assert(Float.INFINITY.is_infinite());
+    assert(!Float.INFINITY.is_nan());
+}
+
+@test
+fn test_float_subnormal_is_finite_but_not_normal() {
+    let subnormal = Float.MIN_POSITIVE / 2.0;
+    assert(subnormal.is_finite());
+    assert(subnormal.is_subnormal());
+}
+
+@test
+fn test_float_nan_arithmetic() {
+    let nan = Float.NAN;
+    // Any arithmetic with NaN produces NaN
+    assert((nan + 1.0).is_nan());
+    assert((nan * 0.0).is_nan());
+    assert((nan - nan).is_nan());
+}
+
+@test
+fn test_float_inf_arithmetic() {
+    let inf = Float.INFINITY;
+    assert((inf + 1.0).is_infinite());
+    assert((1.0 / 0.0).is_infinite());
+    assert((inf - inf).is_nan());   // inf - inf = NaN
+}
+
+fn main() {}

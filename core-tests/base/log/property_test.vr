@@ -65,4 +65,44 @@ fn parametrised_name_values(lvl: LogLevel, expected: Text) {
     assert_eq(lvl.name(), expected);
 }
 
+// =============================================================================
+// Section: Structured-field encoding laws
+// =============================================================================
+
+@test
+fn test_log_record_fields_count_preserved() {
+    let fields: List<(Text, Text)> = [
+        ("k1".to_text(), "v1".to_text()),
+        ("k2".to_text(), "v2".to_text()),
+        ("k3".to_text(), "v3".to_text()),
+    ];
+    let rec = LogRecord.new(LogLevel.Info, "test msg", fields);
+    assert_eq(rec.fields.len(), 3);
+}
+
+@test
+fn test_log_record_fields_keys_accessible() {
+    let fields: List<(Text, Text)> = [
+        ("user".to_text(), "alice".to_text()),
+        ("request_id".to_text(), "abc123".to_text()),
+    ];
+    let rec = LogRecord.new(LogLevel.Info, "auth", fields);
+    let user_field = rec.fields.iter().find(|(k, _)| *k == "user");
+    assert(user_field.is_some());
+    assert_eq(user_field.map(|(_, v)| v.clone()), Some("alice".to_text()));
+}
+
+@test
+fn test_log_record_empty_fields_allowed() {
+    let rec = LogRecord.new(LogLevel.Debug, "no fields", []);
+    assert_eq(rec.fields.len(), 0);
+}
+
+@test
+fn test_log_record_message_preserved() {
+    let msg = "important event occurred".to_text();
+    let rec = LogRecord.new(LogLevel.Warn, msg.clone(), []);
+    assert_eq(rec.message, msg);
+}
+
 fn main() {}

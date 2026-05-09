@@ -1,0 +1,146 @@
+// =============================================================================
+// core-tests/base/primitives/bitmanip_test.vr
+// =============================================================================
+//
+// Tests for bit-manipulation methods on Int / UInt types:
+// count_ones, count_zeros, leading_zeros, trailing_zeros,
+// rotate_left, rotate_right, reverse_bits, swap_bytes.
+// Verifies algebraic invariants across all methods.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: count_ones (popcount) laws
+// =============================================================================
+
+@test
+fn test_count_ones_zero() {
+    assert_eq((0 as Int).count_ones(), 0);
+}
+
+@test
+fn test_count_ones_all_bits_set() {
+    // -1 in two's complement has all bits set
+    assert_eq((-1 as Int).count_ones(), 64);
+}
+
+@test
+fn test_count_ones_power_of_two() {
+    assert_eq((1 as Int).count_ones(), 1);
+    assert_eq((256 as Int).count_ones(), 1);
+    assert_eq((1024 as Int).count_ones(), 1);
+}
+
+@test
+fn test_count_ones_plus_count_zeros_equals_bit_width() {
+    let values: List<Int> = [0, 1, 42, -1, Int.MAX, Int.MIN];
+    for v in values {
+        assert_eq(v.count_ones() + v.count_zeros(), 64);
+    }
+}
+
+// =============================================================================
+// Section 2: leading_zeros and trailing_zeros
+// =============================================================================
+
+@test
+fn test_leading_zeros_of_one() {
+    assert_eq((1 as Int).leading_zeros(), 63);   // 64-bit, 1 in LSB
+}
+
+@test
+fn test_leading_zeros_of_max() {
+    assert_eq(Int.MAX.leading_zeros(), 1);   // 0x7FFF...F
+}
+
+@test
+fn test_trailing_zeros_of_one() {
+    assert_eq((1 as Int).trailing_zeros(), 0);
+}
+
+@test
+fn test_trailing_zeros_of_power_of_two() {
+    assert_eq((8 as Int).trailing_zeros(), 3);    // 2^3
+    assert_eq((1024 as Int).trailing_zeros(), 10); // 2^10
+}
+
+@test
+fn test_leading_zeros_plus_log2_approx() {
+    // For positive powers of 2: leading_zeros(2^k) + 1 + trailing_zeros(2^k) = 64
+    let k = 10;
+    let pow = 1 << k;
+    assert_eq(pow.leading_zeros() + pow.trailing_zeros() + 1, 64);
+}
+
+// =============================================================================
+// Section 3: rotate_left / rotate_right (inverse pair)
+// =============================================================================
+
+@test
+fn test_rotate_left_rotate_right_inverse() {
+    let v: Int = 0x1234567890ABCDEF;
+    let n: Int = 17;
+    assert_eq(v.rotate_left(n).rotate_right(n), v);
+}
+
+@test
+fn test_rotate_left_by_zero_is_identity() {
+    let v: Int = 42;
+    assert_eq(v.rotate_left(0), v);
+}
+
+@test
+fn test_rotate_by_bit_width_is_identity() {
+    let v: Int = 0xDEADBEEF;
+    assert_eq(v.rotate_left(64), v);
+    assert_eq(v.rotate_right(64), v);
+}
+
+// =============================================================================
+// Section 4: reverse_bits
+// =============================================================================
+
+@test
+fn test_reverse_bits_involution() {
+    let v: Int = 0xABCDEF1234567890;
+    assert_eq(v.reverse_bits().reverse_bits(), v);
+}
+
+@test
+fn test_reverse_bits_of_one() {
+    // 1 (LSB set) reversed = MSB set = Int.MIN (in two's complement)
+    let reversed = (1 as Int).reverse_bits();
+    assert_eq(reversed, Int.MIN);
+}
+
+// =============================================================================
+// Section 5: UInt8 bit operations (used for byte manipulation)
+// =============================================================================
+
+@test
+fn test_uint8_and() {
+    assert_eq((0xFF_u8 & 0x0F_u8), 0x0F);
+}
+
+@test
+fn test_uint8_or() {
+    assert_eq((0xF0_u8 | 0x0F_u8), 0xFF);
+}
+
+@test
+fn test_uint8_xor() {
+    assert_eq((0xFF_u8 ^ 0xFF_u8), 0x00);
+}
+
+@test
+fn test_uint8_shift_left() {
+    assert_eq((1_u8 << 4), 16);
+}
+
+@test
+fn test_uint8_shift_right() {
+    assert_eq((128_u8 >> 4), 8);
+}
+
+fn main() {}

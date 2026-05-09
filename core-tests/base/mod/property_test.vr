@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/base/mod/property_test.vr
+// =============================================================================
+//
+// Property-based tests for `core.base.mod` — algebraic laws over the type
+// aliases and prelude types exported from mod.vr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.{Byte, Bytes, TextResult, StdResult};
+
+// =============================================================================
+// Section 1: Byte = UInt8 laws
+// =============================================================================
+
+@property
+fn prop_byte_add_mod_256(a: Byte, b: Byte) {
+    // Byte arithmetic wraps at 256
+    let sum: Int = (a as Int) + (b as Int);
+    let expected: Byte = (sum % 256) as Byte;
+    let actual: Byte = a.wrapping_add(b);
+    assert_eq(actual, expected);
+}
+
+@property
+fn prop_byte_roundtrip_as_int(a: Byte) {
+    let as_int: Int = a as Int;
+    assert(as_int >= 0 && as_int <= 255);
+    let back: Byte = as_int as Byte;
+    assert_eq(back, a);
+}
+
+@test_case(0)
+@test_case(127)
+@test_case(255)
+fn test_byte_boundary_values(b: Byte) {
+    let v: Int = b as Int;
+    assert(v >= 0 && v <= 255);
+}
+
+// =============================================================================
+// Section 2: Bytes = List<Byte> laws
+// =============================================================================
+
+@property
+fn prop_bytes_len_non_negative(bs: Bytes) {
+    assert(bs.len() >= 0);
+}
+
+@test
+fn test_bytes_empty_is_valid() {
+    let empty: Bytes = [];
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_bytes_concat_length_additive() {
+    let a: Bytes = [1, 2, 3];
+    let b: Bytes = [4, 5];
+    let c: Bytes = a.concat(b);
+    assert_eq(c.len(), 5);
+}
+
+// =============================================================================
+// Section 3: TextResult / StdResult identity laws
+// =============================================================================
+
+@test
+fn test_text_result_ok_is_transparent() {
+    let v = 42;
+    let r: TextResult<Int> = Ok(v);
+    assert_eq(r.unwrap(), v);
+}
+
+@test
+fn test_text_result_err_carries_message() {
+    let msg = "parse error".to_text();
+    let r: TextResult<Int> = Err(msg.clone());
+    assert_eq(r.unwrap_err(), msg);
+}
+
+@test
+fn test_std_result_ok_not_err() {
+    let r: StdResult<Int> = Ok(1);
+    assert(r.is_ok());
+    assert(!r.is_err());
+}
+
+fn main() {}

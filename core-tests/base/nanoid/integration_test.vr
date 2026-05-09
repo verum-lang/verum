@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/base/nanoid/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.nanoid` — custom alphabets, ID uniqueness
+// at scale, and cross-type usage with collections.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.nanoid.{
+    generate, generate_with_length, generate_with_alphabet,
+    NANOID_DEFAULT_ALPHABET, NANOID_DEFAULT_LENGTH,
+};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+
+// =============================================================================
+// Section 1: Custom-alphabet tests
+// =============================================================================
+
+@test
+fn test_custom_alphabet_hex_lowercase() {
+    let hex_alpha = "0123456789abcdef";
+    let id = generate_with_alphabet(16, hex_alpha);
+    assert_eq(id.len(), 16);
+    for ch in id.chars() {
+        assert(hex_alpha.contains_char(ch),
+            f"char '{ch}' not in hex alphabet");
+    }
+}
+
+@test
+fn test_custom_alphabet_uppercase_letters_only() {
+    let alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let id = generate_with_alphabet(10, alpha);
+    assert_eq(id.len(), 10);
+    for ch in id.chars() {
+        assert(ch >= 'A' && ch <= 'Z');
+    }
+}
+
+@test
+fn test_custom_alphabet_numeric_only() {
+    let alpha = "0123456789";
+    let id = generate_with_alphabet(12, alpha);
+    assert_eq(id.len(), 12);
+    for ch in id.chars() {
+        assert(ch >= '0' && ch <= '9');
+    }
+}
+
+@test
+fn test_custom_alphabet_uniqueness_over_100_samples() {
+    let alpha = "ABCDEF";
+    let mut ids: Set<Text> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        ids.insert(generate_with_alphabet(21, alpha));
+        i = i + 1;
+    }
+    assert_eq(ids.len(), 100);
+}
+
+// =============================================================================
+// Section 2: Default IDs used as map keys
+// =============================================================================
+
+@test
+fn test_nanoid_as_map_key() {
+    let mut m: Map<Text, Int> = Map.new();
+    let id1 = generate();
+    let id2 = generate();
+    m.insert(id1.clone(), 1);
+    m.insert(id2.clone(), 2);
+    assert_eq(m.get(&id1), Some(1));
+    assert_eq(m.get(&id2), Some(2));
+}
+
+// =============================================================================
+// Section 3: Custom length with default alphabet
+// =============================================================================
+
+@test
+fn test_length_1_generates_single_char() {
+    let id = generate_with_length(1);
+    assert_eq(id.len(), 1);
+    assert(NANOID_DEFAULT_ALPHABET.contains_char(id.chars().first().unwrap()));
+}
+
+@test
+fn test_length_100_generates_100_chars() {
+    let id = generate_with_length(100);
+    assert_eq(id.len(), 100);
+}
+
+// =============================================================================
+// Section 4: Large-scale ID generation uniqueness
+// =============================================================================
+
+@test
+fn test_1000_default_ids_all_unique() {
+    let mut ids: Set<Text> = Set.new();
+    let mut i = 0;
+    while i < 1000 {
+        ids.insert(generate());
+        i = i + 1;
+    }
+    assert_eq(ids.len(), 1000);
+}
+
+fn main() {}

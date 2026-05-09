@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/base/snowflake/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.snowflake` — multi-worker ID spaces,
+// cross-collection usage, bit-layout validation, and monotonicity at scale.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.snowflake.{
+    Snowflake, SnowflakeGenerator,
+    using_default_epoch, with_epoch,
+    SnowflakeError,
+};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: Multiple generators with distinct worker_ids
+// =============================================================================
+
+@test
+fn test_two_workers_produce_non_colliding_ids() {
+    let mut gen1 = using_default_epoch(1).unwrap();
+    let mut gen2 = using_default_epoch(2).unwrap();
+    let mut ids: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 50 {
+        ids.insert(gen1.next_id().unwrap().value());
+        ids.insert(gen2.next_id().unwrap().value());
+        i = i + 1;
+    }
+    assert_eq(ids.len(), 100);   // all unique
+}
+
+@test
+fn test_worker_id_boundary_values() {
+    // Worker ID range: 0–1023 (10-bit field)
+    let gen_zero = using_default_epoch(0);
+    let gen_max = using_default_epoch(1023);
+    let gen_over = using_default_epoch(1024);
+    assert(gen_zero.is_ok());
+    assert(gen_max.is_ok());
+    assert(gen_over.is_err());
+}
+
+// =============================================================================
+// Section 2: ID bit-layout extraction
+// =============================================================================
+
+@test
+fn test_snowflake_worker_id_round_trip() {
+    let worker_id: Int = 42;
+    let mut gen = using_default_epoch(worker_id).unwrap();
+    let id = gen.next_id().unwrap();
+    assert_eq(id.worker_id(), worker_id);
+}
+
+@test
+fn test_snowflake_timestamp_increases_over_time() {
+    let mut gen = using_default_epoch(1).unwrap();
+    let id1 = gen.next_id().unwrap();
+    let id2 = gen.next_id().unwrap();
+    // Within the same ms, ids are still monotone
+    assert(id2.value() >= id1.value());
+}
+
+// =============================================================================
+// Section 3: Snowflake IDs as map keys
+// =============================================================================
+
+@test
+fn test_snowflake_ids_as_map_keys() {
+    let mut gen = using_default_epoch(0).unwrap();
+    let mut m: Map<Int, Text> = Map.new();
+    let mut i = 0;
+    while i < 20 {
+        let id = gen.next_id().unwrap().value();
+        m.insert(id, f"event-{i}");
+        i = i + 1;
+    }
+    assert_eq(m.len(), 20);
+}
+
+// =============================================================================
+// Section 4: Parse round-trip
+// =============================================================================
+
+@test
+fn test_snowflake_parse_from_value() {
+    let mut gen = using_default_epoch(7).unwrap();
+    let id = gen.next_id().unwrap();
+    let raw = id.value();
+    let parsed = Snowflake.from_value(raw);
+    assert_eq(parsed.value(), raw);
+    assert_eq(parsed.worker_id(), 7);
+}
+
+// =============================================================================
+// Section 5: Sequence monotonicity within burst
+// =============================================================================
+
+@test
+fn test_burst_of_100_ids_monotone() {
+    let mut gen = using_default_epoch(3).unwrap();
+    let mut ids: List<Int> = [];
+    let mut i = 0;
+    while i < 100 {
+        ids.push(gen.next_id().unwrap().value());
+        i = i + 1;
+    }
+    let mut prev = ids.get(0).unwrap();
+    for id in ids.iter().skip(1) {
+        assert(*id >= prev, "IDs must be non-decreasing");
+        prev = *id;
+    }
+}
+
+fn main() {}

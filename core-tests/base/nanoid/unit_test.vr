@@ -79,6 +79,49 @@ fn test_distinct_calls_produce_distinct_ids() {
 }
 
 // =============================================================================
+// Section 5: Custom-alphabet tests
+// =============================================================================
+
+@test
+fn test_generate_with_hex_alphabet() {
+    let hex_alpha = "0123456789abcdef";
+    let id = generate_with_alphabet(16, hex_alpha);
+    assert_eq(id.len(), 16);
+    for ch in id.chars() {
+        assert(hex_alpha.contains_char(ch),
+            f"char '{ch}' not in hex alphabet");
+    }
+}
+
+@test
+fn test_generate_with_uppercase_only_alphabet() {
+    let alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let id = generate_with_alphabet(10, alpha);
+    assert_eq(id.len(), 10);
+    for ch in id.chars() {
+        assert(ch >= 'A' && ch <= 'Z');
+    }
+}
+
+@test
+fn test_generate_with_numeric_only_alphabet() {
+    let alpha = "0123456789";
+    let id = generate_with_alphabet(12, alpha);
+    assert_eq(id.len(), 12);
+    for ch in id.chars() {
+        assert(ch >= '0' && ch <= '9');
+    }
+}
+
+@test
+fn test_custom_alphabet_distinctness() {
+    let alpha = "ABCDEF";
+    let id1 = generate_with_alphabet(21, alpha);
+    let id2 = generate_with_alphabet(21, alpha);
+    assert(id1 != id2);
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

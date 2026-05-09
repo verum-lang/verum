@@ -1,0 +1,177 @@
+// =============================================================================
+// core-tests/base/primitives/uint_isize_test.vr
+// =============================================================================
+//
+// Tests for unsigned integer widths (UInt8/16/32/64) and size types
+// (ISize, USize) — addressing the coverage gap noted in the audit.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: UInt8 (Byte)
+// =============================================================================
+
+@test
+fn test_uint8_max_value() {
+    let v: UInt8 = 255;
+    assert_eq(v, 255);
+}
+
+@test
+fn test_uint8_min_value() {
+    let v: UInt8 = 0;
+    assert_eq(v, 0);
+}
+
+@test
+fn test_uint8_wrapping_add() {
+    let a: UInt8 = 200;
+    let b: UInt8 = 100;
+    assert_eq(a.wrapping_add(b), 44);   // (200+100) mod 256 = 44
+}
+
+@test
+fn test_uint8_saturating_add() {
+    let a: UInt8 = 200;
+    let b: UInt8 = 100;
+    assert_eq(a.saturating_add(b), 255);   // saturates at max
+}
+
+// =============================================================================
+// Section 2: UInt16
+// =============================================================================
+
+@test
+fn test_uint16_max_value() {
+    let v: UInt16 = 65535;
+    assert_eq(v, 65535);
+}
+
+@test
+fn test_uint16_wrapping_add_at_boundary() {
+    let v: UInt16 = 65535;
+    assert_eq(v.wrapping_add(1), 0);
+}
+
+@test
+fn test_uint16_checked_add_overflow_returns_none() {
+    let v: UInt16 = 65535;
+    assert(v.checked_add(1).is_none());
+}
+
+// =============================================================================
+// Section 3: UInt32
+// =============================================================================
+
+@test
+fn test_uint32_max_value() {
+    let v: UInt32 = 4294967295;
+    assert_eq(v, 4294967295);
+}
+
+@test
+fn test_uint32_wrapping_mul() {
+    // 65536 * 65536 mod 2^32 = 0
+    let a: UInt32 = 65536;
+    assert_eq(a.wrapping_mul(a), 0);
+}
+
+@test
+fn test_uint32_power_of_two_detection() {
+    assert(256_u32.is_power_of_two());
+    assert(!255_u32.is_power_of_two());
+}
+
+// =============================================================================
+// Section 4: UInt64
+// =============================================================================
+
+@test
+fn test_uint64_max_value() {
+    let v: UInt64 = 18446744073709551615;
+    assert_eq(v, UInt64.MAX);
+}
+
+@test
+fn test_uint64_from_u32() {
+    let small: UInt32 = 1000;
+    let big: UInt64 = small as UInt64;
+    assert_eq(big, 1000);
+}
+
+// =============================================================================
+// Section 5: ISize — signed platform-width integer
+// =============================================================================
+
+@test
+fn test_isize_positive() {
+    let v: ISize = 42;
+    assert(v > 0);
+}
+
+@test
+fn test_isize_negative() {
+    let v: ISize = -1;
+    assert(v < 0);
+}
+
+@test
+fn test_isize_abs() {
+    assert_eq((-42 as ISize).abs(), 42);
+    assert_eq((42 as ISize).abs(), 42);
+}
+
+@test
+fn test_isize_checked_neg_min_overflows() {
+    let min = ISize.MIN;
+    assert(min.checked_neg().is_none());
+}
+
+// =============================================================================
+// Section 6: USize — unsigned platform-width integer (pointer-sized)
+// =============================================================================
+
+@test
+fn test_usize_non_negative() {
+    let v: USize = 0;
+    assert(v >= 0);
+}
+
+@test
+fn test_usize_as_array_index() {
+    let lst: List<Int> = [10, 20, 30, 40];
+    let idx: USize = 2;
+    assert_eq(lst.get(idx as Int), Some(30));
+}
+
+@test
+fn test_usize_wrapping_sub() {
+    let v: USize = 0;
+    let result = v.wrapping_sub(1);
+    assert_eq(result, USize.MAX);
+}
+
+// =============================================================================
+// Section 7: Cross-width conversions
+// =============================================================================
+
+@test_case(0)
+@test_case(127)
+@test_case(255)
+fn test_uint8_to_uint16_preserves_value(v: Int) {
+    let u8val: UInt8 = v as UInt8;
+    let u16val: UInt16 = u8val as UInt16;
+    assert_eq(u16val as Int, v);
+}
+
+@test_case(0)
+@test_case(1000)
+@test_case(65535)
+fn test_uint16_to_uint32_preserves_value(v: Int) {
+    let u16val: UInt16 = v as UInt16;
+    let u32val: UInt32 = u16val as UInt32;
+    assert_eq(u32val as Int, v);
+}
+
+fn main() {}

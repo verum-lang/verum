@@ -91,4 +91,35 @@ fn test_from_bytes_to_bytes_round_trip() {
     assert_eq(recovered, original);
 }
 
+// =============================================================================
+// Section 6: RFC 4122 variant bits validation
+// =============================================================================
+
+@test
+fn test_v4_variant_bits_are_10() {
+    // RFC 4122: octet 8 high bits must be 10 (variant 1)
+    let id = Uuid.new_v4();
+    let bytes = id.to_bytes();
+    let octet8 = bytes.get(8).unwrap() as Int;
+    assert_eq((octet8 >> 6) & 0b11, 0b10,
+        "v4 variant bits must be 10xx (RFC 4122 variant 1)");
+}
+
+@test
+fn test_v7_variant_bits_are_10() {
+    let id = Uuid.new_v7();
+    let bytes = id.to_bytes();
+    let octet8 = bytes.get(8).unwrap() as Int;
+    assert_eq((octet8 >> 6) & 0b11, 0b10);
+}
+
+@test
+fn test_nil_uuid_has_zero_variant_and_version() {
+    let n = Uuid.nil();
+    let bytes = n.to_bytes();
+    for b in bytes {
+        assert_eq(b as Int, 0);
+    }
+}
+
 fn main() {}

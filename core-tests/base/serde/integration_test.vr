@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/base/serde/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.serde` — protocol-shape compliance,
+// SerdeError handling, and user-type Serialize/Deserialize contracts.
+// Full backend round-trip tests live in core-tests/encoding/<backend>/.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.serde.{
+    SerdeError, Serialize, Deserialize,
+    Serializer, Deserializer,
+    SerdeResult,
+};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: SerdeError construction and fields
+// =============================================================================
+
+@test
+fn test_serde_error_new_has_message() {
+    let e = SerdeError.new("unexpected token".to_text());
+    assert_eq(e.message(), "unexpected token".to_text());
+}
+
+@test
+fn test_serde_error_unexpected_type() {
+    let e = SerdeError.unexpected_type("Int", "Text");
+    assert(e.message().contains("Int"));
+    assert(e.message().contains("Text"));
+}
+
+@test
+fn test_serde_error_missing_field() {
+    let e = SerdeError.missing_field("user_id");
+    assert(e.message().contains("user_id"));
+}
+
+@test
+fn test_serde_error_unknown_field() {
+    let e = SerdeError.unknown_field("extra_field");
+    assert(e.message().contains("extra_field"));
+}
+
+// =============================================================================
+// Section 2: User-type implementing Serialize protocol shape
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+implement Serialize for Point {
+    fn serialize<S: Serializer>(&self, serializer: S) -> SerdeResult<S.Output> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("x", self.x)?;
+        map.serialize_entry("y", self.y)?;
+        map.end()
+    }
+}
+
+@test
+fn test_user_type_implements_serialize_protocol() {
+    // Just verify the implement block typechecks — compilation is the test
+    let p = Point { x: 1.0, y: 2.0 };
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+}
+
+// =============================================================================
+// Section 3: SerdeResult as Result<T, SerdeError>
+// =============================================================================
+
+@test
+fn test_serde_result_ok_is_transparent() {
+    let r: SerdeResult<Int> = Ok(42);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn test_serde_result_err_carries_serde_error() {
+    let r: SerdeResult<Int> = Err(SerdeError.new("bad".to_text()));
+    assert(r.is_err());
+    assert(r.unwrap_err().message().contains("bad"));
+}
+
+// =============================================================================
+// Section 4: Error chain with multiple serde errors
+// =============================================================================
+
+@test
+fn test_collect_multiple_serde_errors() {
+    let errors: List<SerdeError> = [
+        SerdeError.missing_field("name"),
+        SerdeError.missing_field("age"),
+        SerdeError.unexpected_type("Bool", "Int"),
+    ];
+    assert_eq(errors.len(), 3);
+    let messages: List<Text> = errors.map(|e| e.message()).collect();
+    assert(messages.any(|m| m.contains("name")));
+    assert(messages.any(|m| m.contains("age")));
+}
+
+fn main() {}

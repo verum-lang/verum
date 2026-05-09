@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/base/serde/property_test.vr
+// =============================================================================
+//
+// Property-based tests for `core.base.serde` — SerdeError law coverage and
+// protocol-shape invariants. Concrete backend round-trip properties live in
+// core-tests/encoding/<backend>/property_test.vr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.serde.{SerdeError, SerdeResult};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: SerdeError laws
+// =============================================================================
+
+@test
+fn test_serde_error_message_is_non_empty() {
+    let e = SerdeError.new("some error".to_text());
+    assert(!e.message().is_empty());
+}
+
+@test
+fn test_serde_error_missing_field_contains_field_name() {
+    let field_names: List<Text> = ["id", "name", "timestamp", "payload"];
+    for name in field_names {
+        let e = SerdeError.missing_field(name);
+        assert(e.message().contains(name));
+    }
+}
+
+@test
+fn test_serde_error_unexpected_type_contains_both_types() {
+    let pairs: List<(Text, Text)> = [
+        ("Int",  "Text"),
+        ("Bool", "Float"),
+        ("List", "Map"),
+    ];
+    for (expected, got) in pairs {
+        let e = SerdeError.unexpected_type(expected, got);
+        let msg = e.message();
+        assert(msg.contains(expected) || msg.contains(got));
+    }
+}
+
+// =============================================================================
+// Section 2: SerdeResult combinators
+// =============================================================================
+
+@test
+fn test_serde_result_map_on_ok() {
+    let r: SerdeResult<Int> = Ok(5);
+    let mapped = r.map(|x| x * 2);
+    assert_eq(mapped, Ok(10));
+}
+
+@test
+fn test_serde_result_map_on_err_is_passthrough() {
+    let r: SerdeResult<Int> = Err(SerdeError.new("err".to_text()));
+    let mapped = r.map(|x| x * 2);
+    assert(mapped.is_err());
+}
+
+@test
+fn test_serde_result_and_then_chains() {
+    let r: SerdeResult<Int> = Ok(3);
+    let result = r.and_then(|x| {
+        if x > 0 { Ok(x + 1) }
+        else { Err(SerdeError.new("non-positive".to_text())) }
+    });
+    assert_eq(result, Ok(4));
+}
+
+// =============================================================================
+// Section 3: Protocol-shape markers
+// =============================================================================
+
+@test_case("Serialize")
+@test_case("Deserialize")
+@test_case("Serializer")
+@test_case("Deserializer")
+@test_case("ListSerializer")
+@test_case("MapSerializer")
+fn test_serde_protocol_names_are_valid_identifiers(name: Text) {
+    // Verify we can refer to these names as strings; real typecheck
+    // is done in unit_test.vr
+    assert(!name.is_empty());
+    assert(name.chars().first().map(|c| c >= 'A' && c <= 'Z').unwrap_or(false));
+}
+
+fn main() {}

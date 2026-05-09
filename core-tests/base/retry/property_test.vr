@@ -104,4 +104,47 @@ fn prop_retry_exhausts_to_max(max: Int) {
     }
 }
 
+// =============================================================================
+// §E  abort-on-permanent-error: should_retry=false stops after 1 call.
+// =============================================================================
+
+@test
+fn prop_abort_on_permanent_error_calls_once() {
+    let opts: RetryOptions<Text> = RetryOptions.simple(10)
+        .with_should_retry(|_: &Text| false);
+    let mut counter = 0;
+    let _: Result<Int, Text> = retry_with_strategy(opts, || {
+        counter = counter + 1;
+        Err("permanent".to_text())
+    });
+    assert_eq(counter, 1);
+}
+
+// =============================================================================
+// §F  Total-time bound: jittered delay must stay below max_ms.
+// =============================================================================
+
+@test_case(0)
+@test_case(1)
+@test_case(100)
+fn test_jittered_delay_bounded_by_max_ms(attempt: Int) {
+    let backoff = RetryBackoff.Jittered { base_ms: 10, max_ms: 100 };
+    let delay = backoff.delay_for_attempt(attempt);
+    assert(delay <= 100, f"jittered delay {delay} exceeded max 100");
+}
+
+// =============================================================================
+// §G  Linear backoff delay increases monotonically with attempt.
+// =============================================================================
+
+@test
+fn prop_linear_backoff_is_non_decreasing() {
+    let backoff = RetryBackoff.Linear { base_ms: 10 };
+    let d0 = backoff.delay_for_attempt(0);
+    let d1 = backoff.delay_for_attempt(1);
+    let d2 = backoff.delay_for_attempt(2);
+    assert(d1 >= d0);
+    assert(d2 >= d1);
+}
+
 fn main() {}

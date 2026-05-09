@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/base/semver/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.semver` — RFC 2.0.0 complete fixture set,
+// build-metadata equivalence, VERSION constant validation, and sorting.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer, parse, format as semver_format};
+mount core.base.{VERSION};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Complete RFC 2.0.0 §11 precedence fixtures (all 11)
+// =============================================================================
+
+@test_case("1.0.0-alpha",    "1.0.0-alpha.1",    Ordering.Less)
+@test_case("1.0.0-alpha.1",  "1.0.0-alpha.beta", Ordering.Less)
+@test_case("1.0.0-alpha.beta","1.0.0-beta",       Ordering.Less)
+@test_case("1.0.0-beta",     "1.0.0-beta.2",     Ordering.Less)
+@test_case("1.0.0-beta.2",   "1.0.0-beta.11",    Ordering.Less)
+@test_case("1.0.0-beta.11",  "1.0.0-rc.1",       Ordering.Less)
+@test_case("1.0.0-rc.1",     "1.0.0",            Ordering.Less)
+@test_case("1.0.0",          "2.0.0",            Ordering.Less)
+@test_case("2.0.0",          "2.1.0",            Ordering.Less)
+@test_case("2.1.0",          "2.1.1",            Ordering.Less)
+@test_case("1.0.0-rc.1",     "1.0.0-rc.1",       Ordering.Equal)
+fn test_rfc_precedence_fixture(a_str: Text, b_str: Text, expected: Ordering) {
+    let a = parse(a_str).unwrap();
+    let b = parse(b_str).unwrap();
+    let actual = Ordering.from_int(a.cmp(&b));
+    assert_eq(actual, expected,
+        f"expected {a_str} {expected:?} {b_str}");
+}
+
+// =============================================================================
+// Section 2: Build-metadata equivalence (RFC §10 — metadata IGNORED for precedence)
+// =============================================================================
+
+@test
+fn test_build_metadata_ignored_in_comparison() {
+    let a = parse("1.0.0+build.1").unwrap();
+    let b = parse("1.0.0+build.2").unwrap();
+    // a and b have the same precedence — build metadata must not change ordering
+    assert_eq(Ordering.from_int(a.cmp(&b)), Ordering.Equal);
+}
+
+@test
+fn test_prerelease_with_build_metadata_lower_than_release() {
+    let pre = parse("1.0.0-alpha+001").unwrap();
+    let release = parse("1.0.0+build.1").unwrap();
+    // prerelease < release, regardless of build metadata
+    assert_eq(Ordering.from_int(pre.cmp(&release)), Ordering.Less);
+}
+
+// =============================================================================
+// Section 3: VERSION constant validation
+// =============================================================================
+
+@test
+fn test_version_constant_parses_clean() {
+    let parsed = parse(VERSION);
+    assert(parsed.is_ok(), f"core VERSION '{VERSION}' must be valid semver");
+}
+
+// =============================================================================
+// Section 4: Sorting a list of versions
+// =============================================================================
+
+@test
+fn test_sort_versions_ascending() {
+    let versions: List<Text> = [
+        "2.0.0", "1.0.0", "1.2.0", "1.1.0", "2.1.0",
+    ];
+    let mut parsed: List<SemVer> = versions.map(|s| parse(s).unwrap()).collect();
+    parsed.sort_by(|a, b| Ordering.from_int(a.cmp(b)));
+    let strs: List<Text> = parsed.map(|v| semver_format(&v)).collect();
+    assert_eq(strs, ["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"]);
+}
+
+// =============================================================================
+// Section 5: Format round-trip
+// =============================================================================
+
+@test
+fn test_format_roundtrip_with_prerelease_and_build() {
+    let inputs: List<Text> = [
+        "1.0.0",
+        "1.0.0-alpha.1",
+        "2.3.4+build.100",
+        "0.0.1-rc.1+exp.sha.5114f85",
+    ];
+    for s in inputs {
+        let parsed = parse(s).unwrap();
+        let formatted = semver_format(&parsed);
+        assert_eq(formatted, s, f"round-trip failed for '{s}'");
+    }
+}
+
+fn main() {}

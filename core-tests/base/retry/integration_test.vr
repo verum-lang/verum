@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/base/retry/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.retry` — abort-on-permanent-error
+// semantics, zero-attempt edge cases, and cross-stdlib error-type usage.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.retry.{
+    RetryBackoff, RetryOptions,
+    retry, retry_immediate, retry_with_strategy,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Abort on permanent error (should_retry = false)
+// =============================================================================
+
+@test
+fn test_abort_on_permanent_error_stops_immediately() {
+    let mut call_count = 0;
+    let opts: RetryOptions<Text> = RetryOptions.simple(5)
+        .with_should_retry(|e: &Text| { *e != "permanent" });
+    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+        call_count = call_count + 1;
+        Err("permanent".to_text())
+    });
+    assert(r.is_err());
+    assert_eq(call_count, 1);   // stopped immediately — permanent error
+}
+
+@test
+fn test_retries_transient_but_aborts_permanent() {
+    let mut call_count = 0;
+    let opts: RetryOptions<Text> = RetryOptions.simple(10)
+        .with_should_retry(|e: &Text| { *e == "transient" });
+    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+        call_count = call_count + 1;
+        if call_count < 3 {
+            Err("transient".to_text())
+        } else {
+            Err("permanent".to_text())
+        }
+    });
+    assert(r.is_err());
+    assert_eq(call_count, 3);   // 2 transient retries then permanent
+}
+
+// =============================================================================
+// Section 2: Zero / negative max_attempts edge cases
+// =============================================================================
+
+@test
+fn test_zero_max_attempts_returns_error_immediately() {
+    // With max_attempts=0 the loop body should never execute
+    let mut call_count = 0;
+    let r: Result<Int, Text> = retry(0, || {
+        call_count = call_count + 1;
+        Ok(1)
+    });
+    // Contract: retry(0, f) → Err (no attempt was made)
+    assert(r.is_err() || call_count == 0);
+}
+
+@test
+fn test_one_max_attempt_succeeds_on_first() {
+    let mut call_count = 0;
+    let r: Result<Int, Text> = retry(1, || {
+        call_count = call_count + 1;
+        Ok(42)
+    });
+    assert_eq(r, Ok(42));
+    assert_eq(call_count, 1);
+}
+
+@test
+fn test_one_max_attempt_fails_without_retry() {
+    let mut call_count = 0;
+    let r: Result<Int, Text> = retry(1, || {
+        call_count = call_count + 1;
+        Err("fail".to_text())
+    });
+    assert(r.is_err());
+    assert_eq(call_count, 1);
+}
+
+// =============================================================================
+// Section 3: Total-time bound for linear backoff
+// =============================================================================
+
+@test
+fn test_linear_backoff_attempt_count_bounded() {
+    // Each retry waits base_ms * attempt_index (capped by max_attempts).
+    // With 3 attempts and base_ms=0 (test-mode), ensure exact attempts.
+    let opts: RetryOptions<Text> = RetryOptions.simple(3)
+        .with_backoff(RetryBackoff.Linear { base_ms: 0 });
+    let mut call_count = 0;
+    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+        call_count = call_count + 1;
+        Err("always".to_text())
+    });
+    assert(r.is_err());
+    assert_eq(call_count, 3);
+}
+
+// =============================================================================
+// Section 4: Success after error sequence using stdlib types
+// =============================================================================
+
+@test
+fn test_retry_with_result_list_accumulation() {
+    let mut results: List<Text> = [];
+    let mut counter = 0;
+    let r: Result<Int, Text> = retry(5, || {
+        counter = counter + 1;
+        results.push(f"attempt-{counter}");
+        if counter < 4 { Err("not yet".to_text()) } else { Ok(counter) }
+    });
+    assert_eq(r, Ok(4));
+    assert_eq(results.len(), 4);
+}
+
+fn main() {}

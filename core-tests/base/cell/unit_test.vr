@@ -92,4 +92,54 @@ fn test_once_cell_second_init_returns_first_value() {
     assert_eq(*v, 1);
 }
 
+// =============================================================================
+// Section 4: LazyCell<T> — init-once-then-replay
+// =============================================================================
+
+@test
+fn test_lazy_cell_initialises_on_first_deref() {
+    let lz: LazyCell<Int> = LazyCell.new(|| 42);
+    assert_eq(*lz, 42);
+}
+
+@test
+fn test_lazy_cell_init_called_exactly_once() {
+    let counter: Cell<Int> = Cell.new(0);
+    let lz: LazyCell<Int> = LazyCell.new(|| {
+        counter.update(|x| x + 1);
+        99
+    });
+    let _ = *lz;
+    let _ = *lz;
+    let _ = *lz;
+    assert_eq(counter.get(), 1);   // closure called exactly once
+}
+
+@test
+fn test_lazy_cell_value_is_stable() {
+    let lz: LazyCell<Text> = LazyCell.new(|| "hello".to_text());
+    assert_eq(*lz, "hello".to_text());
+    assert_eq(*lz, "hello".to_text());
+}
+
+// =============================================================================
+// Section 5: Cell.swap — exchange two cells
+// =============================================================================
+
+@test
+fn test_cell_swap_exchanges_values() {
+    let a: Cell<Int> = Cell.new(10);
+    let b: Cell<Int> = Cell.new(20);
+    a.swap(&b);
+    assert_eq(a.get(), 20);
+    assert_eq(b.get(), 10);
+}
+
+@test
+fn test_cell_swap_self_is_no_op() {
+    let a: Cell<Int> = Cell.new(42);
+    a.swap(&a);
+    assert_eq(a.get(), 42);
+}
+
 fn main() {}

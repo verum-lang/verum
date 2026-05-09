@@ -1,0 +1,149 @@
+// =============================================================================
+// core-tests/base/cell/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.cell` — cross-type scenarios exercising
+// Cell/RefCell/OnceCell/LazyCell alongside List, Map, and other stdlib types.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.cell.{Cell, RefCell, OnceCell, LazyCell};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: Cell<T> with collection payload
+// =============================================================================
+
+@test
+fn test_cell_containing_list() {
+    let c: Cell<List<Int>> = Cell.new([1, 2, 3]);
+    let lst = c.get();
+    assert_eq(lst.len(), 3);
+    c.set([10, 20]);
+    assert_eq(c.get().len(), 2);
+}
+
+@test
+fn test_multiple_cells_independent() {
+    let a: Cell<Int> = Cell.new(1);
+    let b: Cell<Int> = Cell.new(2);
+    a.set(99);
+    assert_eq(a.get(), 99);
+    assert_eq(b.get(), 2);   // b is unaffected
+}
+
+// =============================================================================
+// Section 2: RefCell<T> accumulator pattern
+// =============================================================================
+
+@test
+fn test_refcell_accumulate_via_borrow_mut() {
+    let acc: RefCell<List<Int>> = RefCell.new([]);
+    {
+        let mut guard = acc.borrow_mut();
+        guard.push(1);
+        guard.push(2);
+        guard.push(3);
+    }
+    let r = acc.borrow();
+    assert_eq(r.len(), 3);
+    assert_eq((*r).get(0), Some(1));
+}
+
+@test
+fn test_refcell_shared_counter_pattern() {
+    let counter: RefCell<Int> = RefCell.new(0);
+    let times = 5;
+    let mut i = 0;
+    while i < times {
+        let mut c = counter.borrow_mut();
+        *c = *c + 1;
+        i = i + 1;
+    }
+    assert_eq(*counter.borrow(), 5);
+}
+
+// =============================================================================
+// Section 3: OnceCell<T> for lazy initialisation
+// =============================================================================
+
+@test
+fn test_once_cell_with_expensive_init() {
+    let cache: OnceCell<List<Int>> = OnceCell.new();
+    let v1 = cache.get_or_init(|| [1, 2, 3, 4, 5]);
+    let v2 = cache.get_or_init(|| [99]);    // should NOT run
+    assert_eq(v1.len(), 5);
+    assert_eq(v2.len(), 5);    // same value
+}
+
+@test
+fn test_once_cell_is_none_before_init() {
+    let oc: OnceCell<Int> = OnceCell.new();
+    assert(oc.get().is_none());
+    let _ = oc.get_or_init(|| 42);
+    assert(oc.get().is_some());
+}
+
+// =============================================================================
+// Section 4: LazyCell<T> — init-once-then-replay
+// =============================================================================
+
+@test
+fn test_lazy_cell_initialises_on_first_access() {
+    let mut init_count: Cell<Int> = Cell.new(0);
+    let lz: LazyCell<Int> = LazyCell.new(|| {
+        init_count.update(|x| x + 1);
+        100
+    });
+    let v1 = *lz;
+    let v2 = *lz;
+    assert_eq(v1, 100);
+    assert_eq(v2, 100);
+    assert_eq(init_count.get(), 1);   // init closure called exactly once
+}
+
+@test
+fn test_lazy_cell_expensive_computation_memoised() {
+    // Simulate an expensive computation that should run once
+    let computed: LazyCell<List<Int>> = LazyCell.new(|| {
+        let mut lst: List<Int> = [];
+        let mut i = 0;
+        while i < 10 {
+            lst.push(i * i);
+            i = i + 1;
+        }
+        lst
+    });
+    let v = &*computed;
+    assert_eq(v.len(), 10);
+    assert_eq(v.get(3), Some(9));    // 3^2 = 9
+    assert_eq(v.get(9), Some(81));   // 9^2 = 81
+    // Second access returns same memoised result
+    assert_eq((&*computed).len(), 10);
+}
+
+// =============================================================================
+// Section 5: Cell.swap — exchange two cells
+// =============================================================================
+
+@test
+fn test_cell_swap_exchanges_values() {
+    let a: Cell<Int> = Cell.new(1);
+    let b: Cell<Int> = Cell.new(2);
+    a.swap(&b);
+    assert_eq(a.get(), 2);
+    assert_eq(b.get(), 1);
+}
+
+@test
+fn test_cell_swap_is_involution() {
+    let a: Cell<Int> = Cell.new(42);
+    let b: Cell<Int> = Cell.new(99);
+    a.swap(&b);
+    a.swap(&b);   // swap twice = identity
+    assert_eq(a.get(), 42);
+    assert_eq(b.get(), 99);
+}
+
+fn main() {}

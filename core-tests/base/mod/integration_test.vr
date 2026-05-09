@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/base/mod/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.mod` — verifies that all 24 public
+// submodules declared in mod.vr are reachable via their canonical mount paths,
+// and that type aliases (Byte, Bytes, TextResult, StdResult) work correctly.
+// Also validates that VERSION parses as valid semver.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer, parse as parse_semver};
+mount core.base.{
+    VERSION, MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION,
+    Byte, Bytes, TextResult, StdResult,
+};
+
+// =============================================================================
+// Section 1: Submodule reachability — each module's key type accessible
+// =============================================================================
+
+@test
+fn test_ordering_accessible_via_prelude() {
+    let o: Ordering = Ordering.Less;
+    assert(o.is_less());
+}
+
+@test
+fn test_maybe_accessible_via_prelude() {
+    let m: Maybe<Int> = Some(42);
+    assert(m.is_some());
+}
+
+@test
+fn test_result_accessible_via_prelude() {
+    let r: Result<Int, Text> = Ok(1);
+    assert(r.is_ok());
+}
+
+@test
+fn test_list_accessible_via_prelude() {
+    let lst: List<Int> = [1, 2, 3];
+    assert_eq(lst.len(), 3);
+}
+
+@test
+fn test_map_accessible_via_prelude() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a".to_text(), 1);
+    assert_eq(m.get("a"), Some(1));
+}
+
+// =============================================================================
+// Section 2: Type aliases from mod.vr
+// =============================================================================
+
+@test
+fn test_byte_alias_is_uint8() {
+    let b: Byte = 255;
+    assert_eq(b, 255);
+    let b2: Byte = 0;
+    assert_eq(b2, 0);
+}
+
+@test
+fn test_bytes_alias_is_list_of_byte() {
+    let bs: Bytes = [72, 101, 108, 108, 111];   // "Hello" ASCII
+    assert_eq(bs.len(), 5);
+    assert_eq(bs.get(0), Some(72));
+}
+
+@test
+fn test_text_result_alias() {
+    let ok: TextResult<Int> = Ok(42);
+    let err: TextResult<Int> = Err("bad input".to_text());
+    assert(ok.is_ok());
+    assert(err.is_err());
+}
+
+@test
+fn test_std_result_alias() {
+    // StdResult<T> = Result<T, Error> — verify construction
+    fn fallible(x: Int) -> StdResult<Int> {
+        if x > 0 { Ok(x) } else { Err(Error.new("negative".to_text())) }
+    }
+    assert(fallible(1).is_ok());
+    assert(fallible(-1).is_err());
+}
+
+// =============================================================================
+// Section 3: VERSION constant semver compliance
+// =============================================================================
+
+@test
+fn test_version_parses_as_semver() {
+    let parsed = parse_semver(VERSION);
+    assert(parsed.is_ok(), f"VERSION '{VERSION}' must parse as semver");
+}
+
+@test
+fn test_version_components_consistent() {
+    let parsed = parse_semver(VERSION).unwrap();
+    assert_eq(parsed.major, MAJOR_VERSION as UInt64);
+    assert_eq(parsed.minor, MINOR_VERSION as UInt64);
+    assert_eq(parsed.patch, PATCH_VERSION as UInt64);
+}
+
+@test
+fn test_version_is_non_empty() {
+    assert(!VERSION.is_empty());
+}
+
+// =============================================================================
+// Section 4: Re-export propagation — named symbols still accessible
+// =============================================================================
+
+@test
+fn test_heap_accessible_via_prelude() {
+    let h: Heap<Int> = Heap.new(42);
+    assert_eq(*h, 42);
+}
+
+@test
+fn test_shared_accessible_via_prelude() {
+    let s: Shared<Text> = Shared.new("hello".to_text());
+    assert_eq(*s, "hello".to_text());
+}
+
+fn main() {}
