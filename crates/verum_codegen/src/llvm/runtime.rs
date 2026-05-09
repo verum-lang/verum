@@ -15973,16 +15973,25 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     // The user pointer is at (raw_ptr + 32). get_header subtracts 32.
 
-    /// AllocationHeader size in bytes (aligned to 32).
-    const ALLOC_HEADER_SIZE: u64 = 32;
-    /// GEN_INITIAL
-    const GEN_INITIAL: u64 = 1;
-    /// GEN_MAX
-    const GEN_MAX: u64 = 0xFFFFFFFE;
-    /// CAP_FULL (all capabilities)
-    const CAP_FULL: u64 = 0x00FF;
-    /// FLAG_REVOKED
-    const FLAG_REVOKED: u64 = 0x02;
+    /// AllocationHeader size in bytes — re-exports the canonical
+    /// [`verum_common::layout::ALLOCATION_HEADER_SIZE`].
+    const ALLOC_HEADER_SIZE: u64 = verum_common::layout::ALLOCATION_HEADER_SIZE;
+    /// Initial generation value for fresh allocations — re-exports
+    /// [`verum_common::cbgr::GEN_INITIAL`] (matches stdlib
+    /// `core/mem/allocator.vr` `GEN_INITIAL: UInt32 = 1`).
+    const GEN_INITIAL: u64 = verum_common::cbgr::GEN_INITIAL as u64;
+    /// Maximum non-wraparound generation — re-exports
+    /// [`verum_common::cbgr::GEN_MAX`] (`0xFFFF_FFFE`). Reaching this
+    /// value triggers an epoch advance.
+    const GEN_MAX: u64 = verum_common::cbgr::GEN_MAX as u64;
+    /// All standard capabilities (bits 0-7) — re-exports
+    /// [`verum_common::cbgr::caps::ALL`]. Initial allocations grant
+    /// the full capability set; attenuation strips bits.
+    const CAP_FULL: u64 = verum_common::cbgr::caps::ALL as u64;
+    /// AllocationHeader::flags REVOKED bit — re-exports
+    /// [`verum_common::cbgr::flags::REVOKED`]. Set by
+    /// `verum_cbgr_revoke`; checked on every dereference path.
+    const FLAG_REVOKED: u64 = verum_common::cbgr::flags::REVOKED as u64;
 
     /// Emit all CBGR LLVM IR functions.
     fn emit_verum_cbgr_functions(&self, module: &Module<'ctx>) -> Result<()> {
