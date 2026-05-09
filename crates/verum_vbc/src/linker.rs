@@ -61,17 +61,13 @@
 use std::collections::HashMap;
 
 use crate::archive::VbcArchive;
-use crate::bytecode::{decode_instruction, decode_instructions, encode_instructions};
+use crate::bytecode::{decode_instruction, encode_instructions};
 use crate::cfg_key::CfgKey;
-use crate::instruction::Instruction;
 use crate::module::{
-    ConstId, Constant, FunctionDescriptor, FunctionId, FunctionVariantSet, ParamDescriptor,
-    SourceMap, SourceMapEntry, SpecializationEntry, VbcModule, VbcVariant,
+    ConstId, Constant, FunctionDescriptor, FunctionId, FunctionVariantSet, SpecializationEntry,
+    VbcModule, VbcVariant,
 };
-use crate::types::{
-    ContextRef, FieldDescriptor, ProtocolId, ProtocolImpl, StringId, TypeDescriptor, TypeId,
-    TypeParamDescriptor, TypeRef, VariantDescriptor,
-};
+use crate::types::{ContextRef, ProtocolId, StringId, TypeDescriptor, TypeId, TypeRef};
 
 /// Errors raised during link-time merge.
 #[derive(Debug)]
@@ -229,6 +225,35 @@ impl RemapTable {
         // fallback handles the cross-module case until Phase 4b emits
         // self-contained per-module context tables.
         Ok(self.context.get(src.0 as usize).copied().unwrap_or(src))
+    }
+}
+
+/// `IdRemap` adapter — every per-id linker fallback already
+/// identity-maps unknowns, so the trait surface is a thin wrapper
+/// that drops the `Result` (the only producer of `Err` is
+/// `map_string`'s strict path, which is NOT called from
+/// `bytecode_remap::rewrite_instruction_ids`).  Lets the linker
+/// share the per-instruction rewrite logic with
+/// `verum_compiler::archive_ctx_loader` — see
+/// `crates/verum_vbc/src/bytecode_remap.rs` module docs.
+impl crate::bytecode_remap::IdRemap for RemapTable {
+    fn map_string(&self, src: StringId) -> StringId {
+        // Strict map for instruction-stream callers — there are
+        // none today (instructions don't carry StringId operands
+        // directly), so the lenient form is the safer default.
+        RemapTable::map_string_lenient(self, src)
+    }
+    fn map_function(&self, src: FunctionId) -> FunctionId {
+        RemapTable::map_function(self, src).unwrap_or(src)
+    }
+    fn map_type_id(&self, src: TypeId) -> TypeId {
+        RemapTable::map_type_id(self, src).unwrap_or(src)
+    }
+    fn map_const(&self, src: ConstId) -> ConstId {
+        RemapTable::map_const(self, src).unwrap_or(src)
+    }
+    fn map_protocol(&self, src: ProtocolId) -> ProtocolId {
+        RemapTable::map_protocol(self, src).unwrap_or(src)
     }
 }
 
@@ -981,67 +1006,12 @@ impl VbcLinker {
             }
         }
         for instr in instructions.iter_mut() {
-            rewrite_instruction_ids(instr, remap)?;
+            crate::bytecode_remap::rewrite_instruction_ids(instr, remap);
         }
         let mut out = Vec::with_capacity(src_bytes.len());
         encode_instructions(&instructions, &mut out);
         Ok(out)
     }
-}
-
-/// In-place rewrite of any id-bearing operand in `instr`. No-op on
-/// id-free variants. Called per-instruction by
-/// [`VbcLinker::rewrite_function_bytecode`].
-///
-/// **Maintenance contract**: every new id-bearing instruction variant
-/// added to `instruction.rs` MUST be added here. Missing a variant
-/// surfaces as a runtime `FunctionNotFound` / `TypeNotFound` panic
-/// when user code transitively calls into the unrewritten body.
-fn rewrite_instruction_ids(
-    instr: &mut Instruction,
-    remap: &RemapTable,
-) -> Result<(), LinkError> {
-    match instr {
-        // --- Constant pool index ---
-        Instruction::LoadK { const_id, .. } => {
-            *const_id = remap.map_const(ConstId(*const_id))?.0;
-        }
-        Instruction::MetaQuote { bytes_const_id, .. } => {
-            *bytes_const_id = remap.map_const(ConstId(*bytes_const_id))?.0;
-        }
-        // --- Function table index ---
-        Instruction::Call { func_id, .. }
-        | Instruction::CallG { func_id, .. }
-        | Instruction::TailCall { func_id, .. }
-        | Instruction::NewClosure { func_id, .. }
-        | Instruction::Spawn { func_id, .. }
-        | Instruction::GenCreate { func_id, .. } => {
-            *func_id = remap.map_function(FunctionId(*func_id))?.0;
-        }
-        Instruction::CallM { method_id, .. } => {
-            // Method table is a slice of the function table; method_id
-            // is a flat function-id under the hood.
-            *method_id = remap.map_function(FunctionId(*method_id))?.0;
-        }
-        // --- Type table index ---
-        Instruction::New { type_id, .. }
-        | Instruction::NewG { type_id, .. }
-        | Instruction::MetaReflect { type_id, .. }
-        | Instruction::MakeVariantTyped { type_id, .. } => {
-            *type_id = remap.map_type_id(TypeId(*type_id))?.0;
-        }
-        Instruction::MakePi { return_type_id, .. } => {
-            *return_type_id = remap.map_type_id(TypeId(*return_type_id))?.0;
-        }
-        // --- Protocol table index ---
-        Instruction::BinaryG { protocol_id, .. }
-        | Instruction::CmpG { protocol_id, .. } => {
-            *protocol_id = remap.map_protocol(ProtocolId(*protocol_id))?.0;
-        }
-        // Everything else has no id operand.
-        _ => {}
-    }
-    Ok(())
 }
 
 // ============================================================================
