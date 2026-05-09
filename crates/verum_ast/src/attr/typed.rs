@@ -73,48 +73,122 @@ pub enum Profile {
     Research,
 }
 
+// =========================================================================
+// Profile metadata — single source of truth for the 3 variants.
+//
+// Pre-refactor Profile carried five parallel match-arm accessors
+// (`from_str`, `as_str`, `is_more_restrictive_than`,
+// `allows_unsafe`, `requires_verification`).  Cross-cutting
+// invariants — `from_str(p.as_str()) == Some(p)` round-trip,
+// `requires_verification ⇒ is_more_restrictive_than(others)` —
+// lived implicitly across the independent matches.
+//
+// Same drift-collapse pattern as the verum_vbc sub-opcode meta()
+// series, the verum_compiler LintMeta + Profile (compiler-side)
+// consolidations, and the verum_ast BinOpMeta refactor.
+//
+// NOTE: this is a DIFFERENT `Profile` enum from
+// `crates/verum_compiler/src/profile_system.rs::Profile`.  Both
+// enumerate the same 3 names (Application / Systems / Research)
+// but expose different accessor surfaces — this AST-side enum
+// describes the parsed `@profile(name)` attribute; the compiler
+// version describes the compilation profile selected from CLI /
+// manifest.  Long-term they should be unified; for now the two
+// stay parallel and consistent via this consolidation.
+// =========================================================================
+
+/// Co-located metadata for one `@profile` attribute variant.
+#[derive(Debug, Clone, Copy)]
+pub struct ProfileMeta {
+    /// Canonical attribute spelling (`"application"` /
+    /// `"systems"` / `"research"`).
+    pub name: &'static str,
+    /// Restriction-hierarchy rank: `Application < Systems <
+    /// Research` (Research is most restrictive — requires
+    /// proofs; Application is least restrictive — most permissive
+    /// features).
+    pub restriction_rank: u8,
+    /// Whether this profile permits `unsafe` operations.
+    pub allows_unsafe: bool,
+    /// Whether this profile requires formal verification.
+    pub requires_verification: bool,
+}
+
 impl Profile {
-    /// Get the profile from a string name
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "application" => Maybe::Some(Profile::Application),
-            "systems" => Maybe::Some(Profile::Systems),
-            "research" => Maybe::Some(Profile::Research),
-            _ => Maybe::None,
+    /// All variants in stable order.
+    pub const ALL: &'static [Self] = &[
+        Self::Application,
+        Self::Systems,
+        Self::Research,
+    ];
+
+    /// Returns co-located metadata for this profile.  Single
+    /// source of truth for `name`, `restriction_rank`,
+    /// `allows_unsafe`, `requires_verification`.
+    pub const fn meta(self) -> ProfileMeta {
+        match self {
+            Self::Application => ProfileMeta {
+                name: "application",
+                restriction_rank: 0,
+                allows_unsafe: false,
+                requires_verification: false,
+            },
+            Self::Systems => ProfileMeta {
+                name: "systems",
+                restriction_rank: 1,
+                allows_unsafe: true,
+                requires_verification: false,
+            },
+            Self::Research => ProfileMeta {
+                name: "research",
+                restriction_rank: 2,
+                allows_unsafe: false,
+                requires_verification: true,
+            },
         }
     }
 
-    /// Get the string name of this profile
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Profile::Application => "application",
-            Profile::Systems => "systems",
-            Profile::Research => "research",
+    /// Get the profile from a string name.  Derived from `ALL`
+    /// so the name → variant table cannot drift from the
+    /// variant → name table (`as_str()`).
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.as_str().as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    /// Get the string name of this profile.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Check if this profile is more restrictive than another
     ///
-
     /// Restriction hierarchy: Application < Systems < Research
     /// Research is most restrictive (requires proofs)
     /// Application is least restrictive (most permissive features)
-    pub fn is_more_restrictive_than(&self, other: &Profile) -> bool {
-        use Profile::*;
-        matches!(
-            (self, other),
-            (Research, Application) | (Research, Systems) | (Systems, Application)
-        )
+    #[inline]
+    pub const fn is_more_restrictive_than(&self, other: &Profile) -> bool {
+        self.meta().restriction_rank > other.meta().restriction_rank
     }
 
-    /// Check if this profile allows unsafe operations
-    pub fn allows_unsafe(&self) -> bool {
-        matches!(self, Profile::Systems)
+    /// Check if this profile allows unsafe operations.
+    #[inline]
+    pub const fn allows_unsafe(&self) -> bool {
+        self.meta().allows_unsafe
     }
 
-    /// Check if this profile requires verification
-    pub fn requires_verification(&self) -> bool {
-        matches!(self, Profile::Research)
+    /// Check if this profile requires verification.
+    #[inline]
+    pub const fn requires_verification(&self) -> bool {
+        self.meta().requires_verification
     }
 }
 
@@ -629,19 +703,51 @@ pub enum InlineMode {
     Release,
 }
 
+// =========================================================================
+// InlineMode metadata — single source of truth for the 4 variants.
+//
+// Pre-refactor `InlineMode::from_str` covered only 3 variants
+// ("always" / "never" / "release") while `as_str` covered all 4
+// (including "suggest" for the bare `@inline` form).  This
+// violated the round-trip property: `from_str("suggest") == None`
+// but `as_str(Suggest) == "suggest"`.  Consumers that
+// serialise → deserialise via these methods would lose the
+// `Suggest` variant.
+//
+// The consolidation closes the round-trip drift by deriving
+// `from_str` from `ALL` — every `as_str` output now parses
+// back.  `@inline(suggest)` becomes a parseable (if redundant)
+// attribute form, matching the bare `@inline` default.
+// =========================================================================
+
 impl InlineMode {
-    /// Parse inline mode from string
+    /// All variants in stable order.
+    pub const ALL: &'static [Self] = &[
+        Self::Suggest,
+        Self::Always,
+        Self::Never,
+        Self::Release,
+    ];
+
+    /// Parse inline mode from string.  Derived from `ALL` so
+    /// every `as_str` output round-trips through `from_str`.
+    /// Closes the legacy drift defect where `Suggest` was
+    /// reachable via `as_str` but not via `from_str("suggest")`.
     pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "always" => Maybe::Some(InlineMode::Always),
-            "never" => Maybe::Some(InlineMode::Never),
-            "release" => Maybe::Some(InlineMode::Release),
-            _ => Maybe::None,
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.as_str().as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
     }
 
-    /// Get string representation
-    pub fn as_str(&self) -> &'static str {
+    /// Get string representation.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             InlineMode::Suggest => "suggest",
             InlineMode::Always => "always",
@@ -7798,5 +7904,125 @@ mod doc_attr_tests {
     fn language_or_default_returns_explicit_lang() {
         let doc = DocAttr::with_language("zh", "text", span());
         assert_eq!(doc.language_or_default(), "zh");
+    }
+}
+
+// =========================================================================
+// Drift-pin tests for the meta() consolidation
+// =========================================================================
+
+#[cfg(test)]
+mod meta_drift_pins {
+    use super::*;
+
+    // --- Profile ---
+
+    /// Variant count is the explicit signal a new profile has
+    /// landed.
+    #[test]
+    fn profile_count_pinned_at_three() {
+        assert_eq!(Profile::ALL.len(), 3,
+            "Profile (attr) variant count drift: expected 3");
+    }
+
+    /// `from_str(p.as_str()) == Some(p)` for every variant.
+    /// Catches drift between the meta() table and the legacy
+    /// match-based `from_str` parser.
+    #[test]
+    fn profile_name_round_trip() {
+        for &p in Profile::ALL {
+            let name = p.as_str();
+            assert_eq!(Profile::from_str(name), Maybe::Some(p),
+                "round-trip drift on {:?}: name={:?}", p, name);
+        }
+    }
+
+    /// Unknown names parse to None.
+    #[test]
+    fn profile_from_str_rejects_unknown() {
+        assert_eq!(Profile::from_str(""), Maybe::None);
+        assert_eq!(Profile::from_str("APPLICATION"), Maybe::None,
+            "case-sensitive — uppercase must NOT match");
+        assert_eq!(Profile::from_str("invalid"), Maybe::None);
+    }
+
+    /// `is_more_restrictive_than` follows the strict total order
+    /// `Application < Systems < Research`.  Pin the strict order
+    /// and asymmetry.
+    #[test]
+    fn profile_restriction_order_strict() {
+        for &p in Profile::ALL {
+            // Reflexivity: not strictly more restrictive than self.
+            assert!(!p.is_more_restrictive_than(&p),
+                "{:?}: should NOT be strictly more restrictive than itself", p);
+        }
+        // Asymmetry: only one direction holds for any pair of
+        // distinct profiles.
+        assert!(Profile::Research.is_more_restrictive_than(&Profile::Application));
+        assert!(!Profile::Application.is_more_restrictive_than(&Profile::Research));
+        assert!(Profile::Research.is_more_restrictive_than(&Profile::Systems));
+        assert!(Profile::Systems.is_more_restrictive_than(&Profile::Application));
+    }
+
+    /// Pin the canonical capability-flag set: only Systems
+    /// allows unsafe, only Research requires verification.
+    #[test]
+    fn profile_capability_flags_canonical() {
+        assert!(!Profile::Application.allows_unsafe());
+        assert!( Profile::Systems.allows_unsafe());
+        assert!(!Profile::Research.allows_unsafe());
+
+        assert!(!Profile::Application.requires_verification());
+        assert!(!Profile::Systems.requires_verification());
+        assert!( Profile::Research.requires_verification());
+    }
+
+    // --- InlineMode ---
+
+    /// Variant count is the explicit signal a new mode has
+    /// landed.
+    #[test]
+    fn inline_mode_count_pinned_at_four() {
+        assert_eq!(InlineMode::ALL.len(), 4,
+            "InlineMode variant count drift: expected 4");
+    }
+
+    /// **Drift-defect closure**: `from_str(m.as_str()) == Some(m)`
+    /// for EVERY variant.  Pre-fix this failed for `Suggest`:
+    /// `as_str(Suggest) == "suggest"` but `from_str("suggest") ==
+    /// None`.  The consolidation derives `from_str` from `ALL`
+    /// so every `as_str` output now parses back.
+    #[test]
+    fn inline_mode_round_trip_includes_suggest() {
+        for &m in InlineMode::ALL {
+            let name = m.as_str();
+            assert_eq!(InlineMode::from_str(name), Maybe::Some(m),
+                "round-trip drift on {:?}: name={:?}", m, name);
+        }
+        // Named regression assertion for the closed gap:
+        assert_eq!(InlineMode::from_str("suggest"), Maybe::Some(InlineMode::Suggest),
+            "InlineMode::from_str(\"suggest\") was None pre-fix — round-trip must work");
+    }
+
+    /// Unknown names parse to None.
+    #[test]
+    fn inline_mode_from_str_rejects_unknown() {
+        assert_eq!(InlineMode::from_str(""), Maybe::None);
+        assert_eq!(InlineMode::from_str("ALWAYS"), Maybe::None,
+            "case-sensitive — uppercase must NOT match");
+        assert_eq!(InlineMode::from_str("inline"), Maybe::None);
+    }
+
+    /// `as_str` outputs are unique and non-empty.
+    #[test]
+    fn inline_mode_as_str_unique_and_non_empty() {
+        let mut seen: Vec<&'static str> = Vec::new();
+        for &m in InlineMode::ALL {
+            let n = m.as_str();
+            assert!(!n.is_empty(), "{:?}: empty as_str", m);
+            assert!(!seen.contains(&n),
+                "duplicate as_str {:?} on variant {:?}", n, m);
+            seen.push(n);
+        }
     }
 }
