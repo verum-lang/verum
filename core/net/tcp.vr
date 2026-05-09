@@ -819,8 +819,8 @@ implement AsyncRead for TcpStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<IoResult<Int>> {
         // Try a non-blocking read first. If WouldBlock, register waker.
         let cap = buf.capacity();
-        let mut byte_buf = [0_u8; 65536];   // stack buffer, 64 KiB
-        let read_len = if cap < 65536 { cap } else { 65536 };
+        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        let read_len = if cap < STREAM_CHUNK_SIZE { cap } else { STREAM_CHUNK_SIZE };
         if read_len == 0 {
             return Poll.Ready(Ok(0));
         }
@@ -861,8 +861,8 @@ implement AsyncWrite for TcpStream {
         }
 
         // Direct byte slice — no Int → Byte marshalling needed post-§4.
-        let mut byte_buf = [0_u8; 65536];
-        let write_len = if buf.len() < 65536 { buf.len() } else { 65536 };
+        let mut byte_buf = [0_u8; STREAM_CHUNK_SIZE];
+        let write_len = if buf.len() < STREAM_CHUNK_SIZE { buf.len() } else { STREAM_CHUNK_SIZE };
         for i in 0..write_len { byte_buf[i] = buf[i]; }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -1063,6 +1063,14 @@ public type TcpListener is {
 
 /// Default backlog for listen(). Can handle burst of 1024 pending connections.
 const DEFAULT_BACKLOG: Int = 1024;
+
+/// Stack-allocated chunk size for non-blocking poll_read / poll_write.
+/// 64 KiB matches the typical TCP receive-buffer ceiling and the
+/// page-cluster size most kernels read in one go; larger buffers
+/// rarely fill in a single non-blocking call so the extra stack
+/// pressure is wasted.  Single source of truth so the four sites in
+/// AsyncRead::poll_read + AsyncWrite::poll_write cannot drift.
+const STREAM_CHUNK_SIZE: Int = 65536;
 
 implement TcpListener {
     /// Create a new TcpListener bound to the specified address.
