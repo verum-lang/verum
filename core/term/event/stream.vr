@@ -32,6 +32,14 @@ mount core.sys.FileDesc;
 // EventStream — synchronous event stream
 // =============================================================================
 
+/// Read-buffer size for terminal-event polling.  1 KiB easily holds
+/// the longest input sequence the parser cares about (a paste burst
+/// or a wide CSI escape sequence) while staying well under stack
+/// pressure for the typical event-loop frame.  Centralised so the
+/// EventStream type field and the constructor's init slot cannot
+/// drift on each other.
+const EVENT_READ_BUF_SIZE: Int = 1024;
+
 /// Synchronous terminal event stream.
 /// Wraps an InputParser and reads from a terminal file descriptor.
 ///
@@ -48,7 +56,7 @@ mount core.sys.FileDesc;
 public type EventStream is {
     parser: InputParser,
     fd: FileDesc,
-    read_buf: [Byte; 1024],
+    read_buf: [Byte; EVENT_READ_BUF_SIZE],
 };
 
 implement EventStream {
@@ -58,7 +66,7 @@ implement EventStream {
         EventStream {
             parser: InputParser.new(),
             fd: fd,
-            read_buf: [0; 1024],
+            read_buf: [0; EVENT_READ_BUF_SIZE],
         }
     }
 
