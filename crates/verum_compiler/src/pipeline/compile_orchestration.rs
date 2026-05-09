@@ -915,6 +915,20 @@ impl<'s> CompilationPipeline<'s> {
                 // Register built-in types and functions
                 checker.register_builtins();
 
+                // Hand the stdlib metadata to this per-module TypeChecker
+                // so the receiver-driven lazy stdlib-type loader fires on
+                // method calls whose receiver type was *inferred* (via
+                // `Result.Ok` arm of `pool.acquire().await?` etc.) rather
+                // than explicitly named in the user's `mount` list.
+                // Without this, every `conn.query(...)` style call on an
+                // indirectly-inferred stdlib type surfaces as
+                // `MethodNotFound` despite the method's body being in the
+                // precompiled archive — the lookup bucket is empty
+                // because the lazy load never fires.
+                if let Some(metadata) = self.stdlib_metadata.get() {
+                    checker.set_core_metadata(std::sync::Arc::clone(metadata));
+                }
+
                 // Configure type checker with module registry for cross-file resolution
                 // This enables imports to resolve types from other modules
                 let registry = self.session.module_registry();
