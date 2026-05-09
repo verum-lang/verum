@@ -488,6 +488,25 @@ implement Debug for DirEntry {
 // ReadDir Iterator
 // =============================================================================
 
+/// Internal buffer size for batched directory-entry reads.  4 KiB
+/// matches the typical Linux page size and is the standard
+/// getdents64 batch size used in glibc's `readdir` implementation;
+/// larger buffers rarely amortise.  Centralised so the ReadDir
+/// type field and the per-platform init sites cannot drift.
+const READDIR_BUFFER_SIZE: Int = 4096;
+
+/// Maximum path length in bytes.  POSIX `PATH_MAX` on Linux/macOS
+/// is 4096; the syscall surfaces (opendir, readlink, …) cap path
+/// arguments at this size.  Centralised so the path-buffer
+/// allocations and their (PATH_MAX_BYTES - 1) null-terminator
+/// slot computations cannot drift.
+const PATH_MAX_BYTES: Int = 4096;
+
+/// I/O chunk size for streaming file copy.  8 KiB balances the
+/// system-call overhead per chunk against stack pressure; matches
+/// `core.io.buffer::DEFAULT_BUF_CAPACITY`.
+const FILE_COPY_CHUNK_SIZE: Int = 8192;
+
 /// Iterator over directory entries.
 ///
 
@@ -503,7 +522,7 @@ public type ReadDir is {
     // macOS: opendir handle
     dir_handle: Int,
     base_path: PathBuf,
-    buffer: [Byte; 4096],
+    buffer: [Byte; READDIR_BUFFER_SIZE],
     buffer_pos: Int,
     buffer_len: Int,
     finished: Bool,
@@ -851,7 +870,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
             Ok(ReadDir {
                 fd: fd,
                 base_path: path.to_path_buf(),
-                buffer: [0; 4096],
+                buffer: [0; READDIR_BUFFER_SIZE],
                 buffer_pos: 0,
                 buffer_len: 0,
                 finished: false,
@@ -867,8 +886,8 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     let path_bytes = path_str.as_bytes();
 
     // Null-terminate the path
-    let mut path_buf = [0_u8; 4096];
-    let len = path_bytes.len().min(4095);
+    let mut path_buf = [0_u8; PATH_MAX_BYTES];
+    let len = path_bytes.len().min(PATH_MAX_BYTES - 1);
     path_buf[..len].copy_from_slice(&path_bytes[..len]);
     path_buf[len] = 0;
 
@@ -882,7 +901,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
         fd: 0,
         dir_handle: dir_handle as Int,
         base_path: path.to_path_buf(),
-        buffer: [0; 4096],
+        buffer: [0; READDIR_BUFFER_SIZE],
         buffer_pos: 0,
         buffer_len: 0,
         finished: false,
@@ -944,7 +963,7 @@ public fn copy(from: &Path, to: &Path) -> IoResult<Int> {
     let mut dst = File.create(&to.to_text())?;
 
     // Copy in chunks
-    let mut buf = [0_u8; 8192];
+    let mut buf = [0_u8; FILE_COPY_CHUNK_SIZE];
     let mut total = 0;
 
     loop {
@@ -1017,7 +1036,7 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
 public fn read_link(path: &Path) -> IoResult<PathBuf> {
     let path_str = path.as_str();
     let path_bytes = path_str.as_bytes();
-    let mut buf = [0_u8; 4096];
+    let mut buf = [0_u8; PATH_MAX_BYTES];
 
     match sys_readlink(path_bytes, &mut buf) {
         Ok(n) => {
@@ -1177,7 +1196,7 @@ public fn temp_dir() -> PathBuf {
 
 /// Get the current working directory.
 public fn current_dir() -> IoResult<PathBuf> {
-    let mut buf = [0_u8; 4096];
+    let mut buf = [0_u8; PATH_MAX_BYTES];
 
     match sys_getcwd(&mut buf) {
         Ok(n) => {
