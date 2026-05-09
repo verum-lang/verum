@@ -201,12 +201,21 @@ pub(in super::super) fn handle_deref(
         let base_ptr = ref_val.as_ptr::<u8>();
         if !base_ptr.is_null() {
             let ptr_addr = base_ptr as usize;
-            let header_addr = ptr_addr.wrapping_sub(32); // 32-byte AllocationHeader
+            // 32-byte AllocationHeader sits immediately before the data payload —
+            // see `verum_common::layout::ALLOCATION_HEADER_SIZE`.
+            let header_addr = ptr_addr
+                .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
             if state.cbgr_allocations.contains(&header_addr) {
-                // CBGR data pointer: check if allocation has been freed
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                let flags = unsafe { *((header_addr + 20) as *const u32) };
-                if flags & 1 != 0 {
+                // CBGR data pointer: check if allocation has been freed.
+                // Field offsets sourced from
+                // `verum_common::layout::ALLOCATION_HEADER_*_OFFSET`;
+                // the FREED bit lives in the canonical `flags::FREED`
+                // constant (`verum_common::cbgr::flags::FREED`).
+                let flags = unsafe {
+                    *((header_addr + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                        as *const u32)
+                };
+                if flags & verum_common::cbgr::flags::FREED != 0 {
                     return Err(InterpreterError::Panic {
                         message: "CBGR use-after-free detected".to_string(),
                     });
@@ -316,14 +325,18 @@ pub(in super::super) fn handle_deref_mut(
         }
         // CBGR epoch advancement on heap mutation
         state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
-        // Update the epoch in the AllocationHeader for this allocation
-        // AllocationHeader is 32 bytes before the data pointer
-        // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
+        // Update the epoch in the AllocationHeader for this allocation.
+        // Header sits immediately before the data payload — see
+        // `verum_common::layout::ALLOCATION_HEADER_SIZE` and
+        // `ALLOCATION_HEADER_EPOCH_OFFSET`.
         let ptr_addr = ptr as usize;
-        let header_addr = ptr_addr.wrapping_sub(32);
+        let header_addr =
+            ptr_addr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
             unsafe {
-                let epoch_ptr = (header_addr + 12) as *mut u16;
+                let epoch_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                    as *mut u16;
                 *epoch_ptr = state.cbgr_epoch as u16;
             }
         }
@@ -352,19 +365,29 @@ pub(in super::super) fn handle_chk_ref(
         let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
         validate_cbgr_generation(state, abs_index, generation)?;
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
-        // Heap-based CBGR reference - validate AllocationHeader
+        // Heap-based CBGR reference - validate AllocationHeader.
+        // Field offsets sourced from `verum_common::layout`.
         let ptr_addr = ref_val.as_ptr::<u8>() as usize;
-        let header_addr = ptr_addr.wrapping_sub(32); // 32-byte AllocationHeader
+        let header_addr =
+            ptr_addr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
 
         if state.cbgr_allocations.contains(&header_addr) {
-            // Read generation and flags from AllocationHeader
-            // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4]
-            let generation = unsafe { *((header_addr + 8) as *const u32) };
-            let _epoch = unsafe { *((header_addr + 12) as *const u16) };
-            let flags = unsafe { *((header_addr + 20) as *const u32) };
+            // Read generation and flags from AllocationHeader.
+            let generation = unsafe {
+                *((header_addr + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                    as *const u32)
+            };
+            let _epoch = unsafe {
+                *((header_addr + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                    as *const u16)
+            };
+            let flags = unsafe {
+                *((header_addr + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                    as *const u32)
+            };
 
             // Check if allocation has been freed
-            if flags & 1 != 0 {
+            if flags & verum_common::cbgr::flags::FREED != 0 {
                 return Err(InterpreterError::Panic {
                     message: "CBGR use-after-free: allocation has been freed".to_string(),
                 });
@@ -479,7 +502,7 @@ pub(in super::super) fn handle_drop_ref(
         // Only check standard heap objects (not CBGR allocations which have 32-byte AllocationHeader)
         let is_cbgr_alloc = state
             .cbgr_allocations
-            .contains(&(obj_ptr as usize).wrapping_sub(32));
+            .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
 
         if !is_cbgr_alloc {
             // Standard heap objects: the pointer points directly to the ObjectHeader
@@ -618,7 +641,7 @@ pub(in super::super) fn handle_drop_ref(
         let obj_ptr = val.as_ptr::<u8>();
         let is_cbgr_alloc = state
             .cbgr_allocations
-            .contains(&(obj_ptr as usize).wrapping_sub(32));
+            .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
 
         if !is_cbgr_alloc {
             let header = unsafe { &*(obj_ptr as *const heap::ObjectHeader) };
@@ -659,14 +682,21 @@ pub(in super::super) fn handle_drop_ref(
     // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
     if val.is_ptr() && !val.is_nil() {
         let data_ptr = val.as_ptr::<u8>() as usize;
-        let header_addr = data_ptr.wrapping_sub(32); // 32-byte AllocationHeader
+        let header_addr =
+            data_ptr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
-            // Bump generation and set freed flag in AllocationHeader
+            // Bump generation and set FREED flag in AllocationHeader.
+            // Field offsets and the FREED bit value live in
+            // `verum_common::{layout, cbgr::flags}`.
             unsafe {
-                let gen_ptr = (header_addr + 8) as *mut u32; // generation at offset 8
+                let gen_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                    as *mut u32;
                 *gen_ptr = (*gen_ptr).wrapping_add(1);
-                let flags_ptr = (header_addr + 20) as *mut u32; // flags at offset 20
-                *flags_ptr |= 1; // FREED flag
+                let flags_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                    as *mut u32;
+                *flags_ptr |= verum_common::cbgr::flags::FREED;
             }
             // Advance global epoch on deallocation
             state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
@@ -1414,11 +1444,13 @@ pub(in super::super) fn handle_cbgr_extended(
                 let (_, ref_gen) = decode_cbgr_ref(src_val.as_i64());
                 ref_gen as i64
             } else if src_val.is_ptr() && !src_val.is_nil() {
-                // Heap-based ref: read generation from AllocationHeader
+                // Heap-based ref: read generation from AllocationHeader.
                 let ptr_addr = src_val.as_ptr::<u8>() as usize;
-                let header_addr = ptr_addr.wrapping_sub(32); // 32-byte AllocationHeader
-                // Read generation at offset 8 in the header
-                let gen_ptr = (header_addr + 8) as *const u32;
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+                let gen_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                    as *const u32;
                 unsafe { *gen_ptr as i64 }
             } else {
                 0 // Null or non-reference: no generation
@@ -1441,10 +1473,13 @@ pub(in super::super) fn handle_cbgr_extended(
                 let (abs_index, _) = decode_cbgr_ref(src_val.as_i64());
                 state.registers.get_epoch(abs_index) as i64
             } else if src_val.is_ptr() && !src_val.is_nil() {
-                // Heap-based ref: read epoch from AllocationHeader (offset 12, 2 bytes)
+                // Heap-based ref: read epoch from AllocationHeader.
                 let ptr_addr = src_val.as_ptr::<u8>() as usize;
-                let header_addr = ptr_addr.wrapping_sub(32);
-                let epoch_ptr = (header_addr + 12) as *const u16;
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+                let epoch_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                    as *const u16;
                 unsafe { *epoch_ptr as i64 }
             } else {
                 state.cbgr_epoch as i64 // For non-refs, return current epoch
@@ -1473,8 +1508,11 @@ pub(in super::super) fn handle_cbgr_extended(
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 // Heap-based ref: validate epoch using window comparison
                 let ptr_addr = src_val.as_ptr::<u8>() as usize;
-                let header_addr = ptr_addr.wrapping_sub(32);
-                let epoch_ptr = (header_addr + 12) as *const u16;
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+                let epoch_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                    as *const u16;
                 let ref_epoch = unsafe { *epoch_ptr };
                 validate_epoch_window(ref_epoch, state.cbgr_epoch, EPOCH_WINDOW_SIZE)
             } else if src_val.is_nil() {
@@ -1607,13 +1645,19 @@ pub(in super::super) fn handle_cbgr_extended(
 
             let src = state.get_reg(src_reg);
             let is_valid = if src.is_ptr() && !src.is_nil() {
-                // Check CBGR freed flag for data pointers
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
+                // Check CBGR FREED flag for data pointers — see
+                // `verum_common::cbgr::flags::FREED` and the
+                // `ALLOCATION_HEADER_FLAGS_OFFSET` canonical constant.
                 let data_ptr = src.as_ptr::<u8>() as usize;
-                let header_addr = data_ptr.wrapping_sub(32); // 32-byte AllocationHeader
+                let header_addr = data_ptr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
                 if state.cbgr_allocations.contains(&header_addr) {
-                    let flags = unsafe { *((header_addr + 20) as *const u32) }; // flags at offset 20
-                    flags & 1 == 0 // Valid if not freed
+                    let flags = unsafe {
+                        *((header_addr
+                            + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                            as *const u32)
+                    };
+                    flags & verum_common::cbgr::flags::FREED == 0 // Valid if not freed
                 } else {
                     true
                 }

@@ -4471,6 +4471,96 @@ pub enum MlSubOpcode {
     RdmaCheckValid = 0x83,
 }
 
+// =========================================================================
+// MlSubOpcode metadata — single source of truth for the 62 variants.
+//
+// The legacy implementation maintained four parallel match-arm
+// methods (`mnemonic`, `category`, `is_collective`, `is_p2p`).
+// `category()` was driven by `match self as u8` over 16-byte
+// windows so renumbering a variant could silently move it
+// between bands.
+//
+// Same drift-collapse pattern as ArithSubOpcode.meta()
+// (06d64018d), TensorSubOpcode (79369267d), GpuSubOpcode
+// (dd84a929b), SystemSubOpcode (60b4cc3b9), MathSubOpcode
+// (4b2792881), KernelRule (ec9cfc411).
+// =========================================================================
+
+/// Functional band an `MlSubOpcode` belongs to.  Bands are stamped
+/// per-variant in `meta()` rather than inferred from byte-range
+/// arithmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MlCategory {
+    /// BPE / SentencePiece tokenizer load + encode + decode.
+    TokenizerOperations,
+    /// `SampleTopP` / `SampleTopK` / `RepetitionPenalty` /
+    /// `PagedAttention` etc.
+    SamplingOperations,
+    /// `ParseToolCall` / `FormatValue` / `KvCacheOp` /
+    /// `SpeculativeVerify` / JSON schema bridges.
+    InferenceUtility,
+    /// `AllReduce` / `AllGather` / `Broadcast` / `Barrier` /
+    /// pmap collectives + `Vmap*Transform` / `Pmap*Transform`
+    /// higher-order transformations.
+    DistributedCollective,
+    /// `DistWorldGroup` / `DistNewGroup` / `DistGetRank` /
+    /// `DistWorldSize` / `DistLocalRank`.
+    ProcessGroup,
+    /// `P2PSend` / `P2PRecv` / `P2PIsend` / `P2PIrecv` / `P2PWait`.
+    PointToPoint,
+    /// `BucketGradients` / `GetGrad` / `SetGrad` /
+    /// `ModuleBackward` / `ZeroGrad` / `ClipGradNorm` / JVP
+    /// scopes / `GradCustom` / `GradRecompute`.
+    GradientOperations,
+    /// `MeshSelect` / `ActorNewId` / `MeshCreate` / `MeshShape`.
+    ActorMesh,
+    /// `RdmaCreateRef` / `RdmaFetch` / `RdmaWrite` /
+    /// `RdmaCheckValid`.
+    Rdma,
+}
+
+impl MlCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenizerOperations    => "Tokenizer Operations",
+            Self::SamplingOperations     => "Sampling Operations",
+            Self::InferenceUtility       => "Inference Utility Operations",
+            Self::DistributedCollective  => "Distributed/Collective Operations",
+            Self::ProcessGroup           => "Process Group Operations",
+            Self::PointToPoint           => "Point-to-Point Operations",
+            Self::GradientOperations     => "Gradient Operations",
+            Self::ActorMesh              => "Actor/Mesh Operations",
+            Self::Rdma                   => "RDMA Operations",
+        }
+    }
+}
+
+/// Co-located metadata for one `MlSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; `MlSubOpcode::meta()` is the only site that constructs
+/// values of this type.
+#[derive(Debug, Clone, Copy)]
+pub struct MlOpMeta {
+    /// All-caps mnemonic prefixed with `"ML_"`.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: MlCategory,
+    /// True for cross-rank collectives that produce the same
+    /// result on all participating ranks (all-reduce / all-gather
+    /// / broadcast / reduce-scatter / barrier / pmap-aggregates).
+    /// `Vmap*Transform` / `Pmap*Transform` are higher-order
+    /// transformations that *produce* collective-using functions
+    /// rather than performing the collective themselves —
+    /// intentionally excluded.
+    pub is_collective: bool,
+    /// True for synchronous and async point-to-point primitives
+    /// (`P2PSend` / `P2PRecv` / `P2PIsend` / `P2PIrecv` /
+    /// `P2PWait`).
+    pub is_p2p: bool,
+}
+
 impl MlSubOpcode {
     /// Creates an ML sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -4555,121 +4645,137 @@ impl MlSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this ML sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            // Tokenizer Operations
-            Self::TokenizerLoadBpe => "ML_TOKENIZER_LOAD_BPE",
-            Self::TokenizerLoadPretrained => "ML_TOKENIZER_LOAD_PRETRAINED",
-            Self::TokenizerEncode => "ML_TOKENIZER_ENCODE",
-            Self::TokenizerDecode => "ML_TOKENIZER_DECODE",
-            Self::TokenizerLoadSpm => "ML_TOKENIZER_LOAD_SPM",
-            Self::TokenizerSpmEncode => "ML_TOKENIZER_SPM_ENCODE",
-            Self::TokenizerSpmDecode => "ML_TOKENIZER_SPM_DECODE",
-            // Sampling Operations
-            Self::SampleTopP => "ML_SAMPLE_TOP_P",
-            Self::SampleTemperature => "ML_SAMPLE_TEMPERATURE",
-            Self::PagedAttention => "ML_PAGED_ATTENTION",
-            Self::SampleTopK => "ML_SAMPLE_TOP_K",
-            Self::SampleTopKTopP => "ML_SAMPLE_TOP_K_TOP_P",
-            Self::RepetitionPenalty => "ML_REPETITION_PENALTY",
-            // Inference Utility Operations
-            Self::ParseToolCall => "ML_PARSE_TOOL_CALL",
-            Self::FormatValue => "ML_FORMAT_VALUE",
-            Self::QuantizedMatmul => "ML_QUANTIZED_MATMUL",
-            Self::GenerateRequestId => "ML_GENERATE_REQUEST_ID",
-            Self::JsonSchemaToJson => "ML_JSON_SCHEMA_TO_JSON",
-            Self::FunctionSchemaToJson => "ML_FUNCTION_SCHEMA_TO_JSON",
-            Self::ParseFunctionCalls => "ML_PARSE_FUNCTION_CALLS",
-            Self::KvCacheOp => "ML_KV_CACHE_OP",
-            Self::SpeculativeVerify => "ML_SPECULATIVE_VERIFY",
-            // Distributed/Collective Operations
-            Self::AllReduce => "ML_ALL_REDUCE",
-            Self::AllGather => "ML_ALL_GATHER",
-            Self::Broadcast => "ML_BROADCAST",
-            Self::ReduceScatter => "ML_REDUCE_SCATTER",
-            Self::Barrier => "ML_BARRIER",
-            Self::PmapPsum => "ML_PMAP_PSUM",
-            Self::PmapPmean => "ML_PMAP_PMEAN",
-            Self::PmapPmax => "ML_PMAP_PMAX",
-            Self::PmapAllGather => "ML_PMAP_ALL_GATHER",
-            Self::VmapTransform => "ML_VMAP_TRANSFORM",
-            Self::PmapTransform => "ML_PMAP_TRANSFORM",
-            // Process Group Operations
-            Self::DistWorldGroup => "ML_DIST_WORLD_GROUP",
-            Self::DistNewGroup => "ML_DIST_NEW_GROUP",
-            Self::DistGetRank => "ML_DIST_GET_RANK",
-            Self::DistWorldSize => "ML_DIST_WORLD_SIZE",
-            Self::DistLocalRank => "ML_DIST_LOCAL_RANK",
-            // Point-to-Point Operations
-            Self::P2PSend => "ML_P2P_SEND",
-            Self::P2PRecv => "ML_P2P_RECV",
-            Self::P2PIsend => "ML_P2P_ISEND",
-            Self::P2PIrecv => "ML_P2P_IRECV",
-            Self::P2PWait => "ML_P2P_WAIT",
-            // Gradient Operations
-            Self::BucketGradients => "ML_BUCKET_GRADIENTS",
-            Self::GetGrad => "ML_GET_GRAD",
-            Self::SetGrad => "ML_SET_GRAD",
-            Self::ModuleBackward => "ML_MODULE_BACKWARD",
-            Self::ZeroGrad => "ML_ZERO_GRAD",
-            Self::ClipGradNorm => "ML_CLIP_GRAD_NORM",
-            Self::JvpBegin => "ML_JVP_BEGIN",
-            Self::JvpEnd => "ML_JVP_END",
-            Self::GradCustom => "ML_GRAD_CUSTOM",
-            Self::GradZeroTangent => "ML_GRAD_ZERO_TANGENT",
-            Self::GradRecompute => "ML_GRAD_RECOMPUTE",
-            // Actor/Mesh Operations
-            Self::MeshSelect => "ML_MESH_SELECT",
-            Self::ActorNewId => "ML_ACTOR_NEW_ID",
-            Self::MeshCreate => "ML_MESH_CREATE",
-            Self::MeshShape => "ML_MESH_SHAPE",
-            // RDMA Operations
-            Self::RdmaCreateRef => "ML_RDMA_CREATE_REF",
-            Self::RdmaFetch => "ML_RDMA_FETCH",
-            Self::RdmaWrite => "ML_RDMA_WRITE",
-            Self::RdmaCheckValid => "ML_RDMA_CHECK_VALID",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `is_collective` / `is_p2p`.  Sibling accessors are
+    /// `#[inline]` projections through this method's return value.
+    pub const fn meta(self) -> MlOpMeta {
+        use MlCategory::{
+            ActorMesh, DistributedCollective, GradientOperations, InferenceUtility,
+            PointToPoint, ProcessGroup, Rdma, SamplingOperations, TokenizerOperations,
+        };
+
+        // Field order: mnemonic, category, is_collective, is_p2p.
+        macro_rules! m {
+            ($mn:expr, $cat:ident, coll=$coll:literal, p2p=$p2p:literal $(,)?) => {
+                MlOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    is_collective: $coll,
+                    is_p2p: $p2p,
+                }
+            };
         }
+
+        match self {
+            // ===== Tokenizer Operations (0x00-0x0F) =====
+            Self::TokenizerLoadBpe        => m!("ML_TOKENIZER_LOAD_BPE",        TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerLoadPretrained => m!("ML_TOKENIZER_LOAD_PRETRAINED", TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerEncode         => m!("ML_TOKENIZER_ENCODE",          TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerDecode         => m!("ML_TOKENIZER_DECODE",          TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerLoadSpm        => m!("ML_TOKENIZER_LOAD_SPM",        TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerSpmEncode      => m!("ML_TOKENIZER_SPM_ENCODE",      TokenizerOperations,   coll=false, p2p=false),
+            Self::TokenizerSpmDecode      => m!("ML_TOKENIZER_SPM_DECODE",      TokenizerOperations,   coll=false, p2p=false),
+
+            // ===== Sampling Operations (0x10-0x1F) =====
+            Self::SampleTopP              => m!("ML_SAMPLE_TOP_P",              SamplingOperations,    coll=false, p2p=false),
+            Self::SampleTemperature       => m!("ML_SAMPLE_TEMPERATURE",        SamplingOperations,    coll=false, p2p=false),
+            Self::PagedAttention          => m!("ML_PAGED_ATTENTION",           SamplingOperations,    coll=false, p2p=false),
+            Self::SampleTopK              => m!("ML_SAMPLE_TOP_K",              SamplingOperations,    coll=false, p2p=false),
+            Self::SampleTopKTopP          => m!("ML_SAMPLE_TOP_K_TOP_P",        SamplingOperations,    coll=false, p2p=false),
+            Self::RepetitionPenalty       => m!("ML_REPETITION_PENALTY",        SamplingOperations,    coll=false, p2p=false),
+
+            // ===== Inference Utility (0x20-0x2F) =====
+            Self::ParseToolCall           => m!("ML_PARSE_TOOL_CALL",           InferenceUtility,      coll=false, p2p=false),
+            Self::FormatValue             => m!("ML_FORMAT_VALUE",              InferenceUtility,      coll=false, p2p=false),
+            Self::QuantizedMatmul         => m!("ML_QUANTIZED_MATMUL",          InferenceUtility,      coll=false, p2p=false),
+            Self::GenerateRequestId       => m!("ML_GENERATE_REQUEST_ID",       InferenceUtility,      coll=false, p2p=false),
+            Self::JsonSchemaToJson        => m!("ML_JSON_SCHEMA_TO_JSON",       InferenceUtility,      coll=false, p2p=false),
+            Self::FunctionSchemaToJson    => m!("ML_FUNCTION_SCHEMA_TO_JSON",   InferenceUtility,      coll=false, p2p=false),
+            Self::ParseFunctionCalls      => m!("ML_PARSE_FUNCTION_CALLS",      InferenceUtility,      coll=false, p2p=false),
+            Self::KvCacheOp               => m!("ML_KV_CACHE_OP",               InferenceUtility,      coll=false, p2p=false),
+            Self::SpeculativeVerify       => m!("ML_SPECULATIVE_VERIFY",        InferenceUtility,      coll=false, p2p=false),
+
+            // ===== Distributed/Collective (0x30-0x3F) =====
+            // Vmap*Transform / Pmap*Transform are higher-order
+            // transformations and intentionally NOT tagged
+            // is_collective.
+            Self::AllReduce               => m!("ML_ALL_REDUCE",                DistributedCollective, coll=true,  p2p=false),
+            Self::AllGather               => m!("ML_ALL_GATHER",                DistributedCollective, coll=true,  p2p=false),
+            Self::Broadcast               => m!("ML_BROADCAST",                 DistributedCollective, coll=true,  p2p=false),
+            Self::ReduceScatter           => m!("ML_REDUCE_SCATTER",            DistributedCollective, coll=true,  p2p=false),
+            Self::Barrier                 => m!("ML_BARRIER",                   DistributedCollective, coll=true,  p2p=false),
+            Self::PmapPsum                => m!("ML_PMAP_PSUM",                 DistributedCollective, coll=true,  p2p=false),
+            Self::PmapPmean               => m!("ML_PMAP_PMEAN",                DistributedCollective, coll=true,  p2p=false),
+            Self::PmapPmax                => m!("ML_PMAP_PMAX",                 DistributedCollective, coll=true,  p2p=false),
+            Self::PmapAllGather           => m!("ML_PMAP_ALL_GATHER",           DistributedCollective, coll=true,  p2p=false),
+            Self::VmapTransform           => m!("ML_VMAP_TRANSFORM",            DistributedCollective, coll=false, p2p=false),
+            Self::PmapTransform           => m!("ML_PMAP_TRANSFORM",            DistributedCollective, coll=false, p2p=false),
+
+            // ===== Process Group (0x40-0x4F) =====
+            Self::DistWorldGroup          => m!("ML_DIST_WORLD_GROUP",          ProcessGroup,          coll=false, p2p=false),
+            Self::DistNewGroup            => m!("ML_DIST_NEW_GROUP",            ProcessGroup,          coll=false, p2p=false),
+            Self::DistGetRank             => m!("ML_DIST_GET_RANK",             ProcessGroup,          coll=false, p2p=false),
+            Self::DistWorldSize           => m!("ML_DIST_WORLD_SIZE",           ProcessGroup,          coll=false, p2p=false),
+            Self::DistLocalRank           => m!("ML_DIST_LOCAL_RANK",           ProcessGroup,          coll=false, p2p=false),
+
+            // ===== Point-to-Point (0x50-0x5F) =====
+            Self::P2PSend                 => m!("ML_P2P_SEND",                  PointToPoint,          coll=false, p2p=true),
+            Self::P2PRecv                 => m!("ML_P2P_RECV",                  PointToPoint,          coll=false, p2p=true),
+            Self::P2PIsend                => m!("ML_P2P_ISEND",                 PointToPoint,          coll=false, p2p=true),
+            Self::P2PIrecv                => m!("ML_P2P_IRECV",                 PointToPoint,          coll=false, p2p=true),
+            Self::P2PWait                 => m!("ML_P2P_WAIT",                  PointToPoint,          coll=false, p2p=true),
+
+            // ===== Gradient Operations (0x60-0x6F) =====
+            Self::BucketGradients         => m!("ML_BUCKET_GRADIENTS",          GradientOperations,    coll=false, p2p=false),
+            Self::GetGrad                 => m!("ML_GET_GRAD",                  GradientOperations,    coll=false, p2p=false),
+            Self::SetGrad                 => m!("ML_SET_GRAD",                  GradientOperations,    coll=false, p2p=false),
+            Self::ModuleBackward          => m!("ML_MODULE_BACKWARD",           GradientOperations,    coll=false, p2p=false),
+            Self::ZeroGrad                => m!("ML_ZERO_GRAD",                 GradientOperations,    coll=false, p2p=false),
+            Self::ClipGradNorm            => m!("ML_CLIP_GRAD_NORM",            GradientOperations,    coll=false, p2p=false),
+            Self::JvpBegin                => m!("ML_JVP_BEGIN",                 GradientOperations,    coll=false, p2p=false),
+            Self::JvpEnd                  => m!("ML_JVP_END",                   GradientOperations,    coll=false, p2p=false),
+            Self::GradCustom              => m!("ML_GRAD_CUSTOM",               GradientOperations,    coll=false, p2p=false),
+            Self::GradZeroTangent         => m!("ML_GRAD_ZERO_TANGENT",         GradientOperations,    coll=false, p2p=false),
+            Self::GradRecompute           => m!("ML_GRAD_RECOMPUTE",            GradientOperations,    coll=false, p2p=false),
+
+            // ===== Actor/Mesh (0x70-0x7F) =====
+            Self::MeshSelect              => m!("ML_MESH_SELECT",               ActorMesh,             coll=false, p2p=false),
+            Self::ActorNewId              => m!("ML_ACTOR_NEW_ID",              ActorMesh,             coll=false, p2p=false),
+            Self::MeshCreate              => m!("ML_MESH_CREATE",               ActorMesh,             coll=false, p2p=false),
+            Self::MeshShape               => m!("ML_MESH_SHAPE",                ActorMesh,             coll=false, p2p=false),
+
+            // ===== RDMA (0x80-0x8F) =====
+            Self::RdmaCreateRef           => m!("ML_RDMA_CREATE_REF",           Rdma,                  coll=false, p2p=false),
+            Self::RdmaFetch               => m!("ML_RDMA_FETCH",                Rdma,                  coll=false, p2p=false),
+            Self::RdmaWrite               => m!("ML_RDMA_WRITE",                Rdma,                  coll=false, p2p=false),
+            Self::RdmaCheckValid          => m!("ML_RDMA_CHECK_VALID",          Rdma,                  coll=false, p2p=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this ML sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category of this ML sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self as u8 {
-            0x00..=0x0F => "Tokenizer Operations",
-            0x10..=0x1F => "Sampling Operations",
-            0x20..=0x2F => "Inference Utility Operations",
-            0x30..=0x3F => "Distributed/Collective Operations",
-            0x40..=0x4F => "Process Group Operations",
-            0x50..=0x5F => "Point-to-Point Operations",
-            0x60..=0x6F => "Gradient Operations",
-            0x70..=0x7F => "Actor/Mesh Operations",
-            0x80..=0x8F => "RDMA Operations",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this is a collective operation.
+    #[inline]
     pub fn is_collective(self) -> bool {
-        matches!(
-            self,
-            Self::AllReduce
-                | Self::AllGather
-                | Self::Broadcast
-                | Self::ReduceScatter
-                | Self::Barrier
-                | Self::PmapPsum
-                | Self::PmapPmean
-                | Self::PmapPmax
-                | Self::PmapAllGather
-        )
+        self.meta().is_collective
     }
 
     /// Returns true if this is a point-to-point operation.
+    #[inline]
     pub fn is_p2p(self) -> bool {
-        matches!(
-            self,
-            Self::P2PSend | Self::P2PRecv | Self::P2PIsend | Self::P2PIrecv | Self::P2PWait
-        )
+        self.meta().is_p2p
     }
 }
 
@@ -16254,5 +16360,123 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 58);
+    }
+
+    // ========================================================================
+    // MlSubOpcode meta() drift pins
+    //
+    // The legacy `category()` accessor inferred bands via
+    // `match self as u8` over 16-byte windows; the new
+    // structurally-tagged `meta().category` decouples encoding
+    // from semantics.
+    // ========================================================================
+
+    fn for_every_ml_sub_opcode<F: FnMut(MlSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = MlSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "MlSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn ml_meta_count_pinned_at_sixty_two() {
+        let mut count = 0;
+        for_every_ml_sub_opcode(|_| count += 1);
+        assert_eq!(count, 62,
+            "MlSubOpcode variant count drift: expected 62, got {}", count);
+    }
+
+    #[test]
+    fn ml_meta_category_matches_byte_range_band() {
+        for_every_ml_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => MlCategory::TokenizerOperations,
+                0x10..=0x1F => MlCategory::SamplingOperations,
+                0x20..=0x2F => MlCategory::InferenceUtility,
+                0x30..=0x3F => MlCategory::DistributedCollective,
+                0x40..=0x4F => MlCategory::ProcessGroup,
+                0x50..=0x5F => MlCategory::PointToPoint,
+                0x60..=0x6F => MlCategory::GradientOperations,
+                0x70..=0x7F => MlCategory::ActorMesh,
+                0x80..=0x8F => MlCategory::Rdma,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn ml_meta_is_p2p_iff_p2p_band() {
+        // is_p2p is fully band-aligned: every PointToPoint-band
+        // variant is a p2p op, no other-band variant is.
+        for_every_ml_sub_opcode(|op| {
+            let in_band = op.meta().category == MlCategory::PointToPoint;
+            assert_eq!(op.is_p2p(), in_band,
+                "{:?}: is_p2p={} but PointToPoint band={}",
+                op, op.is_p2p(), in_band);
+        });
+    }
+
+    #[test]
+    fn ml_meta_is_collective_subset_of_distributed_band() {
+        // is_collective is a strict SUBSET of the
+        // DistributedCollective band: every collective op sits in
+        // the band, but Vmap*Transform / Pmap*Transform also sit
+        // in the band yet are *not* collectives (they're
+        // higher-order transformations producing
+        // collective-using functions).  Pin the directional
+        // implication.
+        for_every_ml_sub_opcode(|op| {
+            if op.is_collective() {
+                assert_eq!(op.meta().category, MlCategory::DistributedCollective,
+                    "{:?}: is_collective=true but not in DistributedCollective band", op);
+            }
+        });
+        // Pin the canonical 9-collective set.
+        let mut count = 0;
+        for_every_ml_sub_opcode(|op| {
+            if op.is_collective() { count += 1; }
+        });
+        assert_eq!(count, 9,
+            "is_collective count drift: expected 9 (all-reduce/gather/broadcast/reduce-scatter/barrier + 4 pmap-aggregates)");
+        // Pin the *exclusion* of the higher-order transformations.
+        assert!(!MlSubOpcode::VmapTransform.is_collective(),
+            "VmapTransform is a higher-order transformation, not a collective");
+        assert!(!MlSubOpcode::PmapTransform.is_collective(),
+            "PmapTransform is a higher-order transformation, not a collective");
+    }
+
+    #[test]
+    fn ml_meta_is_collective_xor_is_p2p() {
+        // is_collective and is_p2p partition the
+        // distributed-communication surface: an op is at most one
+        // of the two.
+        for_every_ml_sub_opcode(|op| {
+            assert!(!(op.is_collective() && op.is_p2p()),
+                "{:?}: tagged both is_collective and is_p2p", op);
+        });
+    }
+
+    #[test]
+    fn ml_meta_mnemonic_uniqueness_and_prefix() {
+        // Every mnemonic must be distinct AND start with `"ML_"`
+        // for grep-ability and to match the encoding-class
+        // documentation.
+        let mut seen: Vec<&'static str> = Vec::with_capacity(62);
+        for_every_ml_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("ML_"),
+                "{:?}: mnemonic {:?} not in `ML_*` namespace", op, m);
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 62);
     }
 }
