@@ -90,12 +90,33 @@ impl TypeChecker {
         ];
         let raw_name = type_decl.name.name.as_str();
         if PRIMITIVE_NAMES.contains(&raw_name) {
-            tracing::warn!(
-                "type `{}` collides with primitive name and was skipped \
-                 — rename to e.g. `{}_` to keep the declaration",
-                raw_name,
-                raw_name
-            );
+            // Emit the warning at most once per (raw_name) per process — the
+            // stdlib defines aliases for these in many sibling modules and
+            // each external-project compile reloads them all, otherwise
+            // producing dozens-to-thousands of identical warnings that bury
+            // the real diagnostics.
+            use std::collections::HashSet;
+            use std::sync::Mutex;
+            use std::sync::OnceLock;
+            static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+            let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+            // Look up the &'static str variant matching raw_name so the set
+            // contains a stable key. The PRIMITIVE_NAMES table is exactly
+            // that — find the canonical &'static str for the matched name.
+            let canonical: &'static str = PRIMITIVE_NAMES
+                .iter()
+                .find(|n| **n == raw_name)
+                .copied()
+                .unwrap_or("");
+            let mut guard = seen.lock().unwrap_or_else(|p| p.into_inner());
+            if guard.insert(canonical) {
+                tracing::warn!(
+                    "type `{}` collides with primitive name and was skipped \
+                     — rename to e.g. `{}_` to keep the declaration",
+                    raw_name,
+                    raw_name
+                );
+            }
             return Ok(());
         }
         self.register_type_declaration_inner(type_decl)
