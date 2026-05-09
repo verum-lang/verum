@@ -3234,8 +3234,12 @@ impl<'ctx> PlatformIR<'ctx> {
     /// CBGR memory safety stubs — always return true (valid).
     ///
 
-    /// ThinRef layout: { ptr: ptr, generation: u32, epoch_caps: u32 } = 16 bytes
-    /// FatRef layout: { ptr: ptr, generation: u32, epoch_caps: u32, len: u64 } = 24 bytes
+    /// ThinRef layout: { ptr: ptr, generation: u32, epoch_and_caps: u32 } = 16 bytes
+    /// FatRef layout (per `core/mem/fat_ref.vr` `@repr(C, size(32), align(8))`):
+    ///   { ptr: ptr, generation: u32, epoch_and_caps: u32,
+    ///     metadata: i64, offset_from_base: u32, reserved: u32 } = 32 bytes
+    /// The check stubs below only read the first 3 fields (offsets 0/8/12)
+    /// which are common to both shapes, so a single emit handles both.
     /// AllocationHeader: 8 bytes before pointer (generation u32 + caps u32 packed).
     ///
 
@@ -3460,8 +3464,12 @@ impl<'ctx> PlatformIR<'ctx> {
             }
         }
 
-        // verum_cbgr_check_fat(ref: ptr) -> i1: same as check but for FatRef (same first 3 fields)
-        // FatRef layout: { user_ptr: ptr(8), generation: i32(4), epoch_caps: i32(4), len: i64(8) }
+        // verum_cbgr_check_fat(ref: ptr) -> i1: same as check but for FatRef.
+        // Canonical FatRef layout (`core/mem/fat_ref.vr`):
+        //   { user_ptr: ptr(8), generation: i32(4), epoch_and_caps: i32(4),
+        //     metadata: i64(8), offset_from_base: i32(4), reserved: i32(4) } = 32 bytes
+        // The first 3 fields (offsets 0/8/12) are common with ThinRef and
+        // are the only fields the check needs.
         {
             let fn_type = i1_type.fn_type(&[ptr_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_cbgr_check_fat", fn_type);

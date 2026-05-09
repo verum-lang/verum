@@ -253,9 +253,11 @@ impl RefType {
     /// Get MLIR type string representation.
     ///
 
-    /// References are lowered to LLVM struct types:
-    /// - ThinRef: { ptr, i32 generation, i32 epoch_caps } = 16 bytes
-    /// - FatRef: { ptr, i32 gen, i32 epoch_caps, i64 metadata } = 24 bytes
+    /// References are lowered to LLVM struct types per
+    /// `core/mem/fat_ref.vr` / `core/mem/thin_ref.vr`:
+    /// - ThinRef: { ptr, i32 generation, i32 epoch_and_caps } = 16 bytes
+    /// - FatRef:  { ptr, i32 generation, i32 epoch_and_caps,
+    ///              i64 metadata, i32 offset_from_base, i32 reserved } = 32 bytes
     pub fn to_mlir_type_string(&self) -> Text {
         // For now, represent as a pointer type with metadata
         // The actual structure depends on CBGR tier

@@ -35,13 +35,17 @@
 //! ```
 //!
 
-//! FatRef<T>: 24 bytes (for slices/arrays)
+//! FatRef<T>: 32 bytes (for unsized types — slices, trait objects).
+//! Layout matches `core/mem/fat_ref.vr` `@repr(C, size(32), align(8))`.
 //! ```text
-//! +--------+------------+------------+--------+
-//! | ptr | generation | epoch_caps | len |
-//! | 8 bytes| 4 bytes | 4 bytes | 8 bytes|
-//! +--------+------------+------------+--------+
+//! +-----+------------+----------------+----------+--------+----------+
+//! | ptr | generation | epoch_and_caps | metadata | offset | reserved |
+//! |  8  |     4      |       4        |    8     |   4    |    4     |
+//! +-----+------------+----------------+----------+--------+----------+
 //! ```
+//! * `metadata`: length for slices, vtable pointer for trait objects.
+//! * `offset_from_base`: subslice view offset from the base allocation.
+//! * `reserved`: padding for future extensions.
 
 use verum_common::Text;
 use verum_llvm::IntPredicate;
@@ -62,7 +66,8 @@ pub struct CbgrLowering<'ctx> {
     /// ThinRef struct type: { ptr, generation, epoch_caps }.
     thin_ref_type: StructType<'ctx>,
 
-    /// FatRef struct type: { ptr, generation, epoch_caps, len }.
+    /// FatRef struct type — matches `core/mem/fat_ref.vr` 6-field layout
+    /// `{ ptr, generation, epoch_and_caps, metadata, offset_from_base, reserved }`.
     fat_ref_type: StructType<'ctx>,
 
     /// Runtime check function (for Tier 0).
@@ -112,13 +117,21 @@ impl<'ctx> CbgrLowering<'ctx> {
         let thin_ref_type =
             context.struct_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
 
-        // FatRef: { ptr: *T, generation: u32, epoch_caps: u32, len: u64 }
+        // FatRef: 32-byte 6-field layout matching `core/mem/fat_ref.vr`:
+        //   { ptr:*T, generation:u32, epoch_and_caps:u32,
+        //     metadata:i64, offset_from_base:u32, reserved:u32 }
+        // Total: 8 + 4 + 4 + 8 + 4 + 4 = 32 bytes.
+        // The `metadata` field carries length for slices and a vtable
+        // pointer for trait objects; `offset_from_base` enables zero-copy
+        // subslice views; `reserved` is padding for future extensions.
         let fat_ref_type = context.struct_type(
             &[
                 ptr_type.into(),
                 i32_type.into(),
                 i32_type.into(),
                 i64_type.into(),
+                i32_type.into(),
+                i32_type.into(),
             ],
             false,
         );

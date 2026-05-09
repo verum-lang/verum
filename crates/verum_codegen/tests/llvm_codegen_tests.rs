@@ -59,6 +59,7 @@ fn int_lit_expr(value: i128) -> Expr {
         span: dummy_span(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -74,6 +75,7 @@ fn float_lit_expr(value: f64) -> Expr {
         span: dummy_span(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -86,6 +88,7 @@ fn bool_lit_expr(value: bool) -> Expr {
         span: dummy_span(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -102,6 +105,7 @@ fn ident_expr(name: &str) -> Expr {
         span: dummy_span(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -115,6 +119,7 @@ fn bin_op_expr(op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
         span: dummy_span(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -769,7 +774,11 @@ fn test_thin_ref_size_constant() {
 #[test]
 fn test_fat_ref_size_constant() {
     use verum_codegen::llvm::FAT_REF_SIZE;
-    assert_eq!(FAT_REF_SIZE, 24, "FatRef should be 24 bytes");
+    assert_eq!(
+        FAT_REF_SIZE, 32,
+        "FatRef should be 32 bytes (per core/mem/fat_ref.vr @repr(C, size(32), align(8)) — \
+         6 fields: ptr + generation + epoch_and_caps + metadata + offset_from_base + reserved)",
+    );
 }
 
 // =============================================================================
