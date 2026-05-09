@@ -14698,196 +14698,7 @@ impl TypeChecker {
 
                 // Lambda synthesis: create fresh type variables for parameters
                 // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types (dependent functions)
-                Closure {
-                    params,
-                    body,
-                    return_type,
-                    async_,
-                    move_,
-                    ..
-                } => {
-                    // ============================================================
-                    // Closure Capture Analysis
-                    // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .5 - Closure captures
-                    // ============================================================
-                    // Track what variables this closure captures and check for
-                    // aliasing conflicts with existing borrows.
-
-                    // Analyze captured variables BEFORE entering closure scope
-                    // This determines what outside variables the closure references
-                    let captures = self.analyze_closure_captures(body, params, *move_);
-
-                    // Enter closure tracking for capture analysis
-                    let closure_id = self.borrow_tracker.enter_closure(*move_);
-
-                    // Register each captured variable and check for aliasing conflicts
-                    // Collect all capture errors to report them together
-                    let mut capture_errors: List<TypeError> = List::new();
-
-                    for (var_name, field_path, capture_mode, capture_span) in &captures {
-                        // Check if capturing this variable would conflict with existing borrows
-                        // E.g., can't capture `&mut x` if x is already immutably borrowed
-                        // Field-level tracking enables borrow splitting: `x.a` and `x.b` can be
-                        // captured separately without conflict.
-                        if let Err(e) = self.borrow_tracker.register_capture(
-                            closure_id,
-                            var_name.clone(),
-                            field_path.clone(),
-                            *capture_mode,
-                            *capture_span,
-                        ) {
-                            capture_errors.push(e);
-                        }
-                    }
-
-                    // Report first capture error if any exist
-                    // (We collect all to provide better diagnostics in the future)
-                    if let Some(first_error) = capture_errors.into_iter().next() {
-                        // Clean up before returning error
-                        self.borrow_tracker.exit_closure(closure_id);
-                        return Err(first_error);
-                    }
-
-                    // Enter new scope for lambda
-                    self.ctx.enter_scope();
-
-                    // Enter async scope if this is an async closure
-                    // Also flip `in_async_context` so the body may use
-                    // `.await` — c7b4d71's enforcement was keyed on the
-                    // function-scope flag and missed async closures. For
-                    // `async move |x| { future.await }` the body is as
-                    // valid a .await site as an `async fn` body.
-                    let prev_async_context = if *async_ {
-                        self.borrow_tracker.enter_async_scope();
-                        Some(std::mem::replace(&mut self.in_async_context, true))
-                    } else {
-                        None
-                    };
-
-                    // Collect parameter names and types for dependent type analysis
-                    let mut param_names = List::new();
-                    let mut param_types = List::new();
-
-                    for param in params.iter() {
-                        // Extract parameter name for potential dependent type use
-                        let param_name = match &param.pattern.kind {
-                            verum_ast::pattern::PatternKind::Ident { name, .. } => {
-                                Some(name.name.clone())
-                            }
-                            _ => None,
-                        };
-                        param_names.push(param_name);
-
-                        let param_ty = if let Some(ty_annotation) = &param.ty {
-                            self.ast_to_type(ty_annotation)?
-                        } else {
-                            Type::Var(TypeVar::fresh())
-                        };
-                        self.bind_pattern(&param.pattern, &param_ty)?;
-                        param_types.push(param_ty);
-                    }
-
-                    // Synthesize or check body
-                    let ret_ty = if let Some(rt) = return_type {
-                        let expected_ret = self.ast_to_type(rt)?;
-                        self.check_expr(body, &expected_ret)?;
-                        expected_ret
-                    } else {
-                        let body_result = self.synth_expr(body)?;
-                        body_result.ty
-                    };
-
-                    // Exit async scope if this was an async closure
-                    if let Some(prev) = prev_async_context {
-                        self.borrow_tracker.exit_async_scope();
-                        self.in_async_context = prev;
-                    }
-
-                    // Exit closure tracking and get capture set
-                    let capture_set = self.borrow_tracker.exit_closure(closure_id);
-
-                    // ============================================================
-                    // Send/Sync Safety for Async Closures
-                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety
-                    // ============================================================
-                    // Async closures that capture references must ensure those
-                    // references are Send if the closure crosses await points.
-                    if let Some(ref cs) = capture_set {
-                        if *async_ && !cs.captures.is_empty() {
-                            // Check thread safety for captured variables
-                            // MutBorrow captures are NOT Send-safe across await points
-                            for capture in &cs.captures {
-                                if matches!(capture.mode, crate::aliasing::CaptureMode::MutBorrow) {
-                                    // Look up the variable's type to check if it's Send
-                                    if let Some(var_scheme) = self.ctx.env.lookup(&capture.target) {
-                                        let var_ty = var_scheme.instantiate();
-                                        let resolved_ty = self.unifier.apply(&var_ty);
-                                        // Check if the type is known to be !Send
-                                        if self.is_non_send_type(&resolved_ty) {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot capture `{}` by mutable reference in async closure: \
-                                                 type `{}` is not Send-safe across await points",
-                                                    capture.target, resolved_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Exit lambda scope
-                    self.ctx.exit_scope();
-
-                    // Check if return type depends on parameters (dependent function / Pi type)
-                    // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types
-                    let is_dependent = params.len() == 1
-                        && self.return_type_depends_on_param(&ret_ty, &param_names);
-
-                    // If async closure, wrap return type in Future<T>
-                    let func_ty = if *async_ {
-                        let future_ret_ty = Type::Generic {
-                            name: verum_common::Text::from("Future"),
-                            args: vec![ret_ty].into(),
-                        };
-                        if let (true, Some(param_name)) =
-                            (is_dependent, param_names.get(0).and_then(|p| p.clone()))
-                        {
-                            // Dependent async function: (x: A) -> Future<B(x)>
-                            Type::Pi {
-                                param_name,
-                                param_type: Box::new(param_types[0].clone()),
-                                return_type: Box::new(future_ret_ty),
-                            }
-                        } else {
-                            Type::function(param_types, future_ret_ty)
-                        }
-                    } else if let (true, Some(param_name)) =
-                        (is_dependent, param_names.get(0).and_then(|p| p.clone()))
-                    {
-                        // Dependent function: (x: A) -> B(x)
-                        // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi type introduction
-                        Type::Pi {
-                            param_name,
-                            param_type: Box::new(param_types[0].clone()),
-                            return_type: Box::new(ret_ty),
-                        }
-                    } else {
-                        // Regular function: A -> B
-                        Type::function(param_types, ret_ty)
-                    };
-
-                    // Register closure type in the type registry for codegen
-                    // Apply unifier substitution to resolve type variables
-                    // This enables closure parameter type inference during LLVM codegen
-                    let resolved_func_ty = self.unifier.apply(&func_ty);
-                    self.type_registry
-                        .register_expr(expr.span, resolved_func_ty);
-
-                    Ok(InferResult::new(func_ty))
-                }
+                Closure { .. } => self.infer_closure_expr(current_expr, expr.span),
 
                 // Field access (including GAT access like Iterator.Item)
                 // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 - GAT syntax
@@ -15224,362 +15035,7 @@ impl TypeChecker {
                     Ok(InferResult::new(Type::unit()))
                 }
 
-                For {
-                    label: _,
-                    pattern,
-                    iter,
-                    body,
-                    invariants: _,
-                    decreases: _,
-                } => {
-                    // NLL: Before synthesizing the iterator expression, release any
-                    // expired borrows on the collection being iterated. This handles
-                    // patterns like:
-                    //  let slice = &mut array; slice[0] = 10;
-                    //  for item in &mut array { ... } // slice's borrow has expired
-                    if let ExprKind::Unary { op, expr: inner } = &iter.kind {
-                        if matches!(op, UnOp::Ref | UnOp::RefMut) {
-                            if let ExprKind::Path(path) = &inner.kind {
-                                if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                    path.segments.first()
-                                {
-                                    let target = verum_common::Text::from(id.name.as_str());
-                                    self.borrow_tracker.nll_release_expired_borrows_for(&target);
-                                }
-                            }
-                        }
-                    }
-
-                    let iter_result = self.synth_expr(iter)?;
-
-                    // CRITICAL: Apply current substitution to resolve type variables
-                    // This fixes: for (a, b) in pairs where pairs: List<(A, B)>
-                    let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-
-                    // =========================================================================
-                    // Protocol-based IntoIterator resolution
-                    // For-loop desugaring: "for x in iter" desugars to IntoIterator protocol calls (into_iter -> next loop)
-                    // =========================================================================
-                    let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_into_iterator_protocol(&resolved_iter_ty)
-                    {
-                        Some(resolution) => resolution.item,
-                        None => {
-                            // =========================================================================
-                            // Fallback 1: Try Iterator protocol's Item associated type
-                            // If the type implements Iterator directly (not IntoIterator),
-                            // extract the Item type from the Iterator protocol impl.
-                            // This handles types like RangeIterator, MapIterator, etc. that
-                            // implement Iterator but not IntoIterator.
-                            // =========================================================================
-                            let iter_item = self.protocol_checker.read().try_find_associated_type(
-                                &resolved_iter_ty,
-                                &verum_common::Text::from("Item"),
-                            );
-                            if let Some(item_ty) = iter_item {
-                                // Normalize projection types (e.g., ::Item[SomeType] -> ConcreteType)
-
-                                self.protocol_checker
-                                    .read()
-                                    .normalize_projection_type(&item_ty)
-                            } else {
-                                // Duck-typing fallback: extract type name from any type representation
-                                // and check if it has has_next/next methods in inherent_methods.
-                                // This enables `for v in CustomIter { ... }` without requiring
-                                // an explicit IntoIterator implementation.
-                                let try_duck_type_iter = |ty: &Type| -> Option<Type> {
-                                    let type_name: Option<&str> = match ty {
-                                        Type::Named { path, .. } => Self::path_type_name(path)
-                                            .or_else(|| Self::path_last_type_name(path)),
-                                        Type::Generic { name, .. } => Some(name.as_str()),
-                                        _ => None,
-                                    };
-                                    type_name.and_then(|tn| {
-                                        let methods_guard = self.inherent_methods.read();
-                                        let methods =
-                                            methods_guard.get(&verum_common::Text::from(tn))?;
-                                        let _has_next =
-                                            methods.get(&verum_common::Text::from("has_next"))?;
-                                        let next_scheme =
-                                            methods.get(&verum_common::Text::from("next"))?;
-                                        let next_ty = next_scheme.instantiate();
-                                        if let Type::Function { return_type, .. } = &next_ty {
-                                            Some(*return_type.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                };
-
-                                // Special case for known iterator types and path-like types
-                                if let Type::Named { path, .. } = &resolved_iter_ty {
-                                    let tname = Self::path_type_name(path)
-                                        .or_else(|| Self::path_last_type_name(path))
-                                        .unwrap_or("");
-                                    if tname == "PathIter" {
-                                        Type::Text
-                                    } else if tname.contains("Iter")
-                                        || tname.contains("iter")
-                                        || matches!(
-                                            tname,
-                                            "Components"
-                                                | "ReadDir"
-                                                | "Range"
-                                                | "Entries"
-                                                | "Chunks"
-                                                | "Windows"
-                                                | "Lines"
-                                                | "Chars"
-                                                | "Bytes"
-                                                | "Keys"
-                                                | "Values"
-                                                | "Items"
-                                                | "DirEntry"
-                                        )
-                                    {
-                                        // Known iterator-like types: return a fresh type variable
-                                        // for the element type
-                                        Type::Var(TypeVar::fresh())
-                                    } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty)
-                                    {
-                                        elem
-                                    } else {
-                                        // Try expanding Named type to its variant definition
-                                        // to detect linked-list patterns like Cons/Nil
-                                        let expanded =
-                                            self.expand_generic_to_variant(&resolved_iter_ty);
-                                        if let Type::Variant(ref variants) = expanded {
-                                            if let Some(elem) =
-                                                Self::infer_linked_list_element_type(variants)
-                                            {
-                                                elem
-                                            } else {
-                                                // Named variant type without linked-list pattern:
-                                                // allow iteration with a fresh element type for types
-                                                // that may implement IntoIterator via protocol impls
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        } else {
-                                            // Custom named type: assume it implements IntoIterator
-                                            // via protocol implementations. Use a fresh element type.
-                                            // If it truly isn't iterable, a runtime error will catch it.
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    }
-                                } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty) {
-                                    // Handles Type::Generic and other types with duck-typed iteration
-                                    elem
-                                } else if let Type::Generic { name, args } = &resolved_iter_ty {
-                                    // Well-known collection types: List<T>->T, Set<T>->T, Map<K,V>->(K,V)
-                                    match name.as_str() {
-                                        "List" | "Set" | "Deque" | "PriorityQueue" | "BTreeSet"
-                                        | "HashSet" | "Queue" | "Stack" | "Stream" => args
-                                            .first()
-                                            .cloned()
-                                            .unwrap_or(Type::Var(TypeVar::fresh())),
-                                        "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
-                                            if args.len() >= 2 {
-                                                Type::Tuple(List::from(vec![
-                                                    args[0].clone(),
-                                                    args[1].clone(),
-                                                ]))
-                                            } else {
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        }
-                                        _ => Type::Var(TypeVar::fresh()),
-                                    }
-                                } else {
-                                    // Try unwrapping reference types (&T, &mut T) for duck-typing
-                                    let inner_ty = match &resolved_iter_ty {
-                                        Type::Reference { inner, .. }
-                                        | Type::CheckedReference { inner, .. }
-                                        | Type::UnsafeReference { inner, .. } => {
-                                            Some(inner.as_ref())
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(inner) = inner_ty {
-                                        if let Some(elem) = try_duck_type_iter(inner) {
-                                            elem
-                                        } else if let Type::Generic { name, args } = inner {
-                                            // Collection types behind references: &List<T>->T, &Set<T>->T
-                                            match name.as_str() {
-                                                "List" | "Set" | "Deque" | "PriorityQueue"
-                                                | "BTreeSet" | "HashSet" | "Queue" | "Stack"
-                                                | "Stream" => args
-                                                    .first()
-                                                    .cloned()
-                                                    .unwrap_or(Type::Var(TypeVar::fresh())),
-                                                "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
-                                                    if args.len() >= 2 {
-                                                        Type::Tuple(List::from(vec![
-                                                            args[0].clone(),
-                                                            args[1].clone(),
-                                                        ]))
-                                                    } else {
-                                                        Type::Var(TypeVar::fresh())
-                                                    }
-                                                }
-                                                _ => Type::Var(TypeVar::fresh()),
-                                            }
-                                        } else {
-                                            // For other reference types, use fresh var
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    } else if let Type::Variant(variants) = &resolved_iter_ty {
-                                        // Heuristic for user-defined linked list types:
-                                        // If the variant type has a Cons-like variant with a tuple payload
-                                        // and a Nil-like variant with Unit payload, treat it as iterable.
-                                        // The element type is inferred from the first element of the Cons tuple.
-                                        if let Some(elem) =
-                                            Self::infer_linked_list_element_type(variants)
-                                        {
-                                            elem
-                                        } else {
-                                            // Fallback: for Variant types, infer element as the variant type itself
-                                            // This allows `for x in variant_value { }` to type-check
-                                            // (the runtime semantics depend on the user's iterator impl)
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over non-iterable type: {}. Type must implement IntoIterator or provide has_next()/next() methods.",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    } else {
-                                        // Last resort: try expanding to variant for Generic/other types
-                                        let expanded =
-                                            self.expand_generic_to_variant(&resolved_iter_ty);
-                                        if let Type::Variant(ref variants) = expanded {
-                                            if let Some(elem) =
-                                                Self::infer_linked_list_element_type(variants)
-                                            {
-                                                elem
-                                            } else {
-                                                // For Named/Generic iterator-like types, allow iteration
-                                                // with a fresh element type rather than hard-erroring
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        } else {
-                                            // Fallback: assume custom iterator type, use fresh element type
-                                            // This handles types like ZipIter, ∃_. _, etc.
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    }
-                                }
-                            } // end else: no Iterator Item found, duck-typing fallback
-                        } // end None branch
-                    };
-
-                    // Apply the current substitution to resolve any type variables
-                    // that were already unified during iterable expression inference
-                    // (e.g., the closure return type in `items.map(|x| x.cmp(0))`
-                    // unifies the Item TypeVar with Ordering before we reach here,
-                    // so `ord` in the for body must be Ordering, not an opaque TypeVar).
-                    let elem_ty = self.unifier.apply(&elem_ty);
-
-                    // Enter loop context for affine tracking
-                    self.affine_tracker.enter_loop();
-
-                    // ============================================================
-                    // Iterator Invalidation Tracking
-                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Iterator safety
-                    // ============================================================
-                    // Track iterators to prevent modifications to collections
-                    // during iteration, which would invalidate the iterator.
-
-                    // Extract collection name from iterable expression for tracking
-                    // Handle various iterator expression patterns:
-                    // - `for item in items` -> Path(items)
-                    // - `for item in &items` -> Unary(Ref, Path(items))
-                    // - `for item in &mut items` -> Unary(RefMut, Path(items))
-                    // - `for item in items.iter()` -> MethodCall(items, "iter", [])
-                    let collection_name: Option<Text> = match &iter.kind {
-                        ExprKind::Path(path) => path.segments.first().and_then(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(id) => {
-                                Some(verum_common::Text::from(id.name.as_str()))
-                            }
-                            _ => None,
-                        }),
-                        // Handle &items and &mut items
-                        ExprKind::Unary { op, expr: inner }
-                            if matches!(op, UnOp::Ref | UnOp::RefMut) =>
-                        {
-                            if let ExprKind::Path(path) = &inner.kind {
-                                path.segments.first().and_then(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(id) => {
-                                        Some(verum_common::Text::from(id.name.as_str()))
-                                    }
-                                    _ => None,
-                                })
-                            } else {
-                                None
-                            }
-                        }
-                        // Handle items.iter() and items.iter_mut()
-                        ExprKind::MethodCall {
-                            receiver, method, ..
-                        } if method.name.as_str() == "iter"
-                            || method.name.as_str() == "iter_mut" =>
-                        {
-                            self.extract_receiver_name(receiver)
-                        }
-                        _ => None,
-                    };
-
-                    // Register iterator if we can track the collection
-                    let iter_var_name = verum_common::Text::from("__iter");
-                    if let Some(ref collection) = collection_name {
-                        // Determine if this is a mutable iterator
-                        let is_mutable_iter = match &iter.kind {
-                            ExprKind::Unary { op, .. } if matches!(op, UnOp::RefMut) => true,
-                            ExprKind::MethodCall { method, .. }
-                                if method.name.as_str() == "iter_mut" =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        };
-                        let _ = self.borrow_tracker.register_iterator(
-                            iter_var_name.clone(),
-                            collection.clone(),
-                            is_mutable_iter,
-                            iter.span,
-                        );
-                    }
-
-                    self.ctx.enter_scope();
-                    self.borrow_tracker.enter_scope();
-                    self.refinement_evidence.push_scope();
-
-                    self.bind_pattern(pattern, &elem_ty)?;
-
-                    // Add pattern evidence for for-loop pattern
-                    // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-                    // For `for Some(x) in items`, we know x is Some within the body
-                    if let Maybe::Some(iter_name) = self.extract_simple_var_name(iter) {
-                        self.add_pattern_evidence(pattern, iter_name, pattern.span);
-                    }
-
-                    self.infer_block(body)?;
-
-                    self.refinement_evidence.pop_scope();
-                    self.borrow_tracker.exit_scope();
-                    self.ctx.exit_scope();
-
-                    // Release iterator tracking
-                    if collection_name.is_some() {
-                        self.borrow_tracker.release_iterator(iter_var_name.as_str());
-                    }
-
-                    // Exit loop context
-                    self.affine_tracker.exit_loop();
-
-                    Ok(InferResult::new(Type::unit()))
-                }
+                For { .. } => self.infer_for_loop(current_expr),
 
                 Break { label: _, value: _ } => {
                     // Break has Never type (diverging control flow)
@@ -16096,196 +15552,7 @@ impl TypeChecker {
                 // Select expressions require async context: "select { ... }" only valid in async functions — Select Expression Syntax
                 // Awaits multiple futures concurrently, executes first completed
                 // Grammar: grammar/verum.ebnf v2.9 - select_expr
-                Select {
-                    biased: _,
-                    arms,
-                    span: select_span,
-                } => {
-                    // Validate that select is used in an async context
-                    // Select expressions require async context: "select { ... }" only valid in async functions — Select expressions can only be used in async context
-                    if !self.in_async_context {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression can only be used in async context \
-                             (async fn, async block, or async closure)",
-                        )));
-                    }
-
-                    if arms.is_empty() {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression must have at least one arm",
-                        )));
-                    }
-
-                    // Type check each arm and collect body types
-                    let mut arm_types: List<Type> = List::new();
-                    // Track for exhaustiveness checking
-                    let mut has_else = false;
-                    let mut all_have_guards = true;
-
-                    for arm in arms.iter() {
-                        self.ctx.enter_scope();
-
-                        // Check if this is an else/default arm
-                        if arm.is_else() {
-                            has_else = true;
-                            // Else arm has no pattern or future to check
-                        } else {
-                            // Track if this arm has a guard for exhaustiveness check
-                            if arm.guard.is_none() {
-                                all_have_guards = false;
-                            }
-                            // Type check the future expression
-                            // Note: arm.future contains an await expression (e.g., `future.await`)
-                            // We need to extract the inner future and get its type
-                            if let Some(ref future_expr) = arm.future {
-                                // The parser stores the full await expression (e.g., `task.await`)
-                                // We need to extract the inner future expression and type it
-                                let awaited_ty = if let ExprKind::Await(inner_future) =
-                                    &future_expr.kind
-                                {
-                                    // Type the inner future expression (before .await)
-                                    let future_result = self.synth_expr(inner_future)?;
-
-                                    // Resolve type variables before matching
-                                    let resolved_ty = self.unifier.apply(&future_result.ty);
-
-                                    // Extract awaited type using protocol resolver for comprehensive
-                                    // Future type handling (Type::Future, Type::Generic, Type::Named, Type::Var)
-                                    match self
-                                        .protocol_checker
-                                        .read()
-                                        .resolve_future_protocol(&resolved_ty)
-                                    {
-                                        Some(resolution) => resolution.output,
-                                        None => {
-                                            // Also handle JoinHandle<T> as an awaitable type
-                                            match &resolved_ty {
-                                                Type::Generic { name, args }
-                                                    if name.as_str() == "JoinHandle"
-                                                        && args.len() == 1 =>
-                                                {
-                                                    args[0].clone()
-                                                }
-                                                Type::Named { path, args } if args.len() == 1 => {
-                                                    if let Some(ident) = path.as_ident() {
-                                                        if ident.as_str() == "JoinHandle" {
-                                                            args[0].clone()
-                                                        } else {
-                                                            // In async context, be lenient for unknown awaitable types
-                                                            resolved_ty.clone()
-                                                        }
-                                                    } else {
-                                                        resolved_ty.clone()
-                                                    }
-                                                }
-                                                _ => {
-                                                    // In async context, be lenient - type may implement Future
-                                                    if self.in_async_context {
-                                                        resolved_ty.clone()
-                                                    } else {
-                                                        return Err(TypeError::Other(
-                                                            verum_common::Text::from(format!(
-                                                                "select arm future must be a Future type, got: {}",
-                                                                future_result.ty
-                                                            )),
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Fallback: if not an await expr, type the expression directly
-                                    // This shouldn't happen with correct parsing, but handle it gracefully
-                                    let future_result = self.synth_expr(future_expr)?;
-                                    let resolved_ty = self.unifier.apply(&future_result.ty);
-                                    match self
-                                        .protocol_checker
-                                        .read()
-                                        .resolve_future_protocol(&resolved_ty)
-                                    {
-                                        Some(resolution) => resolution.output,
-                                        None => {
-                                            // In async context, be lenient
-                                            if self.in_async_context {
-                                                resolved_ty
-                                            } else {
-                                                return Err(TypeError::Other(
-                                                    verum_common::Text::from(format!(
-                                                        "select arm must contain await expression, got: {:?}",
-                                                        future_expr.kind
-                                                    )),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                };
-
-                                // Bind pattern variables using full pattern matching
-                                // Supports: Ok(data), Message.Command { cmd }, x, _, etc.
-                                // Select expressions require async context: "select { ... }" only valid in async functions — Section 4.3.4 - Pattern Matching in Branches
-                                if let Some(ref pattern) = arm.pattern {
-                                    self.bind_pattern(pattern, &awaited_ty)?;
-                                }
-                            }
-
-                            // Type check optional guard
-                            if let Some(ref guard) = arm.guard {
-                                let guard_result = self.synth_expr(guard)?;
-                                self.unifier
-                                    .unify(&guard_result.ty, &Type::bool(), guard.span)?;
-                            }
-                        }
-
-                        // Type check the arm body
-                        let body_result = self.synth_expr(&arm.body)?;
-                        arm_types.push(body_result.ty);
-
-                        self.ctx.exit_scope();
-                    }
-
-                    // Exhaustiveness check for select expression
-                    // Select expressions require async context: "select { ... }" only valid in async functions — Select exhaustiveness
-                    // A select is considered non-exhaustive if:
-                    // - All arms have guards AND there's no else/default arm
-                    // In this case, if all guards evaluate to false, the select will block forever
-                    if all_have_guards
-                        && !has_else
-                        && !arms.is_empty()
-                        && !arms.iter().all(|a| a.is_else())
-                    {
-                        // Check if there's at least one arm without a guard (excluding else arms)
-                        let non_else_arms: Vec<_> = arms.iter().filter(|a| !a.is_else()).collect();
-                        if !non_else_arms.is_empty()
-                            && non_else_arms.iter().all(|a| a.guard.is_some())
-                        {
-                            // All non-else arms have guards - this could block forever
-                            // Emit a warning (not error) since guards might be intentionally comprehensive
-                            let warning = Diagnostic::new_warning(
-                                "select expression may block forever: all arms have guards but no \
-                                 'else' branch. If all guards evaluate to false, execution will block. \
-                                 Consider adding an 'else => ...' branch for exhaustiveness.",
-                                span_to_line_col(*select_span),
-                                "W0501", // Warning code for select exhaustiveness
-                            );
-                            self.diagnostics.push(warning);
-                        }
-                    }
-
-                    // All arm bodies must unify to the same type
-                    if arm_types.is_empty() {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression has no arms",
-                        )));
-                    }
-
-                    let result_ty = arm_types[0].clone();
-                    for (i, arm_ty) in arm_types.iter().enumerate().skip(1) {
-                        self.unifier.unify(arm_ty, &result_ty, arms[i].span)?;
-                    }
-
-                    Ok(InferResult::new(result_ty))
-                }
+                Select { .. } => self.infer_select_expr(current_expr),
 
                 // Nursery expression: nursery(options) { body } [on_cancel {...}] [recover {...}]
                 // Structured concurrency: nurseries for task scoping, cancellation propagation, error collection — Structured Concurrency
@@ -16599,6 +15866,742 @@ impl TypeChecker {
             },
         }
     }
+    /// Type-infer a closure (lambda) expression.
+    /// Performs capture analysis, borrow tracking, parameter binding,
+    /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
+    fn infer_closure_expr(&mut self, expr: &Expr, outer_span: Span) -> Result<InferResult> {
+        let ExprKind::Closure { params, body, return_type, async_, move_, .. } = &expr.kind
+            else { unreachable!() };
+                    // ============================================================
+                    // Closure Capture Analysis
+                    // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .5 - Closure captures
+                    // ============================================================
+                    // Track what variables this closure captures and check for
+                    // aliasing conflicts with existing borrows.
+
+                    // Analyze captured variables BEFORE entering closure scope
+                    // This determines what outside variables the closure references
+                    let captures = self.analyze_closure_captures(body, params, *move_);
+
+                    // Enter closure tracking for capture analysis
+                    let closure_id = self.borrow_tracker.enter_closure(*move_);
+
+                    // Register each captured variable and check for aliasing conflicts
+                    // Collect all capture errors to report them together
+                    let mut capture_errors: List<TypeError> = List::new();
+
+                    for (var_name, field_path, capture_mode, capture_span) in &captures {
+                        // Check if capturing this variable would conflict with existing borrows
+                        // E.g., can't capture `&mut x` if x is already immutably borrowed
+                        // Field-level tracking enables borrow splitting: `x.a` and `x.b` can be
+                        // captured separately without conflict.
+                        if let Err(e) = self.borrow_tracker.register_capture(
+                            closure_id,
+                            var_name.clone(),
+                            field_path.clone(),
+                            *capture_mode,
+                            *capture_span,
+                        ) {
+                            capture_errors.push(e);
+                        }
+                    }
+
+                    // Report first capture error if any exist
+                    // (We collect all to provide better diagnostics in the future)
+                    if let Some(first_error) = capture_errors.into_iter().next() {
+                        // Clean up before returning error
+                        self.borrow_tracker.exit_closure(closure_id);
+                        return Err(first_error);
+                    }
+
+                    // Enter new scope for lambda
+                    self.ctx.enter_scope();
+
+                    // Enter async scope if this is an async closure
+                    // Also flip `in_async_context` so the body may use
+                    // `.await` — c7b4d71's enforcement was keyed on the
+                    // function-scope flag and missed async closures. For
+                    // `async move |x| { future.await }` the body is as
+                    // valid a .await site as an `async fn` body.
+                    let prev_async_context = if *async_ {
+                        self.borrow_tracker.enter_async_scope();
+                        Some(std::mem::replace(&mut self.in_async_context, true))
+                    } else {
+                        None
+                    };
+
+                    // Collect parameter names and types for dependent type analysis
+                    let mut param_names = List::new();
+                    let mut param_types = List::new();
+
+                    for param in params.iter() {
+                        // Extract parameter name for potential dependent type use
+                        let param_name = match &param.pattern.kind {
+                            verum_ast::pattern::PatternKind::Ident { name, .. } => {
+                                Some(name.name.clone())
+                            }
+                            _ => None,
+                        };
+                        param_names.push(param_name);
+
+                        let param_ty = if let Some(ty_annotation) = &param.ty {
+                            self.ast_to_type(ty_annotation)?
+                        } else {
+                            Type::Var(TypeVar::fresh())
+                        };
+                        self.bind_pattern(&param.pattern, &param_ty)?;
+                        param_types.push(param_ty);
+                    }
+
+                    // Synthesize or check body
+                    let ret_ty = if let Some(rt) = return_type {
+                        let expected_ret = self.ast_to_type(rt)?;
+                        self.check_expr(body, &expected_ret)?;
+                        expected_ret
+                    } else {
+                        let body_result = self.synth_expr(body)?;
+                        body_result.ty
+                    };
+
+                    // Exit async scope if this was an async closure
+                    if let Some(prev) = prev_async_context {
+                        self.borrow_tracker.exit_async_scope();
+                        self.in_async_context = prev;
+                    }
+
+                    // Exit closure tracking and get capture set
+                    let capture_set = self.borrow_tracker.exit_closure(closure_id);
+
+                    // ============================================================
+                    // Send/Sync Safety for Async Closures
+                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety
+                    // ============================================================
+                    // Async closures that capture references must ensure those
+                    // references are Send if the closure crosses await points.
+                    if let Some(ref cs) = capture_set {
+                        if *async_ && !cs.captures.is_empty() {
+                            // Check thread safety for captured variables
+                            // MutBorrow captures are NOT Send-safe across await points
+                            for capture in &cs.captures {
+                                if matches!(capture.mode, crate::aliasing::CaptureMode::MutBorrow) {
+                                    // Look up the variable's type to check if it's Send
+                                    if let Some(var_scheme) = self.ctx.env.lookup(&capture.target) {
+                                        let var_ty = var_scheme.instantiate();
+                                        let resolved_ty = self.unifier.apply(&var_ty);
+                                        // Check if the type is known to be !Send
+                                        if self.is_non_send_type(&resolved_ty) {
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Cannot capture `{}` by mutable reference in async closure: \
+                                                 type `{}` is not Send-safe across await points",
+                                                    capture.target, resolved_ty
+                                                )),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Exit lambda scope
+                    self.ctx.exit_scope();
+
+                    // Check if return type depends on parameters (dependent function / Pi type)
+                    // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types
+                    let is_dependent = params.len() == 1
+                        && self.return_type_depends_on_param(&ret_ty, &param_names);
+
+                    // If async closure, wrap return type in Future<T>
+                    let func_ty = if *async_ {
+                        let future_ret_ty = Type::Generic {
+                            name: verum_common::Text::from("Future"),
+                            args: vec![ret_ty].into(),
+                        };
+                        if let (true, Some(param_name)) =
+                            (is_dependent, param_names.get(0).and_then(|p| p.clone()))
+                        {
+                            // Dependent async function: (x: A) -> Future<B(x)>
+                            Type::Pi {
+                                param_name,
+                                param_type: Box::new(param_types[0].clone()),
+                                return_type: Box::new(future_ret_ty),
+                            }
+                        } else {
+                            Type::function(param_types, future_ret_ty)
+                        }
+                    } else if let (true, Some(param_name)) =
+                        (is_dependent, param_names.get(0).and_then(|p| p.clone()))
+                    {
+                        // Dependent function: (x: A) -> B(x)
+                        // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi type introduction
+                        Type::Pi {
+                            param_name,
+                            param_type: Box::new(param_types[0].clone()),
+                            return_type: Box::new(ret_ty),
+                        }
+                    } else {
+                        // Regular function: A -> B
+                        Type::function(param_types, ret_ty)
+                    };
+
+                    // Register closure type in the type registry for codegen
+                    // Apply unifier substitution to resolve type variables
+                    // This enables closure parameter type inference during LLVM codegen
+                    let resolved_func_ty = self.unifier.apply(&func_ty);
+                    self.type_registry
+                        .register_expr(outer_span, resolved_func_ty);
+
+                    Ok(InferResult::new(func_ty))
+    }
+
+    /// Type-infer a `for` loop expression.
+    /// Synthesizes the iterator type, resolves the Iterator protocol to get Item,
+    /// binds the pattern, checks the body, and returns unit.
+    fn infer_for_loop(&mut self, expr: &Expr) -> Result<InferResult> {
+        let ExprKind::For { label: _, pattern, iter, body, invariants: _, decreases: _ } = &expr.kind
+            else { unreachable!() };
+                    // NLL: Before synthesizing the iterator expression, release any
+                    // expired borrows on the collection being iterated. This handles
+                    // patterns like:
+                    //  let slice = &mut array; slice[0] = 10;
+                    //  for item in &mut array { ... } // slice's borrow has expired
+                    if let ExprKind::Unary { op, expr: inner } = &iter.kind {
+                        if matches!(op, UnOp::Ref | UnOp::RefMut) {
+                            if let ExprKind::Path(path) = &inner.kind {
+                                if let Some(verum_ast::ty::PathSegment::Name(id)) =
+                                    path.segments.first()
+                                {
+                                    let target = verum_common::Text::from(id.name.as_str());
+                                    self.borrow_tracker.nll_release_expired_borrows_for(&target);
+                                }
+                            }
+                        }
+                    }
+
+                    let iter_result = self.synth_expr(iter)?;
+
+                    // CRITICAL: Apply current substitution to resolve type variables
+                    // This fixes: for (a, b) in pairs where pairs: List<(A, B)>
+                    let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
+
+                    // =========================================================================
+                    // Protocol-based IntoIterator resolution
+                    // For-loop desugaring: "for x in iter" desugars to IntoIterator protocol calls (into_iter -> next loop)
+                    // =========================================================================
+                    let elem_ty = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_into_iterator_protocol(&resolved_iter_ty)
+                    {
+                        Some(resolution) => resolution.item,
+                        None => {
+                            // =========================================================================
+                            // Fallback 1: Try Iterator protocol's Item associated type
+                            // If the type implements Iterator directly (not IntoIterator),
+                            // extract the Item type from the Iterator protocol impl.
+                            // This handles types like RangeIterator, MapIterator, etc. that
+                            // implement Iterator but not IntoIterator.
+                            // =========================================================================
+                            let iter_item = self.protocol_checker.read().try_find_associated_type(
+                                &resolved_iter_ty,
+                                &verum_common::Text::from("Item"),
+                            );
+                            if let Some(item_ty) = iter_item {
+                                // Normalize projection types (e.g., ::Item[SomeType] -> ConcreteType)
+
+                                self.protocol_checker
+                                    .read()
+                                    .normalize_projection_type(&item_ty)
+                            } else {
+                                // Duck-typing fallback: extract type name from any type representation
+                                // and check if it has has_next/next methods in inherent_methods.
+                                // This enables `for v in CustomIter { ... }` without requiring
+                                // an explicit IntoIterator implementation.
+                                let try_duck_type_iter = |ty: &Type| -> Option<Type> {
+                                    let type_name: Option<&str> = match ty {
+                                        Type::Named { path, .. } => Self::path_type_name(path)
+                                            .or_else(|| Self::path_last_type_name(path)),
+                                        Type::Generic { name, .. } => Some(name.as_str()),
+                                        _ => None,
+                                    };
+                                    type_name.and_then(|tn| {
+                                        let methods_guard = self.inherent_methods.read();
+                                        let methods =
+                                            methods_guard.get(&verum_common::Text::from(tn))?;
+                                        let _has_next =
+                                            methods.get(&verum_common::Text::from("has_next"))?;
+                                        let next_scheme =
+                                            methods.get(&verum_common::Text::from("next"))?;
+                                        let next_ty = next_scheme.instantiate();
+                                        if let Type::Function { return_type, .. } = &next_ty {
+                                            Some(*return_type.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                };
+
+                                // Special case for known iterator types and path-like types
+                                if let Type::Named { path, .. } = &resolved_iter_ty {
+                                    let tname = Self::path_type_name(path)
+                                        .or_else(|| Self::path_last_type_name(path))
+                                        .unwrap_or("");
+                                    if tname == "PathIter" {
+                                        Type::Text
+                                    } else if tname.contains("Iter")
+                                        || tname.contains("iter")
+                                        || matches!(
+                                            tname,
+                                            "Components"
+                                                | "ReadDir"
+                                                | "Range"
+                                                | "Entries"
+                                                | "Chunks"
+                                                | "Windows"
+                                                | "Lines"
+                                                | "Chars"
+                                                | "Bytes"
+                                                | "Keys"
+                                                | "Values"
+                                                | "Items"
+                                                | "DirEntry"
+                                        )
+                                    {
+                                        // Known iterator-like types: return a fresh type variable
+                                        // for the element type
+                                        Type::Var(TypeVar::fresh())
+                                    } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty)
+                                    {
+                                        elem
+                                    } else {
+                                        // Try expanding Named type to its variant definition
+                                        // to detect linked-list patterns like Cons/Nil
+                                        let expanded =
+                                            self.expand_generic_to_variant(&resolved_iter_ty);
+                                        if let Type::Variant(ref variants) = expanded {
+                                            if let Some(elem) =
+                                                Self::infer_linked_list_element_type(variants)
+                                            {
+                                                elem
+                                            } else {
+                                                // Named variant type without linked-list pattern:
+                                                // allow iteration with a fresh element type for types
+                                                // that may implement IntoIterator via protocol impls
+                                                Type::Var(TypeVar::fresh())
+                                            }
+                                        } else {
+                                            // Custom named type: assume it implements IntoIterator
+                                            // via protocol implementations. Use a fresh element type.
+                                            // If it truly isn't iterable, a runtime error will catch it.
+                                            Type::Var(TypeVar::fresh())
+                                        }
+                                    }
+                                } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty) {
+                                    // Handles Type::Generic and other types with duck-typed iteration
+                                    elem
+                                } else if let Type::Generic { name, args } = &resolved_iter_ty {
+                                    // Well-known collection types: List<T>->T, Set<T>->T, Map<K,V>->(K,V)
+                                    match name.as_str() {
+                                        "List" | "Set" | "Deque" | "PriorityQueue" | "BTreeSet"
+                                        | "HashSet" | "Queue" | "Stack" | "Stream" => args
+                                            .first()
+                                            .cloned()
+                                            .unwrap_or(Type::Var(TypeVar::fresh())),
+                                        "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
+                                            if args.len() >= 2 {
+                                                Type::Tuple(List::from(vec![
+                                                    args[0].clone(),
+                                                    args[1].clone(),
+                                                ]))
+                                            } else {
+                                                Type::Var(TypeVar::fresh())
+                                            }
+                                        }
+                                        _ => Type::Var(TypeVar::fresh()),
+                                    }
+                                } else {
+                                    // Try unwrapping reference types (&T, &mut T) for duck-typing
+                                    let inner_ty = match &resolved_iter_ty {
+                                        Type::Reference { inner, .. }
+                                        | Type::CheckedReference { inner, .. }
+                                        | Type::UnsafeReference { inner, .. } => {
+                                            Some(inner.as_ref())
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(inner) = inner_ty {
+                                        if let Some(elem) = try_duck_type_iter(inner) {
+                                            elem
+                                        } else if let Type::Generic { name, args } = inner {
+                                            // Collection types behind references: &List<T>->T, &Set<T>->T
+                                            match name.as_str() {
+                                                "List" | "Set" | "Deque" | "PriorityQueue"
+                                                | "BTreeSet" | "HashSet" | "Queue" | "Stack"
+                                                | "Stream" => args
+                                                    .first()
+                                                    .cloned()
+                                                    .unwrap_or(Type::Var(TypeVar::fresh())),
+                                                "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
+                                                    if args.len() >= 2 {
+                                                        Type::Tuple(List::from(vec![
+                                                            args[0].clone(),
+                                                            args[1].clone(),
+                                                        ]))
+                                                    } else {
+                                                        Type::Var(TypeVar::fresh())
+                                                    }
+                                                }
+                                                _ => Type::Var(TypeVar::fresh()),
+                                            }
+                                        } else {
+                                            // For other reference types, use fresh var
+                                            Type::Var(TypeVar::fresh())
+                                        }
+                                    } else if let Type::Variant(variants) = &resolved_iter_ty {
+                                        // Heuristic for user-defined linked list types:
+                                        // If the variant type has a Cons-like variant with a tuple payload
+                                        // and a Nil-like variant with Unit payload, treat it as iterable.
+                                        // The element type is inferred from the first element of the Cons tuple.
+                                        if let Some(elem) =
+                                            Self::infer_linked_list_element_type(variants)
+                                        {
+                                            elem
+                                        } else {
+                                            // Fallback: for Variant types, infer element as the variant type itself
+                                            // This allows `for x in variant_value { }` to type-check
+                                            // (the runtime semantics depend on the user's iterator impl)
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Cannot iterate over non-iterable type: {}. Type must implement IntoIterator or provide has_next()/next() methods.",
+                                                    resolved_iter_ty
+                                                )),
+                                            ));
+                                        }
+                                    } else {
+                                        // Last resort: try expanding to variant for Generic/other types
+                                        let expanded =
+                                            self.expand_generic_to_variant(&resolved_iter_ty);
+                                        if let Type::Variant(ref variants) = expanded {
+                                            if let Some(elem) =
+                                                Self::infer_linked_list_element_type(variants)
+                                            {
+                                                elem
+                                            } else {
+                                                // For Named/Generic iterator-like types, allow iteration
+                                                // with a fresh element type rather than hard-erroring
+                                                Type::Var(TypeVar::fresh())
+                                            }
+                                        } else {
+                                            // Fallback: assume custom iterator type, use fresh element type
+                                            // This handles types like ZipIter, ∃_. _, etc.
+                                            Type::Var(TypeVar::fresh())
+                                        }
+                                    }
+                                }
+                            } // end else: no Iterator Item found, duck-typing fallback
+                        } // end None branch
+                    };
+
+                    // Apply the current substitution to resolve any type variables
+                    // that were already unified during iterable expression inference
+                    // (e.g., the closure return type in `items.map(|x| x.cmp(0))`
+                    // unifies the Item TypeVar with Ordering before we reach here,
+                    // so `ord` in the for body must be Ordering, not an opaque TypeVar).
+                    let elem_ty = self.unifier.apply(&elem_ty);
+
+                    // Enter loop context for affine tracking
+                    self.affine_tracker.enter_loop();
+
+                    // ============================================================
+                    // Iterator Invalidation Tracking
+                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Iterator safety
+                    // ============================================================
+                    // Track iterators to prevent modifications to collections
+                    // during iteration, which would invalidate the iterator.
+
+                    // Extract collection name from iterable expression for tracking
+                    // Handle various iterator expression patterns:
+                    // - `for item in items` -> Path(items)
+                    // - `for item in &items` -> Unary(Ref, Path(items))
+                    // - `for item in &mut items` -> Unary(RefMut, Path(items))
+                    // - `for item in items.iter()` -> MethodCall(items, "iter", [])
+                    let collection_name: Option<Text> = match &iter.kind {
+                        ExprKind::Path(path) => path.segments.first().and_then(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(id) => {
+                                Some(verum_common::Text::from(id.name.as_str()))
+                            }
+                            _ => None,
+                        }),
+                        // Handle &items and &mut items
+                        ExprKind::Unary { op, expr: inner }
+                            if matches!(op, UnOp::Ref | UnOp::RefMut) =>
+                        {
+                            if let ExprKind::Path(path) = &inner.kind {
+                                path.segments.first().and_then(|seg| match seg {
+                                    verum_ast::ty::PathSegment::Name(id) => {
+                                        Some(verum_common::Text::from(id.name.as_str()))
+                                    }
+                                    _ => None,
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        // Handle items.iter() and items.iter_mut()
+                        ExprKind::MethodCall {
+                            receiver, method, ..
+                        } if method.name.as_str() == "iter"
+                            || method.name.as_str() == "iter_mut" =>
+                        {
+                            self.extract_receiver_name(receiver)
+                        }
+                        _ => None,
+                    };
+
+                    // Register iterator if we can track the collection
+                    let iter_var_name = verum_common::Text::from("__iter");
+                    if let Some(ref collection) = collection_name {
+                        // Determine if this is a mutable iterator
+                        let is_mutable_iter = match &iter.kind {
+                            ExprKind::Unary { op, .. } if matches!(op, UnOp::RefMut) => true,
+                            ExprKind::MethodCall { method, .. }
+                                if method.name.as_str() == "iter_mut" =>
+                            {
+                                true
+                            }
+                            _ => false,
+                        };
+                        let _ = self.borrow_tracker.register_iterator(
+                            iter_var_name.clone(),
+                            collection.clone(),
+                            is_mutable_iter,
+                            iter.span,
+                        );
+                    }
+
+                    self.ctx.enter_scope();
+                    self.borrow_tracker.enter_scope();
+                    self.refinement_evidence.push_scope();
+
+                    self.bind_pattern(pattern, &elem_ty)?;
+
+                    // Add pattern evidence for for-loop pattern
+                    // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
+                    // For `for Some(x) in items`, we know x is Some within the body
+                    if let Maybe::Some(iter_name) = self.extract_simple_var_name(iter) {
+                        self.add_pattern_evidence(pattern, iter_name, pattern.span);
+                    }
+
+                    self.infer_block(body)?;
+
+                    self.refinement_evidence.pop_scope();
+                    self.borrow_tracker.exit_scope();
+                    self.ctx.exit_scope();
+
+                    // Release iterator tracking
+                    if collection_name.is_some() {
+                        self.borrow_tracker.release_iterator(iter_var_name.as_str());
+                    }
+
+                    // Exit loop context
+                    self.affine_tracker.exit_loop();
+
+                    Ok(InferResult::new(Type::unit()))
+    }
+
+    /// Type-infer a `select { ... }` expression.
+    /// Validates async context, checks each arm's future + pattern + guard,
+    /// unifies all arm body types, and warns on exhaustiveness issues.
+    fn infer_select_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        let ExprKind::Select { biased: _, arms, span: select_span } = &expr.kind
+            else { unreachable!() };
+                    // Validate that select is used in an async context
+                    // Select expressions require async context: "select { ... }" only valid in async functions — Select expressions can only be used in async context
+                    if !self.in_async_context {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            "select expression can only be used in async context \
+                             (async fn, async block, or async closure)",
+                        )));
+                    }
+
+                    if arms.is_empty() {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            "select expression must have at least one arm",
+                        )));
+                    }
+
+                    // Type check each arm and collect body types
+                    let mut arm_types: List<Type> = List::new();
+                    // Track for exhaustiveness checking
+                    let mut has_else = false;
+                    let mut all_have_guards = true;
+
+                    for arm in arms.iter() {
+                        self.ctx.enter_scope();
+
+                        // Check if this is an else/default arm
+                        if arm.is_else() {
+                            has_else = true;
+                            // Else arm has no pattern or future to check
+                        } else {
+                            // Track if this arm has a guard for exhaustiveness check
+                            if arm.guard.is_none() {
+                                all_have_guards = false;
+                            }
+                            // Type check the future expression
+                            // Note: arm.future contains an await expression (e.g., `future.await`)
+                            // We need to extract the inner future and get its type
+                            if let Some(ref future_expr) = arm.future {
+                                // The parser stores the full await expression (e.g., `task.await`)
+                                // We need to extract the inner future expression and type it
+                                let awaited_ty = if let ExprKind::Await(inner_future) =
+                                    &future_expr.kind
+                                {
+                                    // Type the inner future expression (before .await)
+                                    let future_result = self.synth_expr(inner_future)?;
+
+                                    // Resolve type variables before matching
+                                    let resolved_ty = self.unifier.apply(&future_result.ty);
+
+                                    // Extract awaited type using protocol resolver for comprehensive
+                                    // Future type handling (Type::Future, Type::Generic, Type::Named, Type::Var)
+                                    match self
+                                        .protocol_checker
+                                        .read()
+                                        .resolve_future_protocol(&resolved_ty)
+                                    {
+                                        Some(resolution) => resolution.output,
+                                        None => {
+                                            // Also handle JoinHandle<T> as an awaitable type
+                                            match &resolved_ty {
+                                                Type::Generic { name, args }
+                                                    if name.as_str() == "JoinHandle"
+                                                        && args.len() == 1 =>
+                                                {
+                                                    args[0].clone()
+                                                }
+                                                Type::Named { path, args } if args.len() == 1 => {
+                                                    if let Some(ident) = path.as_ident() {
+                                                        if ident.as_str() == "JoinHandle" {
+                                                            args[0].clone()
+                                                        } else {
+                                                            // In async context, be lenient for unknown awaitable types
+                                                            resolved_ty.clone()
+                                                        }
+                                                    } else {
+                                                        resolved_ty.clone()
+                                                    }
+                                                }
+                                                _ => {
+                                                    // In async context, be lenient - type may implement Future
+                                                    if self.in_async_context {
+                                                        resolved_ty.clone()
+                                                    } else {
+                                                        return Err(TypeError::Other(
+                                                            verum_common::Text::from(format!(
+                                                                "select arm future must be a Future type, got: {}",
+                                                                future_result.ty
+                                                            )),
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Fallback: if not an await expr, type the expression directly
+                                    // This shouldn't happen with correct parsing, but handle it gracefully
+                                    let future_result = self.synth_expr(future_expr)?;
+                                    let resolved_ty = self.unifier.apply(&future_result.ty);
+                                    match self
+                                        .protocol_checker
+                                        .read()
+                                        .resolve_future_protocol(&resolved_ty)
+                                    {
+                                        Some(resolution) => resolution.output,
+                                        None => {
+                                            // In async context, be lenient
+                                            if self.in_async_context {
+                                                resolved_ty
+                                            } else {
+                                                return Err(TypeError::Other(
+                                                    verum_common::Text::from(format!(
+                                                        "select arm must contain await expression, got: {:?}",
+                                                        future_expr.kind
+                                                    )),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                };
+
+                                // Bind pattern variables using full pattern matching
+                                // Supports: Ok(data), Message.Command { cmd }, x, _, etc.
+                                // Select expressions require async context: "select { ... }" only valid in async functions — Section 4.3.4 - Pattern Matching in Branches
+                                if let Some(ref pattern) = arm.pattern {
+                                    self.bind_pattern(pattern, &awaited_ty)?;
+                                }
+                            }
+
+                            // Type check optional guard
+                            if let Some(ref guard) = arm.guard {
+                                let guard_result = self.synth_expr(guard)?;
+                                self.unifier
+                                    .unify(&guard_result.ty, &Type::bool(), guard.span)?;
+                            }
+                        }
+
+                        // Type check the arm body
+                        let body_result = self.synth_expr(&arm.body)?;
+                        arm_types.push(body_result.ty);
+
+                        self.ctx.exit_scope();
+                    }
+
+                    // Exhaustiveness check for select expression
+                    // Select expressions require async context: "select { ... }" only valid in async functions — Select exhaustiveness
+                    // A select is considered non-exhaustive if:
+                    // - All arms have guards AND there's no else/default arm
+                    // In this case, if all guards evaluate to false, the select will block forever
+                    if all_have_guards
+                        && !has_else
+                        && !arms.is_empty()
+                        && !arms.iter().all(|a| a.is_else())
+                    {
+                        // Check if there's at least one arm without a guard (excluding else arms)
+                        let non_else_arms: Vec<_> = arms.iter().filter(|a| !a.is_else()).collect();
+                        if !non_else_arms.is_empty()
+                            && non_else_arms.iter().all(|a| a.guard.is_some())
+                        {
+                            // All non-else arms have guards - this could block forever
+                            // Emit a warning (not error) since guards might be intentionally comprehensive
+                            let warning = Diagnostic::new_warning(
+                                "select expression may block forever: all arms have guards but no \
+                                 'else' branch. If all guards evaluate to false, execution will block. \
+                                 Consider adding an 'else => ...' branch for exhaustiveness.",
+                                span_to_line_col(*select_span),
+                                "W0501", // Warning code for select exhaustiveness
+                            );
+                            self.diagnostics.push(warning);
+                        }
+                    }
+
+                    // All arm bodies must unify to the same type
+                    if arm_types.is_empty() {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            "select expression has no arms",
+                        )));
+                    }
+
+                    let result_ty = arm_types[0].clone();
+                    for (i, arm_ty) in arm_types.iter().enumerate().skip(1) {
+                        self.unifier.unify(arm_ty, &result_ty, arms[i].span)?;
+                    }
+
+                    Ok(InferResult::new(result_ty))
+    }
+
     fn infer_expr_path(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Path(path) = &expr.kind else { unreachable!() };
