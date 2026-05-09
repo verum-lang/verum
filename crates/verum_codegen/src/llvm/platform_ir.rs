@@ -9350,13 +9350,16 @@ impl<'ctx> PlatformIR<'ctx> {
             "verum_pool_await",
             i64_type.fn_type(&[i64_type.into()], false),
         );
+        // sched_yield + clock_gettime via the canonical syscall
+        // registry — see `super::syscall_registry` for the Verum-ABI
+        // rationale that resolves the historical i32-vs-i64 drift
+        // between this site and `runtime.rs`.
         let sched_yield_fn =
-            self.get_or_declare_fn(module, "sched_yield", i32_type.fn_type(&[], false));
-        let clock_gettime_fn = self.get_or_declare_fn(
-            module,
-            "clock_gettime",
-            i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
-        );
+            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
+                .expect("sched_yield in registry");
+        let clock_gettime_fn =
+            super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")
+                .expect("clock_gettime in registry");
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -10234,13 +10237,14 @@ impl<'ctx> PlatformIR<'ctx> {
             return Ok(());
         }
 
+        // sched_yield + clock_gettime via the canonical syscall
+        // registry (see `super::syscall_registry` module docstring).
         let sched_yield_fn =
-            self.get_or_declare_fn(module, "sched_yield", i32_type.fn_type(&[], false));
-        let clock_gettime_fn = self.get_or_declare_fn(
-            module,
-            "clock_gettime",
-            i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
-        );
+            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
+                .expect("sched_yield in registry");
+        let clock_gettime_fn =
+            super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")
+                .expect("clock_gettime in registry");
         let mutex_lock = module
             .get_function("verum_mutex_lock")
             .or_missing_fn("verum_mutex_lock")?;

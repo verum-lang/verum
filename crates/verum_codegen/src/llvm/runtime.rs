@@ -5207,8 +5207,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else {
             let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
             // CLOCK_MONOTONIC: macOS=6 (libSystem), other-Unix=1.
+            // Verum-ABI uniform i64: see `syscall_registry` module
+            // docstring for why widening clockid_t (C `int`) to i64
+            // here is correct under x86_64/aarch64 calling conventions.
             let clock_id: u64 = if target_is_darwin(module) { 6 } else { 1 };
-            let clock_id_val = i32_type.const_int(clock_id, false);
+            let clock_id_val = i64_type.const_int(clock_id, false);
             self.build_libc_call_void(
                 &builder,
                 clock_gettime_fn,
@@ -5285,7 +5288,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let _ = self.emit_linux_syscall(&builder, module, sys_num, &[clock_id, ts_addr])?;
         } else {
             let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
-            let clock_id_val = i32_type.const_int(0, false);
+            // CLOCK_REALTIME = 0 across Linux/macOS.  Verum-ABI i64 —
+            // see `syscall_registry` for ABI rationale.
+            let clock_id_val = i64_type.const_int(0, false);
             self.build_libc_call_void(
                 &builder,
                 clock_gettime_fn,
@@ -9147,26 +9152,23 @@ impl<'ctx> RuntimeLowering<'ctx> {
         wrapper
     }
 
-    /// Get or declare clock_gettime(clockid: i32, ts: *timespec) -> i32.
+    /// Get or declare `clock_gettime` under the canonical Verum-ABI
+    /// signature.  See `super::syscall_registry` for the full rationale
+    /// — this thin wrapper exists only so existing callers keep their
+    /// current call shape during the migration; new sites should use
+    /// `super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")`
+    /// directly.
     fn get_or_declare_clock_gettime(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("clock_gettime") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into()], false);
-        module.add_function("clock_gettime", fn_type, None)
+        super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")
+            .expect("clock_gettime must be in the syscall registry")
     }
 
-    /// Get or declare nanosleep(req: *timespec, rem: *timespec) -> i32.
+    /// Get or declare `nanosleep` under the canonical Verum-ABI
+    /// signature.  See [`get_or_declare_clock_gettime`] for the
+    /// migration discipline.
     fn get_or_declare_nanosleep(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("nanosleep") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        module.add_function("nanosleep", fn_type, None)
+        super::syscall_registry::get_or_declare(module, self.context, "nanosleep")
+            .expect("nanosleep must be in the syscall registry")
     }
 
     /// Get or declare a libc-free `strcmp` wrapper.

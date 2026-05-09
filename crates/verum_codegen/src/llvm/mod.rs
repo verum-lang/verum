@@ -167,6 +167,13 @@ pub mod permissions;
 // gates miscompiles cross builds.
 pub mod target_triple;
 
+// Canonical platform-syscall declaration registry. Single source of
+// truth for `clock_gettime`, `nanosleep`, `read`, `write`, etc. so
+// `runtime.rs` and `platform_ir.rs` agree on the (i64-uniform Verum)
+// ABI and avoid LLVM IR verification failures from drifting
+// declarations.
+pub mod syscall_registry;
+
 // Re-export main types
 pub use asm::{AsmCall, InlineAsmGenerator};
 pub use bitfield::{BitfieldLowering, BitfieldStats, min_container_bytes, optimal_container_bits};
