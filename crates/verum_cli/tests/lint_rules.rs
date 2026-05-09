@@ -602,6 +602,33 @@ fn unused_import_silent_when_name_used_in_code() {
     silent("unused-import", src);
 }
 
+/// Regression: glob mounts must NEVER trigger `unused-import`, even when the
+/// line carries an inline `// comment` after the trailing `;`.  The earlier
+/// mount-parser ran `trim_end_matches(';')` BEFORE stripping the comment, so
+/// `mount foo.*; // why` parsed to a non-glob name `*; // why`, dodging the
+/// glob-skip guard in `check_unused_imports`, and `verum lint --fix` then
+/// deleted the load-bearing line.  Closed by 8e0a15d9d.
+#[test]
+fn unused_import_silent_on_glob_mount_with_inline_comment_adjacent_semicolon() {
+    let src = "mount foo.*; // why\nfn main() {}\n";
+    silent("unused-import", src);
+}
+
+#[test]
+fn unused_import_silent_on_glob_mount_with_inline_comment_spaces_then_comment() {
+    // The dominant real-world shape — aligned column for the comment leaves
+    // a wide whitespace gap between `;` and `//`.
+    let src = "mount foo.*;                // brings X, Y, Z into scope\nfn main() {}\n";
+    silent("unused-import", src);
+}
+
+#[test]
+fn unused_import_silent_on_glob_mount_no_comment() {
+    // Sanity — the bare glob mount continues to work.
+    let src = "mount foo.*;\nfn main() {}\n";
+    silent("unused-import", src);
+}
+
 #[test]
 fn unnecessary_heap_silent_on_string_literal_match() {
     let src = "fn main() { let s = \"Heap(5)\"; let _ = s; }\n";
