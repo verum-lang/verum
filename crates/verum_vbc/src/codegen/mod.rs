@@ -8663,6 +8663,10 @@ impl VbcCodegen {
                     protocols: smallvec::SmallVec::new(),
                     visibility: crate::types::Visibility::Public,
                     alias_target: Some(target_ref),
+                    // Aliases are name-only redirects; representation
+                    // is decided by the alias *target* type's
+                    // descriptor, not by the alias itself.
+                    is_transparent_wrapper: false,
                 };
                 self.push_type_dedupe(type_desc);
             }
@@ -8675,6 +8679,33 @@ impl VbcCodegen {
                 self.ctx
                     .newtype_inner_type
                     .insert(type_name.clone(), inner_name);
+
+                // Allocate / reuse a TypeId so the descriptor below
+                // and any later cross-module reference share the same
+                // identity.  Same pattern as the Record / Sum arms.
+                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
+                    existing
+                } else {
+                    let tid = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(type_name.clone(), tid);
+                    tid
+                };
+
+                // Canonical (serialisable) marker on the type
+                // descriptor: this type IS a transparent wrapper.
+                // Mirrors `newtype_names` so archive-loaded types
+                // recover their representation policy after a
+                // round-trip without rebuilding the codegen-local
+                // HashSet from source.  See `TypeDescriptor::is_transparent_wrapper`.
+                let mut type_desc = TypeDescriptor {
+                    id: type_id,
+                    name: StringId(self.ctx.intern_string_raw(&type_name)),
+                    kind: crate::types::TypeKind::Record,
+                    is_transparent_wrapper: true,
+                    ..Default::default()
+                };
+                type_desc.size = 8; // single inner value (one Value-slot)
+                self.push_type_dedupe(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -8704,13 +8735,36 @@ impl VbcCodegen {
             TypeDeclBody::Tuple(types) => {
                 // Single-element tuple types like `type FileDesc is (Int)` are newtypes.
                 // The value IS the single wrapped field — no heap allocation.
-                if types.len() == 1 {
+                let is_transparent = types.len() == 1;
+                if is_transparent {
                     self.ctx.newtype_names.insert(type_name.clone());
                     let inner_name = self.type_to_simple_name(&types[0]);
                     self.ctx
                         .newtype_inner_type
                         .insert(type_name.clone(), inner_name);
                 }
+
+                // Allocate / reuse a TypeId — same pattern as the Record arm.
+                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
+                    existing
+                } else {
+                    let tid = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(type_name.clone(), tid);
+                    tid
+                };
+
+                // Canonical descriptor — flips the transparent flag for
+                // single-element tuples; multi-element tuples remain
+                // boxed records (one slot per element).
+                let mut type_desc = TypeDescriptor {
+                    id: type_id,
+                    name: StringId(self.ctx.intern_string_raw(&type_name)),
+                    kind: crate::types::TypeKind::Record,
+                    is_transparent_wrapper: is_transparent,
+                    ..Default::default()
+                };
+                type_desc.size = (types.len() as u32) * 8;
+                self.push_type_dedupe(type_desc);
 
                 let id = FunctionId(u32::MAX / 2);
 
@@ -8881,6 +8935,27 @@ impl VbcCodegen {
                 if !inner.is_empty() {
                     self.ctx.newtype_inner_type.insert(type_name.clone(), inner);
                 }
+
+                // Canonical descriptor — quotient types lower to the
+                // carrier at runtime, same transparent-wrapper policy
+                // as Newtype/single-element-Tuple.  See
+                // `TypeDescriptor::is_transparent_wrapper`.
+                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
+                    existing
+                } else {
+                    let tid = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(type_name.clone(), tid);
+                    tid
+                };
+                let mut type_desc = TypeDescriptor {
+                    id: type_id,
+                    name: StringId(self.ctx.intern_string_raw(&type_name)),
+                    kind: crate::types::TypeKind::Record,
+                    is_transparent_wrapper: true,
+                    ..Default::default()
+                };
+                type_desc.size = 8;
+                self.push_type_dedupe(type_desc);
             }
         }
         Ok(())
@@ -12167,7 +12242,19 @@ impl VbcCodegen {
             protocols: ty.protocols.clone(),
             visibility: ty.visibility,
             alias_target: ty.alias_target.clone(),
+            is_transparent_wrapper: ty.is_transparent_wrapper,
         };
+
+        // Restore the codegen-local newtype fast-cache from the
+        // canonical descriptor flag.  Without this, archive-loaded
+        // newtypes (`type Meters is (Float)` from stdlib) would
+        // surface as opaque records at runtime — `m.0` would emit
+        // `GetF(0)` on a value that was never boxed, producing
+        // garbage.  See `TypeDescriptor::is_transparent_wrapper`.
+        if imported.is_transparent_wrapper {
+            self.ctx.newtype_names.insert(name_str.clone());
+        }
+
         self.push_type_dedupe(imported);
     }
 

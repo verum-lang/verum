@@ -965,6 +965,14 @@ impl<'a> BytecodeSpecializer<'a> {
             protocols: base_desc.map(|d| d.protocols.clone()).unwrap_or_default(),
             visibility: base_desc.map(|d| d.visibility).unwrap_or_default(),
             alias_target: base_desc.and_then(|d| d.alias_target.clone()),
+            // Specialised types inherit the wrapper policy of the base.
+            // `List<Int>` mono'd from `List<T>` stays a record;
+            // `Meters<Int>` (hypothetical) from a transparent base
+            // stays transparent.  See
+            // `TypeDescriptor::is_transparent_wrapper`.
+            is_transparent_wrapper: base_desc
+                .map(|d| d.is_transparent_wrapper)
+                .unwrap_or(false),
         };
 
         // Update layout cache

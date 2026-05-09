@@ -707,6 +707,32 @@ pub struct TypeDescriptor {
     /// concrete args at the use site.
     #[serde(default)]
     pub alias_target: Option<TypeRef>,
+    /// Single canonical flag: is this type a transparent wrapper
+    /// whose values are represented at runtime as the inner value
+    /// (no heap allocation, no field offsets, no type-tag preserved)?
+    ///
+    /// True only for the *newtype* family — declared via either of:
+    ///
+    ///   * `type X is T;`        — newtype-record syntax (one inner type)
+    ///   * `type X is (T);`      — single-element tuple syntax
+    ///
+    /// False for *named-field record* types, even single-field ones:
+    ///
+    ///   * `type X is { f: T };` — record syntax (allocates a record
+    ///                             with `f` at slot 0; type identity
+    ///                             preserved for method dispatch)
+    ///
+    /// The distinction matters because record types carry method
+    /// tables and field-name addressing — collapsing them to inner
+    /// values loses both. Newtypes are pure compile-time wrappers
+    /// (used for type-safe units / opaque IDs) and explicitly opt
+    /// into representation transparency.
+    ///
+    /// SOURCE OF TRUTH: this field. The codegen-local
+    /// `CodegenContext::newtype_names` HashSet is a redundant fast-
+    /// lookup cache populated from this flag; both must always agree.
+    #[serde(default)]
+    pub is_transparent_wrapper: bool,
 }
 
 impl Default for TypeDescriptor {
@@ -725,6 +751,10 @@ impl Default for TypeDescriptor {
             protocols: SmallVec::new(),
             visibility: Visibility::Public,
             alias_target: None,
+            // Default: NOT a transparent wrapper. Record types and sum
+            // types preserve runtime identity; only `Newtype` / single-
+            // element `Tuple` lowering paths flip this true.
+            is_transparent_wrapper: false,
         }
     }
 }
