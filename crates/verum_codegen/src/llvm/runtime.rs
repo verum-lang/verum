@@ -48,58 +48,58 @@ pub const DEFAULT_LIST_CAPACITY: u64 = 16;
 pub const DEFAULT_MAP_CAPACITY: u64 = 16;
 
 /// Size of a NaN-boxed value in bytes.
-pub const VALUE_SIZE: u64 = 8;
+///
+/// Re-exports the canonical `verum_common::layout::VALUE_SLOT_SIZE`.
+pub const VALUE_SIZE: u64 = verum_common::layout::VALUE_SLOT_SIZE;
 
-/// Size of list object in bytes: 24-byte object header + 3 fields (ptr, len, cap).
-/// Layout: [header(24)][ptr:i64][len:i64][cap:i64] = 48 bytes.
-/// This matches the NewG allocation layout used by compiled list.vr code.
-pub const LIST_OBJECT_SIZE: u64 = 48;
+// All heap-object field offsets and per-collection sizes are sourced
+// from `verum_common::layout` — the single source of truth shared with
+// the Tier-0 interpreter (`verum_vbc::interpreter::heap`) and the
+// Verum stdlib. Drift between codegen IR and the interpreter is
+// structurally impossible; the runtime drift contract is pinned by
+// `verum_vbc::interpreter::heap::tests::header_struct_size_matches_canonical`.
 
-/// Byte offsets from list object start to each field (NewG layout).
-/// Field order matches list.vr: { ptr, len, cap }
-pub const LIST_PTR_OFFSET: u64 = 24; // OBJECT_HEADER_SIZE + 0*8
-pub const LIST_LEN_OFFSET: u64 = 32; // OBJECT_HEADER_SIZE + 1*8
-pub const LIST_CAP_OFFSET: u64 = 40; // OBJECT_HEADER_SIZE + 2*8
+/// Total `List<T>` object size: header + 3 slot widths.
+pub const LIST_OBJECT_SIZE: u64 = verum_common::layout::LIST_OBJECT_SIZE;
 
-/// Size of Text object in bytes: {ptr, len, cap} = 24 bytes.
-/// Layout: [ptr:i64][len:i64][cap:i64]
-/// cap == 0 indicates a static/immutable string literal (do not free).
-pub const TEXT_OBJECT_SIZE: u64 = 24;
+/// `List<T>` field byte offsets (NewG layout, declared order: `ptr / len / cap`).
+pub const LIST_PTR_OFFSET: u64 = verum_common::layout::LIST_PTR_OFFSET;
+pub const LIST_LEN_OFFSET: u64 = verum_common::layout::LIST_LEN_OFFSET;
+pub const LIST_CAP_OFFSET: u64 = verum_common::layout::LIST_CAP_OFFSET;
 
-/// Byte offsets from Text object start to each field.
+/// Size of a `Text` value layout (`{ ptr, len, cap }`) in bytes.
+/// `cap == 0` indicates a static/immutable string literal (do not free).
+pub const TEXT_OBJECT_SIZE: u64 = verum_common::layout::TEXT_SIZE;
+
+/// Byte offsets from Text object start to each field. Text is a value
+/// type with no leading object header — the three fields begin at 0.
 pub const TEXT_PTR_OFFSET: u64 = 0;
-pub const TEXT_LEN_OFFSET: u64 = 8;
-pub const TEXT_CAP_OFFSET: u64 = 16;
+pub const TEXT_LEN_OFFSET: u64 = verum_common::layout::POINTER_SIZE;
+pub const TEXT_CAP_OFFSET: u64 = 2 * verum_common::layout::POINTER_SIZE;
 
-/// Size of map object in bytes: 24-byte object header + 3 fields (entries, len, cap).
-/// Layout: [header(24)][entries_ptr:i64][len:i64][cap:i64] = 48 bytes minimum.
-/// This matches the NewG allocation layout used by compiled map.vr code.
-/// Note: compiled map.vr has 4 fields (entries, len, cap, tombstones) = 56 bytes,
-/// but C runtime fallback only uses 3 fields = 48 bytes.
-pub const MAP_HEADER_SIZE: u64 = 48;
+/// `Map<K, V>` C-runtime header size: header + 3 slots = 48 bytes.
+/// (The compiled map.vr carries an extra `tombstones` field but the
+/// shared C runtime uses the 3-field projection.)
+pub const MAP_HEADER_SIZE: u64 = verum_common::layout::MAP_HEADER_SIZE;
 
-/// Byte offsets from map object start to each field (NewG layout).
-/// Field order matches map.vr: { entries, len, cap, tombstones }
-pub const MAP_ENTRIES_OFFSET: u64 = 24; // OBJECT_HEADER_SIZE + 0*8
-pub const MAP_LEN_OFFSET: u64 = 32; // OBJECT_HEADER_SIZE + 1*8
-pub const MAP_CAP_OFFSET: u64 = 40; // OBJECT_HEADER_SIZE + 2*8
+/// `Map<K, V>` field byte offsets (NewG layout: `entries / len / cap`).
+pub const MAP_ENTRIES_OFFSET: u64 = verum_common::layout::MAP_ENTRIES_OFFSET;
+pub const MAP_LEN_OFFSET: u64 = verum_common::layout::MAP_LEN_OFFSET;
+pub const MAP_CAP_OFFSET: u64 = verum_common::layout::MAP_CAP_OFFSET;
 
-/// Size of set object in bytes: 24-byte object header + set fields.
-/// Set is backed by Map internally, but C runtime set functions use flat {len, cap, entries}.
-/// With NewG layout: [header(24)][len:i64][cap:i64][entries_ptr:i64] = 48 bytes.
-pub const SET_LEN_OFFSET: u64 = 24; // OBJECT_HEADER_SIZE + 0*8
-pub const SET_CAP_OFFSET: u64 = 32; // OBJECT_HEADER_SIZE + 1*8
-pub const SET_ENTRIES_OFFSET: u64 = 40; // OBJECT_HEADER_SIZE + 2*8
+/// `Set<T>` field byte offsets (NewG layout: `len / cap / entries`).
+pub const SET_LEN_OFFSET: u64 = verum_common::layout::SET_LEN_OFFSET;
+pub const SET_CAP_OFFSET: u64 = verum_common::layout::SET_CAP_OFFSET;
+pub const SET_ENTRIES_OFFSET: u64 = verum_common::layout::SET_ENTRIES_OFFSET;
 
-/// Deque object layout: [header(24)][data_ptr:i64][head:i64][len:i64][cap:i64] = 56 bytes.
-/// Field order matches deque.vr: { data, head, len, cap }
-pub const DEQUE_DATA_OFFSET: u64 = 24; // OBJECT_HEADER_SIZE + 0*8
-pub const DEQUE_HEAD_OFFSET: u64 = 32; // OBJECT_HEADER_SIZE + 1*8
-pub const DEQUE_LEN_OFFSET: u64 = 40; // OBJECT_HEADER_SIZE + 2*8
-pub const DEQUE_CAP_OFFSET: u64 = 48; // OBJECT_HEADER_SIZE + 3*8
+/// `Deque<T>` field byte offsets: `data / head / len / cap` (4 slots).
+pub const DEQUE_DATA_OFFSET: u64 = verum_common::layout::DEQUE_DATA_OFFSET;
+pub const DEQUE_HEAD_OFFSET: u64 = verum_common::layout::DEQUE_HEAD_OFFSET;
+pub const DEQUE_LEN_OFFSET: u64 = verum_common::layout::DEQUE_LEN_OFFSET;
+pub const DEQUE_CAP_OFFSET: u64 = verum_common::layout::DEQUE_CAP_OFFSET;
 
 /// Size of map entry in bytes (key + value + hash + state + padding).
-pub const MAP_ENTRY_SIZE: u64 = 32;
+pub const MAP_ENTRY_SIZE: u64 = 4 * verum_common::layout::VALUE_SLOT_SIZE;
 
 /// Runtime lowering helper for collection operations.
 pub struct RuntimeLowering<'ctx> {
@@ -1432,14 +1432,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // Variant Operations
     // =========================================================================
 
-    /// Object header size in bytes (matches interpreter heap.rs).
-    pub const OBJECT_HEADER_SIZE: u64 = 24;
+    /// Object header size in bytes — re-exports the canonical
+    /// `verum_common::layout::OBJECT_HEADER_SIZE` shared with the
+    /// Tier-0 interpreter (`verum_vbc::interpreter::heap`).
+    pub const OBJECT_HEADER_SIZE: u64 = verum_common::layout::OBJECT_HEADER_SIZE;
 
-    /// Variant tag offset (after object header).
-    pub const VARIANT_TAG_OFFSET: u64 = Self::OBJECT_HEADER_SIZE;
+    /// Variant tag offset (immediately after the object header).
+    pub const VARIANT_TAG_OFFSET: u64 = verum_common::layout::VARIANT_TAG_OFFSET;
 
-    /// Variant payload offset (after tag + padding).
-    pub const VARIANT_PAYLOAD_OFFSET: u64 = Self::OBJECT_HEADER_SIZE + 8;
+    /// Variant payload offset (one slot after the tag).
+    pub const VARIANT_PAYLOAD_OFFSET: u64 = verum_common::layout::VARIANT_PAYLOAD_OFFSET;
 
     /// Lower New instruction — allocate a record/object on the heap.
     ///

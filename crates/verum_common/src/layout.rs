@@ -193,6 +193,93 @@ pub const EPOCH_MASK_U32: u32 = (1u32 << EPOCH_BITS) - 1; // 0xFFFF
 pub const ALLOCATION_HEADER_SIZE: u64 = 32;
 
 // ============================================================================
+// Heap object header (Tier-0 interpreter / Tier-1 codegen shared)
+// ============================================================================
+
+/// Size of the per-heap-object header that precedes every Verum
+/// runtime object (List, Map, Set, Deque, Variant, user records).
+///
+/// Layout (`verum_vbc::interpreter::heap::ObjectHeader`,
+/// `#[repr(C)]`):
+/// ```text
+///     type_id:      TypeId u32  @ 0
+///     generation:   u32         @ 4
+///     flags:        ObjectFlags @ 8
+///     refcount:     u16         @ 10  (note: 2-byte field)
+///     size:         u32         @ 12
+///     epoch:        u16         @ 16
+///     capabilities: u16         @ 18
+///     _padding:     u32         @ 20
+/// ```
+/// 24 bytes total, 8-byte aligned. Both the Tier-0 interpreter and
+/// the Tier-1 LLVM codegen MUST use the same value — drift causes
+/// silent miscompilation of every heap-object field access (the
+/// codegen GEPs by `OBJECT_HEADER_SIZE + field_idx * VALUE_SLOT_SIZE`
+/// while the interpreter reads at `OBJECT_HEADER_SIZE + field_idx * 8`).
+///
+/// **Drift contract:** verified at unit-test time via
+/// `verum_vbc::interpreter::heap::tests` — `size_of::<ObjectHeader>()`
+/// MUST equal this constant.
+pub const OBJECT_HEADER_SIZE: u64 = 24;
+
+/// Width of a single object-field slot in bytes.
+///
+/// Verum heap objects pack one NaN-boxed `Value` per field; the
+/// runtime tag bits are fitted into 64-bit words. Codegen emits
+/// `GEP(obj_ptr, OBJECT_HEADER_SIZE + field_idx * VALUE_SLOT_SIZE)`
+/// for every field access, and the interpreter mirrors the same
+/// stride.
+pub const VALUE_SLOT_SIZE: u64 = 8;
+
+/// Compute the byte offset of the *N*-th data field within a heap
+/// object, accounting for the leading object header.
+///
+/// `object_field_offset(N) == OBJECT_HEADER_SIZE + N * VALUE_SLOT_SIZE`.
+/// Use this in codegen GEPs and runtime field access in lieu of
+/// hand-computed magic numbers.
+pub const fn object_field_offset(field_index: u64) -> u64 {
+    OBJECT_HEADER_SIZE + field_index * VALUE_SLOT_SIZE
+}
+
+// ----------------------------------------------------------------------------
+// Canonical heap-object field offsets — derived from the per-collection
+// declared field order so codegen and runtime cannot disagree on layout.
+// ----------------------------------------------------------------------------
+
+/// `List<T>` field layout: `{ ptr, len, cap }`.
+pub const LIST_PTR_OFFSET: u64 = object_field_offset(0); // 24
+pub const LIST_LEN_OFFSET: u64 = object_field_offset(1); // 32
+pub const LIST_CAP_OFFSET: u64 = object_field_offset(2); // 40
+/// Total `List<T>` object size: header + 3 fields = 48 bytes.
+pub const LIST_OBJECT_SIZE: u64 = OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE;
+
+/// `Map<K, V>` field layout (C-runtime view): `{ entries, len, cap }`.
+/// (The compiled `map.vr` carries an extra `tombstones` field but the
+/// shared C runtime uses the 3-field projection.)
+pub const MAP_ENTRIES_OFFSET: u64 = object_field_offset(0); // 24
+pub const MAP_LEN_OFFSET: u64 = object_field_offset(1); // 32
+pub const MAP_CAP_OFFSET: u64 = object_field_offset(2); // 40
+/// Total `Map<K, V>` C-runtime object size: header + 3 fields = 48 bytes.
+pub const MAP_HEADER_SIZE: u64 = OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE;
+
+/// `Set<T>` field layout: `{ len, cap, entries }`.
+pub const SET_LEN_OFFSET: u64 = object_field_offset(0); // 24
+pub const SET_CAP_OFFSET: u64 = object_field_offset(1); // 32
+pub const SET_ENTRIES_OFFSET: u64 = object_field_offset(2); // 40
+
+/// `Deque<T>` field layout: `{ data, head, len, cap }`.
+pub const DEQUE_DATA_OFFSET: u64 = object_field_offset(0); // 24
+pub const DEQUE_HEAD_OFFSET: u64 = object_field_offset(1); // 32
+pub const DEQUE_LEN_OFFSET: u64 = object_field_offset(2); // 40
+pub const DEQUE_CAP_OFFSET: u64 = object_field_offset(3); // 48
+
+/// Variant tag offset (single 8-byte slot immediately after the header).
+pub const VARIANT_TAG_OFFSET: u64 = OBJECT_HEADER_SIZE; // 24
+
+/// Variant payload offset (one slot after the tag).
+pub const VARIANT_PAYLOAD_OFFSET: u64 = OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE; // 32
+
+// ============================================================================
 // Built-in scalar layouts
 // ============================================================================
 
@@ -332,6 +419,51 @@ mod tests {
         assert_eq!(FAT_REF_RESERVED_OFFSET, 28);
         // Last extra field fits exactly into FAT_REF_SIZE.
         assert_eq!(FAT_REF_RESERVED_OFFSET + 4, FAT_REF_SIZE);
+    }
+
+    /// Heap-object layout constants are derived from `OBJECT_HEADER_SIZE`
+    /// and `VALUE_SLOT_SIZE`. A change in either must propagate to every
+    /// per-collection offset; the per-collection offsets must remain
+    /// monotonic and match `object_field_offset(idx)` arithmetic.
+    #[test]
+    fn heap_object_layout_pinned() {
+        // Header sized 24 bytes (matches verum_vbc::interpreter::heap::ObjectHeader).
+        assert_eq!(OBJECT_HEADER_SIZE, 24);
+        assert_eq!(VALUE_SLOT_SIZE, POINTER_SIZE, "slot is one machine word");
+
+        // object_field_offset() arithmetic — pure derivations.
+        assert_eq!(object_field_offset(0), OBJECT_HEADER_SIZE);
+        assert_eq!(object_field_offset(1), OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE);
+        assert_eq!(object_field_offset(2), OBJECT_HEADER_SIZE + 2 * VALUE_SLOT_SIZE);
+
+        // List<T> { ptr, len, cap }: declared order matches index 0/1/2.
+        assert_eq!(LIST_PTR_OFFSET, object_field_offset(0));
+        assert_eq!(LIST_LEN_OFFSET, object_field_offset(1));
+        assert_eq!(LIST_CAP_OFFSET, object_field_offset(2));
+        // Object size = header + 3 slot widths.
+        assert_eq!(LIST_OBJECT_SIZE, OBJECT_HEADER_SIZE + 3 * VALUE_SLOT_SIZE);
+        assert_eq!(LIST_OBJECT_SIZE, 48);
+
+        // Map<K, V> uses the same 3-slot projection.
+        assert_eq!(MAP_ENTRIES_OFFSET, LIST_PTR_OFFSET);
+        assert_eq!(MAP_LEN_OFFSET, LIST_LEN_OFFSET);
+        assert_eq!(MAP_CAP_OFFSET, LIST_CAP_OFFSET);
+        assert_eq!(MAP_HEADER_SIZE, LIST_OBJECT_SIZE);
+
+        // Set<T>: same 3-slot stride, different field semantics.
+        assert_eq!(SET_LEN_OFFSET, object_field_offset(0));
+        assert_eq!(SET_CAP_OFFSET, object_field_offset(1));
+        assert_eq!(SET_ENTRIES_OFFSET, object_field_offset(2));
+
+        // Deque<T>: 4 slots.
+        assert_eq!(DEQUE_DATA_OFFSET, object_field_offset(0));
+        assert_eq!(DEQUE_HEAD_OFFSET, object_field_offset(1));
+        assert_eq!(DEQUE_LEN_OFFSET, object_field_offset(2));
+        assert_eq!(DEQUE_CAP_OFFSET, object_field_offset(3));
+
+        // Variants — tag in slot 0, payload in slot 1.
+        assert_eq!(VARIANT_TAG_OFFSET, OBJECT_HEADER_SIZE);
+        assert_eq!(VARIANT_PAYLOAD_OFFSET, OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE);
     }
 
     /// Bit-packing constants stay self-consistent: caps + epoch widths
