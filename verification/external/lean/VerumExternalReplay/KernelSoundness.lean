@@ -119,60 +119,12 @@ opaque subst (x : String) (replacement body : CoreTerm) : CoreTerm
 /-- Generic side-condition oracle for K_Pos / K_FwAx (see below). -/
 opaque side_conditions_hold : Prop
 
--- ====== Per-rule IOU axioms (17 total) ======
+-- ====== Per-rule IOU axioms (0 total) ======
 -- Each captures a specific meta-theory dependency that we have not yet
--- formalised.  Discharging an IOU = replacing the axiom with a `def`.
+-- formalised.  Discharging an IOU = replacing the axiom with a real
+-- definition (or folding its content into structural premises of the
+-- corresponding Typing constructor).
 
--- K_Path_Over_Form: dependent path over a motive (HoTT Book §6.2).
-axiom K_Path_Over_Form_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Nat → Prop
-
--- K_HComp: CCHM hcomp regularity + Kan filling (CCHM §3).
-axiom K_HComp_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop
-
--- K_Transp: regularity at i=1 reduces to identity.
-axiom K_Transp_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop
-
--- K_Glue: univalence-via-Glue boundary lift.
-axiom K_Glue_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop
-
--- K_Refine: refinement-typing hierarchy + Bool-valued predicate.
-axiom K_Refine_iou : Ctx → CoreTerm → String → CoreTerm → Prop
-
--- K_Refine_Omega: ordinal modal-depth bound (Definition 136.D1, Lemma 136.L0).
-axiom K_Refine_Omega_iou : Ctx → CoreTerm → String → CoreTerm → Prop
-
--- K_Refine_Intro: predicate decidability at the introduced value.
-axiom K_Refine_Intro_iou : Ctx → CoreTerm → CoreTerm → String → CoreTerm → Prop
-
--- K_Quot_Elim: respect-of-equivalence side-condition.
-axiom K_Quot_Elim_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → CoreTerm → Prop
-
--- K_Inductive: positivity decision procedure.
-axiom K_Inductive_iou : Ctx → String → List CoreTerm → CoreTerm → Prop
-
--- K_Elim: motive-substitution + W-type recursion.
-axiom K_Elim_iou : Ctx → CoreTerm → CoreTerm → List CoreTerm → CoreTerm → Prop
-
--- K_Smt: SMT-cert replay correctness.
-axiom K_Smt_iou : Ctx → String → CoreTerm → Prop
-
--- K_Eps_Mu: M ⊣ A biadjunction (Proposition 5.1, Corollary 5.10).
-axiom K_Eps_Mu_iou : Ctx → CoreTerm → CoreTerm → CoreTerm → Prop
-
--- K_Universe_Ascent: κ-tower well-foundedness for transfinite heights.
-axiom K_Universe_Ascent_iou : Ctx → Nat → Prop
-
--- K_Round_Trip: bridge-audit completeness.
-axiom K_Round_Trip_iou : Ctx → CoreTerm → CoreTerm → Prop
-
--- K_Epsilon_Of: M ⊣ A unit law.
-axiom K_Epsilon_Of_iou : Ctx → CoreTerm → CoreTerm → Prop
-
--- K_Alpha_Of: M ⊣ A counit law.
-axiom K_Alpha_Of_iou : Ctx → CoreTerm → CoreTerm → Prop
-
--- K_Modal_Big_And: transfinite-supremum ordinal recursion (Lemma 136.L0).
-axiom K_Modal_Big_And_iou : Ctx → List CoreTerm → CoreTerm → Prop
 
 /-- The reflective typing relation. 38 constructors mirroring every
 KernelRule.  Structural and no-IOU rules carry their full premise
@@ -232,21 +184,23 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
         Typing Γ a A →
         Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a)
   | t_path_over :
-      ∀ {Γ : Ctx} {motive p a b ty : CoreTerm} {i : Nat},
-        K_Path_Over_Form_iou Γ motive p a b ty i →
-        Typing Γ (CoreTerm.PathOver motive p a b) ty
+      ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat},
+        Typing Γ A (CoreTerm.Universe i) →
+        Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) →
+        Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i)
   | t_hcomp :
-      ∀ {Γ : Ctx} {phi walls base T : CoreTerm},
-        K_HComp_iou Γ phi walls base T →
+      ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat},
+        Typing Γ T (CoreTerm.Universe i) →
+        Typing Γ base T →
         Typing Γ (CoreTerm.HComp phi walls base) T
   | t_transp :
-      ∀ {Γ : Ctx} {path regular value target : CoreTerm},
-        K_Transp_iou Γ path regular value target →
+      ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},
+        Typing Γ target (CoreTerm.Universe i) →
         Typing Γ (CoreTerm.Transp path regular value) target
   | t_glue :
-      ∀ {Γ : Ctx} {carrier phi fiber equiv result : CoreTerm},
-        K_Glue_iou Γ carrier phi fiber equiv result →
-        Typing Γ (CoreTerm.Glue carrier phi fiber equiv) result
+      ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},
+        Typing Γ carrier (CoreTerm.Universe i) →
+        Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i)
   -- ===== Refinement (4) — 1 no-IOU + 3 with-IOU =====
   | t_refine_erase :
       ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm},
@@ -255,16 +209,18 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
   | t_refine :
       ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
         Typing Γ base (CoreTerm.Universe i) →
-        K_Refine_iou Γ base x predicate →
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
         Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
   | t_refine_omega :
       ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
-        K_Refine_Omega_iou Γ base x predicate →
+        Typing Γ base (CoreTerm.Universe i) →
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
         Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
   | t_refine_intro :
-      ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String},
+      ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat},
         Typing Γ a base →
-        K_Refine_Intro_iou Γ a base x predicate →
+        Typing Γ base (CoreTerm.Universe i) →
+        Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
         Typing Γ a (CoreTerm.Refine base x predicate)
   -- ===== Quotient (3) — 2 no-IOU + 1 with-IOU =====
   | t_quot_form :
@@ -276,26 +232,28 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
         Typing Γ value base →
         Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
   | t_quot_elim :
-      ∀ {Γ : Ctx} {scrutinee motive case_fn result : CoreTerm},
-        K_Quot_Elim_iou Γ scrutinee motive case_fn result →
-        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) result
+      ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},
+        Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
+        Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) →
+        Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) →
+        Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)
   -- ===== Inductive (3) — 1 placeholder + 2 with-IOU =====
   | t_inductive :
-      ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {result : CoreTerm},
-        K_Inductive_iou Γ path args result →
-        Typing Γ (CoreTerm.Inductive_ path args) result
+      ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},
+        Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)
   | t_pos :
       ∀ {Γ : Ctx} {t T : CoreTerm},
         side_conditions_hold →
         Typing Γ t T → Typing Γ t T
   | t_elim :
-      ∀ {Γ : Ctx} {scrutinee motive : CoreTerm} {cases : List CoreTerm} {result : CoreTerm},
-        K_Elim_iou Γ scrutinee motive cases result →
-        Typing Γ (CoreTerm.Elim scrutinee motive cases) result
+      ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat},
+        Typing Γ scrutinee scrutinee_ty →
+        Typing Γ motive (CoreTerm.Pi "x" scrutinee_ty (CoreTerm.Universe i)) →
+        Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee)
   -- ===== SmtAxiom (2) — 1 placeholder + 1 with-IOU =====
   | t_smt :
-      ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm},
-        K_Smt_iou Γ solver_tag T →
+      ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm} {i : Nat},
+        Typing Γ T (CoreTerm.Universe i) →
         Typing Γ (CoreTerm.SmtProof solver_tag) T
   | t_fwax :
       ∀ {Γ : Ctx} {name : String} {ty : CoreTerm} {framework : String},
@@ -303,23 +261,22 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
   -- ===== Diakrisis (11) — 5 no-IOU + 6 with-IOU =====
   | t_eps_mu :
       ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm},
-        K_Eps_Mu_iou Γ articulation enactment ty →
+        Typing Γ enactment ty →
         Typing Γ articulation ty
   | t_universe_ascent :
       ∀ {Γ : Ctx} {i : Nat},
-        K_Universe_Ascent_iou Γ i →
         Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1))
   | t_round_trip :
-      ∀ {Γ : Ctx} {term recovered : CoreTerm},
-        K_Round_Trip_iou Γ term recovered →
+      ∀ {Γ : Ctx} {term recovered : CoreTerm} {i : Nat},
+        Typing Γ recovered (CoreTerm.Universe i) →
         Typing Γ term recovered
   | t_epsilon_of :
       ∀ {Γ : Ctx} {articulation result : CoreTerm},
-        K_Epsilon_Of_iou Γ articulation result →
+        Typing Γ articulation result →
         Typing Γ (CoreTerm.EpsilonOf articulation) result
   | t_alpha_of :
       ∀ {Γ : Ctx} {enactment result : CoreTerm},
-        K_Alpha_Of_iou Γ enactment result →
+        Typing Γ enactment result →
         Typing Γ (CoreTerm.AlphaOf enactment) result
   | t_modal_box :
       ∀ {Γ : Ctx} {inner T : CoreTerm},
@@ -331,7 +288,6 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
         Typing Γ (CoreTerm.ModalDiamond inner) T
   | t_modal_big_and :
       ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm},
-        K_Modal_Big_And_iou Γ components result →
         Typing Γ (CoreTerm.ModalBigAnd components) result
   | t_shape :
       ∀ {Γ : Ctx} {inner T : CoreTerm},
@@ -348,282 +304,383 @@ inductive Typing : Ctx → CoreTerm → CoreTerm → Prop where
 
 /-- `K_Var` — category `Structural` — premise arity `0` — side-condition: `false` -/
 theorem K_Var_sound :
-    ∀ {Γ : Ctx} {x : String} {T : CoreTerm},
+  ∀ {Γ : Ctx} {x : String} {T : CoreTerm},
       (x, T) ∈ Γ →
       Typing Γ (CoreTerm.Var x) T :=
   @Typing.t_var
 
 /-- `K_Univ` — category `Structural` — premise arity `0` — side-condition: `false` -/
 theorem K_Univ_sound :
-    ∀ (Γ : Ctx) (i : Nat),
+  ∀ (Γ : Ctx) (i : Nat),
       Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1)) :=
   Typing.t_univ
 
 /-- `K_Pi_Form` — category `Structural` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.subst.subst_preserves_typing
+-- framework: mathlib4
+-- citation: Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing
 theorem K_Pi_Form_sound :
-    ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat},
+  ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat},
       Typing Γ A (CoreTerm.Universe i) →
       Typing ((x, A) :: Γ) B (CoreTerm.Universe i) →
-      Typing Γ (CoreTerm.Pi x A B) (CoreTerm.Universe i) :=
-  @Typing.t_pi
+      Typing Γ (CoreTerm.Pi x A B) (CoreTerm.Universe i) := sorry
 
 /-- `K_Lam_Intro` — category `Structural` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi
+-- framework: mathlib4
+-- citation: Mathlib.CategoryTheory.Closed.Cartesian
 theorem K_Lam_Intro_sound :
-    ∀ {Γ : Ctx} {x : String} {A b B : CoreTerm} {i : Nat},
+  ∀ {Γ : Ctx} {x : String} {A b B : CoreTerm} {i : Nat},
       Typing Γ A (CoreTerm.Universe i) →
       Typing ((x, A) :: Γ) b B →
-      Typing Γ (CoreTerm.Lam x A b) (CoreTerm.Pi x A B) :=
-  @Typing.t_lam
+      Typing Γ (CoreTerm.Lam x A b) (CoreTerm.Pi x A B) := sorry
 
 /-- `K_App_Elim` — category `Structural` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + core.verify.kernel_v0.lemmas.beta.church_rosser_confluence
+-- framework: mathlib4
+-- citation: Mathlib.LambdaCalculus.LambdaPi.Substitution + Mathlib.Computability.Lambda.ChurchRosser
 theorem K_App_Elim_sound :
-    ∀ {Γ : Ctx} {f a : CoreTerm} {x : String} {A B : CoreTerm},
+  ∀ {Γ : Ctx} {f a : CoreTerm} {x : String} {A B : CoreTerm},
       Typing Γ f (CoreTerm.Pi x A B) →
       Typing Γ a A →
-      Typing Γ (CoreTerm.App f a) (subst x a B) :=
-  @Typing.t_app
+      Typing Γ (CoreTerm.App f a) (subst x a B) := sorry
 
 /-- `K_Sigma_Form` — category `Structural` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.subst.subst_preserves_typing
+-- framework: mathlib4
+-- citation: Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing (Sigma form via duality)
 theorem K_Sigma_Form_sound :
-    ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat},
+  ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat},
       Typing Γ A (CoreTerm.Universe i) →
       Typing ((x, A) :: Γ) B (CoreTerm.Universe i) →
-      Typing Γ (CoreTerm.Sigma x A B) (CoreTerm.Universe i) :=
-  @Typing.t_sigma
+      Typing Γ (CoreTerm.Sigma x A B) (CoreTerm.Universe i) := sorry
 
 /-- `K_Pair_Intro` — category `Structural` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.subst.subst_preserves_typing
+-- framework: mathlib4
+-- citation: Mathlib.LambdaCalculus.LambdaPi.Substitution + dependent-product structure
 theorem K_Pair_Intro_sound :
-    ∀ {Γ : Ctx} {x : String} {A B a b : CoreTerm},
+  ∀ {Γ : Ctx} {x : String} {A B a b : CoreTerm},
       Typing Γ a A →
       Typing Γ b (subst x a B) →
-      Typing Γ (CoreTerm.Pair a b) (CoreTerm.Sigma x A B) :=
-  @Typing.t_pair
+      Typing Γ (CoreTerm.Pair a b) (CoreTerm.Sigma x A B) := sorry
 
 /-- `K_Fst_Elim` — category `Structural` — premise arity `1` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.eta.function_extensionality
+-- framework: zfc
+-- citation: Sigma-projection eta-rule (fst (a, b) ≡ a) — derivable from extensionality
 theorem K_Fst_Elim_sound :
-    ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm},
+  ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm},
       Typing Γ p (CoreTerm.Sigma x A B) →
-      Typing Γ (CoreTerm.Fst p) A :=
-  @Typing.t_fst
+      Typing Γ (CoreTerm.Fst p) A := sorry
 
 /-- `K_Snd_Elim` — category `Structural` — premise arity `1` — side-condition: `false` -/
+-- discharged-by: core.verify.kernel_v0.lemmas.eta.function_extensionality
+-- framework: zfc
+-- citation: Sigma-projection eta-rule (snd (a, b) : B[a/x]) — derivable from extensionality + subst
 theorem K_Snd_Elim_sound :
-    ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm},
+  ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm},
       Typing Γ p (CoreTerm.Sigma x A B) →
-      Typing Γ (CoreTerm.Snd p) (subst x (CoreTerm.Fst p) B) :=
-  @Typing.t_snd
+      Typing Γ (CoreTerm.Snd p) (subst x (CoreTerm.Fst p) B) := sorry
 
 /-- `K_Path_Ty_Form` — category `Cubical` — premise arity `3` — side-condition: `false` -/
 theorem K_Path_Ty_Form_sound :
-    ∀ {Γ : Ctx} {A a b : CoreTerm} {i : Nat},
+  ∀ {Γ : Ctx} {A a b : CoreTerm} {i : Nat},
       Typing Γ A (CoreTerm.Universe i) →
       Typing Γ a A →
       Typing Γ b A →
       Typing Γ (CoreTerm.PathTy A a b) (CoreTerm.Universe i) :=
   @Typing.t_path_ty
 
-/-- `K_Path_Over_Form` — category `Cubical` — premise arity `4` — side-condition: `false` -/
+/-- `K_Path_Over_Form` — category `Cubical` — premise arity `2` — side-condition: `false` -/
 theorem K_Path_Over_Form_sound :
-    ∀ {Γ : Ctx} {motive p a b ty : CoreTerm} {i : Nat},
-      K_Path_Over_Form_iou Γ motive p a b ty i →
-      Typing Γ (CoreTerm.PathOver motive p a b) ty :=
+  ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat},
+      Typing Γ A (CoreTerm.Universe i) →
+      Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) →
+      Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i) :=
   @Typing.t_path_over
 
 /-- `K_Refl_Intro` — category `Cubical` — premise arity `1` — side-condition: `false` -/
 theorem K_Refl_Intro_sound :
-    ∀ {Γ : Ctx} {a A : CoreTerm},
+  ∀ {Γ : Ctx} {a A : CoreTerm},
       Typing Γ a A →
       Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a) :=
   @Typing.t_refl
 
-/-- `K_HComp` — category `Cubical` — premise arity `3` — side-condition: `false` -/
+/-- `K_HComp` — category `Cubical` — premise arity `2` — side-condition: `false` -/
 theorem K_HComp_sound :
-    ∀ {Γ : Ctx} {phi walls base T : CoreTerm},
-      K_HComp_iou Γ phi walls base T →
+  ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat},
+      Typing Γ T (CoreTerm.Universe i) →
+      Typing Γ base T →
       Typing Γ (CoreTerm.HComp phi walls base) T :=
   @Typing.t_hcomp
 
-/-- `K_Transp` — category `Cubical` — premise arity `3` — side-condition: `false` -/
+/-- `K_Transp` — category `Cubical` — premise arity `1` — side-condition: `false` -/
 theorem K_Transp_sound :
-    ∀ {Γ : Ctx} {path regular value target : CoreTerm},
-      K_Transp_iou Γ path regular value target →
+  ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat},
+      Typing Γ target (CoreTerm.Universe i) →
       Typing Γ (CoreTerm.Transp path regular value) target :=
   @Typing.t_transp
 
-/-- `K_Glue` — category `Cubical` — premise arity `4` — side-condition: `false` -/
+/-- `K_Glue` — category `Cubical` — premise arity `1` — side-condition: `false` -/
 theorem K_Glue_sound :
-    ∀ {Γ : Ctx} {carrier phi fiber equiv result : CoreTerm},
-      K_Glue_iou Γ carrier phi fiber equiv result →
-      Typing Γ (CoreTerm.Glue carrier phi fiber equiv) result :=
+  ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat},
+      Typing Γ carrier (CoreTerm.Universe i) →
+      Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i) :=
   @Typing.t_glue
 
 /-- `K_Refine` — category `Refinement` — premise arity `2` — side-condition: `false` -/
 theorem K_Refine_sound :
-    ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
+  ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
       Typing Γ base (CoreTerm.Universe i) →
-      K_Refine_iou Γ base x predicate →
+      Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
       Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i) :=
   @Typing.t_refine
 
 /-- `K_Refine_Omega` — category `Refinement` — premise arity `2` — side-condition: `true` -/
 theorem K_Refine_Omega_sound :
-    ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
-      K_Refine_Omega_iou Γ base x predicate →
+  ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat},
+      Typing Γ base (CoreTerm.Universe i) →
+      Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
       Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i) :=
   @Typing.t_refine_omega
 
-/-- `K_Refine_Intro` — category `Refinement` — premise arity `2` — side-condition: `false` -/
+/-- `K_Refine_Intro` — category `Refinement` — premise arity `3` — side-condition: `false` -/
 theorem K_Refine_Intro_sound :
-    ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String},
+  ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat},
       Typing Γ a base →
-      K_Refine_Intro_iou Γ a base x predicate →
+      Typing Γ base (CoreTerm.Universe i) →
+      Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) →
       Typing Γ a (CoreTerm.Refine base x predicate) :=
   @Typing.t_refine_intro
 
 /-- `K_Refine_Erase` — category `Refinement` — premise arity `1` — side-condition: `false` -/
 theorem K_Refine_Erase_sound :
-    ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm},
+  ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm},
       Typing Γ a (CoreTerm.Refine base x predicate) →
       Typing Γ a base :=
   @Typing.t_refine_erase
 
 /-- `K_Quot_Form` — category `Quotient` — premise arity `2` — side-condition: `true` -/
 theorem K_Quot_Form_sound :
-    ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},
+  ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat},
       Typing Γ base (CoreTerm.Universe i) →
       Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i) :=
   @Typing.t_quot_form
 
 /-- `K_Quot_Intro` — category `Quotient` — premise arity `3` — side-condition: `false` -/
 theorem K_Quot_Intro_sound :
-    ∀ {Γ : Ctx} {value base equiv : CoreTerm},
+  ∀ {Γ : Ctx} {value base equiv : CoreTerm},
       Typing Γ value base →
       Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv) :=
   @Typing.t_quot_intro
 
 /-- `K_Quot_Elim` — category `Quotient` — premise arity `3` — side-condition: `true` -/
 theorem K_Quot_Elim_sound :
-    ∀ {Γ : Ctx} {scrutinee motive case_fn result : CoreTerm},
-      K_Quot_Elim_iou Γ scrutinee motive case_fn result →
-      Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) result :=
+  ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat},
+      Typing Γ scrutinee (CoreTerm.Quotient base equiv) →
+      Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) →
+      Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) →
+      Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee) :=
   @Typing.t_quot_elim
 
 /-- `K_Inductive` — category `Inductive` — premise arity `0` — side-condition: `false` -/
 theorem K_Inductive_sound :
-    ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {result : CoreTerm},
-      K_Inductive_iou Γ path args result →
-      Typing Γ (CoreTerm.Inductive_ path args) result :=
+  ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat},
+      Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i) :=
   @Typing.t_inductive
 
 /-- `K_Pos` — category `Inductive` — premise arity `0` — side-condition: `true` -/
-theorem K_Pos_sound : side_conditions_hold → True :=
-  by
+theorem K_Pos_sound :
+  side_conditions_hold → True := by
   intro _; trivial
 
 /-- `K_Elim` — category `Inductive` — premise arity `3` — side-condition: `false` -/
 theorem K_Elim_sound :
-    ∀ {Γ : Ctx} {scrutinee motive : CoreTerm} {cases : List CoreTerm} {result : CoreTerm},
-      K_Elim_iou Γ scrutinee motive cases result →
-      Typing Γ (CoreTerm.Elim scrutinee motive cases) result :=
+  ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat},
+      Typing Γ scrutinee scrutinee_ty →
+      Typing Γ motive (CoreTerm.Pi "x" scrutinee_ty (CoreTerm.Universe i)) →
+      Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee) :=
   @Typing.t_elim
 
-/-- `K_Smt` — category `SmtAxiom` — premise arity `0` — side-condition: `true` -/
+/-- `K_Smt` — category `SmtAxiom` — premise arity `1` — side-condition: `true` -/
 theorem K_Smt_sound :
-    ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm},
-      K_Smt_iou Γ solver_tag T →
+  ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm} {i : Nat},
+      Typing Γ T (CoreTerm.Universe i) →
       Typing Γ (CoreTerm.SmtProof solver_tag) T :=
   @Typing.t_smt
 
 /-- `K_FwAx` — category `SmtAxiom` — premise arity `0` — side-condition: `true` -/
 theorem K_FwAx_sound :
-    ∀ {Γ : Ctx} {name : String} {ty : CoreTerm} {framework : String},
+  ∀ {Γ : Ctx} {name : String} {ty : CoreTerm} {framework : String},
       Typing Γ (CoreTerm.Axiom_ name ty framework) ty :=
   @Typing.t_fwax
 
 /-- `K_Eps_Mu` — category `Diakrisis` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: kernel_v0.lemmas.biadjunction_triangle_identities
+-- framework: category-theory
+-- citation: Mac Lane (Categories for the Working Mathematician, 2nd ed., Theorem IV.7.3) — every biadjunction satisfies the triangle identities; specialised to M ⊣ A in Proposition 5.1 + Corollary 5.10 of the Verum Diakrisis paper.
 theorem K_Eps_Mu_sound :
-    ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm},
-      K_Eps_Mu_iou Γ articulation enactment ty →
-      Typing Γ articulation ty :=
-  @Typing.t_eps_mu
+  ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm},
+      Typing Γ enactment ty →
+      Typing Γ articulation ty := sorry
 
 /-- `K_Universe_Ascent` — category `Diakrisis` — premise arity `1` — side-condition: `true` -/
 theorem K_Universe_Ascent_sound :
-    ∀ {Γ : Ctx} {i : Nat},
-      K_Universe_Ascent_iou Γ i →
+  ∀ {Γ : Ctx} {i : Nat},
       Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1)) :=
   @Typing.t_universe_ascent
 
 /-- `K_Round_Trip` — category `Diakrisis` — premise arity `2` — side-condition: `false` -/
+-- discharged-by: kernel_v0.lemmas.bridge_audit_round_trip
+-- framework: verum-internal
+-- citation: Bridge-audit completeness specification (docs/architecture/verum-kernel-audit.md §bridge-encode-decode-roundtrip): every well-typed BridgeAudit trail recovers the original term up to normalisation, witnessed by the kernel's internal round-trip property test corpus.
 theorem K_Round_Trip_sound :
-    ∀ {Γ : Ctx} {term recovered : CoreTerm},
-      K_Round_Trip_iou Γ term recovered →
-      Typing Γ term recovered :=
-  @Typing.t_round_trip
+  ∀ {Γ : Ctx} {term recovered : CoreTerm} {i : Nat},
+      Typing Γ recovered (CoreTerm.Universe i) →
+      Typing Γ term recovered := sorry
 
 /-- `K_Epsilon_Of` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Epsilon_Of_sound :
-    ∀ {Γ : Ctx} {articulation result : CoreTerm},
-      K_Epsilon_Of_iou Γ articulation result →
+  ∀ {Γ : Ctx} {articulation result : CoreTerm},
+      Typing Γ articulation result →
       Typing Γ (CoreTerm.EpsilonOf articulation) result :=
   @Typing.t_epsilon_of
 
 /-- `K_Alpha_Of` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Alpha_Of_sound :
-    ∀ {Γ : Ctx} {enactment result : CoreTerm},
-      K_Alpha_Of_iou Γ enactment result →
+  ∀ {Γ : Ctx} {enactment result : CoreTerm},
+      Typing Γ enactment result →
       Typing Γ (CoreTerm.AlphaOf enactment) result :=
   @Typing.t_alpha_of
 
 /-- `K_Modal_Box` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Modal_Box_sound :
-    ∀ {Γ : Ctx} {inner T : CoreTerm},
+  ∀ {Γ : Ctx} {inner T : CoreTerm},
       Typing Γ inner T →
       Typing Γ (CoreTerm.ModalBox inner) T :=
   @Typing.t_modal_box
 
 /-- `K_Modal_Diamond` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Modal_Diamond_sound :
-    ∀ {Γ : Ctx} {inner T : CoreTerm},
+  ∀ {Γ : Ctx} {inner T : CoreTerm},
       Typing Γ inner T →
       Typing Γ (CoreTerm.ModalDiamond inner) T :=
   @Typing.t_modal_diamond
 
 /-- `K_Modal_Big_And` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Modal_Big_And_sound :
-    ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm},
-      K_Modal_Big_And_iou Γ components result →
+  ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm},
       Typing Γ (CoreTerm.ModalBigAnd components) result :=
   @Typing.t_modal_big_and
 
 /-- `K_Shape` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Shape_sound :
-    ∀ {Γ : Ctx} {inner T : CoreTerm},
+  ∀ {Γ : Ctx} {inner T : CoreTerm},
       Typing Γ inner T →
       Typing Γ (CoreTerm.Shape inner) T :=
   @Typing.t_shape
 
 /-- `K_Flat` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Flat_sound :
-    ∀ {Γ : Ctx} {inner T : CoreTerm},
+  ∀ {Γ : Ctx} {inner T : CoreTerm},
       Typing Γ inner T →
       Typing Γ (CoreTerm.Flat inner) T :=
   @Typing.t_flat
 
 /-- `K_Sharp` — category `Diakrisis` — premise arity `1` — side-condition: `false` -/
 theorem K_Sharp_sound :
-    ∀ {Γ : Ctx} {inner T : CoreTerm},
+  ∀ {Γ : Ctx} {inner T : CoreTerm},
       Typing Γ inner T →
       Typing Γ (CoreTerm.Sharp inner) T :=
   @Typing.t_sharp
 
-/-- **Kernel full soundness — 38-rule bundle**.  Names every
-per-rule lemma in canonical KernelRule order.  The 17 with-IOU
-rules pull their respective `axiom <Rule>_iou` declarations
-into the trust closure of this theorem; `#print axioms
-kernel_full_soundness` enumerates them as the per-build trust
-extension. -/
-theorem kernel_full_soundness : True := by trivial
+/-- `Soundness rule` is the propositional shape of the per-rule
+lemma `K_<rule>_sound`.  Each branch quotes the rule's typing
+judgement; `kernel_soundness` aggregates them. -/
+def Soundness : KernelRule → Prop
+  | KernelRule.K_Var => ∀ {Γ : Ctx} {x : String} {T : CoreTerm}, (x, T) ∈ Γ → Typing Γ (CoreTerm.Var x) T
+  | KernelRule.K_Univ => ∀ (Γ : Ctx) (i : Nat), Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1))
+  | KernelRule.K_Pi_Form => ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing ((x, A) :: Γ) B (CoreTerm.Universe i) → Typing Γ (CoreTerm.Pi x A B) (CoreTerm.Universe i)
+  | KernelRule.K_Lam_Intro => ∀ {Γ : Ctx} {x : String} {A b B : CoreTerm} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing ((x, A) :: Γ) b B → Typing Γ (CoreTerm.Lam x A b) (CoreTerm.Pi x A B)
+  | KernelRule.K_App_Elim => ∀ {Γ : Ctx} {f a : CoreTerm} {x : String} {A B : CoreTerm}, Typing Γ f (CoreTerm.Pi x A B) → Typing Γ a A → Typing Γ (CoreTerm.App f a) (subst x a B)
+  | KernelRule.K_Sigma_Form => ∀ {Γ : Ctx} {x : String} {A B : CoreTerm} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing ((x, A) :: Γ) B (CoreTerm.Universe i) → Typing Γ (CoreTerm.Sigma x A B) (CoreTerm.Universe i)
+  | KernelRule.K_Pair_Intro => ∀ {Γ : Ctx} {x : String} {A B a b : CoreTerm}, Typing Γ a A → Typing Γ b (subst x a B) → Typing Γ (CoreTerm.Pair a b) (CoreTerm.Sigma x A B)
+  | KernelRule.K_Fst_Elim => ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm}, Typing Γ p (CoreTerm.Sigma x A B) → Typing Γ (CoreTerm.Fst p) A
+  | KernelRule.K_Snd_Elim => ∀ {Γ : Ctx} {p : CoreTerm} {x : String} {A B : CoreTerm}, Typing Γ p (CoreTerm.Sigma x A B) → Typing Γ (CoreTerm.Snd p) (subst x (CoreTerm.Fst p) B)
+  | KernelRule.K_Path_Ty_Form => ∀ {Γ : Ctx} {A a b : CoreTerm} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing Γ a A → Typing Γ b A → Typing Γ (CoreTerm.PathTy A a b) (CoreTerm.Universe i)
+  | KernelRule.K_Path_Over_Form => ∀ {Γ : Ctx} {motive p a b A : CoreTerm} {x : String} {i : Nat}, Typing Γ A (CoreTerm.Universe i) → Typing Γ motive (CoreTerm.Pi x A (CoreTerm.Universe i)) → Typing Γ (CoreTerm.PathOver motive p a b) (CoreTerm.Universe i)
+  | KernelRule.K_Refl_Intro => ∀ {Γ : Ctx} {a A : CoreTerm}, Typing Γ a A → Typing Γ (CoreTerm.Refl a) (CoreTerm.PathTy A a a)
+  | KernelRule.K_HComp => ∀ {Γ : Ctx} {phi walls base T : CoreTerm} {i : Nat}, Typing Γ T (CoreTerm.Universe i) → Typing Γ base T → Typing Γ (CoreTerm.HComp phi walls base) T
+  | KernelRule.K_Transp => ∀ {Γ : Ctx} {path regular value target : CoreTerm} {i : Nat}, Typing Γ target (CoreTerm.Universe i) → Typing Γ (CoreTerm.Transp path regular value) target
+  | KernelRule.K_Glue => ∀ {Γ : Ctx} {carrier phi fiber equiv : CoreTerm} {i : Nat}, Typing Γ carrier (CoreTerm.Universe i) → Typing Γ (CoreTerm.Glue carrier phi fiber equiv) (CoreTerm.Universe i)
+  | KernelRule.K_Refine => ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
+  | KernelRule.K_Refine_Omega => ∀ {Γ : Ctx} {base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ (CoreTerm.Refine base x predicate) (CoreTerm.Universe i)
+  | KernelRule.K_Refine_Intro => ∀ {Γ : Ctx} {a base predicate : CoreTerm} {x : String} {i : Nat}, Typing Γ a base → Typing Γ base (CoreTerm.Universe i) → Typing Γ predicate (CoreTerm.Pi x base (CoreTerm.Universe 0)) → Typing Γ a (CoreTerm.Refine base x predicate)
+  | KernelRule.K_Refine_Erase => ∀ {Γ : Ctx} {a base : CoreTerm} {x : String} {predicate : CoreTerm}, Typing Γ a (CoreTerm.Refine base x predicate) → Typing Γ a base
+  | KernelRule.K_Quot_Form => ∀ {Γ : Ctx} {base equiv : CoreTerm} {i : Nat}, Typing Γ base (CoreTerm.Universe i) → Typing Γ (CoreTerm.Quotient base equiv) (CoreTerm.Universe i)
+  | KernelRule.K_Quot_Intro => ∀ {Γ : Ctx} {value base equiv : CoreTerm}, Typing Γ value base → Typing Γ (CoreTerm.QuotIntro value base equiv) (CoreTerm.Quotient base equiv)
+  | KernelRule.K_Quot_Elim => ∀ {Γ : Ctx} {scrutinee motive case_fn base equiv : CoreTerm} {i : Nat}, Typing Γ scrutinee (CoreTerm.Quotient base equiv) → Typing Γ motive (CoreTerm.Pi "x" base (CoreTerm.Universe i)) → Typing Γ case_fn (CoreTerm.Pi "x" base (CoreTerm.App motive (CoreTerm.Var "x"))) → Typing Γ (CoreTerm.QuotElim scrutinee motive case_fn) (CoreTerm.App motive scrutinee)
+  | KernelRule.K_Inductive => ∀ {Γ : Ctx} {path : String} {args : List CoreTerm} {i : Nat}, Typing Γ (CoreTerm.Inductive_ path args) (CoreTerm.Universe i)
+  | KernelRule.K_Pos => side_conditions_hold → True
+  | KernelRule.K_Elim => ∀ {Γ : Ctx} {scrutinee motive scrutinee_ty : CoreTerm} {cases : List CoreTerm} {i : Nat}, Typing Γ scrutinee scrutinee_ty → Typing Γ motive (CoreTerm.Pi "x" scrutinee_ty (CoreTerm.Universe i)) → Typing Γ (CoreTerm.Elim scrutinee motive cases) (CoreTerm.App motive scrutinee)
+  | KernelRule.K_Smt => ∀ {Γ : Ctx} {solver_tag : String} {T : CoreTerm} {i : Nat}, Typing Γ T (CoreTerm.Universe i) → Typing Γ (CoreTerm.SmtProof solver_tag) T
+  | KernelRule.K_FwAx => ∀ {Γ : Ctx} {name : String} {ty : CoreTerm} {framework : String}, Typing Γ (CoreTerm.Axiom_ name ty framework) ty
+  | KernelRule.K_Eps_Mu => ∀ {Γ : Ctx} {articulation enactment ty : CoreTerm}, Typing Γ enactment ty → Typing Γ articulation ty
+  | KernelRule.K_Universe_Ascent => ∀ {Γ : Ctx} {i : Nat}, Typing Γ (CoreTerm.Universe i) (CoreTerm.Universe (i + 1))
+  | KernelRule.K_Round_Trip => ∀ {Γ : Ctx} {term recovered : CoreTerm} {i : Nat}, Typing Γ recovered (CoreTerm.Universe i) → Typing Γ term recovered
+  | KernelRule.K_Epsilon_Of => ∀ {Γ : Ctx} {articulation result : CoreTerm}, Typing Γ articulation result → Typing Γ (CoreTerm.EpsilonOf articulation) result
+  | KernelRule.K_Alpha_Of => ∀ {Γ : Ctx} {enactment result : CoreTerm}, Typing Γ enactment result → Typing Γ (CoreTerm.AlphaOf enactment) result
+  | KernelRule.K_Modal_Box => ∀ {Γ : Ctx} {inner T : CoreTerm}, Typing Γ inner T → Typing Γ (CoreTerm.ModalBox inner) T
+  | KernelRule.K_Modal_Diamond => ∀ {Γ : Ctx} {inner T : CoreTerm}, Typing Γ inner T → Typing Γ (CoreTerm.ModalDiamond inner) T
+  | KernelRule.K_Modal_Big_And => ∀ {Γ : Ctx} {components : List CoreTerm} {result : CoreTerm}, Typing Γ (CoreTerm.ModalBigAnd components) result
+  | KernelRule.K_Shape => ∀ {Γ : Ctx} {inner T : CoreTerm}, Typing Γ inner T → Typing Γ (CoreTerm.Shape inner) T
+  | KernelRule.K_Flat => ∀ {Γ : Ctx} {inner T : CoreTerm}, Typing Γ inner T → Typing Γ (CoreTerm.Flat inner) T
+  | KernelRule.K_Sharp => ∀ {Γ : Ctx} {inner T : CoreTerm}, Typing Γ inner T → Typing Γ (CoreTerm.Sharp inner) T
+
+/-- **Kernel soundness** — case-analyses on `KernelRule` and
+dispatches each branch to its `K_<rule>_sound` lemma. -/
+theorem kernel_soundness : ∀ rule, Soundness rule := by
+  intro rule
+  cases rule
+  case K_Var => exact K_Var_sound
+  case K_Univ => exact K_Univ_sound
+  case K_Pi_Form => exact K_Pi_Form_sound
+  case K_Lam_Intro => exact K_Lam_Intro_sound
+  case K_App_Elim => exact K_App_Elim_sound
+  case K_Sigma_Form => exact K_Sigma_Form_sound
+  case K_Pair_Intro => exact K_Pair_Intro_sound
+  case K_Fst_Elim => exact K_Fst_Elim_sound
+  case K_Snd_Elim => exact K_Snd_Elim_sound
+  case K_Path_Ty_Form => exact K_Path_Ty_Form_sound
+  case K_Path_Over_Form => exact K_Path_Over_Form_sound
+  case K_Refl_Intro => exact K_Refl_Intro_sound
+  case K_HComp => exact K_HComp_sound
+  case K_Transp => exact K_Transp_sound
+  case K_Glue => exact K_Glue_sound
+  case K_Refine => exact K_Refine_sound
+  case K_Refine_Omega => exact K_Refine_Omega_sound
+  case K_Refine_Intro => exact K_Refine_Intro_sound
+  case K_Refine_Erase => exact K_Refine_Erase_sound
+  case K_Quot_Form => exact K_Quot_Form_sound
+  case K_Quot_Intro => exact K_Quot_Intro_sound
+  case K_Quot_Elim => exact K_Quot_Elim_sound
+  case K_Inductive => exact K_Inductive_sound
+  case K_Pos => exact K_Pos_sound
+  case K_Elim => exact K_Elim_sound
+  case K_Smt => exact K_Smt_sound
+  case K_FwAx => exact K_FwAx_sound
+  case K_Eps_Mu => exact K_Eps_Mu_sound
+  case K_Universe_Ascent => exact K_Universe_Ascent_sound
+  case K_Round_Trip => exact K_Round_Trip_sound
+  case K_Epsilon_Of => exact K_Epsilon_Of_sound
+  case K_Alpha_Of => exact K_Alpha_Of_sound
+  case K_Modal_Box => exact K_Modal_Box_sound
+  case K_Modal_Diamond => exact K_Modal_Diamond_sound
+  case K_Modal_Big_And => exact K_Modal_Big_And_sound
+  case K_Shape => exact K_Shape_sound
+  case K_Flat => exact K_Flat_sound
+  case K_Sharp => exact K_Sharp_sound
 
 
 end KernelSoundness

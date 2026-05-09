@@ -149,9 +149,18 @@ impl SoundnessBackend for CoqBackend {
         // Fallback for the K_Pos / K_FwAx pair whose content is meta
         // (positivity / framework-axiom admission) is the generic
         // `side_conditions_hold -> True` shape.
+        //
+        // `parts.witness` is `Some(<name>)` only when the proof
+        // block reduces to the single-tactic `Proof. exact <name>.
+        // Qed.` shape; multi-tactic scripts (e.g. `intros; apply
+        // T_quot_elim with (...); assumption.`) yield `None` so
+        // the renderer below dispatches via the rule's recorded
+        // `coq_tactics` rather than wrapping the whole proof block
+        // in `Proof. exact <block>. Qed.` (which produced the
+        // malformed historical output for K_Quot_Elim / K_Elim).
         let (type_body, constructor_witness) =
             match rule_signature_coq(&rule.rule_name).and_then(parse_coq_signature) {
-                Some(parts) => (parts.type_body, Some(parts.witness)),
+                Some(parts) => (parts.type_body, parts.witness),
                 None => ("side_conditions_hold -> True".to_string(), None),
             };
 
@@ -235,13 +244,19 @@ impl SoundnessBackend for CoqBackend {
             "\n(* **Kernel soundness** — case-analyses on `KernelRule` and *)\n\
              (* dispatches each branch to its `K_<rule>_sound` lemma.    *)\n",
         );
+        // Each per-rule branch needs `simpl` BEFORE `apply` so Coq
+        // reduces `Soundness K_<Name>` to the matching `match`-arm
+        // body — without this, `apply (K_<Name>_sound)` fails to
+        // unify against the un-reduced `Soundness K_<Name>` goal
+        // (the historical drift surfaced when the IOU registry
+        // emptied: under `Admitted.` lemmas the issue was masked).
         out.push_str(
             "Theorem kernel_soundness : forall rule : KernelRule, Soundness rule.\n\
              Proof.\n  \
              intro rule. destruct rule.\n",
         );
         for r in rules {
-            out.push_str(&format!("  - apply ({}).\n", r.lemma_name));
+            out.push_str(&format!("  - simpl; apply ({}).\n", r.lemma_name));
         }
         out.push_str("Qed.\n");
 
@@ -471,10 +486,15 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
 /// for each rule with an explicit shape-faithful lemma.  The main-
 /// theorem renderer uses the `<TYPE>` slice to define
 /// `Soundness : KernelRule -> Prop`; the per-rule renderer uses the
-/// `<WITNESS>` slice as the proof body for `Proved` rules.
+/// `<WITNESS>` slice (when present) as the constructor name to
+/// emit `Proof. exact <WITNESS>. Qed.`. When the proof block uses
+/// a multi-tactic script that doesn't reduce to a single
+/// `exact <name>.`, `witness` is `None` and the per-rule renderer
+/// falls back to the full tactic body from the rule's recorded
+/// `coq_tactics`.
 struct CoqSigParts {
     type_body: String,
-    witness: String,
+    witness: Option<String>,
 }
 
 fn parse_coq_signature(sig: String) -> Option<CoqSigParts> {
@@ -490,17 +510,33 @@ fn parse_coq_signature(sig: String) -> Option<CoqSigParts> {
 
 /// Extract the Typing-constructor witness from a Coq proof block.
 ///
-/// Common shape: `Proof. exact T_var. Qed.` → `T_var`.  When the
-/// proof body uses an unrecognised tactic, the entire block is
-/// returned as-is and the per-rule renderer falls back to embedding
-/// the full `coq_tactics` from the rule's `LemmaStatus::Proved`.
-fn extract_coq_witness(proof_block: &str) -> String {
-    if let Some(rest) = proof_block.strip_prefix("Proof. exact ") {
-        if let Some((witness, _)) = rest.split_once('.') {
-            return witness.trim().to_string();
-        }
+/// Recognised single-tactic shape: `Proof. exact <name>. Qed.`
+/// returns `Some("<name>")`. Anything else (multi-tactic scripts
+/// like `Proof. intros; apply T_quot_elim with (...); assumption.
+/// Qed.`) returns `None` so the per-rule renderer emits the full
+/// `coq_tactics` body verbatim instead of mangling it through
+/// `Proof. exact <whole-block>. Qed.` (the historical drift).
+fn extract_coq_witness(proof_block: &str) -> Option<String> {
+    let rest = proof_block.strip_prefix("Proof. exact ")?;
+    let (witness, after) = rest.split_once('.')?;
+    let witness = witness.trim();
+    // Reject multi-token witnesses (would only be valid as a
+    // Gallina expression, not as a constructor name; `Proof.
+    // exact <expr>. Qed.` with non-trivial `<expr>` should still
+    // route through the constructor-witness path only when the
+    // `<expr>` is a single atomic identifier).
+    if witness.is_empty() || witness.contains(|c: char| c.is_whitespace()) {
+        return None;
     }
-    proof_block.to_string()
+    // Also reject anything that has the trailing tactic-script
+    // shape after the first period — `intros; apply X; …` would
+    // have left content after the split that's not just `\n` /
+    // `Qed.` / whitespace.
+    let trailing = after.trim_start();
+    if !trailing.starts_with("Qed.") && !trailing.is_empty() {
+        return None;
+    }
+    Some(witness.to_string())
 }
 
 fn rule_signature_coq(rule_name: &str) -> Option<String> {
