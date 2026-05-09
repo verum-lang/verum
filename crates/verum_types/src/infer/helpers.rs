@@ -16,13 +16,18 @@ use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::well_known_types::WellKnownType as WKT;
 use std::collections::HashSet;
 
-// Size constants (used by calculate_type_size)
+// Size constants (used by calculate_type_size).
+//
+// All scalar / pointer / CBGR-reference sizes flow through the
+// canonical layout module — `verum_common::layout` is the single
+// source of truth and shares the constants with @const evaluation,
+// MIR lowering, and codegen.
 const MAX_STACK_ALLOCATION_BYTES: u64 = 1024 * 1024;
-const SIZE_OF_INT: u64 = 8;
-const SIZE_OF_FLOAT: u64 = 8;
-const SIZE_OF_BOOL: u64 = 1;
-const SIZE_OF_CHAR: u64 = 4;
-const SIZE_OF_POINTER: u64 = 8;
+use verum_common::layout::{
+    BOOL_SIZE as SIZE_OF_BOOL, CHAR_SIZE as SIZE_OF_CHAR, FLOAT_SIZE as SIZE_OF_FLOAT,
+    INT_SIZE as SIZE_OF_INT, POINTER_SIZE as SIZE_OF_POINTER, REF_TIER0_SIZE,
+    REF_TIER2_SIZE, SLICE_FAT_PTR_SIZE, TEXT_SIZE,
+};
 
 /// Helper trait for conditions (used in if/while condition parsing)
 pub(crate) trait ConditionExt {
@@ -882,14 +887,19 @@ impl TypeChecker {
             Type::Char => Some(SIZE_OF_CHAR),
             Type::Unit => Some(0),
             Type::Never => Some(0),
-            Type::Text => Some(SIZE_OF_POINTER * 3), // ptr + len + cap
+            Type::Text => Some(TEXT_SIZE), // ptr + len + cap (canonical layout)
 
-            // References and pointers are pointer-sized
+            // CBGR Tier-0 / Tier-1 references are ThinRef-shaped:
+            // 16 bytes = ptr + generation + epoch_caps. Required for
+            // correct stack-allocation budgets and `@sizeof` answers.
             Type::Reference { .. }
-            | Type::CheckedReference { .. }
-            | Type::UnsafeReference { .. }
+            | Type::CheckedReference { .. } => Some(REF_TIER0_SIZE),
+
+            // Tier-2 (`&unsafe`) and raw pointers strip the CBGR
+            // metadata and lower to a bare 8-byte pointer.
+            Type::UnsafeReference { .. }
             | Type::Pointer { .. }
-            | Type::VolatilePointer { .. } => Some(SIZE_OF_POINTER),
+            | Type::VolatilePointer { .. } => Some(REF_TIER2_SIZE),
 
             // Array with known size: element_size * count
             Type::Array {
@@ -903,8 +913,8 @@ impl TypeChecker {
             // Array without known size - dynamic, can't determine
             Type::Array { size: None, .. } => None,
 
-            // Slice is fat pointer (ptr + len)
-            Type::Slice { .. } => Some(SIZE_OF_POINTER * 2),
+            // Slice is fat pointer (ptr + len) — canonical SLICE_FAT_PTR_SIZE.
+            Type::Slice { .. } => Some(SLICE_FAT_PTR_SIZE),
 
             // Tuple: sum of all element sizes (simplified, ignoring alignment)
             Type::Tuple(elements) => {
