@@ -918,14 +918,22 @@ pub(crate) fn alloc_list_from_values(
 // Deep Value Equality (used by method_dispatch and comparison handlers)
 // ============================================================================
 
-/// Get the length of an array (Value array or List).
+/// Get the length of an array, `LIST<T>`, or `BYTE_LIST` (`List<Byte>`).
+///
+/// The list-like family (`is_list_like`) shares the
+/// `[len, cap, backing_ptr]` 3-Value-header shape; the byte-backed
+/// variant differs only in element stride at the backing array.
+/// Other variant-shaped or tuple-shaped pointer values fall through
+/// to the raw `header.size / sizeof::<Value>()` count.
 pub(crate) fn get_array_length(
     ptr: *const u8,
     header: &super::heap::ObjectHeader,
 ) -> InterpreterResult<usize> {
-    if header.type_id == TypeId::LIST {
-        // SAFETY: List objects have a 3-Value header [len, cap, backing_ptr] after OBJECT_HEADER_SIZE.
-        // The first Value is the length.
+    if header.type_id.is_list_like() {
+        // SAFETY: list-like objects have a 3-Value header [len, cap,
+        // backing_ptr] after OBJECT_HEADER_SIZE. The first Value is
+        // the length, regardless of whether the backing is stride-8
+        // (LIST) or stride-1 (BYTE_LIST).
         let data_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE) as *const Value };
         Ok(unsafe { (*data_ptr).as_i64() } as usize)
     } else {
@@ -933,20 +941,31 @@ pub(crate) fn get_array_length(
     }
 }
 
-/// Get element at index from an array (Value array or List).
+/// Get element at index from an array, `LIST<T>`, or `BYTE_LIST`.
 ///
-
 /// SECURITY: `index * size_of::<Value>()` can overflow `usize` on
 /// huge indices, producing a wrapped offset that would point into
-/// arbitrary memory. Use `checked_mul` and return an overflow
-/// error if the multiplication wraps. This was previously a
-/// silent unsafe-multiply hazard duplicated across handlers; this
-/// canonical implementation absorbs the safer variant.
+/// arbitrary memory. Use `checked_mul` and return an overflow error
+/// if the multiplication wraps. This was previously a silent
+/// unsafe-multiply hazard duplicated across handlers; this canonical
+/// implementation absorbs the safer variant. `BYTE_LIST` reads use
+/// stride 1 (no `checked_mul` needed) so the overflow guard runs
+/// only on the stride-8 paths.
 pub(crate) fn get_array_element(
     ptr: *const u8,
     header: &super::heap::ObjectHeader,
     index: usize,
 ) -> InterpreterResult<Value> {
+    if header.type_id == TypeId::BYTE_LIST {
+        // Packed-byte backing: read 1 byte at index, zero-extend
+        // into a NaN-boxed Value. Stride is 1, so no overflow
+        // multiplication.
+        let data_ptr = unsafe { ptr.add(super::heap::OBJECT_HEADER_SIZE) as *const Value };
+        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+        let elem_ptr = unsafe { backing.add(super::heap::OBJECT_HEADER_SIZE + index) };
+        return Ok(Value::from_i64(unsafe { *elem_ptr } as i64));
+    }
+
     let elem_offset = index.checked_mul(std::mem::size_of::<Value>()).ok_or(
         InterpreterError::IntegerOverflow {
             operation: "array_index_offset",
