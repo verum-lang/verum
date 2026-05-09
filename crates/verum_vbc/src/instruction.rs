@@ -8759,6 +8759,94 @@ pub enum CbgrSubOpcode {
     //               heap-statistics-snapshot).
 }
 
+// =========================================================================
+// CbgrSubOpcode metadata — single source of truth for the 43 variants.
+//
+// The legacy implementation maintained five parallel match-arm
+// methods (`mnemonic`, `category`, `creates_reference`,
+// `modifies_capabilities`, `is_validation`).  `category()` was
+// driven by `match self.to_byte()` over 16-byte windows so
+// renumbering a variant could silently move it between bands.
+//
+// Latent drift defect closed: `creates_reference()` flagged 11
+// of the 14 actual reference-creating variants.  Three were
+// missed:
+//   * `SliceSubslice` — explicitly creates a new `FatRef`
+//     pointing to a subrange of the source.
+//   * `SliceSplitAt` — explicitly returns two new `FatRef`s.
+//   * `FatToThin` — converts a fat reference to a thin
+//     reference (parallel structure with `ThinToFat`, which IS
+//     tagged).
+//
+// Same drift-collapse pattern as MlSubOpcode.meta() (ae5bc5896),
+// ArithSubOpcode (06d64018d), TensorSubOpcode (79369267d),
+// GpuSubOpcode (dd84a929b), SystemSubOpcode (60b4cc3b9),
+// MathSubOpcode (4b2792881), KernelRule (ec9cfc411).
+// =========================================================================
+
+/// Functional band a `CbgrSubOpcode` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CbgrCategory {
+    /// `RefSlice` / `RefInterior` / `RefArrayElement` /
+    /// `SliceGet` / `SliceSubslice` / `SliceSplitAt` etc.
+    SliceInteriorReferences,
+    /// `CapAttenuate` / `CapTransfer` / `CapCheck` / `CapGet` /
+    /// `MakeShared` / `MakeExclusive`.
+    CapabilityOperations,
+    /// `GetGeneration` / `GetEpoch` / `ValidateEpoch` /
+    /// `AdvanceEpoch` / `CurrentEpoch` / `PinToEpoch`.
+    GenerationEpoch,
+    /// `ThinToFat` / `FatToThin` / `ToRawPtr` / `FromRawPtr` /
+    /// `Reborrow`.
+    ReferenceConversion,
+    /// `DebugRef` / `GetTier` / `IsValid` / `RefCount`.
+    DebugIntrospection,
+    /// `NewGeneration` / `Invalidate` / `GetEpochCaps` /
+    /// `Bypass*` / `GetStats`.
+    Management,
+    /// `Alloc` / `AllocZeroed` / `Dealloc` / `SecureZero`.
+    /// Canonical home for the CBGR allocator entries (the
+    /// `SystemSubOpcode::Cbgr*` aliases at 0xA0-0xA3 are
+    /// deprecated bytecode-compat shims per the 2026-05-02
+    /// sub-opcode refactor plan).
+    Allocator,
+}
+
+impl CbgrCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SliceInteriorReferences => "Slice/Interior References",
+            Self::CapabilityOperations    => "Capability Operations",
+            Self::GenerationEpoch         => "Generation/Epoch",
+            Self::ReferenceConversion     => "Reference Conversion",
+            Self::DebugIntrospection      => "Debug/Introspection",
+            Self::Management              => "CBGR Management",
+            Self::Allocator               => "CBGR Allocator",
+        }
+    }
+}
+
+/// Co-located metadata for one `CbgrSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct CbgrOpMeta {
+    /// All-caps mnemonic prefixed with `"CBGR_"`.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: CbgrCategory,
+    /// True if the op produces a new reference value (slice
+    /// constructor, sub-slice, split-at, conversion between
+    /// thin/fat/raw shapes, capability-modified clone).
+    pub creates_reference: bool,
+    /// True if the op produces a reference whose capability set
+    /// differs from the source — `CapAttenuate` / `CapTransfer`
+    /// / `MakeShared` / `MakeExclusive`.
+    pub modifies_capabilities: bool,
+    /// True if the op is a read-only safety predicate
+    /// (`CapCheck` / `ValidateEpoch` / `IsValid`).
+    pub is_validation: bool,
+}
+
 impl CbgrSubOpcode {
     /// Creates a CBGR sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -8824,99 +8912,129 @@ impl CbgrSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this CBGR sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::RefSlice => "CBGR_REF_SLICE",
-            Self::RefInterior => "CBGR_REF_INTERIOR",
-            Self::RefArrayElement => "CBGR_REF_ARRAY_ELEM",
-            Self::RefTrait => "CBGR_REF_TRAIT",
-            Self::Unslice => "CBGR_UNSLICE",
-            Self::SliceLen => "CBGR_SLICE_LEN",
-            Self::SliceGet => "CBGR_SLICE_GET",
-            Self::SliceGetUnchecked => "CBGR_SLICE_GET_UNCHECKED",
-            Self::SliceSubslice => "CBGR_SLICE_SUBSLICE",
-            Self::SliceSplitAt => "CBGR_SLICE_SPLIT_AT",
-            Self::RefSliceRaw => "CBGR_REF_SLICE_RAW",
-            Self::RefListElement => "CBGR_REF_LIST_ELEM",
-            Self::CapAttenuate => "CBGR_CAP_ATTENUATE",
-            Self::CapTransfer => "CBGR_CAP_TRANSFER",
-            Self::CapCheck => "CBGR_CAP_CHECK",
-            Self::CapGet => "CBGR_CAP_GET",
-            Self::MakeShared => "CBGR_MAKE_SHARED",
-            Self::MakeExclusive => "CBGR_MAKE_EXCLUSIVE",
-            Self::GetGeneration => "CBGR_GET_GEN",
-            Self::GetEpoch => "CBGR_GET_EPOCH",
-            Self::ValidateEpoch => "CBGR_VALIDATE_EPOCH",
-            Self::AdvanceEpoch => "CBGR_ADVANCE_EPOCH",
-            Self::CurrentEpoch => "CBGR_CURRENT_EPOCH",
-            Self::PinToEpoch => "CBGR_PIN_EPOCH",
-            Self::ThinToFat => "CBGR_THIN_TO_FAT",
-            Self::FatToThin => "CBGR_FAT_TO_THIN",
-            Self::ToRawPtr => "CBGR_TO_RAW",
-            Self::FromRawPtr => "CBGR_FROM_RAW",
-            Self::Reborrow => "CBGR_REBORROW",
-            Self::DebugRef => "CBGR_DEBUG_REF",
-            Self::GetTier => "CBGR_GET_TIER",
-            Self::IsValid => "CBGR_IS_VALID",
-            Self::RefCount => "CBGR_REF_COUNT",
-            Self::NewGeneration => "CBGR_NEW_GEN",
-            Self::Invalidate => "CBGR_INVALIDATE",
-            Self::GetEpochCaps => "CBGR_GET_EPOCH_CAPS",
-            Self::BypassBegin => "CBGR_BYPASS_BEGIN",
-            Self::BypassEnd => "CBGR_BYPASS_END",
-            Self::GetStats => "CBGR_GET_STATS",
-            // Allocator (0x60-0x6F)
-            Self::Alloc => "CBGR_ALLOC",
-            Self::AllocZeroed => "CBGR_ALLOC_ZEROED",
-            Self::Dealloc => "CBGR_DEALLOC",
-            Self::SecureZero => "CBGR_SECURE_ZERO",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `creates_reference` / `modifies_capabilities` /
+    /// `is_validation`.  Sibling accessors are `#[inline]`
+    /// projections through this method's return value.
+    pub const fn meta(self) -> CbgrOpMeta {
+        use CbgrCategory::{
+            Allocator, CapabilityOperations, DebugIntrospection, GenerationEpoch, Management,
+            ReferenceConversion, SliceInteriorReferences,
+        };
+
+        // Field order: mnemonic, category, creates_ref,
+        // modifies_caps, is_validation.
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             cref=$cref:literal, mcaps=$mcaps:literal, val=$val:literal $(,)?) => {
+                CbgrOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    creates_reference: $cref,
+                    modifies_capabilities: $mcaps,
+                    is_validation: $val,
+                }
+            };
         }
+
+        match self {
+            // ===== Slice/Interior References (0x00-0x0F) =====
+            // creates_reference=true on every reference-producing
+            // variant.  Closes the legacy SliceSubslice /
+            // SliceSplitAt undercount (both explicitly create new
+            // FatRefs per their format docs).
+            Self::RefSlice           => m!("CBGR_REF_SLICE",         SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefInterior        => m!("CBGR_REF_INTERIOR",      SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefArrayElement    => m!("CBGR_REF_ARRAY_ELEM",    SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefTrait           => m!("CBGR_REF_TRAIT",         SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            // Unslice extracts the raw pointer (yields a non-ref
+            // value) — explicitly NOT a reference creator.
+            Self::Unslice            => m!("CBGR_UNSLICE",           SliceInteriorReferences, cref=false, mcaps=false, val=false),
+            Self::SliceLen           => m!("CBGR_SLICE_LEN",         SliceInteriorReferences, cref=false, mcaps=false, val=false),
+            Self::SliceGet           => m!("CBGR_SLICE_GET",         SliceInteriorReferences, cref=false, mcaps=false, val=false),
+            Self::SliceGetUnchecked  => m!("CBGR_SLICE_GET_UNCHECKED", SliceInteriorReferences, cref=false, mcaps=false, val=false),
+            Self::SliceSubslice      => m!("CBGR_SLICE_SUBSLICE",    SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::SliceSplitAt       => m!("CBGR_SLICE_SPLIT_AT",    SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefSliceRaw        => m!("CBGR_REF_SLICE_RAW",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefListElement     => m!("CBGR_REF_LIST_ELEM",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+
+            // ===== Capability Operations (0x10-0x1F) =====
+            Self::CapAttenuate       => m!("CBGR_CAP_ATTENUATE",     CapabilityOperations,    cref=false, mcaps=true,  val=false),
+            Self::CapTransfer        => m!("CBGR_CAP_TRANSFER",      CapabilityOperations,    cref=false, mcaps=true,  val=false),
+            Self::CapCheck           => m!("CBGR_CAP_CHECK",         CapabilityOperations,    cref=false, mcaps=false, val=true),
+            Self::CapGet             => m!("CBGR_CAP_GET",           CapabilityOperations,    cref=false, mcaps=false, val=false),
+            Self::MakeShared         => m!("CBGR_MAKE_SHARED",       CapabilityOperations,    cref=true,  mcaps=true,  val=false),
+            Self::MakeExclusive      => m!("CBGR_MAKE_EXCLUSIVE",    CapabilityOperations,    cref=true,  mcaps=true,  val=false),
+
+            // ===== Generation/Epoch (0x20-0x2F) =====
+            Self::GetGeneration      => m!("CBGR_GET_GEN",           GenerationEpoch,         cref=false, mcaps=false, val=false),
+            Self::GetEpoch           => m!("CBGR_GET_EPOCH",         GenerationEpoch,         cref=false, mcaps=false, val=false),
+            Self::ValidateEpoch      => m!("CBGR_VALIDATE_EPOCH",    GenerationEpoch,         cref=false, mcaps=false, val=true),
+            Self::AdvanceEpoch       => m!("CBGR_ADVANCE_EPOCH",     GenerationEpoch,         cref=false, mcaps=false, val=false),
+            Self::CurrentEpoch       => m!("CBGR_CURRENT_EPOCH",     GenerationEpoch,         cref=false, mcaps=false, val=false),
+            Self::PinToEpoch         => m!("CBGR_PIN_EPOCH",         GenerationEpoch,         cref=false, mcaps=false, val=false),
+
+            // ===== Reference Conversion (0x30-0x3F) =====
+            // FatToThin produces a new thin reference value —
+            // closes the legacy creates_reference undercount.
+            Self::ThinToFat          => m!("CBGR_THIN_TO_FAT",       ReferenceConversion,     cref=true,  mcaps=false, val=false),
+            Self::FatToThin          => m!("CBGR_FAT_TO_THIN",       ReferenceConversion,     cref=true,  mcaps=false, val=false),
+            Self::ToRawPtr           => m!("CBGR_TO_RAW",            ReferenceConversion,     cref=false, mcaps=false, val=false),
+            Self::FromRawPtr         => m!("CBGR_FROM_RAW",          ReferenceConversion,     cref=true,  mcaps=false, val=false),
+            Self::Reborrow           => m!("CBGR_REBORROW",          ReferenceConversion,     cref=true,  mcaps=false, val=false),
+
+            // ===== Debug/Introspection (0x40-0x4F) =====
+            Self::DebugRef           => m!("CBGR_DEBUG_REF",         DebugIntrospection,      cref=false, mcaps=false, val=false),
+            Self::GetTier            => m!("CBGR_GET_TIER",          DebugIntrospection,      cref=false, mcaps=false, val=false),
+            Self::IsValid            => m!("CBGR_IS_VALID",          DebugIntrospection,      cref=false, mcaps=false, val=true),
+            Self::RefCount           => m!("CBGR_REF_COUNT",         DebugIntrospection,      cref=false, mcaps=false, val=false),
+
+            // ===== CBGR Management (0x50-0x5F) =====
+            Self::NewGeneration      => m!("CBGR_NEW_GEN",           Management,              cref=false, mcaps=false, val=false),
+            Self::Invalidate         => m!("CBGR_INVALIDATE",        Management,              cref=false, mcaps=false, val=false),
+            Self::GetEpochCaps       => m!("CBGR_GET_EPOCH_CAPS",    Management,              cref=false, mcaps=false, val=false),
+            Self::BypassBegin        => m!("CBGR_BYPASS_BEGIN",      Management,              cref=false, mcaps=false, val=false),
+            Self::BypassEnd          => m!("CBGR_BYPASS_END",        Management,              cref=false, mcaps=false, val=false),
+            Self::GetStats           => m!("CBGR_GET_STATS",         Management,              cref=false, mcaps=false, val=false),
+
+            // ===== CBGR Allocator (0x60-0x6F) =====
+            Self::Alloc              => m!("CBGR_ALLOC",             Allocator,               cref=false, mcaps=false, val=false),
+            Self::AllocZeroed        => m!("CBGR_ALLOC_ZEROED",      Allocator,               cref=false, mcaps=false, val=false),
+            Self::Dealloc            => m!("CBGR_DEALLOC",           Allocator,               cref=false, mcaps=false, val=false),
+            Self::SecureZero         => m!("CBGR_SECURE_ZERO",       Allocator,               cref=false, mcaps=false, val=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this CBGR sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode range.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "Slice/Interior References",
-            0x10..=0x1F => "Capability Operations",
-            0x20..=0x2F => "Generation/Epoch",
-            0x30..=0x3F => "Reference Conversion",
-            0x40..=0x4F => "Debug/Introspection",
-            0x50..=0x5F => "CBGR Management",
-            0x60..=0x6F => "CBGR Allocator",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this operation creates a new reference.
+    #[inline]
     pub fn creates_reference(self) -> bool {
-        matches!(
-            self,
-            Self::RefSlice
-                | Self::RefSliceRaw
-                | Self::RefInterior
-                | Self::RefArrayElement
-                | Self::RefListElement
-                | Self::RefTrait
-                | Self::ThinToFat
-                | Self::FromRawPtr
-                | Self::Reborrow
-                | Self::MakeShared
-                | Self::MakeExclusive
-        )
+        self.meta().creates_reference
     }
 
     /// Returns true if this operation modifies capabilities.
+    #[inline]
     pub fn modifies_capabilities(self) -> bool {
-        matches!(
-            self,
-            Self::CapAttenuate | Self::CapTransfer | Self::MakeShared | Self::MakeExclusive
-        )
+        self.meta().modifies_capabilities
     }
 
     /// Returns true if this operation is a validation check.
+    #[inline]
     pub fn is_validation(self) -> bool {
-        matches!(self, Self::CapCheck | Self::ValidateEpoch | Self::IsValid)
+        self.meta().is_validation
     }
 }
 
@@ -16478,5 +16596,151 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 62);
+    }
+
+    // ========================================================================
+    // CbgrSubOpcode meta() drift pins
+    //
+    // Latent drift defect closed: `creates_reference()` was 11/14
+    // — missing `SliceSubslice` (creates new FatRef on subrange),
+    // `SliceSplitAt` (returns two FatRefs), and `FatToThin`
+    // (parallel structure with `ThinToFat` which IS tagged).
+    // ========================================================================
+
+    fn for_every_cbgr_sub_opcode<F: FnMut(CbgrSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = CbgrSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "CbgrSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn cbgr_meta_count_pinned_at_forty_three() {
+        let mut count = 0;
+        for_every_cbgr_sub_opcode(|_| count += 1);
+        assert_eq!(count, 43,
+            "CbgrSubOpcode variant count drift: expected 43, got {}", count);
+    }
+
+    #[test]
+    fn cbgr_meta_category_matches_byte_range_band() {
+        for_every_cbgr_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => CbgrCategory::SliceInteriorReferences,
+                0x10..=0x1F => CbgrCategory::CapabilityOperations,
+                0x20..=0x2F => CbgrCategory::GenerationEpoch,
+                0x30..=0x3F => CbgrCategory::ReferenceConversion,
+                0x40..=0x4F => CbgrCategory::DebugIntrospection,
+                0x50..=0x5F => CbgrCategory::Management,
+                0x60..=0x6F => CbgrCategory::Allocator,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn cbgr_meta_creates_reference_set_pinned() {
+        // The set of reference-creating variants — 14 total after
+        // closing the legacy 11/14 undercount.
+        // Pinning the count + named regression assertions guards
+        // against future drift.
+        let mut count = 0;
+        for_every_cbgr_sub_opcode(|op| {
+            if op.creates_reference() { count += 1; }
+        });
+        assert_eq!(count, 14,
+            "creates_reference count drift: expected 14 (was 11 pre-fix)");
+        // Named regression assertions for the closed gaps:
+        assert!(CbgrSubOpcode::SliceSubslice.creates_reference(),
+            "SliceSubslice produces a new FatRef per its format docs");
+        assert!(CbgrSubOpcode::SliceSplitAt.creates_reference(),
+            "SliceSplitAt returns two FatRefs per its format docs");
+        assert!(CbgrSubOpcode::FatToThin.creates_reference(),
+            "FatToThin produces a new thin reference (parallels ThinToFat)");
+        // Negative pins: confirm non-creators stay non-creators.
+        assert!(!CbgrSubOpcode::Unslice.creates_reference(),
+            "Unslice extracts a raw pointer, not a reference");
+        assert!(!CbgrSubOpcode::ToRawPtr.creates_reference(),
+            "ToRawPtr produces a raw pointer, not a reference");
+    }
+
+    #[test]
+    fn cbgr_meta_modifies_capabilities_set_pinned() {
+        // Capability-modifying variants: CapAttenuate /
+        // CapTransfer / MakeShared / MakeExclusive.
+        let mut count = 0;
+        for_every_cbgr_sub_opcode(|op| {
+            if op.modifies_capabilities() { count += 1; }
+        });
+        assert_eq!(count, 4,
+            "modifies_capabilities count drift: expected 4");
+        for op in [
+            CbgrSubOpcode::CapAttenuate,
+            CbgrSubOpcode::CapTransfer,
+            CbgrSubOpcode::MakeShared,
+            CbgrSubOpcode::MakeExclusive,
+        ] {
+            assert!(op.modifies_capabilities(),
+                "{:?} should modify capabilities", op);
+        }
+        // CapCheck and CapGet are read-only — must not be tagged.
+        assert!(!CbgrSubOpcode::CapCheck.modifies_capabilities(),
+            "CapCheck is a read-only predicate");
+        assert!(!CbgrSubOpcode::CapGet.modifies_capabilities(),
+            "CapGet is a read-only accessor");
+    }
+
+    #[test]
+    fn cbgr_meta_is_validation_set_pinned() {
+        // Validation predicates: CapCheck / ValidateEpoch / IsValid.
+        let mut count = 0;
+        for_every_cbgr_sub_opcode(|op| {
+            if op.is_validation() { count += 1; }
+        });
+        assert_eq!(count, 3,
+            "is_validation count drift: expected 3");
+        for op in [
+            CbgrSubOpcode::CapCheck,
+            CbgrSubOpcode::ValidateEpoch,
+            CbgrSubOpcode::IsValid,
+        ] {
+            assert!(op.is_validation(), "{:?} should be a validation op", op);
+        }
+    }
+
+    #[test]
+    fn cbgr_meta_validation_disjoint_from_modify_and_create() {
+        // A validation op is read-only and produces no new
+        // reference: it can't simultaneously be a creator or
+        // capability-modifier.
+        for_every_cbgr_sub_opcode(|op| {
+            if op.is_validation() {
+                assert!(!op.creates_reference(),
+                    "{:?}: validation op cannot create a reference", op);
+                assert!(!op.modifies_capabilities(),
+                    "{:?}: validation op cannot modify capabilities", op);
+            }
+        });
+    }
+
+    #[test]
+    fn cbgr_meta_mnemonic_uniqueness_and_prefix() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(43);
+        for_every_cbgr_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(m.starts_with("CBGR_"),
+                "{:?}: mnemonic {:?} not in `CBGR_*` namespace", op, m);
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 43);
     }
 }
