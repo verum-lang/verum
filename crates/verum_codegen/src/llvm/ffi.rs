@@ -56,7 +56,7 @@ use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::SystemSubOpcode;
 
 use super::context::FunctionContext;
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::types::TypeLowering;
 
 /// LLVM calling convention constants.
@@ -279,7 +279,7 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("memcmp should return i32"))?
+            .or_internal("memcmp should return i32")?
             .into_int_value();
 
         Ok(result)
@@ -306,16 +306,16 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("malloc should return ptr"))?
+            .or_internal("malloc should return ptr")?
             .into_pointer_value();
 
         // Null check: OOM → _exit(1)
         let current_bb = builder
             .get_insert_block()
-            .ok_or_else(|| LlvmLoweringError::internal("lower_malloc: no insert block"))?;
+            .or_internal("lower_malloc: no insert block")?;
         let func = current_bb
             .get_parent()
-            .ok_or_else(|| LlvmLoweringError::internal("lower_malloc: no parent function"))?;
+            .or_internal("lower_malloc: no parent function")?;
         let oom_bb = self.context.append_basic_block(func, "malloc_oom");
         let ok_bb = self.context.append_basic_block(func, "malloc_ok");
         let is_null = builder
@@ -385,7 +385,7 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("realloc should return ptr"))?
+            .or_internal("realloc should return ptr")?
             .into_pointer_value();
 
         Ok(result)
@@ -701,7 +701,7 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("__errno_location should return ptr"))?
+            .or_internal("__errno_location should return ptr")?
             .into_pointer_value();
 
         // Load errno value
@@ -731,7 +731,7 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("__errno_location should return ptr"))?
+            .or_internal("__errno_location should return ptr")?
             .into_pointer_value();
 
         // Store the new value
@@ -958,7 +958,7 @@ impl<'ctx> FfiLowering<'ctx> {
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| LlvmLoweringError::internal("verum_os_alloc returned void".to_string()))?
+            .or_internal("verum_os_alloc returned void")?
             .into_pointer_value();
         builder
             .build_return(Some(&new_ptr))

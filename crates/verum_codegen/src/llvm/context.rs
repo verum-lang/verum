@@ -25,7 +25,7 @@ pub struct ExceptionHandler<'ctx> {
 }
 
 use super::cbgr::CbgrLowering;
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::register_types::{MethodDispatchTable, RegisterType, RegisterTypeMap};
 use super::types::{RefTier, TypeLowering};
 use std::sync::Arc;
@@ -2293,7 +2293,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // Allocate in entry block for proper dominance
         let entry = self
             .entry_block()
-            .ok_or_else(|| LlvmLoweringError::internal("No entry block for exception slot"))?;
+            .or_internal("No entry block for exception slot")?;
 
         // Save current position
         let current_block = self.builder.get_insert_block();
