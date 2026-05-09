@@ -93,6 +93,7 @@ mount sys.linux.syscall.{
     AF_INET, AF_INET6, SOCK_STREAM, SOCK_NONBLOCK, SOCK_CLOEXEC,
     SOL_SOCKET, SOL_TCP, SO_ERROR,
     SHUT_RD, SHUT_WR, SHUT_RDWR,
+    MSG_NOSIGNAL, MSG_DONTWAIT,
 };
 
 @cfg(target_os = "windows")
@@ -130,6 +131,7 @@ mount sys.windows.winsock2.{
     AF_INET, AF_INET6, SOCK_STREAM, SOCK_NONBLOCK, SOCK_CLOEXEC,
     SOL_SOCKET, SOL_TCP, SO_ERROR,
     SHUT_RD, SHUT_WR, SHUT_RDWR,
+    MSG_DONTWAIT,
 };
 
 @cfg(target_os = "macos")
@@ -163,6 +165,7 @@ mount sys.darwin.libsystem.{
     AF_INET, AF_INET6, SOCK_STREAM,
     SOL_SOCKET, IPPROTO_TCP, SO_ERROR,
     SHUT_RD, SHUT_WR, SHUT_RDWR,
+    MSG_DONTWAIT,
 };
 
 @cfg(target_os = "macos")
@@ -771,7 +774,6 @@ implement Read for TcpStream {
     fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use recv with MSG_NOSIGNAL to prevent SIGPIPE on closed connection
-            const MSG_NOSIGNAL: Int = 0x4000;
             recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
@@ -785,7 +787,6 @@ implement Write for TcpStream {
     fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows")) {
             // Use send with MSG_NOSIGNAL to prevent SIGPIPE
-            const MSG_NOSIGNAL: Int = 0x4000;
             send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os)
         }
         @cfg(target_os = "macos") {
@@ -827,15 +828,13 @@ implement AsyncRead for TcpStream {
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let result = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            const MSG_DONTWAIT: Int = 0x40;
             recv(self.fd, &mut byte_buf[..read_len], MSG_NOSIGNAL | MSG_DONTWAIT)
         };
 
         @cfg(target_os = "macos")
         let result = {
-            // MSG_DONTWAIT on macOS is 0x80; SO_NOSIGPIPE set at socket creation
-            sys_recv(self.fd, &mut byte_buf[..read_len], 0x80)
+            // MSG_DONTWAIT only — SO_NOSIGPIPE was set at socket creation
+            sys_recv(self.fd, &mut byte_buf[..read_len], MSG_DONTWAIT)
         };
 
         match result {
@@ -867,13 +866,11 @@ implement AsyncWrite for TcpStream {
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let result = {
-            const MSG_NOSIGNAL: Int = 0x4000;
-            const MSG_DONTWAIT: Int = 0x40;
             send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT)
         };
 
         @cfg(target_os = "macos")
-        let result = sys_send(self.fd, &byte_buf[..write_len], 0x80);
+        let result = sys_send(self.fd, &byte_buf[..write_len], MSG_DONTWAIT);
 
         match result {
             Ok(n) => Poll.Ready(Ok(n as Int)),
