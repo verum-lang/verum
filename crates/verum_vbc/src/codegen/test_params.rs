@@ -1891,3 +1891,130 @@ fn main() -> Int { known_good() }
         "known_good must still be in the module"
     );
 }
+
+/// Receiver-shadow safety: `r.stdout()` where `r` is a local variable and
+/// `stdout` is also a free function in scope must dispatch to the METHOD on `r`,
+/// not to the free function. The free function must never appear in `main`'s
+/// bytecode.
+///
+/// Regression pin for the `'static_resolution` gate introduced in commit
+/// 68ef6d25 and extracted into `try_resolve_static_method` in the refactor
+/// that followed. Without the gate, `r.stdout()` was miscompiled as
+/// `stdout()` (the free function), silently dropping the receiver.
+///
+/// Note: the devirtualization path in value dispatch emits `Call` (not `CallM`)
+/// when the receiver type is statically known — that is correct behavior. What
+/// must never happen is a `Call` to the *free* `stdout` function (which would
+/// drop the receiver entirely).
+#[test]
+fn test_receiver_shadow_safety_free_fn_not_called_in_main() {
+    let source = r#"
+type Recorder is { value: Int };
+
+fn stdout() -> Int { 99 }
+
+implement Recorder {
+    fn stdout(&self) -> Int { self.value }
+}
+
+fn main() -> Int {
+    let r = Recorder { value: 42 };
+    r.stdout()
+}
+"#;
+    let mut parser = Parser::new(source);
+    let module = parser.parse_module().expect("Should parse");
+
+    let config = CodegenConfig::new("test_receiver_shadow");
+    let mut codegen = VbcCodegen::with_config(config);
+    let vbc_module = codegen
+        .compile_module(&module)
+        .expect("Compilation must succeed");
+
+    // Locate the FREE `stdout` function (no parent type — it's not a method).
+    let free_stdout_id = vbc_module
+        .functions
+        .iter()
+        .find(|f| {
+            f.parent_type.is_none()
+                && vbc_module
+                    .strings
+                    .get(f.name)
+                    .map(|s| s == "stdout")
+                    .unwrap_or(false)
+        })
+        .map(|f| f.id);
+
+    // Locate the `Recorder.stdout` method (has a parent type).
+    let method_stdout_id = vbc_module
+        .functions
+        .iter()
+        .find(|f| {
+            f.parent_type.is_some()
+                && vbc_module
+                    .strings
+                    .get(f.name)
+                    .map(|s| s == "Recorder.stdout" || s == "stdout")
+                    .unwrap_or(false)
+        })
+        .map(|f| f.id);
+
+    // Decode `main`'s bytecode.
+    let main_desc = vbc_module
+        .functions
+        .iter()
+        .find(|f| {
+            vbc_module
+                .strings
+                .get(f.name)
+                .map(|s| s == "main")
+                .unwrap_or(false)
+        })
+        .expect("main must be present in the module");
+
+    let body_bytes = &vbc_module.bytecode
+        [main_desc.bytecode_offset as usize..][..main_desc.bytecode_length as usize];
+    let instructions =
+        crate::bytecode::decode_instructions(body_bytes).expect("main body must decode cleanly");
+
+    // The free `stdout` function must NOT appear in `main`'s call list.
+    // Before the gate fix, `r.stdout()` was miscompiled to `stdout()` (the
+    // free function), silently dropping `r` as the receiver.
+    if let Some(free_id) = free_stdout_id {
+        let calls_free_fn = instructions.iter().any(|instr| {
+            matches!(instr, crate::Instruction::Call { func_id, .. } if *func_id == free_id.0)
+        });
+        assert!(
+            !calls_free_fn,
+            "r.stdout() must NOT call the free `stdout` fn (id={}); got: {:?}",
+            free_id.0,
+            instructions,
+        );
+    }
+
+    // `main` must call SOMETHING for `r.stdout()` — either the devirt
+    // `Recorder.stdout` method via `Call` (with receiver as first arg) or
+    // a dynamic `CallM` dispatch. At least one call instruction must exist.
+    let has_any_call = instructions.iter().any(|instr| {
+        matches!(instr, crate::Instruction::Call { .. } | crate::Instruction::CallM { .. })
+    });
+    assert!(
+        has_any_call,
+        "main must contain at least one Call/CallM for r.stdout(); got: {:?}",
+        instructions,
+    );
+
+    // Specifically: if devirtualization produced a static Call, it must
+    // point at the METHOD (Recorder.stdout), not the free function.
+    if let (Some(method_id), Some(free_id)) = (method_stdout_id, free_stdout_id) {
+        for instr in &instructions {
+            if let crate::Instruction::Call { func_id, .. } = instr {
+                assert_ne!(
+                    *func_id, free_id.0,
+                    "Call targets the free stdout fn (id={}) instead of the method (id={})",
+                    free_id.0, method_id.0,
+                );
+            }
+        }
+    }
+}
