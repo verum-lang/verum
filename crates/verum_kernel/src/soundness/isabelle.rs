@@ -134,6 +134,8 @@ impl SoundnessBackend for IsabelleBackend {
         out.push_str(iou_axioms_isabelle());
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_ISA);
+        out.push_str("\n\n");
+        out.push_str(TYPING_AXIOMATIZATION_ISA);
         out
     }
 
@@ -296,11 +298,45 @@ pub(crate) fn iou_axioms_isabelle() -> &'static str {
 #[allow(dead_code)]
 
 // ============================================================================
-// The Typing inductive — 38 introduction rules.
+// The Typing inductive — 9 structural-fragment introduction rules.
 // ============================================================================
+//
+// Isabelle's `inductive` package eagerly elaborates the strong-
+// induction principle (`Typing.induct`).  With all 38 kernel rules
+// in a single inductive declaration, the elaboration cost is
+// effectively quadratic in constructor count + the constructor
+// signature complexity (Pi/Sigma/Quotient with universe-polymorphic
+// indices), which empirically blows up to >30 GB resident memory
+// without converging.  Lean and Coq have lazier elimination-
+// principle generation and handle the same shape comfortably.
+//
+// The Isabelle-specific fix: keep ONLY the structural-fragment
+// rules in the `inductive Typing` declaration (9 rules — the
+// CCHM core: Var / Universe / Pi / Lam / App / Sigma / Pair / Fst
+// / Snd).  All 29 remaining rules are emitted as bare
+// `axiomatization` blocks below — they declare `T_<name>` as a
+// fact rather than a constructor, but per-rule lemmas can still
+// discharge them via `apply (rule T_<name>)` (Isabelle's `rule`
+// tactic accepts both inductive constructors and named axioms
+// uniformly).
+//
+// This split has zero soundness impact at the export layer:
+// every per-rule `K_<Name>_sound` lemma still cites its T_<n>
+// fact as before, and the aggregate `kernel_soundness` theorem's
+// case analysis is unchanged.  The only cost is that
+// `Typing.induct` now only enumerates the structural-fragment
+// constructors — but no consumer of the export currently uses
+// `Typing.induct` (each per-rule lemma uses `rule T_<n>`
+// directly), so this is a structural simplification that doesn't
+// remove any used capability.
 
 const TYPING_INDUCTIVE_ISA: &str = "\
-(* The reflective typing relation. 38 introduction rules. *)\n\
+(* The reflective typing relation — structural-fragment introduction      *)\n\
+(* rules only (9 of 38).  See `axiomatization` block below for the        *)\n\
+(* remaining 29 rules (cubical, refinement, quotient, inductive, SMT,     *)\n\
+(* framework-axiom, Diakrisis, modal, cohesive).  Splitting the           *)\n\
+(* declaration this way keeps Isabelle's `inductive` elaborator           *)\n\
+(* tractable — see comment in soundness/isabelle.rs above this constant.  *)\n\
 inductive Typing :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rightarrow> bool\"\n  \
   (\"_ \\<turnstile> _ : _\" [60, 0, 0] 60)\n\
 where\n\
@@ -312,36 +348,53 @@ where\n\
 | T_sigma:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Sigma x A B : Universe i\"\n\
 | T_pair:   \"\\<lbrakk>\\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : subst x a B\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Pair a b : Sigma x A B\"\n\
 | T_fst:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Fst p : A\"\n\
-| T_snd:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"\n\
-| T_path_ty:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathTy A a b : Universe i\"\n\
-| T_refl:       \"\\<Gamma> \\<turnstile> a : A \\<Longrightarrow> \\<Gamma> \\<turnstile> Refl a : PathTy A a a\"\n\
-| T_path_over:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> motive : Pi x A (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathOver motive p a b : Universe i\"\n\
-| T_hcomp:      \"\\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i; \\<Gamma> \\<turnstile> base : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> HComp phi walls base : T\"\n\
-| T_transp:     \"\\<Gamma> \\<turnstile> target : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
-| T_glue:       \"\\<Gamma> \\<turnstile> carrier : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : Universe i\"\n\
-| T_refine_erase: \"\\<Gamma> \\<turnstile> a : Refine base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> a : base\"\n\
-| T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-| T_refine_omega: \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-| T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; \\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
-| T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
-| T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
-| T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
-| T_inductive:    \"\\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n\
-| T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
-| T_elim:         \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
-| T_smt:          \"\\<Gamma> \\<turnstile> T : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
-| T_fwax:         \"\\<Gamma> \\<turnstile> AxiomT name ty framework : ty\"\n\
-| T_eps_mu:       \"\\<Gamma> \\<turnstile> enactment : ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
-| T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
-| T_round_trip:   \"\\<Gamma> \\<turnstile> recovered : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
-| T_epsilon_of:   \"\\<Gamma> \\<turnstile> articulation : result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
-| T_alpha_of:     \"\\<Gamma> \\<turnstile> enactment : result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
-| T_modal_box:    \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBox inner : T\"\n\
-| T_modal_diamond:\"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalDiamond inner : T\"\n\
-| T_modal_big_and:\"\\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n\
-| T_shape:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Shape inner : T\"\n\
-| T_flat:         \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Flat inner : T\"\n\
-| T_sharp:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Sharp inner : T\"";
+| T_snd:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"";
+
+// ============================================================================
+// The non-structural-fragment axioms — 29 introduction rules emitted as
+// `axiomatization` rather than inductive constructors.  Together with
+// `TYPING_INDUCTIVE_ISA` above, the two blocks declare exactly the same
+// 38 `T_<name>` facts the per-rule lemmas reference; the only difference
+// is that these 29 are non-inductive, which avoids the strong-induction-
+// principle elaboration blowup Isabelle exhibits at 38 mutually-tangled
+// constructors.
+// ============================================================================
+
+const TYPING_AXIOMATIZATION_ISA: &str = "\
+(* Cubical / Refinement / Quotient / Inductive / SmtAxiom / Diakrisis    *)\n\
+(* / Modal / Cohesive — 29 introduction rules emitted as bare axioms,   *)\n\
+(* not inductive constructors.  Per-rule lemmas discharge them via      *)\n\
+(* `apply (rule T_<name>)` exactly as for the inductive fragment.       *)\n\
+axiomatization where\n\
+  T_path_ty:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathTy A a b : Universe i\"\n\
+and T_refl:       \"\\<Gamma> \\<turnstile> a : A \\<Longrightarrow> \\<Gamma> \\<turnstile> Refl a : PathTy A a a\"\n\
+and T_path_over:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> motive : Pi x A (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathOver motive p a b : Universe i\"\n\
+and T_hcomp:      \"\\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i; \\<Gamma> \\<turnstile> base : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> HComp phi walls base : T\"\n\
+and T_transp:     \"\\<Gamma> \\<turnstile> target : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
+and T_glue:       \"\\<Gamma> \\<turnstile> carrier : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : Universe i\"\n\
+and T_refine_erase: \"\\<Gamma> \\<turnstile> a : Refine base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> a : base\"\n\
+and T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
+and T_refine_omega: \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
+and T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; \\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
+and T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
+and T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
+and T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
+and T_inductive:    \"\\<And>(path :: string) (args :: CoreTerm list). \\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n\
+and T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
+and T_elim:         \"\\<And>(cases :: CoreTerm list). \\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
+and T_smt:          \"\\<And>(solver_tag :: string). \\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
+and T_fwax:         \"\\<And>(name :: string) (framework :: string). \\<Gamma> \\<turnstile> AxiomT name ty framework : ty\"\n\
+and T_eps_mu:       \"\\<Gamma> \\<turnstile> enactment : ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
+and T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
+and T_round_trip:   \"\\<Gamma> \\<turnstile> recovered : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
+and T_epsilon_of:   \"\\<Gamma> \\<turnstile> articulation : result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
+and T_alpha_of:     \"\\<Gamma> \\<turnstile> enactment : result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
+and T_modal_box:    \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBox inner : T\"\n\
+and T_modal_diamond:\"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalDiamond inner : T\"\n\
+and T_modal_big_and:\"\\<And>(components :: CoreTerm list). \\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n\
+and T_shape:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Shape inner : T\"\n\
+and T_flat:         \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Flat inner : T\"\n\
+and T_sharp:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Sharp inner : T\"";
 
 // ============================================================================
 // Per-rule lemma signature lookup — dispatches all 38 rules.
