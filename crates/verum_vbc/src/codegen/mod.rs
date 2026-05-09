@@ -5086,98 +5086,20 @@ impl VbcCodegen {
             }
         }
 
-        // ALSO push minimal TypeDescriptors for Maybe / Result /
-        // Ordering so the typed-form gate at `emit_make_variant`
-        // succeeds and the runtime's `format_variant_for_print_depth`
-        // resolves variant names type-scoped instead of guessing via
-        // the global tag scan.  Without these descriptors, variant
-        // constructors like `Some(3)` / `None` lose their TypeId at
-        // the `MakeVariant` boundary and the runtime renders them as
-        // whichever unrelated stdlib variant happens to share their
-        // tag (e.g. `AliasError.NonFiniteWeight(3)` instead of
-        // `Some(3)` when `core.collections.alias_sampler` is loaded).
-        self.register_builtin_type_descriptor(
-            "Maybe",
-            crate::types::TypeId::MAYBE,
-            verum_common::well_known_types::MAYBE_VARIANT_LAYOUT,
-            "Maybe",
-        );
-        self.register_builtin_type_descriptor(
-            "Result",
-            crate::types::TypeId::RESULT,
-            verum_common::well_known_types::RESULT_VARIANT_LAYOUT,
-            "Result",
-        );
-        // Ordering has no dedicated WKT TypeId — descriptor lands
-        // via the regular archive import path.  Variant tags are
-        // registered as functions above so call-site resolution
-        // still works for `Ordering.Less` / `Ordering.Greater`.
-    }
-
-    /// Push a minimal `TypeDescriptor` for a built-in variant carrier
-    /// (`Maybe`, `Result`, `Ordering`).  Idempotent: skips when the
-    /// id slot is already populated by an earlier archive import or
-    /// user `type` declaration.
-    fn register_builtin_type_descriptor(
-        &mut self,
-        type_name: &str,
-        type_id: crate::types::TypeId,
-        layout: &[(&'static str, u32)],
-        carrier: &str,
-    ) {
-        // First-wins: if the id slot already carries a descriptor, the
-        // earlier registration is canonical.
-        if self.types.iter().any(|t| t.id == type_id) {
-            return;
-        }
-        let name_id = StringId(self.intern_string(type_name));
-        let mut variants: smallvec::SmallVec<[crate::types::VariantDescriptor; 4]> =
-            smallvec::SmallVec::new();
-        for (variant_name, tag) in layout.iter() {
-            // Arity convention from the layout constants:
-            //   Maybe: None=0, Some=1
-            //   Result: Ok=1, Err=1
-            //   Ordering: Less=0, Equal=0, Greater=0
-            let arity: u8 = match (carrier, *variant_name) {
-                ("Maybe", n) if n == verum_common::well_known_types::variant_tags::SOME => 1,
-                ("Result", _) => 1,
-                _ => 0,
-            };
-            let v_name_id = StringId(self.intern_string(variant_name));
-            variants.push(crate::types::VariantDescriptor {
-                name: v_name_id,
-                tag: *tag,
-                payload: None,
-                kind: if arity == 0 {
-                    crate::types::VariantKind::Unit
-                } else {
-                    crate::types::VariantKind::Tuple
-                },
-                arity,
-                fields: smallvec::SmallVec::new(),
-            });
-        }
-        let desc = crate::types::TypeDescriptor {
-            id: type_id,
-            name: name_id,
-            kind: crate::types::TypeKind::Sum,
-            type_params: smallvec::SmallVec::new(),
-            fields: smallvec::SmallVec::new(),
-            variants,
-            size: 0,
-            alignment: 8,
-            drop_fn: None,
-            clone_fn: None,
-            protocols: smallvec::SmallVec::new(),
-            visibility: crate::types::Visibility::Public,
-            alias_target: None,
-            is_transparent_wrapper: false,
-        };
-        // Make sure type_name_to_id agrees with the canonical id.
-        self.type_name_to_id
-            .entry(type_name.to_string())
-            .or_insert(type_id);
-        self.types.push(desc);
+        // Variant-name → TypeId mapping is set above via the
+        // function table.  Type DESCRIPTORS for Maybe / Result /
+        // Ordering are imported lazily via the archive lazy-load
+        // path (`archive_ctx_loader::apply_lazy_with_types` second
+        // pass — see the variant-tag-collision fix that imports
+        // types alongside variant ctors in the unqualified-wanted
+        // pass).  Eager pre-registration here would emit a
+        // method-less stub descriptor that BLOCKS the real archive
+        // import (via the first-wins gate at
+        // `import_archive_type`); user code calling inherent
+        // methods like `m.is_some()` would then panic with
+        // `method 'Maybe.is_some' not found`.  Lazy import
+        // preserves the full Maybe/Result descriptor including
+        // inherent methods.
     }
 
     /// Registers runtime I/O and networking functions as builtins.
