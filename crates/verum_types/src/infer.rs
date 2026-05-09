@@ -14720,192 +14720,7 @@ impl TypeChecker {
                 // Match expressions
                 // Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Dependent Pattern Matching
                 // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-                Match {
-                    expr: scrutinee,
-                    arms,
-                } => {
-                    use crate::refinement_evidence::{PathCondition, PathConditionKind};
-
-                    // NOTE: Affine tracking for scrutinee is handled by synth_expr
-                    // Do NOT add explicit use_value here - it would cause double-consume errors
-                    // since infer_path_expr already calls use_value for Path expressions
-                    let scrut_result = self.synth_expr(scrutinee)?;
-                    let scrut_ty = scrut_result.ty;
-
-                    // Auto-deref scrutinee for match expressions:
-                    // When matching &T where T is a variant/generic type, auto-deref to T.
-                    // This allows `match self` in impl methods with `&self` to work
-                    // without requiring explicit `match *self`.
-                    // The variant payload bindings will NOT be ref-wrapped.
-                    let scrut_ty = match &scrut_ty {
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. } => match &**inner {
-                            Type::Variant(_)
-                            | Type::Generic { .. }
-                            | Type::Named { .. }
-                            | Type::Record(_) => (**inner).clone(),
-                            _ => scrut_ty,
-                        },
-                        _ => scrut_ty,
-                    };
-
-                    if arms.is_empty() {
-                        return Err(TypeError::Other(
-                            "Match expression must have at least one arm".into(),
-                        ));
-                    }
-
-                    // Check if this is a dependent match (on an inductive type with indices).
-                    // Gated on [types].dependent: when disabled, all match expressions
-                    // use regular (non-dependent) pattern matching even on inductive
-                    // types with indices. This avoids the overhead of motive synthesis
-                    // and index unification for projects that don't use dependent types.
-                    if self.dependent_enabled {
-                        let is_dependent = self.is_dependent_type(&scrut_ty);
-                        if is_dependent {
-                            return self.check_dependent_match(&scrut_ty, arms, expr.span);
-                        }
-                    }
-
-                    // Extract scrutinee variable name for evidence tracking
-                    let scrutinee_var = self.extract_simple_var_name(scrutinee);
-
-                    // Regular pattern matching (non-dependent)
-                    // Check all arms and find the result type
-                    // CRITICAL: Never type is the bottom type - it's a subtype of all types.
-                    // If the first arm returns Never (e.g., panic()), we need to find a non-Never
-                    // arm to establish the result type. If ALL arms return Never, the result is Never.
-                    // Type lattice: Never is bottom (subtype of all), Unknown is top (supertype of all)
-                    let mut result_ty = Type::Never;
-                    let mut all_arm_types: List<(Type, verum_ast::Span)> = List::new();
-
-                    // First pass: check all arms and collect their types
-                    for arm in arms.iter() {
-                        self.ctx.enter_scope();
-                        self.refinement_evidence.push_scope();
-
-                        // Add pattern evidence for this arm
-                        if let Maybe::Some(ref var_name) = scrutinee_var {
-                            self.add_pattern_evidence(
-                                &arm.pattern,
-                                var_name.clone(),
-                                arm.pattern.span,
-                            );
-                        }
-
-                        // CRITICAL: Bind pattern variables BEFORE checking guard
-                        // Guards can reference pattern bindings (e.g., `Some(x) if x > 0`)
-                        // CRITICAL FIX: Apply unifier to scrutinee type before pattern binding.
-                        // When the scrutinee comes from a generic method call (e.g., `Validated.validate_all(items)`),
-                        // the returned type may contain type variables that were unified with concrete types
-                        // during argument checking. Without applying the unifier here, patterns like
-                        // `Valid(values)` would bind `values` to a type variable instead of the concrete type.
-                        let resolved_scrut_ty = self.unifier.apply(&scrut_ty);
-                        self.bind_pattern(&arm.pattern, &resolved_scrut_ty)?;
-
-                        // Handle guard expression evidence (now pattern bindings are in scope)
-                        if let Maybe::Some(ref guard) = arm.guard {
-                            self.check_expr(guard, &Type::bool())?;
-                            self.refinement_evidence
-                                .add_evidence_from_condition(guard, guard.span);
-                        }
-                        let arm_result = self.synth_expr(&arm.body)?;
-                        let is_arm_never = self.is_never_type(&arm_result.ty);
-
-                        // Track this arm's type for later unification
-                        all_arm_types.push((arm_result.ty.clone(), arm.body.span));
-
-                        // If we haven't found a non-Never type yet, use this one
-                        if self.is_never_type(&result_ty) && !is_arm_never {
-                            result_ty = arm_result.ty;
-                        }
-
-                        self.refinement_evidence.pop_scope();
-                        self.ctx.exit_scope();
-                    }
-
-                    // Second pass: unify all non-Never arm types with the result type
-                    for (arm_ty, span) in all_arm_types.iter() {
-                        if !self.is_never_type(arm_ty) && !self.is_never_type(&result_ty) {
-                            self.unifier.unify(arm_ty, &result_ty, *span)?;
-                        }
-                    }
-
-                    // Exhaustiveness check: verify all possible values are covered
-                    // Only check for types with finite constructors (Variant, Bool)
-                    // to avoid false positives with Int/Float/Text and guarded patterns.
-                    let applied_scrut = self.unifier.apply(&scrut_ty);
-                    // Resolve named types to their underlying definition for exhaustiveness checking
-                    let resolved_scrut = match &applied_scrut {
-                        Type::Named { path, .. } => {
-                            let name = path
-                                .segments
-                                .last()
-                                .and_then(|s| match s {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                })
-                                .unwrap_or("");
-                            self.ctx
-                                .lookup_type(name)
-                                .cloned()
-                                .unwrap_or(applied_scrut.clone())
-                        }
-                        _ => applied_scrut.clone(),
-                    };
-                    let should_check_exhaustiveness =
-                        matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
-                    // Don't check if any arm has a guard (guards make analysis imprecise)
-                    let has_guards = arms.iter().any(|arm| arm.guard.is_some());
-                    let has_complex_patterns = arms
-                        .iter()
-                        .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
-                    if should_check_exhaustiveness && !has_guards {
-                        let match_patterns: Vec<verum_ast::pattern::Pattern> =
-                            arms.iter().map(|arm| arm.pattern.clone()).collect();
-                        match crate::exhaustiveness::check_exhaustiveness(
-                            &match_patterns,
-                            &resolved_scrut,
-                            &self.ctx.env,
-                        ) {
-                            Ok(result) => {
-                                if !result.is_exhaustive {
-                                    let witness_str = result
-                                        .uncovered_witnesses
-                                        .iter()
-                                        .map(|w| format!("{}", w))
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    let msg = format!(
-                                        "non-exhaustive patterns: `{}` not covered",
-                                        witness_str
-                                    );
-                                    if has_complex_patterns {
-                                        let diag = Diagnostic::new_warning(
-                                            msg,
-                                            span_to_line_col(expr.span),
-                                            "W0601",
-                                        );
-                                        self.diagnostics.push(diag);
-                                    } else {
-                                        let diag = Diagnostic::new_error(
-                                            msg,
-                                            span_to_line_col(expr.span),
-                                            "E0601",
-                                        );
-                                        self.diagnostics.push(diag);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Exhaustiveness check failed - skip silently
-                            }
-                        }
-                    }
-
-                    Ok(InferResult::new(result_ty))
-                }
+                Match { .. } => self.infer_match_expr(current_expr),
 
                 // Method calls
                 // Higher-rank protocol bounds: for<T> quantification in protocol bounds for universal requirements — .1-2.3
@@ -15380,122 +15195,7 @@ impl TypeChecker {
 
                 // Capability attenuation: context.attenuate(capabilities)
                 // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-                Attenuate {
-                    context,
-                    capabilities,
-                } => {
-                    // Infer the type of the context expression
-                    let context_result = self.synth_expr(context)?;
-
-                    // Extract context name from the context expression
-                    // For now, we support simple path expressions like "Database" or "db"
-                    let context_name = if let Path(path) = &context.kind {
-                        if path.segments.len() == 1 {
-                            if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                                verum_common::Text::from(ident.name.as_str())
-                            } else {
-                                return Err(TypeError::Other(
-                                    "Attenuate requires a simple context name".into(),
-                                ));
-                            }
-                        } else {
-                            return Err(TypeError::Other(
-                                "Attenuate requires a simple context name, not a path".into(),
-                            ));
-                        }
-                    } else {
-                        return Err(TypeError::Other(
-                            "Attenuate requires a context name, not a complex expression".into(),
-                        ));
-                    };
-
-                    // Convert AST capabilities to type-level capabilities
-                    use crate::capability::TypeCapabilitySet;
-                    let new_caps = TypeCapabilitySet::from_ast(capabilities);
-
-                    // Check if the context is registered
-                    let current_caps = match self
-                        .capability_checker
-                        .get_context_capabilities(context_name.as_str())
-                    {
-                        Maybe::Some(caps) => caps.clone(),
-                        Maybe::None => {
-                            // E0308: Context not provided
-                            use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
-                            let diagnostic = CapabilityNotProvidedError::new(
-                                context_name.as_str(),
-                                span_to_line_col(current_expr.span),
-                            )
-                            .build();
-                            self.diagnostics.push(diagnostic);
-
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Context '{}' not found. Did you declare it in the 'using' clause?",
-                                context_name
-                            ))));
-                        }
-                    };
-
-                    // Verify that new capabilities are a subset of current capabilities
-                    // If not, this is an invalid attenuation (E0308)
-                    if !new_caps.is_subset_of(&current_caps.capabilities) {
-                        let missing = new_caps.difference(&current_caps.capabilities);
-                        let missing_names: List<verum_common::Text> = missing
-                            .iter()
-                            .map(|c| verum_common::Text::from(c.name()))
-                            .collect();
-
-                        // E0308: Trying to attenuate with capabilities the context doesn't have
-                        use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
-
-                        let cap_names: Vec<String> = current_caps
-                            .capabilities
-                            .names()
-                            .iter()
-                            .map(|t| t.to_string())
-                            .collect();
-
-                        let diagnostic = CapabilityViolationError::new(
-                            format!("{}::[{}]", context_name, missing_names.join(", ")),
-                            span_to_line_col(current_expr.span),
-                        )
-                        .with_declared_capabilities(
-                            cap_names.iter().map(|s| s.as_str().into()).collect(),
-                        )
-                        .with_function_name("attenuate")
-                        .build();
-                        self.diagnostics.push(diagnostic);
-
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Cannot attenuate context '{}' with capabilities it doesn't have: {}",
-                            context_name,
-                            missing_names.join(", ")
-                        ))));
-                    }
-
-                    // Create attenuated context in capability checker
-                    match self
-                        .capability_checker
-                        .attenuate_context(context_name.as_str(), new_caps)
-                    {
-                        Ok(_) => {
-                            // Attenuation succeeds - return the same context type
-                            Ok(InferResult::new(context_result.ty))
-                        }
-                        Err(cap_err) => {
-                            // Convert capability error to type error with diagnostic
-                            use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
-                            let diagnostic = CapabilityNotProvidedError::new(
-                                cap_err.message().to_string(),
-                                span_to_line_col(current_expr.span),
-                            )
-                            .build();
-                            self.diagnostics.push(diagnostic);
-
-                            Err(TypeError::Other(cap_err.message()))
-                        }
-                    }
-                }
+                Attenuate { .. } => self.infer_attenuate_expr(current_expr),
 
                 // Type property expressions: T.size, T.alignment, T.stride, T.min, T.max, T.bits, T.name
                 // Spec: grammar/verum.ebnf Section 2.17 - Type Properties
@@ -15558,117 +15258,7 @@ impl TypeChecker {
                 // Structured concurrency: nurseries for task scoping, cancellation propagation, error collection — Structured Concurrency
                 // Creates a scope where all spawned tasks must complete before the scope exits.
                 // This guarantees structured concurrency - no orphaned tasks.
-                Nursery {
-                    options,
-                    body,
-                    on_cancel,
-                    recover,
-                    span: nursery_span,
-                } => {
-                    // =========================================================================
-                    // Nursery Structured Concurrency Type Inference
-                    // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 9 - Structured Concurrency
-                    // =========================================================================
-                    //
-
-                    // A nursery creates a structured concurrency scope:
-                    // 1. All spawned tasks within the nursery must complete before exit
-                    // 2. Errors from tasks are collected and handled by recover block
-                    // 3. Timeout and max_tasks provide resource limits
-                    //
-
-                    // Type rules:
-                    // - nursery body returns T
-                    // - recover block (if present) must also return T
-                    // - on_cancel block returns () (cleanup only)
-                    // - options.timeout must be Duration
-                    // - options.max_tasks must be Int
-
-                    self.ctx.enter_scope();
-
-                    // Type check nursery options
-                    if let verum_common::Maybe::Some(timeout_expr) = &options.timeout {
-                        let timeout_result = self.synth_expr(timeout_expr)?;
-                        // Timeout must be Duration type
-                        let expected_duration = Type::Generic {
-                            name: verum_common::Text::from(WKT::Duration.as_str()),
-                            args: vec![].into(),
-                        };
-                        if self
-                            .unifier
-                            .unify(&timeout_result.ty, &expected_duration, timeout_expr.span)
-                            .is_err()
-                        {
-                            // Also accept Int (milliseconds) for convenience
-                            if self
-                                .unifier
-                                .unify(&timeout_result.ty, &Type::int(), timeout_expr.span)
-                                .is_err()
-                            {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "nursery timeout must be Duration or Int (milliseconds), got: {}",
-                                    timeout_result.ty
-                                ))));
-                            }
-                        }
-                    }
-
-                    if let verum_common::Maybe::Some(max_tasks_expr) = &options.max_tasks {
-                        let max_tasks_result = self.synth_expr(max_tasks_expr)?;
-                        // max_tasks must be Int
-                        self.unifier.unify(
-                            &max_tasks_result.ty,
-                            &Type::int(),
-                            max_tasks_expr.span,
-                        )?;
-                    }
-
-                    // Type check nursery body
-                    // The body type is the primary return type of the nursery
-                    let body_result = self.infer_block(body)?;
-
-                    // Type check on_cancel block if present
-                    // on_cancel is a cleanup handler - always returns ()
-                    if let verum_common::Maybe::Some(cancel_block) = on_cancel {
-                        self.ctx.enter_scope();
-                        let cancel_result = self.infer_block(cancel_block)?;
-                        // Warn if on_cancel has non-unit return type (might indicate misuse)
-                        if cancel_result.ty != Type::unit() {
-                            let warning = Diagnostic::new_warning(
-                                format!(
-                                    "nursery on_cancel block returns '{}', but result is discarded. \
-                                     on_cancel is for cleanup - its return value is ignored.",
-                                    cancel_result.ty
-                                ),
-                                span_to_line_col(*nursery_span),
-                                "W0901", // Warning code for nursery cleanup
-                            );
-                            self.diagnostics.push(warning);
-                        }
-                        self.ctx.exit_scope();
-                    }
-
-                    // Type check recover block if present
-                    // recover must return the same type as the body (like try-recover)
-                    if let verum_common::Maybe::Some(recover_body) = recover {
-                        // Determine error type - for nursery, it's a collection of task errors
-                        // Use generic Error or TaskError type
-                        let error_type = Type::Generic {
-                            name: verum_common::Text::from("NurseryError"),
-                            args: vec![].into(),
-                        };
-
-                        let recover_ty = self.infer_recover_body(recover_body, &error_type)?;
-                        // Recover block must return the same type as the body
-                        self.unifier
-                            .unify(&recover_ty, &body_result.ty, *nursery_span)?;
-                    }
-
-                    self.ctx.exit_scope();
-
-                    // The nursery returns the body's type (or recover's unified type)
-                    Ok(body_result)
-                }
+                Nursery { .. } => self.infer_nursery_expr(current_expr),
 
                 // Is expression: expr is Pattern or expr is not Pattern
                 // "x is Pattern" operator: replaces Rust matches!() macro for pattern testing, returns Bool
@@ -15869,6 +15459,427 @@ impl TypeChecker {
     /// Type-infer a closure (lambda) expression.
     /// Performs capture analysis, borrow tracking, parameter binding,
     /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
+    /// Type-infer a match expression.
+    /// Auto-derefs reference scrutinees, dispatches to dependent-type match
+    /// when applicable, checks each arm's pattern + body, unifies arm types,
+    /// and propagates refinement evidence.
+    fn infer_match_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use crate::refinement_evidence::{PathCondition, PathConditionKind};
+        let ExprKind::Match { expr: scrutinee, arms } = &expr.kind
+            else { unreachable!() };
+
+                    // NOTE: Affine tracking for scrutinee is handled by synth_expr
+                    // Do NOT add explicit use_value here - it would cause double-consume errors
+                    // since infer_path_expr already calls use_value for Path expressions
+                    let scrut_result = self.synth_expr(scrutinee)?;
+                    let scrut_ty = scrut_result.ty;
+
+                    // Auto-deref scrutinee for match expressions:
+                    // When matching &T where T is a variant/generic type, auto-deref to T.
+                    // This allows `match self` in impl methods with `&self` to work
+                    // without requiring explicit `match *self`.
+                    // The variant payload bindings will NOT be ref-wrapped.
+                    let scrut_ty = match &scrut_ty {
+                        Type::Reference { inner, .. }
+                        | Type::CheckedReference { inner, .. }
+                        | Type::UnsafeReference { inner, .. } => match &**inner {
+                            Type::Variant(_)
+                            | Type::Generic { .. }
+                            | Type::Named { .. }
+                            | Type::Record(_) => (**inner).clone(),
+                            _ => scrut_ty,
+                        },
+                        _ => scrut_ty,
+                    };
+
+                    if arms.is_empty() {
+                        return Err(TypeError::Other(
+                            "Match expression must have at least one arm".into(),
+                        ));
+                    }
+
+                    // Check if this is a dependent match (on an inductive type with indices).
+                    // Gated on [types].dependent: when disabled, all match expressions
+                    // use regular (non-dependent) pattern matching even on inductive
+                    // types with indices. This avoids the overhead of motive synthesis
+                    // and index unification for projects that don't use dependent types.
+                    if self.dependent_enabled {
+                        let is_dependent = self.is_dependent_type(&scrut_ty);
+                        if is_dependent {
+                            return self.check_dependent_match(&scrut_ty, arms, expr.span);
+                        }
+                    }
+
+                    // Extract scrutinee variable name for evidence tracking
+                    let scrutinee_var = self.extract_simple_var_name(scrutinee);
+
+                    // Regular pattern matching (non-dependent)
+                    // Check all arms and find the result type
+                    // CRITICAL: Never type is the bottom type - it's a subtype of all types.
+                    // If the first arm returns Never (e.g., panic()), we need to find a non-Never
+                    // arm to establish the result type. If ALL arms return Never, the result is Never.
+                    // Type lattice: Never is bottom (subtype of all), Unknown is top (supertype of all)
+                    let mut result_ty = Type::Never;
+                    let mut all_arm_types: List<(Type, verum_ast::Span)> = List::new();
+
+                    // First pass: check all arms and collect their types
+                    for arm in arms.iter() {
+                        self.ctx.enter_scope();
+                        self.refinement_evidence.push_scope();
+
+                        // Add pattern evidence for this arm
+                        if let Maybe::Some(ref var_name) = scrutinee_var {
+                            self.add_pattern_evidence(
+                                &arm.pattern,
+                                var_name.clone(),
+                                arm.pattern.span,
+                            );
+                        }
+
+                        // CRITICAL: Bind pattern variables BEFORE checking guard
+                        // Guards can reference pattern bindings (e.g., `Some(x) if x > 0`)
+                        // CRITICAL FIX: Apply unifier to scrutinee type before pattern binding.
+                        // When the scrutinee comes from a generic method call (e.g., `Validated.validate_all(items)`),
+                        // the returned type may contain type variables that were unified with concrete types
+                        // during argument checking. Without applying the unifier here, patterns like
+                        // `Valid(values)` would bind `values` to a type variable instead of the concrete type.
+                        let resolved_scrut_ty = self.unifier.apply(&scrut_ty);
+                        self.bind_pattern(&arm.pattern, &resolved_scrut_ty)?;
+
+                        // Handle guard expression evidence (now pattern bindings are in scope)
+                        if let Maybe::Some(ref guard) = arm.guard {
+                            self.check_expr(guard, &Type::bool())?;
+                            self.refinement_evidence
+                                .add_evidence_from_condition(guard, guard.span);
+                        }
+                        let arm_result = self.synth_expr(&arm.body)?;
+                        let is_arm_never = self.is_never_type(&arm_result.ty);
+
+                        // Track this arm's type for later unification
+                        all_arm_types.push((arm_result.ty.clone(), arm.body.span));
+
+                        // If we haven't found a non-Never type yet, use this one
+                        if self.is_never_type(&result_ty) && !is_arm_never {
+                            result_ty = arm_result.ty;
+                        }
+
+                        self.refinement_evidence.pop_scope();
+                        self.ctx.exit_scope();
+                    }
+
+                    // Second pass: unify all non-Never arm types with the result type
+                    for (arm_ty, span) in all_arm_types.iter() {
+                        if !self.is_never_type(arm_ty) && !self.is_never_type(&result_ty) {
+                            self.unifier.unify(arm_ty, &result_ty, *span)?;
+                        }
+                    }
+
+                    // Exhaustiveness check: verify all possible values are covered
+                    // Only check for types with finite constructors (Variant, Bool)
+                    // to avoid false positives with Int/Float/Text and guarded patterns.
+                    let applied_scrut = self.unifier.apply(&scrut_ty);
+                    // Resolve named types to their underlying definition for exhaustiveness checking
+                    let resolved_scrut = match &applied_scrut {
+                        Type::Named { path, .. } => {
+                            let name = path
+                                .segments
+                                .last()
+                                .and_then(|s| match s {
+                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                                    _ => None,
+                                })
+                                .unwrap_or("");
+                            self.ctx
+                                .lookup_type(name)
+                                .cloned()
+                                .unwrap_or(applied_scrut.clone())
+                        }
+                        _ => applied_scrut.clone(),
+                    };
+                    let should_check_exhaustiveness =
+                        matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
+                    // Don't check if any arm has a guard (guards make analysis imprecise)
+                    let has_guards = arms.iter().any(|arm| arm.guard.is_some());
+                    let has_complex_patterns = arms
+                        .iter()
+                        .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
+                    if should_check_exhaustiveness && !has_guards {
+                        let match_patterns: Vec<verum_ast::pattern::Pattern> =
+                            arms.iter().map(|arm| arm.pattern.clone()).collect();
+                        match crate::exhaustiveness::check_exhaustiveness(
+                            &match_patterns,
+                            &resolved_scrut,
+                            &self.ctx.env,
+                        ) {
+                            Ok(result) => {
+                                if !result.is_exhaustive {
+                                    let witness_str = result
+                                        .uncovered_witnesses
+                                        .iter()
+                                        .map(|w| format!("{}", w))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    let msg = format!(
+                                        "non-exhaustive patterns: `{}` not covered",
+                                        witness_str
+                                    );
+                                    if has_complex_patterns {
+                                        let diag = Diagnostic::new_warning(
+                                            msg,
+                                            span_to_line_col(expr.span),
+                                            "W0601",
+                                        );
+                                        self.diagnostics.push(diag);
+                                    } else {
+                                        let diag = Diagnostic::new_error(
+                                            msg,
+                                            span_to_line_col(expr.span),
+                                            "E0601",
+                                        );
+                                        self.diagnostics.push(diag);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Exhaustiveness check failed - skip silently
+                            }
+                        }
+                    }
+
+                    Ok(InferResult::new(result_ty))
+    }
+
+    /// Type-infer an `attenuate ctx with [capabilities]` expression.
+    /// Verifies the capability subset relationship and registers the
+    /// attenuated context in the capability checker.
+    fn infer_attenuate_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Attenuate { context, capabilities } = &expr.kind
+            else { unreachable!() };
+                    // Infer the type of the context expression
+                    let context_result = self.synth_expr(context)?;
+
+                    // Extract context name from the context expression
+                    // For now, we support simple path expressions like "Database" or "db"
+                    let context_name = if let Path(path) = &context.kind {
+                        if path.segments.len() == 1 {
+                            if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                                verum_common::Text::from(ident.name.as_str())
+                            } else {
+                                return Err(TypeError::Other(
+                                    "Attenuate requires a simple context name".into(),
+                                ));
+                            }
+                        } else {
+                            return Err(TypeError::Other(
+                                "Attenuate requires a simple context name, not a path".into(),
+                            ));
+                        }
+                    } else {
+                        return Err(TypeError::Other(
+                            "Attenuate requires a context name, not a complex expression".into(),
+                        ));
+                    };
+
+                    // Convert AST capabilities to type-level capabilities
+                    use crate::capability::TypeCapabilitySet;
+                    let new_caps = TypeCapabilitySet::from_ast(capabilities);
+
+                    // Check if the context is registered
+                    let current_caps = match self
+                        .capability_checker
+                        .get_context_capabilities(context_name.as_str())
+                    {
+                        Maybe::Some(caps) => caps.clone(),
+                        Maybe::None => {
+                            // E0308: Context not provided
+                            use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
+                            let diagnostic = CapabilityNotProvidedError::new(
+                                context_name.as_str(),
+                                span_to_line_col(expr.span),
+                            )
+                            .build();
+                            self.diagnostics.push(diagnostic);
+
+                            return Err(TypeError::Other(verum_common::Text::from(format!(
+                                "Context '{}' not found. Did you declare it in the 'using' clause?",
+                                context_name
+                            ))));
+                        }
+                    };
+
+                    // Verify that new capabilities are a subset of current capabilities
+                    // If not, this is an invalid attenuation (E0308)
+                    if !new_caps.is_subset_of(&current_caps.capabilities) {
+                        let missing = new_caps.difference(&current_caps.capabilities);
+                        let missing_names: List<verum_common::Text> = missing
+                            .iter()
+                            .map(|c| verum_common::Text::from(c.name()))
+                            .collect();
+
+                        // E0308: Trying to attenuate with capabilities the context doesn't have
+                        use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
+
+                        let cap_names: Vec<String> = current_caps
+                            .capabilities
+                            .names()
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect();
+
+                        let diagnostic = CapabilityViolationError::new(
+                            format!("{}::[{}]", context_name, missing_names.join(", ")),
+                            span_to_line_col(expr.span),
+                        )
+                        .with_declared_capabilities(
+                            cap_names.iter().map(|s| s.as_str().into()).collect(),
+                        )
+                        .with_function_name("attenuate")
+                        .build();
+                        self.diagnostics.push(diagnostic);
+
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Cannot attenuate context '{}' with capabilities it doesn't have: {}",
+                            context_name,
+                            missing_names.join(", ")
+                        ))));
+                    }
+
+                    // Create attenuated context in capability checker
+                    match self
+                        .capability_checker
+                        .attenuate_context(context_name.as_str(), new_caps)
+                    {
+                        Ok(_) => {
+                            // Attenuation succeeds - return the same context type
+                            Ok(InferResult::new(context_result.ty))
+                        }
+                        Err(cap_err) => {
+                            // Convert capability error to type error with diagnostic
+                            use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
+                            let diagnostic = CapabilityNotProvidedError::new(
+                                cap_err.message().to_string(),
+                                span_to_line_col(expr.span),
+                            )
+                            .build();
+                            self.diagnostics.push(diagnostic);
+
+                            Err(TypeError::Other(cap_err.message()))
+                        }
+                    }
+    }
+
+    /// Type-infer a nursery structured-concurrency expression.
+    /// Checks options (timeout/max_tasks), body, optional on_cancel cleanup,
+    /// and optional recover block (must unify with body type).
+    fn infer_nursery_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        let ExprKind::Nursery { options, body, on_cancel, recover, span: nursery_span } = &expr.kind
+            else { unreachable!() };
+                    // =========================================================================
+                    // Nursery Structured Concurrency Type Inference
+                    // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 9 - Structured Concurrency
+                    // =========================================================================
+                    //
+
+                    // A nursery creates a structured concurrency scope:
+                    // 1. All spawned tasks within the nursery must complete before exit
+                    // 2. Errors from tasks are collected and handled by recover block
+                    // 3. Timeout and max_tasks provide resource limits
+                    //
+
+                    // Type rules:
+                    // - nursery body returns T
+                    // - recover block (if present) must also return T
+                    // - on_cancel block returns () (cleanup only)
+                    // - options.timeout must be Duration
+                    // - options.max_tasks must be Int
+
+                    self.ctx.enter_scope();
+
+                    // Type check nursery options
+                    if let verum_common::Maybe::Some(timeout_expr) = &options.timeout {
+                        let timeout_result = self.synth_expr(timeout_expr)?;
+                        // Timeout must be Duration type
+                        let expected_duration = Type::Generic {
+                            name: verum_common::Text::from(WKT::Duration.as_str()),
+                            args: vec![].into(),
+                        };
+                        if self
+                            .unifier
+                            .unify(&timeout_result.ty, &expected_duration, timeout_expr.span)
+                            .is_err()
+                        {
+                            // Also accept Int (milliseconds) for convenience
+                            if self
+                                .unifier
+                                .unify(&timeout_result.ty, &Type::int(), timeout_expr.span)
+                                .is_err()
+                            {
+                                return Err(TypeError::Other(verum_common::Text::from(format!(
+                                    "nursery timeout must be Duration or Int (milliseconds), got: {}",
+                                    timeout_result.ty
+                                ))));
+                            }
+                        }
+                    }
+
+                    if let verum_common::Maybe::Some(max_tasks_expr) = &options.max_tasks {
+                        let max_tasks_result = self.synth_expr(max_tasks_expr)?;
+                        // max_tasks must be Int
+                        self.unifier.unify(
+                            &max_tasks_result.ty,
+                            &Type::int(),
+                            max_tasks_expr.span,
+                        )?;
+                    }
+
+                    // Type check nursery body
+                    // The body type is the primary return type of the nursery
+                    let body_result = self.infer_block(body)?;
+
+                    // Type check on_cancel block if present
+                    // on_cancel is a cleanup handler - always returns ()
+                    if let verum_common::Maybe::Some(cancel_block) = on_cancel {
+                        self.ctx.enter_scope();
+                        let cancel_result = self.infer_block(cancel_block)?;
+                        // Warn if on_cancel has non-unit return type (might indicate misuse)
+                        if cancel_result.ty != Type::unit() {
+                            let warning = Diagnostic::new_warning(
+                                format!(
+                                    "nursery on_cancel block returns '{}', but result is discarded. \
+                                     on_cancel is for cleanup - its return value is ignored.",
+                                    cancel_result.ty
+                                ),
+                                span_to_line_col(*nursery_span),
+                                "W0901", // Warning code for nursery cleanup
+                            );
+                            self.diagnostics.push(warning);
+                        }
+                        self.ctx.exit_scope();
+                    }
+
+                    // Type check recover block if present
+                    // recover must return the same type as the body (like try-recover)
+                    if let verum_common::Maybe::Some(recover_body) = recover {
+                        // Determine error type - for nursery, it's a collection of task errors
+                        // Use generic Error or TaskError type
+                        let error_type = Type::Generic {
+                            name: verum_common::Text::from("NurseryError"),
+                            args: vec![].into(),
+                        };
+
+                        let recover_ty = self.infer_recover_body(recover_body, &error_type)?;
+                        // Recover block must return the same type as the body
+                        self.unifier
+                            .unify(&recover_ty, &body_result.ty, *nursery_span)?;
+                    }
+
+                    self.ctx.exit_scope();
+
+                    // The nursery returns the body's type (or recover's unified type)
+                    Ok(body_result)
+    }
+
     fn infer_closure_expr(&mut self, expr: &Expr, outer_span: Span) -> Result<InferResult> {
         let ExprKind::Closure { params, body, return_type, async_, move_, .. } = &expr.kind
             else { unreachable!() };
