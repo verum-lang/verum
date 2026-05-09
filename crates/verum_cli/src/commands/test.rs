@@ -1358,7 +1358,7 @@ fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
 }
 
 fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
-    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+    use verum_vbc::codegen::CodegenConfig;
     use verum_vbc::interpreter::Interpreter;
 
     let start = Instant::now();
@@ -1408,8 +1408,11 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     }
 
     let config = CodegenConfig::new("test");
-    let mut codegen = VbcCodegen::with_config(config);
-    let module = match codegen.compile_module(&ast) {
+    let module = match verum_compiler::single_module::compile_module_with_stdlib(
+        &ast,
+        config,
+        /* propagate_test_attr = */ true,
+    ) {
         Ok(m) => m,
         Err(e) => {
             return TestResult::CompileError {

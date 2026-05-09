@@ -204,6 +204,10 @@ pub mod language_features;
 /// collection that walked 2400+ stdlib `.vr` files on every script
 /// invocation.
 pub mod archive_ctx_loader;
+/// Canonical entry point for compiling a single Verum AST module to VBC
+/// with stdlib auto-linked. Used by test runners, REPL, and any caller
+/// that needs the codegen body without the full session pipeline.
+pub mod single_module;
 /// T2-extended of single-path archive-driven epic — converts a
 /// precompiled stdlib `VbcArchive` into `verum_types::CoreMetadata`
 /// at PRECOMPILE time.  The resulting metadata is serialised to
