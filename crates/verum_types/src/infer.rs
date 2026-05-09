@@ -46237,439 +46237,12 @@ impl TypeChecker {
             }
         }
 
-        // ============================================================
-        // EARLY INHERENT_METHODS LOOKUP: Before hardcoded stdlib overrides,
-        // check if the method was registered from parsed .vr stdlib files
-        // via impl block registration (Pass S3). If found, use the registered
-        // method signature instead of hardcoded fallbacks below.
-        // This reduces hardcoded stdlib knowledge in the compiler.
-        // ============================================================
-        {
-            // Skip the early-inherent lookup when the receiver's head is a
-            // bounded type parameter (HKT or otherwise) — inherent methods
-            // don't make sense on an abstract type variable, and querying by
-            // the parameter's name can yield unrelated blanket entries whose
-            // shape matches only by accident. Instead, we want such calls to
-            // fall through to the bound-first dispatch below, which consults
-            // the variable's protocol bounds and returns the correct method.
-            let is_type_param = {
-                let head_name: Option<verum_common::Text> = match &recv_ty {
-                    Type::Var(_) => None, // handled below
-                    Type::TypeApp { constructor, .. } => match &**constructor {
-                        Type::Var(_) => None, // handled below
-                        _ => None,
-                    },
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    Type::Named { path, .. } => path
-                        .as_ident()
-                        .map(|id| verum_common::Text::from(id.name.as_str())),
-                    _ => None,
-                };
-                let head_is_param = head_name
-                    .as_ref()
-                    .map(|n| {
-                        // HKT parameters are recognized via the side table
-                        // (preserves the name even when env shows a
-                        // TypeConstructor after kind inference); ordinary
-                        // bounded type params show up as Type::Var or
-                        // Type::TypeConstructor in env/types.
-                        if self.hkt_type_var_by_name.contains_key(n) {
-                            return true;
-                        }
-                        let resolved = self
-                            .ctx
-                            .env
-                            .lookup(n)
-                            .map(|s| self.unifier.apply(&s.ty))
-                            .or_else(|| match self.ctx.lookup_type(n) {
-                                Maybe::Some(t) => Some(self.unifier.apply(t)),
-                                _ => None,
-                            });
-                        matches!(
-                            resolved,
-                            Some(Type::Var(_)) | Some(Type::TypeConstructor { .. })
-                        )
-                    })
-                    .unwrap_or(false);
-                match &recv_ty {
-                    Type::Var(_) => true,
-                    Type::TypeApp { constructor, .. } => {
-                        matches!(&**constructor, Type::Var(_))
-                    }
-                    _ => head_is_param,
-                }
-            };
-
-            let early_type_name: Option<verum_common::Text> = if is_type_param {
-                None
-            } else {
-                match &recv_ty {
-                    Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    Type::Named { path, .. } => path
-                        .as_ident()
-                        .map(|id| verum_common::Text::from(id.name.as_str())),
-                    _ => None,
-                }
-            };
-
-            if let Some(type_name_text) = early_type_name {
-                let method_name_text = verum_common::Text::from(method.name.as_str());
-                // Receiver-driven lazy load: when the receiver type was
-                // inferred indirectly (through `Result.Ok` arm of a
-                // function return, the `?`-operator unwrap, a chained
-                // `.await` on `Result<T, _>`, …) and was never explicitly
-                // *named* by the user code, the lazy stdlib loader pass
-                // hasn't fired for `type_name_text` yet — so its
-                // `inherent_methods` bucket is empty and any
-                // `recv.method(...)` lookup falls straight through to
-                // `MethodNotFound`.  An explicit `let conn:
-                // AsyncPgPoolGuard = ...` annotation triggers the
-                // load eagerly via the type-resolution path; the
-                // receiver-only case bypasses it.  Force the same
-                // load here, idempotent — `ensure_stdlib_type_loaded`
-                // short-circuits on `ctx.lookup_type(name).is_some()`,
-                // and `register_inherent_methods_from_metadata` skips
-                // method names already populated.
-                {
-                    let mut pending_dep_load: Vec<verum_common::Text> = Vec::new();
-                    self.ensure_stdlib_type_loaded(&type_name_text, &mut pending_dep_load);
-                    while let Some(dep) = pending_dep_load.pop() {
-                        self.ensure_stdlib_type_loaded(&dep, &mut pending_dep_load);
-                    }
-                }
-                // Per-instantiation impl gating (task #35).
-                //
-
-                // When the stdlib or user code declares `impl<T> Foo<T,
-                // ReadOnly>` and `impl<T> Foo<T, WriteOnly>` with
-                // disjoint method sets, we must refuse `write(…)` on a
-                // `Foo<_, ReadOnly>` receiver. The method signatures
-                // themselves all landed in the flat
-                // (type_name, method_name) map when their impl blocks
-                // were registered, so this gate runs *before* the
-                // lookup succeeds and skips the early-inherent path
-                // when no registered impl pattern accepts the
-                // receiver's concrete type arguments. Subsequent
-                // lookup paths (protocol methods, universal methods)
-                // continue to run normally, producing a proper E400
-                // when none of them match either.
-                let receiver_ty_args_for_gate: verum_common::List<Type> = match &recv_ty {
-                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                    _ => verum_common::List::new(),
-                };
-                if !self.inherent_method_pattern_allows(
-                    &type_name_text,
-                    &method_name_text,
-                    &receiver_ty_args_for_gate,
-                ) {
-                    // No registered impl pattern accepts this
-                    // instantiation — produce the canonical
-                    // "no method named X found for type Y" error
-                    // so that `readonly_write_fail.vr` /
-                    // `writeonly_read_fail.vr` reject at type check.
-                    return Err(crate::TypeError::MethodNotFound {
-                        ty: recv_ty.to_text(),
-                        method: method.name.as_str().to_text(),
-                        span: method.span,
-                        did_you_mean: verum_common::Maybe::None,
-                    });
-                }
-                let early_method_info = {
-                    let methods_guard = self.inherent_methods.read();
-                    methods_guard.get(&type_name_text).and_then(|methods| {
-                        methods.get(&method_name_text).cloned().map(|scheme| {
-                            let impl_vc = scheme.impl_var_count;
-                            let (ty, fresh_vars, type_bounds) =
-                                scheme.instantiate_with_type_bounds();
-                            ((ty, fresh_vars, impl_vc), type_bounds)
-                        })
-                    })
-                };
-
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
-                    early_method_info
-                {
-                    // Register type bounds for fresh type variables
-                    for (fresh_var, bounds) in &type_bounds {
-                        for bound in bounds {
-                            self.register_type_var_type_bound(*fresh_var, bound.clone());
-                        }
-                    }
-
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = &method_ty
-                    {
-                        if args.len() == params.len() {
-                            // Extract receiver type args for binding
-                            let receiver_type_args: List<Type> = match &recv_ty {
-                                Type::Named { args, .. } | Type::Generic { args, .. } => {
-                                    args.clone()
-                                }
-                                _ => List::new(),
-                            };
-
-                            // Bind type variables from receiver type args
-                            let bind_limit = Self::resolve_bind_limit(
-                                impl_var_count,
-                                ordered_fresh_vars.len(),
-                                receiver_type_args.len(),
-                            );
-                            let mut combined_subst = crate::ty::Substitution::new();
-                            for (type_var, type_arg) in ordered_fresh_vars
-                                .iter()
-                                .take(bind_limit)
-                                .zip(receiver_type_args.iter())
-                            {
-                                if let Ok(subst) =
-                                    self.unifier.unify(&Type::Var(*type_var), type_arg, span)
-                                {
-                                    combined_subst.extend(subst);
-                                }
-                            }
-
-                            // OVERLOAD GUARD: If a closure argument doesn't match the parameter
-                            // type (e.g., List.position(value: &T) called with closure), skip this
-                            // inherent method and fall through to protocol-based resolution which
-                            // may have a predicate-accepting overload (e.g., Iterator.position).
-                            let params_cloned = params.clone();
-                            let mut signature_mismatch = false;
-                            for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                                if matches!(&arg.kind, ExprKind::Closure { .. }) {
-                                    let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                    let resolved_param = self.unifier.apply(&subst_param_ty);
-                                    if !matches!(
-                                        &resolved_param,
-                                        Type::Function { .. }
-                                            | Type::Var(_)
-                                            | Type::Placeholder { .. }
-                                    ) {
-                                        signature_mismatch = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !signature_mismatch {
-                                // Type check each argument with substituted param types
-                                for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
-                                    let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                    self.check_expr(arg, &subst_param_ty)?;
-                                }
-
-                                // Apply substitution and unifier to get concrete return type
-                                let subst_return_type = return_type.apply_subst(&combined_subst);
-                                let final_return_type = self.unifier.apply(&subst_return_type);
-
-                                return Ok(InferResult::new(final_return_type));
-                            }
-                            // signature_mismatch: fall through to protocol/fallback paths
-                        }
-                    }
-                }
-            }
+        if let Some(r) = self.resolve_inherent_and_collection_method(
+            &recv_ty, method_name_str, receiver, method, type_args, args, span,
+        )? {
+            return Ok(r);
         }
 
-        // ============================================================
-        // C-RUNTIME-INTERCEPTED COLLECTION METHODS (HARDCODED FALLBACK)
-        // These overrides are reached only when inherent_methods lookup above
-        // did NOT find the method (e.g., stdlib .vr files not loaded).
-        // Map/Set/Deque are NOT compiled through VBC→LLVM (not in migrated_modules).
-        // Their methods are intercepted by the C runtime which returns raw values,
-        // not Maybe-wrapped values. Override return types here to match the actual
-        // runtime behavior. When these modules are migrated, remove this block.
-        // ============================================================
-        // Also handle Named types — Map<K,V> may be represented as either Generic or Named
-        let map_type_match = match &recv_ty {
-            Type::Generic {
-                name,
-                args: type_args,
-            } => Some((name.as_str().to_string(), type_args.clone())),
-            Type::Named {
-                path,
-                args: type_args,
-            } => path
-                .as_ident()
-                .map(|id| (id.name.as_str().to_string(), type_args.clone())),
-            _ => None,
-        };
-        if let Some((type_name, type_args)) = map_type_match {
-            let type_name = type_name.as_str();
-            let method_name_str = method.name.as_str();
-            // Map method types now come from compiled map.vr declarations.
-            // Type overrides removed — uses map.vr's actual signatures:
-            //  get(&self, key: &K) -> Maybe<&V>
-            //  remove(&mut self, key: &K) -> Maybe<V>
-            //  insert(&mut self, key: K, value: V)
-            //  contains_key(&self, key: &K) -> Bool
-            //  len(&self) -> Int
-            //  is_empty(&self) -> Bool
-            // Map method type overrides: C runtime returns raw values,
-            // not Maybe<&V> from compiled map.vr. Required until AOT
-            // routes through compiled map.vr with proper Maybe unwrap.
-            match (type_name, method_name_str) {
-                (m, "insert") if WKT::Map.matches(m) && args.len() == 2 && type_args.len() == 2 => {
-                    let key_ty = &type_args[0];
-                    let val_ty = &type_args[1];
-                    self.check_expr(&args[0], key_ty)?;
-                    self.check_expr(&args[1], val_ty)?;
-                    return Ok(InferResult::new(Type::Unit));
-                }
-                (m, "get") if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 => {
-                    let key_ty = &type_args[0];
-                    let val_ty = &type_args[1];
-                    self.check_expr(&args[0], key_ty)?;
-                    // Map.get() returns Maybe<V>, not raw V
-                    let resolved_val = self.unifier.apply(val_ty);
-                    return Ok(InferResult::new(Type::maybe(resolved_val)));
-                }
-                (m, "remove") if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 => {
-                    let key_ty = &type_args[0];
-                    let val_ty = &type_args[1];
-                    self.check_expr(&args[0], key_ty)?;
-                    // Map.remove() returns Maybe<V>, not raw V
-                    let resolved_val = self.unifier.apply(val_ty);
-                    return Ok(InferResult::new(Type::maybe(resolved_val)));
-                }
-                (m, "contains_key")
-                    if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 =>
-                {
-                    let key_ty = &type_args[0];
-                    self.check_expr(&args[0], key_ty)?;
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                (m, "len") if WKT::Map.matches(m) && args.is_empty() => {
-                    return Ok(InferResult::new(Type::Int));
-                }
-                // ============================================================
-                // JoinHandle<T> method overrides - thread join returns T
-                // ============================================================
-                ("JoinHandle", "join") if args.is_empty() && type_args.len() == 1 => {
-                    // join() returns Result<T, JoinError> — callers typically .unwrap()
-                    let inner_ty = self.unifier.apply(&type_args[0]);
-                    let join_error_ty = Type::Named {
-                        path: Path::single(verum_ast::ty::Ident::new("JoinError", span)),
-                        args: List::new(),
-                    };
-                    return Ok(InferResult::new(Type::result(inner_ty, join_error_ty)));
-                }
-                ("JoinHandle", "is_finished") if args.is_empty() => {
-                    return Ok(InferResult::new(Type::Bool));
-                }
-                // ============================================================
-                // MutexGuard<T> / RwLockReadGuard<T> / RwLockWriteGuard<T>
-                // auto-deref: delegate method calls to inner T.
-                // For MutexGuard<Mutex<T>>, deref through Mutex to get T.
-                // ============================================================
-                ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", _)
-                    if type_args.len() == 1 =>
-                {
-                    let mut inner_ty = self.unifier.apply(&type_args[0]);
-                    // Unwrap through Mutex<T>/RwLock<T> to get to the actual data type
-                    // Handle both Type::Generic and Type::Named representations
-                    let mutex_inner = match &inner_ty {
-                        Type::Generic { name, args: ga }
-                            if (WKT::Mutex.matches(name.as_str())
-                                || WKT::RwLock.matches(name.as_str()))
-                                && ga.len() == 1 =>
-                        {
-                            Some(self.unifier.apply(&ga[0]))
-                        }
-                        Type::Named { path, args: na } if na.len() == 1 => {
-                            let is_mutex = path
-                                .as_ident()
-                                .map(|id| {
-                                    let n = id.name.as_str();
-                                    WKT::Mutex.matches(n) || WKT::RwLock.matches(n)
-                                })
-                                .unwrap_or(false);
-                            if is_mutex {
-                                Some(self.unifier.apply(&na[0]))
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    if let Some(unwrapped) = mutex_inner {
-                        inner_ty = unwrapped;
-                    }
-                    // Recursively resolve the method on the inner type
-                    let inner_expr = receiver.clone();
-                    let empty_generic_args: List<verum_ast::ty::GenericArg> = List::new();
-                    let result = self.infer_method_call_inner_impl(
-                        &inner_expr,
-                        method,
-                        &empty_generic_args,
-                        args,
-                        span,
-                        Some(inner_ty),
-                        true,
-                    );
-                    if result.is_ok() {
-                        return result;
-                    }
-                    // If inner type resolution also fails, fall through
-                }
-                _ => {}
-            }
-        }
-
-        // Text method return type overrides — match compiled text.vr signatures.
-        // find/rfind/index_of return Maybe<Int>, byte_at/char_at return Maybe<Int>.
-        // to_int returns Int directly, parse_int returns Result<Int, ParseError>.
-        if matches!(&recv_ty, Type::Text) {
-            let method_name_str = method.name.as_str();
-            match method_name_str {
-                // byte_at returns Maybe<Byte> (≈ Maybe<Int>), char_at returns Maybe<Char> (≈ Maybe<Int>)
-                "byte_at" | "char_at" if args.len() == 1 => {
-                    self.check_expr(&args[0], &Type::Int)?;
-                    return Ok(InferResult::new(Type::maybe(Type::Int)));
-                }
-                // find/rfind/index_of return Maybe<Int> from compiled text.vr
-                "find" | "index_of" | "rfind" if args.len() == 1 => {
-                    self.check_expr(&args[0], &Type::Text)?;
-                    return Ok(InferResult::new(Type::maybe(Type::Int)));
-                }
-                // to_int returns Int directly (0 on parse failure)
-                "to_int" if args.is_empty() => {
-                    return Ok(InferResult::new(Type::Int));
-                }
-                // parse_int returns Result<Int, ParseError>
-                "parse_int" if args.is_empty() => {
-                    let error_ty = Type::Named {
-                        path: Path::single(verum_ast::ty::Ident::new(
-                            "ParseError",
-                            Span::default(),
-                        )),
-                        args: List::new(),
-                    };
-                    return Ok(InferResult::new(Type::result(Type::Int, error_ty)));
-                }
-                // parse_float returns Result<Float, ParseError>
-                "parse_float" if args.is_empty() => {
-                    let error_ty = Type::Named {
-                        path: Path::single(verum_ast::ty::Ident::new(
-                            "ParseError",
-                            Span::default(),
-                        )),
-                        args: List::new(),
-                    };
-                    return Ok(InferResult::new(Type::result(Type::Float, error_ty)));
-                }
-                // Type-directed parse(): returns Maybe<T> where T is
-                // inferred from context (e.g., `let x: Int = "42".parse().unwrap()`)
-                // Returns Maybe (Some/None) rather than Result, matching the common
-                // pattern of `match input.parse<Int>() { Some(n) => n, None => ... }`
-                "parse" if args.is_empty() => {
-                    let inner_tv = Type::Var(TypeVar::fresh());
-                    return Ok(InferResult::new(Type::maybe(inner_tv)));
-                }
-                _ => {}
-            }
-        }
 
         // ============================================================
         // CAPABILITY-RESTRICTED TYPE METHOD FILTERING
@@ -46992,6 +46565,455 @@ impl TypeChecker {
     /// Dispatch CBGR intrinsic methods and reference tier-conversion methods.
     /// Fires BEFORE auto-deref so operations on the reference itself (not the
     /// referent) are intercepted first.
+    /// Try to resolve a method call via the early inherent-methods table
+    /// (methods registered from parsed .vr stdlib files) and the C-runtime
+    /// collection method fallbacks (Map/Set/Deque).
+    fn resolve_inherent_and_collection_method(
+        &mut self,
+        recv_ty: &Type,
+        method_name_str: &str,
+        receiver: &Expr,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // ============================================================
+        // EARLY INHERENT_METHODS LOOKUP: Before hardcoded stdlib overrides,
+        // check if the method was registered from parsed .vr stdlib files
+        // via impl block registration (Pass S3). If found, use the registered
+        // method signature instead of hardcoded fallbacks below.
+        // This reduces hardcoded stdlib knowledge in the compiler.
+        // ============================================================
+        {
+            // Skip the early-inherent lookup when the receiver's head is a
+            // bounded type parameter (HKT or otherwise) — inherent methods
+            // don't make sense on an abstract type variable, and querying by
+            // the parameter's name can yield unrelated blanket entries whose
+            // shape matches only by accident. Instead, we want such calls to
+            // fall through to the bound-first dispatch below, which consults
+            // the variable's protocol bounds and returns the correct method.
+            let is_type_param = {
+                let head_name: Option<verum_common::Text> = match &recv_ty {
+                    Type::Var(_) => None, // handled below
+                    Type::TypeApp { constructor, .. } => match &**constructor {
+                        Type::Var(_) => None, // handled below
+                        _ => None,
+                    },
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| verum_common::Text::from(id.name.as_str())),
+                    _ => None,
+                };
+                let head_is_param = head_name
+                    .as_ref()
+                    .map(|n| {
+                        // HKT parameters are recognized via the side table
+                        // (preserves the name even when env shows a
+                        // TypeConstructor after kind inference); ordinary
+                        // bounded type params show up as Type::Var or
+                        // Type::TypeConstructor in env/types.
+                        if self.hkt_type_var_by_name.contains_key(n) {
+                            return true;
+                        }
+                        let resolved = self
+                            .ctx
+                            .env
+                            .lookup(n)
+                            .map(|s| self.unifier.apply(&s.ty))
+                            .or_else(|| match self.ctx.lookup_type(n) {
+                                Maybe::Some(t) => Some(self.unifier.apply(t)),
+                                _ => None,
+                            });
+                        matches!(
+                            resolved,
+                            Some(Type::Var(_)) | Some(Type::TypeConstructor { .. })
+                        )
+                    })
+                    .unwrap_or(false);
+                match &recv_ty {
+                    Type::Var(_) => true,
+                    Type::TypeApp { constructor, .. } => {
+                        matches!(&**constructor, Type::Var(_))
+                    }
+                    _ => head_is_param,
+                }
+            };
+
+            let early_type_name: Option<verum_common::Text> = if is_type_param {
+                None
+            } else {
+                match &recv_ty {
+                    Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| verum_common::Text::from(id.name.as_str())),
+                    _ => None,
+                }
+            };
+
+            if let Some(type_name_text) = early_type_name {
+                let method_name_text = verum_common::Text::from(method.name.as_str());
+                // Receiver-driven lazy load: when the receiver type was
+                // inferred indirectly (through `Result.Ok` arm of a
+                // function return, the `?`-operator unwrap, a chained
+                // `.await` on `Result<T, _>`, …) and was never explicitly
+                // *named* by the user code, the lazy stdlib loader pass
+                // hasn't fired for `type_name_text` yet — so its
+                // `inherent_methods` bucket is empty and any
+                // `recv.method(...)` lookup falls straight through to
+                // `MethodNotFound`.  An explicit `let conn:
+                // AsyncPgPoolGuard = ...` annotation triggers the
+                // load eagerly via the type-resolution path; the
+                // receiver-only case bypasses it.  Force the same
+                // load here, idempotent — `ensure_stdlib_type_loaded`
+                // short-circuits on `ctx.lookup_type(name).is_some()`,
+                // and `register_inherent_methods_from_metadata` skips
+                // method names already populated.
+                {
+                    let mut pending_dep_load: Vec<verum_common::Text> = Vec::new();
+                    self.ensure_stdlib_type_loaded(&type_name_text, &mut pending_dep_load);
+                    while let Some(dep) = pending_dep_load.pop() {
+                        self.ensure_stdlib_type_loaded(&dep, &mut pending_dep_load);
+                    }
+                }
+                // Per-instantiation impl gating (task #35).
+                //
+
+                // When the stdlib or user code declares `impl<T> Foo<T,
+                // ReadOnly>` and `impl<T> Foo<T, WriteOnly>` with
+                // disjoint method sets, we must refuse `write(…)` on a
+                // `Foo<_, ReadOnly>` receiver. The method signatures
+                // themselves all landed in the flat
+                // (type_name, method_name) map when their impl blocks
+                // were registered, so this gate runs *before* the
+                // lookup succeeds and skips the early-inherent path
+                // when no registered impl pattern accepts the
+                // receiver's concrete type arguments. Subsequent
+                // lookup paths (protocol methods, universal methods)
+                // continue to run normally, producing a proper E400
+                // when none of them match either.
+                let receiver_ty_args_for_gate: verum_common::List<Type> = match &recv_ty {
+                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                    _ => verum_common::List::new(),
+                };
+                if !self.inherent_method_pattern_allows(
+                    &type_name_text,
+                    &method_name_text,
+                    &receiver_ty_args_for_gate,
+                ) {
+                    // No registered impl pattern accepts this
+                    // instantiation — produce the canonical
+                    // "no method named X found for type Y" error
+                    // so that `readonly_write_fail.vr` /
+                    // `writeonly_read_fail.vr` reject at type check.
+                    return Err(crate::TypeError::MethodNotFound {
+                        ty: recv_ty.to_text(),
+                        method: method.name.as_str().to_text(),
+                        span: method.span,
+                        did_you_mean: verum_common::Maybe::None,
+                    });
+                }
+                let early_method_info = {
+                    let methods_guard = self.inherent_methods.read();
+                    methods_guard.get(&type_name_text).and_then(|methods| {
+                        methods.get(&method_name_text).cloned().map(|scheme| {
+                            let impl_vc = scheme.impl_var_count;
+                            let (ty, fresh_vars, type_bounds) =
+                                scheme.instantiate_with_type_bounds();
+                            ((ty, fresh_vars, impl_vc), type_bounds)
+                        })
+                    })
+                };
+
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count), type_bounds)) =
+                    early_method_info
+                {
+                    // Register type bounds for fresh type variables
+                    for (fresh_var, bounds) in &type_bounds {
+                        for bound in bounds {
+                            self.register_type_var_type_bound(*fresh_var, bound.clone());
+                        }
+                    }
+
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = &method_ty
+                    {
+                        if args.len() == params.len() {
+                            // Extract receiver type args for binding
+                            let receiver_type_args: List<Type> = match &recv_ty {
+                                Type::Named { args, .. } | Type::Generic { args, .. } => {
+                                    args.clone()
+                                }
+                                _ => List::new(),
+                            };
+
+                            // Bind type variables from receiver type args
+                            let bind_limit = Self::resolve_bind_limit(
+                                impl_var_count,
+                                ordered_fresh_vars.len(),
+                                receiver_type_args.len(),
+                            );
+                            let mut combined_subst = crate::ty::Substitution::new();
+                            for (type_var, type_arg) in ordered_fresh_vars
+                                .iter()
+                                .take(bind_limit)
+                                .zip(receiver_type_args.iter())
+                            {
+                                if let Ok(subst) =
+                                    self.unifier.unify(&Type::Var(*type_var), type_arg, span)
+                                {
+                                    combined_subst.extend(subst);
+                                }
+                            }
+
+                            // OVERLOAD GUARD: If a closure argument doesn't match the parameter
+                            // type (e.g., List.position(value: &T) called with closure), skip this
+                            // inherent method and fall through to protocol-based resolution which
+                            // may have a predicate-accepting overload (e.g., Iterator.position).
+                            let params_cloned = params.clone();
+                            let mut signature_mismatch = false;
+                            for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                                if matches!(&arg.kind, ExprKind::Closure { .. }) {
+                                    let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                                    let resolved_param = self.unifier.apply(&subst_param_ty);
+                                    if !matches!(
+                                        &resolved_param,
+                                        Type::Function { .. }
+                                            | Type::Var(_)
+                                            | Type::Placeholder { .. }
+                                    ) {
+                                        signature_mismatch = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !signature_mismatch {
+                                // Type check each argument with substituted param types
+                                for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                                    let subst_param_ty = param_ty.apply_subst(&combined_subst);
+                                    self.check_expr(arg, &subst_param_ty)?;
+                                }
+
+                                // Apply substitution and unifier to get concrete return type
+                                let subst_return_type = return_type.apply_subst(&combined_subst);
+                                let final_return_type = self.unifier.apply(&subst_return_type);
+
+                                return Ok(Some(InferResult::new(final_return_type)));
+                            }
+                            // signature_mismatch: fall through to protocol/fallback paths
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // C-RUNTIME-INTERCEPTED COLLECTION METHODS (HARDCODED FALLBACK)
+        // These overrides are reached only when inherent_methods lookup above
+        // did NOT find the method (e.g., stdlib .vr files not loaded).
+        // Map/Set/Deque are NOT compiled through VBC→LLVM (not in migrated_modules).
+        // Their methods are intercepted by the C runtime which returns raw values,
+        // not Maybe-wrapped values. Override return types here to match the actual
+        // runtime behavior. When these modules are migrated, remove this block.
+        // ============================================================
+        // Also handle Named types — Map<K,V> may be represented as either Generic or Named
+        let map_type_match = match &recv_ty {
+            Type::Generic {
+                name,
+                args: type_args,
+            } => Some((name.as_str().to_string(), type_args.clone())),
+            Type::Named {
+                path,
+                args: type_args,
+            } => path
+                .as_ident()
+                .map(|id| (id.name.as_str().to_string(), type_args.clone())),
+            _ => None,
+        };
+        if let Some((type_name, type_args)) = map_type_match {
+            let type_name = type_name.as_str();
+            let method_name_str = method.name.as_str();
+            // Map method types now come from compiled map.vr declarations.
+            // Type overrides removed — uses map.vr's actual signatures:
+            //  get(&self, key: &K) -> Maybe<&V>
+            //  remove(&mut self, key: &K) -> Maybe<V>
+            //  insert(&mut self, key: K, value: V)
+            //  contains_key(&self, key: &K) -> Bool
+            //  len(&self) -> Int
+            //  is_empty(&self) -> Bool
+            // Map method type overrides: C runtime returns raw values,
+            // not Maybe<&V> from compiled map.vr. Required until AOT
+            // routes through compiled map.vr with proper Maybe unwrap.
+            match (type_name, method_name_str) {
+                (m, "insert") if WKT::Map.matches(m) && args.len() == 2 && type_args.len() == 2 => {
+                    let key_ty = &type_args[0];
+                    let val_ty = &type_args[1];
+                    self.check_expr(&args[0], key_ty)?;
+                    self.check_expr(&args[1], val_ty)?;
+                    return Ok(Some(InferResult::new(Type::Unit)));
+                }
+                (m, "get") if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 => {
+                    let key_ty = &type_args[0];
+                    let val_ty = &type_args[1];
+                    self.check_expr(&args[0], key_ty)?;
+                    // Map.get() returns Maybe<V>, not raw V
+                    let resolved_val = self.unifier.apply(val_ty);
+                    return Ok(Some(InferResult::new(Type::maybe(resolved_val))));
+                }
+                (m, "remove") if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 => {
+                    let key_ty = &type_args[0];
+                    let val_ty = &type_args[1];
+                    self.check_expr(&args[0], key_ty)?;
+                    // Map.remove() returns Maybe<V>, not raw V
+                    let resolved_val = self.unifier.apply(val_ty);
+                    return Ok(Some(InferResult::new(Type::maybe(resolved_val))));
+                }
+                (m, "contains_key")
+                    if WKT::Map.matches(m) && args.len() == 1 && type_args.len() == 2 =>
+                {
+                    let key_ty = &type_args[0];
+                    self.check_expr(&args[0], key_ty)?;
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                (m, "len") if WKT::Map.matches(m) && args.is_empty() => {
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                // ============================================================
+                // JoinHandle<T> method overrides - thread join returns T
+                // ============================================================
+                ("JoinHandle", "join") if args.is_empty() && type_args.len() == 1 => {
+                    // join() returns Result<T, JoinError> — callers typically .unwrap()
+                    let inner_ty = self.unifier.apply(&type_args[0]);
+                    let join_error_ty = Type::Named {
+                        path: Path::single(verum_ast::ty::Ident::new("JoinError", span)),
+                        args: List::new(),
+                    };
+                    return Ok(Some(InferResult::new(Type::result(inner_ty, join_error_ty))));
+                }
+                ("JoinHandle", "is_finished") if args.is_empty() => {
+                    return Ok(Some(InferResult::new(Type::Bool)));
+                }
+                // ============================================================
+                // MutexGuard<T> / RwLockReadGuard<T> / RwLockWriteGuard<T>
+                // auto-deref: delegate method calls to inner T.
+                // For MutexGuard<Mutex<T>>, deref through Mutex to get T.
+                // ============================================================
+                ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", _)
+                    if type_args.len() == 1 =>
+                {
+                    let mut inner_ty = self.unifier.apply(&type_args[0]);
+                    // Unwrap through Mutex<T>/RwLock<T> to get to the actual data type
+                    // Handle both Type::Generic and Type::Named representations
+                    let mutex_inner = match &inner_ty {
+                        Type::Generic { name, args: ga }
+                            if (WKT::Mutex.matches(name.as_str())
+                                || WKT::RwLock.matches(name.as_str()))
+                                && ga.len() == 1 =>
+                        {
+                            Some(self.unifier.apply(&ga[0]))
+                        }
+                        Type::Named { path, args: na } if na.len() == 1 => {
+                            let is_mutex = path
+                                .as_ident()
+                                .map(|id| {
+                                    let n = id.name.as_str();
+                                    WKT::Mutex.matches(n) || WKT::RwLock.matches(n)
+                                })
+                                .unwrap_or(false);
+                            if is_mutex {
+                                Some(self.unifier.apply(&na[0]))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(unwrapped) = mutex_inner {
+                        inner_ty = unwrapped;
+                    }
+                    // Recursively resolve the method on the inner type
+                    let inner_expr = receiver.clone();
+                    let empty_generic_args: List<verum_ast::ty::GenericArg> = List::new();
+                    let result = self.infer_method_call_inner_impl(
+                        &inner_expr,
+                        method,
+                        &empty_generic_args,
+                        args,
+                        span,
+                        Some(inner_ty),
+                        true,
+                    );
+                    if result.is_ok() {
+                        return result.map(Some);
+                    }
+                    // If inner type resolution also fails, fall through
+                }
+                _ => {}
+            }
+        }
+
+        // Text method return type overrides — match compiled text.vr signatures.
+        // find/rfind/index_of return Maybe<Int>, byte_at/char_at return Maybe<Int>.
+        // to_int returns Int directly, parse_int returns Result<Int, ParseError>.
+        if matches!(&recv_ty, Type::Text) {
+            let method_name_str = method.name.as_str();
+            match method_name_str {
+                // byte_at returns Maybe<Byte> (≈ Maybe<Int>), char_at returns Maybe<Char> (≈ Maybe<Int>)
+                "byte_at" | "char_at" if args.len() == 1 => {
+                    self.check_expr(&args[0], &Type::Int)?;
+                    return Ok(Some(InferResult::new(Type::maybe(Type::Int))));
+                }
+                // find/rfind/index_of return Maybe<Int> from compiled text.vr
+                "find" | "index_of" | "rfind" if args.len() == 1 => {
+                    self.check_expr(&args[0], &Type::Text)?;
+                    return Ok(Some(InferResult::new(Type::maybe(Type::Int))));
+                }
+                // to_int returns Int directly (0 on parse failure)
+                "to_int" if args.is_empty() => {
+                    return Ok(Some(InferResult::new(Type::Int)));
+                }
+                // parse_int returns Result<Int, ParseError>
+                "parse_int" if args.is_empty() => {
+                    let error_ty = Type::Named {
+                        path: Path::single(verum_ast::ty::Ident::new(
+                            "ParseError",
+                            Span::default(),
+                        )),
+                        args: List::new(),
+                    };
+                    return Ok(Some(InferResult::new(Type::result(Type::Int, error_ty))));
+                }
+                // parse_float returns Result<Float, ParseError>
+                "parse_float" if args.is_empty() => {
+                    let error_ty = Type::Named {
+                        path: Path::single(verum_ast::ty::Ident::new(
+                            "ParseError",
+                            Span::default(),
+                        )),
+                        args: List::new(),
+                    };
+                    return Ok(Some(InferResult::new(Type::result(Type::Float, error_ty))));
+                }
+                // Type-directed parse(): returns Maybe<T> where T is
+                // inferred from context (e.g., `let x: Int = "42".parse().unwrap()`)
+                // Returns Maybe (Some/None) rather than Result, matching the common
+                // pattern of `match input.parse<Int>() { Some(n) => n, None => ... }`
+                "parse" if args.is_empty() => {
+                    let inner_tv = Type::Var(TypeVar::fresh());
+                    return Ok(Some(InferResult::new(Type::maybe(inner_tv))));
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
     fn resolve_reference_type_method(
         &mut self,
         recv_ty_raw: &Type,
