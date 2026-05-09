@@ -865,6 +865,17 @@ impl IouArgType {
             IouArgType::Nat => "nat",
         }
     }
+
+    /// Cubical Agda syntax token for this arg type.  `String` and
+    /// `ℕ` are Agda primitives; `CoreTerm` is the inductive declared
+    /// at the top of the Agda export alongside `Ctx` and `KernelRule`.
+    pub fn agda_repr(self) -> &'static str {
+        match self {
+            IouArgType::CoreTerm => "CoreTerm",
+            IouArgType::Str => "String",
+            IouArgType::Nat => "ℕ",
+        }
+    }
 }
 
 /// Specification of an IOU axiom in the kernel-soundness export:
@@ -976,6 +987,37 @@ pub fn render_iou_axioms_coq() -> String {
             out.push_str(&format!(" -> {}", arg.coq_repr()));
         }
         out.push_str(" -> Prop.\n");
+    }
+    out
+}
+
+/// Render the IOU axiom block for Cubical Agda: `postulate
+/// <Name>_iou : Ctx → <type1> → … → <typeN> → Set` with leading
+/// citation comment.  Mirrors `render_iou_axioms_lean` /
+/// `_coq` / `_isabelle` so the four foundations stay in
+/// lockstep — every entry of `iou_axiom_specs()` materialises
+/// the same trust-extension surface in Agda's syntax.
+pub fn render_iou_axioms_agda() -> String {
+    let specs = iou_axiom_specs();
+    let mut out = String::new();
+    out.push_str(&format!(
+        "-- ====== Per-rule IOU axioms ({} total) ======\n\
+         -- Each captures a meta-theory dependency not yet formalised in\n\
+         -- Cubical Agda; discharging an IOU = replacing the postulate\n\
+         -- with a real definition (or folding its content into\n\
+         -- structural premises of the corresponding `Typing` rule).\n",
+        specs.len()
+    ));
+    if !specs.is_empty() {
+        out.push_str("postulate\n");
+        for spec in &specs {
+            out.push_str(&format!("  -- {}: {}.\n", spec.rule_name, spec.comment));
+            out.push_str(&format!("  {}_iou : Ctx", spec.rule_name));
+            for arg in spec.arg_types {
+                out.push_str(&format!(" → {}", arg.agda_repr()));
+            }
+            out.push_str(" → Set\n");
+        }
     }
     out
 }

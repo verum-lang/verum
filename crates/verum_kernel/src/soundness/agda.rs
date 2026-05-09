@@ -169,6 +169,15 @@ impl SoundnessBackend for AgdaBackend {
             }
             out.push_str(&format!("{} : KernelRule", n));
         }
+
+        // Per-rule IOU postulates — same lockstep contract as
+        // `iou_axioms_lean()` / `_coq()` / `_isabelle()`.  Agda's
+        // emission stays empty whenever `iou_axiom_specs()` is empty
+        // (the steady-state today); the single block lets future
+        // re-introductions flow through one source of truth instead
+        // of forcing a per-foundation patch.
+        out.push_str("\n\n");
+        out.push_str(iou_axioms_agda());
         out
     }
 
@@ -252,6 +261,25 @@ impl SoundnessBackend for AgdaBackend {
              ------------------------------------------------------------",
         )
     }
+}
+
+// ============================================================================
+// Per-rule IOU postulates — generated from the spec registry.
+// ============================================================================
+
+/// The IOU postulate block as a `&'static str`, generated once on
+/// first access from `iou_axiom_specs()` via
+/// [`crate::soundness::render_iou_axioms_agda`].  Mirror of the
+/// matching `iou_axioms_lean` / `_coq` / `_isabelle` cached
+/// helpers — single source of truth is the spec registry in
+/// `mod.rs`; drift between spec and emitted text is impossible by
+/// construction.
+pub(crate) fn iou_axioms_agda() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE
+        .get_or_init(crate::soundness::render_iou_axioms_agda)
+        .as_str()
 }
 
 #[cfg(test)]
