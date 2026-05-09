@@ -176,7 +176,7 @@ pub use format::{MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader};
 pub use instruction::{
     ArithSubOpcode, CbgrSubOpcode, CmpSubOpcode, FfiSubOpcode, FloatWidth, GpuSubOpcode,
     Instruction, MachSubOpcode, MathCategory, MathOpMeta, MathSubOpcode, Opcode, Reg, RegRange,
-    SyncSubOpcode, SysSubOpcode, SystemSubOpcode, TimeSubOpcode,
+    SyncSubOpcode, SysSubOpcode, SystemCategory, SystemOpMeta, SystemSubOpcode, TimeSubOpcode,
 };
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{

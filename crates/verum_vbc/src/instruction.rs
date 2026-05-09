@@ -5381,6 +5381,98 @@ pub enum SyncSubOpcode {
 //   5. Run `verum audit --subop-cleanliness` to catch any
 //      remaining FfiExtended emit-site for a migrated op.
 
+// =========================================================================
+// SystemSubOpcode metadata — single source of truth for the 77 variants.
+//
+// The legacy implementation maintained six parallel match-arm methods
+// (`mnemonic`, `category`, `is_call`, `is_marshal`, `allocates`,
+// `deallocates`); `category()` was driven by a `match self.to_byte()`
+// over 16-byte windows so renumbering a variant could silently move it
+// to a different category band.  `is_call()` and `allocates()` had
+// drift-defect undercounts (the latently-added CallFfiAarch64 /
+// CallFfiWin64Arm64 weren't tagged as calls; the heap-allocating
+// NewByteArray / NewTypedArray / Mach* / Cbgr* ops weren't tagged as
+// allocates), which the new structural per-variant tagging closes.
+//
+// Same drift-collapse pattern as MathSubOpcode.meta() (4b2792881),
+// KernelRule.meta() (ec9cfc411), AntiPatternCode.meta() (c7e4cbb7f),
+// Lifecycle.meta() (02b920ce2).
+// =========================================================================
+
+/// Functional band a `SystemSubOpcode` belongs to.  Each band aligns
+/// with a 16-byte window in the discriminant encoding, but the band a
+/// variant belongs to is now stamped per-variant in `meta()` rather
+/// than inferred from byte-range arithmetic — renumbering a variant
+/// can no longer silently move it between bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SystemCategory {
+    /// `LoadSymbol` / `GetLibrary` / `IsSymbolResolved`.
+    SymbolResolution,
+    /// `CallFfiC` / `CallFfiStdcall` / `CallFfiSysV64` / etc.
+    CallingConvention,
+    /// `MarshalToC` / `StringToC` / `ArrayFromC` / etc.
+    Marshalling,
+    /// `GetErrno` / `SetErrno` / `ClearErrno` / `GetLastError`.
+    ErrorHandling,
+    /// libc-style memory ops + heap-array constructors + C RNG seeds.
+    MemoryOperations,
+    /// `CreateCallback` / `FreeCallback`.
+    CallbackSupport,
+    /// `DerefRaw` / `PtrAdd` / `PtrIsNull` / etc.
+    RawPointerOperations,
+    /// `TimeMonotonicNanos` / `TimeSleepNanos` / etc.
+    TimeOperations,
+    /// `SysGetpid` / `SysMmap` / `SysMadvise` / etc.
+    SystemCallOperations,
+    /// `MachVmAllocate` / `MachSemCreate` / etc.
+    MachKernelOperations,
+    /// `CbgrAlloc` / `CbgrAllocZeroed` / `CbgrDealloc` / `CSecureZero`.
+    CbgrMemoryOperations,
+    /// `FutexWait` / `FutexWake` / `SpinlockLock`.
+    SynchronizationPrimitives,
+}
+
+impl SystemCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SymbolResolution          => "Symbol Resolution",
+            Self::CallingConvention         => "Calling Convention",
+            Self::Marshalling               => "Marshalling",
+            Self::ErrorHandling             => "Error Handling",
+            Self::MemoryOperations          => "Memory Operations",
+            Self::CallbackSupport           => "Callback Support",
+            Self::RawPointerOperations      => "Raw Pointer Operations",
+            Self::TimeOperations            => "Time Operations",
+            Self::SystemCallOperations      => "System Call Operations",
+            Self::MachKernelOperations      => "Mach Kernel Operations",
+            Self::CbgrMemoryOperations      => "CBGR Memory Operations",
+            Self::SynchronizationPrimitives => "Synchronization Primitives",
+        }
+    }
+}
+
+/// Co-located metadata for one `SystemSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured here;
+/// `SystemSubOpcode::meta()` is the only site that constructs values
+/// of this type, so a single match keeps every accessor consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemOpMeta {
+    /// All-caps mnemonic (`"FFI_LOAD_SYMBOL"` / `"SYS_GETPID"`).
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: SystemCategory,
+    /// Performs an FFI call.
+    pub is_call: bool,
+    /// Marshals a value across the Verum/C boundary.
+    pub is_marshal: bool,
+    /// Allocates memory the runtime is responsible for tracking.
+    pub allocates: bool,
+    /// Releases memory the runtime is responsible for tracking.
+    pub deallocates: bool,
+}
+
 impl SystemSubOpcode {
     /// Creates an FFI sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -5483,144 +5575,183 @@ impl SystemSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this FFI sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::LoadSymbol => "FFI_LOAD_SYMBOL",
-            Self::GetLibrary => "FFI_GET_LIBRARY",
-            Self::IsSymbolResolved => "FFI_IS_RESOLVED",
-            Self::CallFfiC => "FFI_CALL_C",
-            Self::CallFfiStdcall => "FFI_CALL_STDCALL",
-            Self::CallFfiSysV64 => "FFI_CALL_SYSV64",
-            Self::CallFfiFastcall => "FFI_CALL_FASTCALL",
-            Self::CallFfiVariadic => "FFI_CALL_VARIADIC",
-            Self::CallFfiIndirect => "FFI_CALL_INDIRECT",
-            Self::CallFfiAarch64 => "FFI_CALL_AARCH64",
-            Self::CallFfiWin64Arm64 => "FFI_CALL_WIN64_ARM64",
-            Self::MarshalToC => "FFI_MARSHAL_TO_C",
-            Self::MarshalFromC => "FFI_MARSHAL_FROM_C",
-            Self::StringToC => "FFI_STRING_TO_C",
-            Self::StringFromC => "FFI_STRING_FROM_C",
-            Self::ArrayToC => "FFI_ARRAY_TO_C",
-            Self::ArrayFromC => "FFI_ARRAY_FROM_C",
-            Self::StructToC => "FFI_STRUCT_TO_C",
-            Self::StructFromC => "FFI_STRUCT_FROM_C",
-            Self::GetErrno => "FFI_GET_ERRNO",
-            Self::SetErrno => "FFI_SET_ERRNO",
-            Self::ClearErrno => "FFI_CLEAR_ERRNO",
-            Self::GetLastError => "FFI_GET_LAST_ERROR",
-            Self::CAlloc => "FFI_C_ALLOC",
-            Self::CFree => "FFI_C_FREE",
-            Self::CRealloc => "FFI_C_REALLOC",
-            Self::CMemcpy => "FFI_C_MEMCPY",
-            Self::CMemset => "FFI_C_MEMSET",
-            Self::CMemmove => "FFI_C_MEMMOVE",
-            Self::CMemcmp => "FFI_C_MEMCMP",
-            Self::RandomU64 => "FFI_RANDOM_U64",
-            Self::RandomFloat => "FFI_RANDOM_FLOAT",
-            Self::NewByteArray => "FFI_NEW_BYTE_ARRAY",
-            Self::ByteArrayElementAddr => "FFI_BYTE_ARRAY_ELEM_ADDR",
-            Self::ByteArrayLoad => "FFI_BYTE_ARRAY_LOAD",
-            Self::ByteArrayStore => "FFI_BYTE_ARRAY_STORE",
-            Self::TypedArrayElementAddr => "FFI_TYPED_ARRAY_ELEM_ADDR",
-            Self::NewTypedArray => "FFI_NEW_TYPED_ARRAY",
-            Self::StructFieldAddr => "FFI_STRUCT_FIELD_ADDR",
-            Self::CreateCallback => "FFI_CREATE_CALLBACK",
-            Self::FreeCallback => "FFI_FREE_CALLBACK",
-            Self::DerefRaw => "FFI_DEREF_RAW",
-            Self::DerefMutRaw => "FFI_DEREF_MUT_RAW",
-            Self::DerefRawPtr => "FFI_DEREF_RAW_PTR",
-            Self::DerefRawSigned => "FFI_DEREF_RAW_SIGNED",
-            Self::PtrAdd => "FFI_PTR_ADD",
-            Self::PtrSub => "FFI_PTR_SUB",
-            Self::PtrDiff => "FFI_PTR_DIFF",
-            Self::PtrIsNull => "FFI_PTR_IS_NULL",
-            Self::TimeMonotonicNanos => "TIME_MONOTONIC_NANOS",
-            Self::TimeRealtimeNanos => "TIME_REALTIME_NANOS",
-            Self::TimeMonotonicRawNanos => "TIME_MONOTONIC_RAW_NANOS",
-            Self::TimeSleepNanos => "TIME_SLEEP_NANOS",
-            Self::TimeThreadCpuNanos => "TIME_THREAD_CPU_NANOS",
-            Self::TimeProcessCpuNanos => "TIME_PROCESS_CPU_NANOS",
-            Self::SysGetpid => "SYS_GETPID",
-            Self::SysGettid => "SYS_GETTID",
-            Self::SysMmap => "SYS_MMAP",
-            Self::SysMunmap => "SYS_MUNMAP",
-            Self::SysMadvise => "SYS_MADVISE",
-            Self::SysGetentropy => "SYS_GETENTROPY",
-            Self::MachVmAllocate => "MACH_VM_ALLOCATE",
-            Self::MachVmDeallocate => "MACH_VM_DEALLOCATE",
-            Self::MachVmProtect => "MACH_VM_PROTECT",
-            Self::MachSemCreate => "MACH_SEM_CREATE",
-            Self::MachSemDestroy => "MACH_SEM_DESTROY",
-            Self::MachSemSignal => "MACH_SEM_SIGNAL",
-            Self::MachSemWait => "MACH_SEM_WAIT",
-            Self::MachErrorString => "MACH_ERROR_STRING",
-            Self::MachSleepUntil => "MACH_SLEEP_UNTIL",
-            Self::CbgrAlloc => "CBGR_ALLOC",
-            Self::CbgrAllocZeroed => "CBGR_ALLOC_ZEROED",
-            Self::CbgrDealloc => "CBGR_DEALLOC",
-            Self::CSecureZero => "FFI_C_SECURE_ZERO",
-            Self::FutexWait => "SYNC_FUTEX_WAIT",
-            Self::FutexWake => "SYNC_FUTEX_WAKE",
-            Self::SpinlockLock => "SYNC_SPINLOCK_LOCK",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` / `is_call`
+    /// / `is_marshal` / `allocates` / `deallocates`.  Adding a new
+    /// variant requires exactly one entry here; sibling accessors are
+    /// `#[inline]` projections through this method's return value.
+    pub const fn meta(self) -> SystemOpMeta {
+        use SystemCategory::{
+            CallbackSupport, CallingConvention, CbgrMemoryOperations, ErrorHandling,
+            MachKernelOperations, Marshalling, MemoryOperations, RawPointerOperations,
+            SymbolResolution, SynchronizationPrimitives, SystemCallOperations, TimeOperations,
+        };
+
+        // Field order: mnemonic, category, is_call, is_marshal,
+        // allocates, deallocates.  Single-line entries keep drift
+        // between sibling rows obvious — categorisation, capability
+        // flags, and the mnemonic spelling all sit on one row.
+        macro_rules! m {
+            ($mn:expr, $cat:ident,
+             call=$call:literal, marshal=$marshal:literal,
+             alloc=$alloc:literal, dealloc=$dealloc:literal $(,)?) => {
+                SystemOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    is_call: $call,
+                    is_marshal: $marshal,
+                    allocates: $alloc,
+                    deallocates: $dealloc,
+                }
+            };
         }
+
+        match self {
+            // ===== Symbol Resolution (0x00-0x0F) =====
+            Self::LoadSymbol             => m!("FFI_LOAD_SYMBOL",            SymbolResolution,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::GetLibrary             => m!("FFI_GET_LIBRARY",            SymbolResolution,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::IsSymbolResolved       => m!("FFI_IS_RESOLVED",            SymbolResolution,         call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Calling Convention (0x10-0x1F) =====
+            // is_call=true on every variant — closes the legacy gap
+            // where CallFfiAarch64 / CallFfiWin64Arm64 (added later)
+            // weren't tagged as calls.
+            Self::CallFfiC               => m!("FFI_CALL_C",                 CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiStdcall         => m!("FFI_CALL_STDCALL",           CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiSysV64          => m!("FFI_CALL_SYSV64",            CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiFastcall        => m!("FFI_CALL_FASTCALL",          CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiVariadic        => m!("FFI_CALL_VARIADIC",          CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiIndirect        => m!("FFI_CALL_INDIRECT",          CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiAarch64         => m!("FFI_CALL_AARCH64",           CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+            Self::CallFfiWin64Arm64      => m!("FFI_CALL_WIN64_ARM64",       CallingConvention,        call=true,  marshal=false, alloc=false, dealloc=false),
+
+            // ===== Marshalling (0x20-0x2F) =====
+            Self::MarshalToC             => m!("FFI_MARSHAL_TO_C",           Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::MarshalFromC           => m!("FFI_MARSHAL_FROM_C",         Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::StringToC              => m!("FFI_STRING_TO_C",            Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::StringFromC            => m!("FFI_STRING_FROM_C",          Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::ArrayToC               => m!("FFI_ARRAY_TO_C",             Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::ArrayFromC             => m!("FFI_ARRAY_FROM_C",           Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::StructToC              => m!("FFI_STRUCT_TO_C",            Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+            Self::StructFromC            => m!("FFI_STRUCT_FROM_C",          Marshalling,              call=false, marshal=true,  alloc=false, dealloc=false),
+
+            // ===== Error Handling (0x30-0x3F) =====
+            Self::GetErrno               => m!("FFI_GET_ERRNO",              ErrorHandling,            call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SetErrno               => m!("FFI_SET_ERRNO",              ErrorHandling,            call=false, marshal=false, alloc=false, dealloc=false),
+            Self::ClearErrno             => m!("FFI_CLEAR_ERRNO",            ErrorHandling,            call=false, marshal=false, alloc=false, dealloc=false),
+            Self::GetLastError           => m!("FFI_GET_LAST_ERROR",         ErrorHandling,            call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Memory Operations (0x40-0x4F) =====
+            // Heap-array constructors (NewByteArray / NewTypedArray)
+            // also allocate — closes the legacy `allocates()`
+            // undercount.
+            Self::CAlloc                 => m!("FFI_C_ALLOC",                MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CFree                  => m!("FFI_C_FREE",                 MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=true),
+            Self::CRealloc               => m!("FFI_C_REALLOC",              MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CMemcpy                => m!("FFI_C_MEMCPY",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CMemset                => m!("FFI_C_MEMSET",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CMemmove               => m!("FFI_C_MEMMOVE",              MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::CMemcmp                => m!("FFI_C_MEMCMP",               MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::RandomU64              => m!("FFI_RANDOM_U64",             MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::RandomFloat            => m!("FFI_RANDOM_FLOAT",           MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::NewByteArray           => m!("FFI_NEW_BYTE_ARRAY",         MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::ByteArrayElementAddr   => m!("FFI_BYTE_ARRAY_ELEM_ADDR",   MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::ByteArrayLoad          => m!("FFI_BYTE_ARRAY_LOAD",        MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::ByteArrayStore         => m!("FFI_BYTE_ARRAY_STORE",       MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TypedArrayElementAddr  => m!("FFI_TYPED_ARRAY_ELEM_ADDR",  MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::NewTypedArray          => m!("FFI_NEW_TYPED_ARRAY",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::StructFieldAddr        => m!("FFI_STRUCT_FIELD_ADDR",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Callback Support (0x50-0x5F) =====
+            Self::CreateCallback         => m!("FFI_CREATE_CALLBACK",        CallbackSupport,          call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::FreeCallback           => m!("FFI_FREE_CALLBACK",          CallbackSupport,          call=false, marshal=false, alloc=false, dealloc=true),
+
+            // ===== Raw Pointer Operations (0x60-0x6F) =====
+            Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::DerefMutRaw            => m!("FFI_DEREF_MUT_RAW",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::DerefRawPtr            => m!("FFI_DEREF_RAW_PTR",          RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::DerefRawSigned         => m!("FFI_DEREF_RAW_SIGNED",       RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrAdd                 => m!("FFI_PTR_ADD",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrSub                 => m!("FFI_PTR_SUB",                RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrDiff                => m!("FFI_PTR_DIFF",               RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::PtrIsNull              => m!("FFI_PTR_IS_NULL",            RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Time Operations (0x70-0x7F) =====
+            Self::TimeMonotonicNanos     => m!("TIME_MONOTONIC_NANOS",       TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeRealtimeNanos      => m!("TIME_REALTIME_NANOS",        TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeMonotonicRawNanos  => m!("TIME_MONOTONIC_RAW_NANOS",   TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeSleepNanos         => m!("TIME_SLEEP_NANOS",           TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeThreadCpuNanos     => m!("TIME_THREAD_CPU_NANOS",      TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TimeProcessCpuNanos    => m!("TIME_PROCESS_CPU_NANOS",     TimeOperations,           call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== System Call Operations (0x80-0x8F) =====
+            Self::SysGetpid              => m!("SYS_GETPID",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SysGettid              => m!("SYS_GETTID",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SysMmap                => m!("SYS_MMAP",                   SystemCallOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::SysMunmap              => m!("SYS_MUNMAP",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=true),
+            Self::SysMadvise             => m!("SYS_MADVISE",                SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SysGetentropy          => m!("SYS_GETENTROPY",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Mach Kernel Operations (0x90-0x9F) =====
+            // Allocation-vs-release tagging mirrors Linux mmap pair.
+            Self::MachVmAllocate         => m!("MACH_VM_ALLOCATE",           MachKernelOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::MachVmDeallocate       => m!("MACH_VM_DEALLOCATE",         MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=true),
+            Self::MachVmProtect          => m!("MACH_VM_PROTECT",            MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::MachSemCreate          => m!("MACH_SEM_CREATE",            MachKernelOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::MachSemDestroy         => m!("MACH_SEM_DESTROY",           MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=true),
+            Self::MachSemSignal          => m!("MACH_SEM_SIGNAL",            MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::MachSemWait            => m!("MACH_SEM_WAIT",              MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::MachErrorString        => m!("MACH_ERROR_STRING",          MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::MachSleepUntil         => m!("MACH_SLEEP_UNTIL",           MachKernelOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== CBGR Memory Operations (0xA0-0xAF) =====
+            Self::CbgrAlloc              => m!("CBGR_ALLOC",                 CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CbgrAllocZeroed        => m!("CBGR_ALLOC_ZEROED",          CbgrMemoryOperations,     call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::CbgrDealloc            => m!("CBGR_DEALLOC",               CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=true),
+            Self::CSecureZero            => m!("FFI_C_SECURE_ZERO",          CbgrMemoryOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+
+            // ===== Synchronization Primitives (0xB0-0xBF) =====
+            Self::FutexWait              => m!("SYNC_FUTEX_WAIT",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::FutexWake              => m!("SYNC_FUTEX_WAKE",            SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::SpinlockLock           => m!("SYNC_SPINLOCK_LOCK",         SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+        }
+    }
+
+    /// Returns the mnemonic string for this FFI sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode range.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "Symbol Resolution",
-            0x10..=0x1F => "Calling Convention",
-            0x20..=0x2F => "Marshalling",
-            0x30..=0x3F => "Error Handling",
-            0x40..=0x4F => "Memory Operations",
-            0x50..=0x5F => "Callback Support",
-            0x60..=0x6F => "Raw Pointer Operations",
-            0x70..=0x7F => "Time Operations",
-            0x80..=0x8F => "System Call Operations",
-            0x90..=0x9F => "Mach Kernel Operations",
-            0xA0..=0xAF => "CBGR Memory Operations",
-            0xB0..=0xBF => "Synchronization Primitives",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns true if this operation performs a call.
+    #[inline]
     pub fn is_call(self) -> bool {
-        matches!(
-            self,
-            Self::CallFfiC
-                | Self::CallFfiStdcall
-                | Self::CallFfiSysV64
-                | Self::CallFfiFastcall
-                | Self::CallFfiVariadic
-                | Self::CallFfiIndirect
-        )
+        self.meta().is_call
     }
 
     /// Returns true if this operation marshals data.
+    #[inline]
     pub fn is_marshal(self) -> bool {
-        matches!(
-            self,
-            Self::MarshalToC
-                | Self::MarshalFromC
-                | Self::StringToC
-                | Self::StringFromC
-                | Self::ArrayToC
-                | Self::ArrayFromC
-                | Self::StructToC
-                | Self::StructFromC
-        )
+        self.meta().is_marshal
     }
 
     /// Returns true if this operation allocates memory.
+    #[inline]
     pub fn allocates(self) -> bool {
-        matches!(self, Self::CAlloc | Self::CRealloc | Self::CreateCallback)
+        self.meta().allocates
     }
 
     /// Returns true if this operation frees memory.
+    #[inline]
     pub fn deallocates(self) -> bool {
-        matches!(self, Self::CFree | Self::FreeCallback)
+        self.meta().deallocates
     }
 }
 
@@ -15121,5 +15252,145 @@ mod tests {
         assert_eq!(count, 80,
             "MathSubOpcode variant count drift: expected 80, got {}",
             count);
+    }
+
+    // ========================================================================
+    // SystemSubOpcode meta() drift pins
+    //
+    // The legacy `category()` accessor inferred functional bands by
+    // matching `to_byte()` over 16-byte windows; `is_call()` /
+    // `is_marshal()` / `allocates()` / `deallocates()` were
+    // explicit-variant lists with at least two known undercount
+    // defects (CallFfiAarch64 / CallFfiWin64Arm64 not flagged as
+    // calls; heap-array constructors not flagged as allocations).
+    // The new meta() table is the single source of truth — these
+    // tests pin its invariants.
+    // ========================================================================
+
+    fn for_every_system_sub_opcode<F: FnMut(SystemSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = SystemSubOpcode::from_byte(byte) {
+                assert_eq!(
+                    op.to_byte(),
+                    byte,
+                    "SystemSubOpcode::from_byte({:#04x}).to_byte() drift",
+                    byte
+                );
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn system_meta_count_pinned_at_seventy_seven() {
+        // 77 currently reachable variants spread over twelve 16-byte
+        // bands.  Bumping this assertion is the explicit signal that
+        // a new SystemSubOpcode entry has landed and the
+        // corresponding meta() arm is in place.
+        let mut count = 0;
+        for_every_system_sub_opcode(|_| count += 1);
+        assert_eq!(count, 77,
+            "SystemSubOpcode variant count drift: expected 77, got {}",
+            count);
+    }
+
+    #[test]
+    fn system_meta_category_matches_byte_range_band() {
+        // The legacy `category()` accessor used 16-byte byte-range
+        // windows.  Pin that meta()'s structural categorisation
+        // agrees with the encoding bands so renumbering a variant
+        // either keeps it in the same band or surfaces a test
+        // failure.
+        for_every_system_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => SystemCategory::SymbolResolution,
+                0x10..=0x1F => SystemCategory::CallingConvention,
+                0x20..=0x2F => SystemCategory::Marshalling,
+                0x30..=0x3F => SystemCategory::ErrorHandling,
+                0x40..=0x4F => SystemCategory::MemoryOperations,
+                0x50..=0x5F => SystemCategory::CallbackSupport,
+                0x60..=0x6F => SystemCategory::RawPointerOperations,
+                0x70..=0x7F => SystemCategory::TimeOperations,
+                0x80..=0x8F => SystemCategory::SystemCallOperations,
+                0x90..=0x9F => SystemCategory::MachKernelOperations,
+                0xA0..=0xAF => SystemCategory::CbgrMemoryOperations,
+                0xB0..=0xBF => SystemCategory::SynchronizationPrimitives,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn system_meta_is_call_iff_calling_convention_band() {
+        // Every CallingConvention-band variant is a call (closing the
+        // legacy CallFfiAarch64 / CallFfiWin64Arm64 undercount), and
+        // no other-band variant is.
+        for_every_system_sub_opcode(|op| {
+            let in_band = op.meta().category == SystemCategory::CallingConvention;
+            assert_eq!(op.is_call(), in_band,
+                "{:?}: is_call={} but band-membership={}", op, op.is_call(), in_band);
+        });
+    }
+
+    #[test]
+    fn system_meta_is_marshal_iff_marshalling_band() {
+        // Symmetric with is_call: the Marshalling band is the
+        // canonical home for marshalling ops, and is_marshal() must
+        // agree with band membership.
+        for_every_system_sub_opcode(|op| {
+            let in_band = op.meta().category == SystemCategory::Marshalling;
+            assert_eq!(op.is_marshal(), in_band,
+                "{:?}: is_marshal={} but Marshalling band={}", op, op.is_marshal(), in_band);
+        });
+    }
+
+    #[test]
+    fn system_meta_alloc_dealloc_disjoint() {
+        // No single op both allocates and deallocates — those are
+        // distinct verbs and tagging both would flag a drift defect.
+        for_every_system_sub_opcode(|op| {
+            assert!(!(op.allocates() && op.deallocates()),
+                "{:?}: tagged both allocates and deallocates", op);
+        });
+    }
+
+    #[test]
+    fn system_meta_alloc_dealloc_pairing() {
+        // Every allocator has a paired deallocator that the runtime
+        // must call to reclaim memory.  The pairing is implicit (by
+        // operation family) so we list the expected count of each:
+        // CAlloc/CRealloc/CreateCallback/NewByteArray/NewTypedArray/
+        // SysMmap/MachVmAllocate/MachSemCreate/CbgrAlloc/CbgrAllocZeroed
+        // = 10 allocators.  CFree/FreeCallback/SysMunmap/
+        // MachVmDeallocate/MachSemDestroy/CbgrDealloc = 6
+        // deallocators (CRealloc + AllocZeroed share CFree/CbgrDealloc;
+        // NewByteArray/NewTypedArray are CBGR-tracked and use
+        // CbgrDealloc).  Pin both counts.
+        let mut alloc = 0;
+        let mut dealloc = 0;
+        for_every_system_sub_opcode(|op| {
+            if op.allocates()   { alloc += 1; }
+            if op.deallocates() { dealloc += 1; }
+        });
+        assert_eq!(alloc, 10, "allocator count drift");
+        assert_eq!(dealloc, 6, "deallocator count drift");
+    }
+
+    #[test]
+    fn system_meta_mnemonic_uniqueness() {
+        // Every mnemonic must be distinct so debug output stays
+        // unambiguous.
+        let mut seen: Vec<&'static str> = Vec::with_capacity(77);
+        for_every_system_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 77);
     }
 }
