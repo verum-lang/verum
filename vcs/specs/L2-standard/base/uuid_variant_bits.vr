@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, uuid, rfc4122, variant-bits, version
+// @timeout: 10000
+// @description: UUID variant bits and version field validation (RFC 4122 / #74).
+//
+// RFC 4122 §4.1.1 mandates that byte 8 (0-indexed) of every UUID carry the
+// variant marker `10xxxxxx` — i.e., `byte & 0xC0 == 0x80`.  The version field
+// lives in the high nibble of byte 6: `(byte >> 4) & 0x0F`.
+//
+// This spec verifies:
+//   1. new_v4() carries version=4 and RFC variant bits.
+//   2. new_v7() carries version=7 and RFC variant bits.
+//   3. parse() of a known V4 UUID string roundtrips version/variant correctly.
+//   4. The nil UUID (all zeros) has version=0 and variant bits=0.
+//   5. from_bytes() with hand-crafted bytes exposes the correct version and
+//      variant via to_bytes()[6] / to_bytes()[8].
+
+mount core.base.uuid.{Uuid, UuidError};
+
+fn version_byte(id: &Uuid) -> Int {
+    id.version()
+}
+
+fn variant_byte(id: &Uuid) -> Int {
+    // Byte 8 lives in the MSB of `lo` (bytes 8-15 big-endian).
+    // Mask to unsigned 8-bit, then check the high 2 bits.
+    let bytes = id.to_bytes();
+    bytes[8] as Int
+}
+
+fn has_rfc_variant(id: &Uuid) -> Bool {
+    (variant_byte(id) & 0xC0) == 0x80
+}
+
+// -----------------------------------------------------------------------------
+// 1. new_v4() — version 4 + RFC variant
+// -----------------------------------------------------------------------------
+
+fn new_v4_version_and_variant() {
+    let id = Uuid.new_v4();
+    assert_eq(version_byte(&id), 4);
+    assert(has_rfc_variant(&id));
+}
+
+// -----------------------------------------------------------------------------
+// 2. new_v7() — version 7 + RFC variant
+// -----------------------------------------------------------------------------
+
+fn new_v7_version_and_variant() {
+    let id = Uuid.new_v7();
+    assert_eq(version_byte(&id), 7);
+    assert(has_rfc_variant(&id));
+}
+
+// -----------------------------------------------------------------------------
+// 3. parse() of known V4 UUID string — version and variant survive round-trip
+// -----------------------------------------------------------------------------
+
+fn parse_v4_roundtrip() -> Result<(), UuidError> {
+    // Canonical V4 UUID with known version nibble (4) and variant byte (0x8n).
+    let s = Text.from("550e8400-e29b-41d4-a716-446655440000");
+    let id = Uuid.parse(&s)?;
+    assert_eq(version_byte(&id), 4);
+    assert(has_rfc_variant(&id));
+    // Round-trip text should have the same 32 hex digits.
+    let out = id.to_text();
+    assert_eq(out.len(), 36);
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 4. nil UUID — version 0, variant bits 0
+// -----------------------------------------------------------------------------
+
+fn nil_uuid_version_and_variant() {
+    let id = Uuid.nil();
+    assert_eq(version_byte(&id), 0);
+    // nil is all zeros; byte 8 = 0x00 → variant bits NOT RFC 4122
+    assert(!has_rfc_variant(&id));
+}
+
+// -----------------------------------------------------------------------------
+// 5. from_bytes() with hand-crafted bytes — version/variant from raw layout
+//    Layout: bytes 0-5 arbitrary, byte 6 high nibble = version,
+//            byte 8 high 2 bits = 0b10 (RFC variant).
+// -----------------------------------------------------------------------------
+
+fn from_bytes_version_and_variant() {
+    let mut buf: [Byte; 16] = [0_u8; 16];
+    buf[6] = 0x40_u8;  // version 4 in high nibble
+    buf[8] = 0x80_u8;  // RFC variant 10xxxxxx
+    let id = Uuid.from_bytes(&buf);
+    assert_eq(version_byte(&id), 4);
+    assert(has_rfc_variant(&id));
+}
+
+fn main() {
+    new_v4_version_and_variant();
+    new_v7_version_and_variant();
+    let _ = parse_v4_roundtrip();
+    nil_uuid_version_and_variant();
+    from_bytes_version_and_variant();
+    print("uuid variant bits typecheck ok");
+}

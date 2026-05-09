@@ -1,0 +1,149 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, ulid, crockford, case-insensitive, normalization
+// @timeout: 10000
+// @description: ULID parse is case-insensitive and handles Crockford Base32
+//               aliases (#73).
+//
+// The ULID spec mandates uppercase output but permits lowercase input.
+// The decode_char helper additionally accepts the Crockford aliases:
+//   I (or i) → 1
+//   L (or l) → 1
+//   O (or o) → 0
+//
+// These aliases exist because I, L and O look similar to 1 and 0 in many
+// fonts; round-tripped user-entered ULIDs should survive such typos.
+//
+// Assertions:
+//   1. Lowercase version of an uppercase ULID parses to the same high/low.
+//   2. 'I' and 'i' are accepted as aliases for '1'.
+//   3. 'L' and 'l' are accepted as aliases for '1'.
+//   4. 'O' and 'o' are accepted as aliases for '0'.
+//   5. Mixed-case input is accepted.
+//   6. Canonical to_text() output is always uppercase.
+
+mount core.base.ulid.{Ulid, UlidError, parse};
+
+fn eq_ulid(a: &Ulid, b: &Ulid) -> Bool {
+    a.high == b.high && a.low == b.low
+}
+
+// -----------------------------------------------------------------------------
+// 1. Uppercase and lowercase round-trip to the same value
+// -----------------------------------------------------------------------------
+
+fn test_case_insensitive_roundtrip() -> Result<(), UlidError> {
+    let upper = Text.from("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let lower = Text.from("01arz3ndektsv4rrffq69g5fav");
+    let u = parse(&upper)?;
+    let l = parse(&lower)?;
+    assert(eq_ulid(&u, &l));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 2. 'I' and 'i' are aliases for '1'
+// -----------------------------------------------------------------------------
+
+fn test_alias_i_uppercase() -> Result<(), UlidError> {
+    // Replace the leading '1' with 'I'; must parse identically.
+    let canonical = Text.from("10000000000000000000000000");
+    let alias_i   = Text.from("I0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_i)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+fn test_alias_i_lowercase() -> Result<(), UlidError> {
+    let canonical = Text.from("10000000000000000000000000");
+    let alias_i   = Text.from("i0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_i)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 3. 'L' and 'l' are aliases for '1'
+// -----------------------------------------------------------------------------
+
+fn test_alias_l_uppercase() -> Result<(), UlidError> {
+    let canonical = Text.from("10000000000000000000000000");
+    let alias_l   = Text.from("L0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_l)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+fn test_alias_l_lowercase() -> Result<(), UlidError> {
+    let canonical = Text.from("10000000000000000000000000");
+    let alias_l   = Text.from("l0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_l)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 4. 'O' and 'o' are aliases for '0'
+// -----------------------------------------------------------------------------
+
+fn test_alias_o_uppercase() -> Result<(), UlidError> {
+    let canonical = Text.from("00000000000000000000000000");
+    let alias_o   = Text.from("O0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_o)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+fn test_alias_o_lowercase() -> Result<(), UlidError> {
+    let canonical = Text.from("00000000000000000000000000");
+    let alias_o   = Text.from("o0000000000000000000000000");
+    let c = parse(&canonical)?;
+    let a = parse(&alias_o)?;
+    assert(eq_ulid(&c, &a));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 5. Mixed-case accepted
+// -----------------------------------------------------------------------------
+
+fn test_mixed_case() -> Result<(), UlidError> {
+    let mixed  = Text.from("01ArZ3NdekTSv4RrFfQ69g5fAV");
+    let upper  = Text.from("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let m = parse(&mixed)?;
+    let u = parse(&upper)?;
+    assert(eq_ulid(&m, &u));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// 6. to_text() output is always uppercase (normalize → canonical)
+// -----------------------------------------------------------------------------
+
+fn test_output_is_uppercase() -> Result<(), UlidError> {
+    let lower = Text.from("01arz3ndektsv4rrffq69g5fav");
+    let id = parse(&lower)?;
+    let out = id.to_text();
+    let upper = Text.from("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    assert_eq(out, upper);
+    Ok(())
+}
+
+fn main() {
+    let _ = test_case_insensitive_roundtrip();
+    let _ = test_alias_i_uppercase();
+    let _ = test_alias_i_lowercase();
+    let _ = test_alias_l_uppercase();
+    let _ = test_alias_l_lowercase();
+    let _ = test_alias_o_uppercase();
+    let _ = test_alias_o_lowercase();
+    let _ = test_mixed_case();
+    let _ = test_output_is_uppercase();
+    print("ulid case normalization typecheck ok");
+}
