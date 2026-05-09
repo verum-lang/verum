@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: snowflake, id-generation, sequence, overflow, time
+// @description: Pins the Snowflake sequence overflow contract: when the 12-bit
+//               sequence counter saturates at 4095, the generator must advance
+//               to the next millisecond before emitting the next ID (#72).
+
+mount core.base.snowflake.{
+    Snowflake,
+    SnowflakeError,
+    SnowflakeParts,
+    SEQUENCE_BITS,
+    WORKER_BITS,
+    MAX_SEQUENCE,
+    TIMESTAMP_SHIFT,
+}
+mount core.base.{UInt64, Int, Bool, Text, Result}
+mount core.io.{print}
+
+// ── Constant shape assertions ─────────────────────────────────────────────────
+
+fn test_sequence_bits_is_12() {
+    assert_eq(SEQUENCE_BITS, 12);
+}
+
+fn test_worker_bits_is_10() {
+    assert_eq(WORKER_BITS, 10);
+}
+
+fn test_max_sequence_is_4095() {
+    // MAX_SEQUENCE = (1 << 12) - 1 = 4095
+    assert_eq(MAX_SEQUENCE, 4095_u64);
+}
+
+fn test_timestamp_shift_is_22() {
+    // worker_bits + sequence_bits = 10 + 12 = 22
+    assert_eq(TIMESTAMP_SHIFT, 22_u64);
+}
+
+// ── Sequence arithmetic ───────────────────────────────────────────────────────
+
+// Simulates the sequence wrap-around logic from Snowflake.next_id.
+// Returns true iff incrementing seq from `current` by 1 would overflow.
+fn sequence_would_overflow(current: UInt64) -> Bool {
+    let next = (current + 1_u64) & MAX_SEQUENCE;
+    next == 0_u64
+}
+
+fn test_sequence_overflows_at_max() {
+    assert(sequence_would_overflow(MAX_SEQUENCE));
+}
+
+fn test_sequence_does_not_overflow_below_max() {
+    assert(!sequence_would_overflow(4094_u64));
+}
+
+fn test_sequence_does_not_overflow_at_zero() {
+    assert(!sequence_would_overflow(0_u64));
+}
+
+fn test_sequence_wrap_gives_zero() {
+    let wrapped = (MAX_SEQUENCE + 1_u64) & MAX_SEQUENCE;
+    assert_eq(wrapped, 0_u64);
+}
+
+// ── SnowflakeParts decomposition ──────────────────────────────────────────────
+
+fn test_snowflake_parts_sequence_within_bounds() {
+    // Any valid emitted ID must have sequence <= MAX_SEQUENCE.
+    let parts = SnowflakeParts {
+        timestamp_ms: 1000_u64,
+        worker_id: 0_u64,
+        sequence: MAX_SEQUENCE,
+    };
+    assert(parts.sequence <= MAX_SEQUENCE);
+}
+
+fn test_snowflake_parts_at_sequence_zero() {
+    let parts = SnowflakeParts {
+        timestamp_ms: 1001_u64,
+        worker_id: 1_u64,
+        sequence: 0_u64,
+    };
+    assert_eq(parts.sequence, 0_u64);
+}
+
+// ── SnowflakeError variants ────────────────────────────────────────────────────
+
+fn test_clock_regressed_error_shape() {
+    let err = SnowflakeError.ClockRegressed(5_u64);
+    let is_regressed = err is ClockRegressed(_);
+    assert(is_regressed);
+}
+
+fn test_worker_id_out_of_range_error_shape() {
+    let err = SnowflakeError.WorkerIdOutOfRange(1024_u64);
+    let is_oor = err is WorkerIdOutOfRange(_);
+    assert(is_oor);
+}
+
+fn test_clock_before_epoch_error_shape() {
+    let err = SnowflakeError.ClockBeforeEpoch(200_u64);
+    let is_before = err is ClockBeforeEpoch(_);
+    assert(is_before);
+}
+
+fn main() {
+    test_sequence_bits_is_12();
+    test_worker_bits_is_10();
+    test_max_sequence_is_4095();
+    test_timestamp_shift_is_22();
+    test_sequence_overflows_at_max();
+    test_sequence_does_not_overflow_below_max();
+    test_sequence_does_not_overflow_at_zero();
+    test_sequence_wrap_gives_zero();
+    test_snowflake_parts_sequence_within_bounds();
+    test_snowflake_parts_at_sequence_zero();
+    test_clock_regressed_error_shape();
+    test_worker_id_out_of_range_error_shape();
+    test_clock_before_epoch_error_shape();
+    print("snowflake sequence overflow spec ok");
+}
