@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, mocking, context, dependency-injection
+// @mock: Database
+// @mock: Logger
+// @description: Pins the @mock directive for context mock injection (#62).
+//               @mock: <ContextType> tells the test runner to inject a mock
+//               value for the named context type via MockRegistry.
+
+mount core.base.{Text, List, Maybe}
+mount core.io.{print}
+
+// MockEntry mirrors mock.rs::MockEntry value/noop/forbidden classification.
+type MockKind is
+    | Value { json: Text }
+    | Noop
+    | Forbidden;
+
+implement MockKind {
+    fn is_panic_on_access(self) -> Bool {
+        self is Forbidden
+    }
+}
+
+// MockBinding pairs a context type name with its mock kind.
+type MockBinding is { context_type: Text, kind: MockKind };
+
+fn make_value_binding(ctx: Text, json: Text) -> MockBinding {
+    MockBinding { context_type: ctx, kind: MockKind.Value { json: json } }
+}
+
+fn make_noop_binding(ctx: Text) -> MockBinding {
+    MockBinding { context_type: ctx, kind: MockKind.Noop }
+}
+
+fn make_forbidden_binding(ctx: Text) -> MockBinding {
+    MockBinding { context_type: ctx, kind: MockKind.Forbidden }
+}
+
+fn test_value_binding_not_panic() {
+    let b = make_value_binding("Database", "{\"pool_size\": 1}");
+    assert(!b.kind.is_panic_on_access());
+}
+
+fn test_noop_binding_not_panic() {
+    let b = make_noop_binding("Logger");
+    assert(!b.kind.is_panic_on_access());
+}
+
+fn test_forbidden_binding_panics() {
+    let b = make_forbidden_binding("FileSystem");
+    assert(b.kind.is_panic_on_access());
+}
+
+fn test_binding_context_type_preserved() {
+    let b = make_noop_binding("Cache");
+    assert_eq(b.context_type, "Cache");
+}
+
+fn test_mock_kind_value_carries_json() {
+    let kind = MockKind.Value { json: "{}" };
+    let is_value = kind is Value { json: _ };
+    assert(is_value);
+}
+
+fn main() {
+    test_value_binding_not_panic();
+    test_noop_binding_not_panic();
+    test_forbidden_binding_panics();
+    test_binding_context_type_preserved();
+    test_mock_kind_value_carries_json();
+    print("mock context injection spec ok");
+}

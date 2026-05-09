@@ -29,6 +29,7 @@
 //! - `@teardown: <fn_name>` - Function to call after each test function in this file
 //! - `@isolation: <level>` - Isolation level: none | process | directory | container
 //! - `@snapshot: <name>` - Golden-file snapshot name; test output compared against stored snapshot
+//! - `@mock: <ContextType>` - Inject a mock for the named context type when running this test file
 //!
 //! # Multi-line Values
 //!
@@ -837,6 +838,9 @@ pub struct TestDirectives {
     /// Golden-file snapshot name for snapshot testing.
     /// Test output is compared against `snapshots/<name>.snap`; use --update-snapshots to refresh.
     pub snapshot: Option<Text>,
+    /// Context types for which mock implementations should be injected during the test run.
+    /// Each entry is the unqualified type name, e.g. "Database", "Logger".
+    pub mocks: List<Text>,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -877,6 +881,7 @@ impl Default for TestDirectives {
             teardown_fn: None,
             isolation: None,
             snapshot: None,
+            mocks: List::new(),
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1089,6 +1094,11 @@ impl TestDirectives {
                 directives.isolation = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@snapshot:") {
                 directives.snapshot = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@mock:") {
+                let ctx_type = rest.trim().to_string();
+                if !ctx_type.is_empty() {
+                    directives.mocks.push(ctx_type.into());
+                }
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()
