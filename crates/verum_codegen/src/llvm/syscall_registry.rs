@@ -46,10 +46,13 @@
 //! canonical signature.
 
 use verum_llvm::AddressSpace;
+use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
-use verum_llvm::values::FunctionValue;
+use verum_llvm::values::{FunctionValue, IntValue};
+
+use super::error::{LlvmLoweringError, Result as LlvmResult};
 
 /// Argument or return-value classification under Verum's uniform-i64
 /// AOT ABI. Concrete `FunctionType` values are constructed lazily from
@@ -210,6 +213,113 @@ pub fn ensure_io_declared<'ctx>(
 // =============================================================================
 // Verum-ABI syscall wrappers — no-libc enforcement layer.
 // =============================================================================
+
+// =============================================================================
+// Linux direct-syscall emitter — shared by RuntimeLowering and PlatformIR.
+//
+// This used to be a private method duplicated on both impls
+// (`RuntimeLowering::emit_linux_syscall`, `PlatformIR::emit_linux_syscall`).
+// They were word-for-word identical: same inline-asm strings, same
+// constraint registers, same 6-arg padding, same arch-driven dispatch
+// over `module.get_triple()`.  Centralising here removes the drift
+// risk and lets every wrapper-emit path (the `__verum_<name>`
+// functions in this module's neighbourhood) use exactly one
+// canonical version.
+// =============================================================================
+
+/// Emit a direct Linux syscall via inline-asm (`syscall` on x86_64,
+/// `svc #0` on aarch64).  Cross-compilation correct: reads
+/// `module.get_triple()`, never host `#[cfg(target_os)]`.
+///
+/// Pads `args` to 6 with `i64::const_zero` so the inline-asm template
+/// always has all 6 register operands populated.  The kernel only
+/// reads the slots the syscall actually consumes.
+///
+/// Returns the syscall's i64 return value.
+pub fn emit_linux_syscall_inline<'ctx>(
+    builder: &Builder<'ctx>,
+    ctx: &'ctx Context,
+    module: &Module<'ctx>,
+    sys_num: u64,
+    args: &[IntValue<'ctx>],
+) -> LlvmResult<IntValue<'ctx>> {
+    let i64_type = ctx.i64_type();
+
+    let triple = module.get_triple();
+    let triple_str = triple.as_str().to_string_lossy();
+    let (asm_str, constraints) =
+        if triple_str.contains("aarch64") || triple_str.contains("arm64") {
+            (
+                "svc #0",
+                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+            )
+        } else if triple_str.contains("x86_64") {
+            (
+                "syscall",
+                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+            )
+        } else {
+            // Other archs (32-bit ARM, RISC-V, …): callers should
+            // route through the per-platform fallback rather than
+            // relying on this helper.  Emitted as `=r,r,...,r` so the
+            // module still validates; the result is meaningless but
+            // surfacing the architectural gap loudly is the point.
+            ("", "=r,r,r,r,r,r,r,r")
+        };
+
+    let fn_type = i64_type.fn_type(
+        &[
+            i64_type.into(),
+            i64_type.into(),
+            i64_type.into(),
+            i64_type.into(),
+            i64_type.into(),
+            i64_type.into(),
+            i64_type.into(),
+        ],
+        false,
+    );
+    let asm_fn = ctx.create_inline_asm(
+        fn_type,
+        asm_str.to_string(),
+        constraints.to_string(),
+        true,
+        true,
+        Some(verum_llvm::InlineAsmDialect::ATT),
+        false,
+    );
+
+    let zero = i64_type.const_zero();
+    let a0 = args.first().copied().unwrap_or(zero);
+    let a1 = args.get(1).copied().unwrap_or(zero);
+    let a2 = args.get(2).copied().unwrap_or(zero);
+    let a3 = args.get(3).copied().unwrap_or(zero);
+    let a4 = args.get(4).copied().unwrap_or(zero);
+    let a5 = args.get(5).copied().unwrap_or(zero);
+    let num_const = i64_type.const_int(sys_num, false);
+
+    let result = builder
+        .build_indirect_call(
+            fn_type,
+            asm_fn,
+            &[
+                num_const.into(),
+                a0.into(),
+                a1.into(),
+                a2.into(),
+                a3.into(),
+                a4.into(),
+                a5.into(),
+            ],
+            "syscall_result",
+        )
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| LlvmLoweringError::internal("syscall returned void".to_string()))?
+        .into_int_value();
+    Ok(result)
+}
 
 /// Canonical name of the Verum-ABI wrapper for a given POSIX syscall.
 /// Wrappers are emitted as private LLVM functions inside the module
