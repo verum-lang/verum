@@ -30,15 +30,76 @@ pub fn shape_of(term: &CoreTerm) -> CoreType {
     }
 }
 
+/// Generate a fresh name not free in `value`, not free in `body`,
+/// and not equal to `blocked_name`.  Used by capture-avoiding
+/// substitution to alpha-rename a binder before descending into a
+/// body where naive substitution would capture a free variable of
+/// `value`.
+///
+/// The candidate sequence is `base_α0`, `base_α1`, … — bounded by
+/// the number of distinct names appearing in `value` and `body`,
+/// each itself linear in tree size.  In practice the loop exits in
+/// the first iteration because the synthetic-suffix names rarely
+/// collide with user-source identifiers.
+fn fresh_binder_name(
+    base: &str,
+    value: &CoreTerm,
+    body: &CoreTerm,
+    blocked_name: &str,
+) -> Text {
+    let mut counter: u64 = 0;
+    loop {
+        let candidate = format!("{}_α{}", base, counter);
+        if candidate.as_str() != blocked_name
+            && !var_occurs_free(value, candidate.as_str())
+            && !var_occurs_free(body, candidate.as_str())
+        {
+            return Text::from(candidate);
+        }
+        counter = counter.wrapping_add(1);
+    }
+}
+
+/// Substitute `value` for `name` under a binder, returning the
+/// (possibly-renamed) binder and the rewritten body.  Handles the
+/// three Barendregt cases:
+///
+///   1. binder == name → shadow-stop (body unchanged).
+///   2. binder ∈ free_vars(value) → **capture risk**: pick fresh
+///      name, alpha-rename body to use it, then substitute into
+///      the renamed body.  Both passes route through `substitute`
+///      so the recursion stays capture-aware.
+///   3. otherwise → simple recursion.
+fn subst_binder_body(
+    binder: &Text,
+    body: &CoreTerm,
+    name: &str,
+    value: &CoreTerm,
+) -> (Text, CoreTerm) {
+    if binder.as_str() == name {
+        return (binder.clone(), (*body).clone());
+    }
+    if var_occurs_free(value, binder.as_str()) {
+        let fresh = fresh_binder_name(binder.as_str(), value, body, name);
+        let renamed_body =
+            substitute(body, binder.as_str(), &CoreTerm::Var(fresh.clone()));
+        let new_body = substitute(&renamed_body, name, value);
+        return (fresh, new_body);
+    }
+    (binder.clone(), substitute(body, name, value))
+}
+
 /// Capture-avoiding substitution: `term[name := value]`.
 ///
-
-/// Rename-on-clash (Barendregt-convention bringup): if a binder in
-/// `term` shadows `name`, that sub-tree is left untouched. Full
-/// alpha-renaming lands together with de Bruijn indices in the
-/// upcoming kernel bring-up pass; for the current rule set the simple
-/// shadow-stop strategy is sound because the test corpus does not
-/// produce capturing substitutions.
+/// Every binder construct (Pi / Lam / Sigma / Refine) routes its
+/// body through [`subst_binder_body`], which uniformly handles
+/// shadow-stop, capture-avoidance via fresh-naming, and the
+/// no-conflict fast path.  Pre-bringup the function used a
+/// "shadow-stop only" strategy whose soundness depended on the
+/// corpus never producing a binder whose name occurred free in the
+/// substituted value — a fragile invariant.  The current
+/// implementation is structurally correct for every well-formed
+/// `term` and every `value`.
 pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
     // Fast-path (#100, task #44): if `name` doesn't occur free in
     // `term`, the entire substitution reduces to a clone. Walking
@@ -73,13 +134,10 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             codomain,
         } => {
             let new_dom = substitute(domain, name, value);
-            let new_codom = if binder.as_str() == name {
-                (**codomain).clone()
-            } else {
-                substitute(codomain, name, value)
-            };
+            let (new_binder, new_codom) =
+                subst_binder_body(binder, codomain, name, value);
             CoreTerm::Pi {
-                binder: binder.clone(),
+                binder: new_binder,
                 domain: Heap::new(new_dom),
                 codomain: Heap::new(new_codom),
             }
@@ -91,13 +149,10 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             body,
         } => {
             let new_dom = substitute(domain, name, value);
-            let new_body = if binder.as_str() == name {
-                (**body).clone()
-            } else {
-                substitute(body, name, value)
-            };
+            let (new_binder, new_body) =
+                subst_binder_body(binder, body, name, value);
             CoreTerm::Lam {
-                binder: binder.clone(),
+                binder: new_binder,
                 domain: Heap::new(new_dom),
                 body: Heap::new(new_body),
             }
@@ -114,13 +169,10 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             snd_ty,
         } => {
             let new_fst = substitute(fst_ty, name, value);
-            let new_snd = if binder.as_str() == name {
-                (**snd_ty).clone()
-            } else {
-                substitute(snd_ty, name, value)
-            };
+            let (new_binder, new_snd) =
+                subst_binder_body(binder, snd_ty, name, value);
             CoreTerm::Sigma {
-                binder: binder.clone(),
+                binder: new_binder,
                 fst_ty: Heap::new(new_fst),
                 snd_ty: Heap::new(new_snd),
             }
@@ -182,14 +234,11 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
             predicate,
         } => {
             let new_base = substitute(base, name, value);
-            let new_pred = if binder.as_str() == name {
-                (**predicate).clone()
-            } else {
-                substitute(predicate, name, value)
-            };
+            let (new_binder, new_pred) =
+                subst_binder_body(binder, predicate, name, value);
             CoreTerm::Refine {
                 base: Heap::new(new_base),
-                binder: binder.clone(),
+                binder: new_binder,
                 predicate: Heap::new(new_pred),
             }
         }
@@ -2390,6 +2439,298 @@ mod conjunction_tests {
                 assert_eq!(r, &var("r"));
             }
             _ => panic!("not Refine"),
+        }
+    }
+}
+
+// ============================================================================
+// substitute() — capture-avoidance pin tests
+//
+// The Barendregt-convention bringup completed: substitute now picks
+// fresh names for binders whose declared name occurs free in the
+// substituted value.  These tests pin the three classes:
+//
+//   1. Shadow-stop:    binder == name → body unchanged.
+//   2. Capture-avoid:  binder ∈ free_vars(value) → fresh-rename.
+//   3. Simple recurse: no conflict → straight recursion.
+//
+// Plus a regression test: the value's free variables must STILL be
+// free after substitution (no silent capture).
+// ============================================================================
+
+#[cfg(test)]
+mod substitute_capture_tests {
+    use super::*;
+
+    fn var(n: &str) -> CoreTerm {
+        CoreTerm::Var(Text::from(n))
+    }
+
+    fn pi(binder: &str, dom: CoreTerm, codom: CoreTerm) -> CoreTerm {
+        CoreTerm::Pi {
+            binder: Text::from(binder),
+            domain: Heap::new(dom),
+            codomain: Heap::new(codom),
+        }
+    }
+
+    fn lam(binder: &str, dom: CoreTerm, body: CoreTerm) -> CoreTerm {
+        CoreTerm::Lam {
+            binder: Text::from(binder),
+            domain: Heap::new(dom),
+            body: Heap::new(body),
+        }
+    }
+
+    fn sigma(binder: &str, fst: CoreTerm, snd: CoreTerm) -> CoreTerm {
+        CoreTerm::Sigma {
+            binder: Text::from(binder),
+            fst_ty: Heap::new(fst),
+            snd_ty: Heap::new(snd),
+        }
+    }
+
+    fn refine(base: CoreTerm, binder: &str, pred: CoreTerm) -> CoreTerm {
+        CoreTerm::Refine {
+            base: Heap::new(base),
+            binder: Text::from(binder),
+            predicate: Heap::new(pred),
+        }
+    }
+
+    // ---- Shadow-stop ----
+
+    #[test]
+    fn shadow_stop_pi_when_binder_equals_name() {
+        // substitute(Π(x: A, x → x), "x", v) — x is shadowed by Π's
+        // binder; codomain stays untouched, only the domain is
+        // affected (binder doesn't shadow there).
+        let term = pi("x", var("A"), CoreTerm::App(Heap::new(var("x")), Heap::new(var("x"))));
+        let v = var("REPLACEMENT");
+        let result = substitute(&term, "x", &v);
+        match result {
+            CoreTerm::Pi { binder, domain, codomain } => {
+                assert_eq!(binder.as_str(), "x", "binder unchanged");
+                // domain has no `x` to shadow — but no `x` to substitute either.
+                // (Domain holds A, so substitution doesn't fire.)
+                assert_eq!(*domain, var("A"));
+                // codomain unchanged due to shadow-stop.
+                assert_eq!(
+                    *codomain,
+                    CoreTerm::App(Heap::new(var("x")), Heap::new(var("x"))),
+                    "shadow-stop preserves body verbatim",
+                );
+            }
+            _ => panic!("expected Pi, got {:?}", result),
+        }
+    }
+
+    // ---- Capture-avoidance ----
+
+    #[test]
+    fn capture_avoidance_pi_renames_binder_when_value_uses_it() {
+        // substitute(Π(x: A, _ : x), name="A", value=Var("x"))
+        //   Naive: Π(x: x, _ : x)  // captured!
+        //   Correct: Π(x_α0: x, _ : x_α0)
+        let term = pi("x", var("A"), var("x"));
+        let v = var("x");
+        let result = substitute(&term, "A", &v);
+        match result {
+            CoreTerm::Pi { binder, domain, codomain } => {
+                assert_ne!(
+                    binder.as_str(),
+                    "x",
+                    "binder MUST be renamed — naive substitution would capture",
+                );
+                // Domain becomes the substituted value: Var("x").
+                assert_eq!(*domain, var("x"), "domain holds substituted value");
+                // Codomain references the FRESH binder, not the
+                // outer x (which would have been captured).
+                assert_eq!(
+                    *codomain,
+                    CoreTerm::Var(binder.clone()),
+                    "codomain references the fresh binder, not the outer x",
+                );
+            }
+            _ => panic!("expected Pi, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn capture_avoidance_lam_renames_binder() {
+        // substitute(λ(x: A. body), name="A", value=Var("x"))
+        // where body = Var("x") — the body's `x` is the bound λ-var
+        // (free reference would be different).
+        // Build a body that references the OUTER A and the inner x:
+        // body = App(Var("A"), Var("x"))
+        let term = lam("x", var("A"), CoreTerm::App(Heap::new(var("A")), Heap::new(var("x"))));
+        let v = var("x");
+        let result = substitute(&term, "A", &v);
+        match result {
+            CoreTerm::Lam { binder, domain, body } => {
+                assert_ne!(
+                    binder.as_str(),
+                    "x",
+                    "binder must be renamed to avoid capturing the value's free x",
+                );
+                assert_eq!(*domain, var("x"));
+                // body should be App(<value=x>, Var(<fresh>))
+                match &*body {
+                    CoreTerm::App(f, a) => {
+                        assert_eq!(**f, var("x"), "App's f became the value");
+                        assert_eq!(
+                            **a,
+                            CoreTerm::Var(binder.clone()),
+                            "App's a refers to fresh binder",
+                        );
+                    }
+                    _ => panic!("expected App body, got {:?}", body),
+                }
+            }
+            _ => panic!("expected Lam, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn capture_avoidance_sigma_renames_binder() {
+        // substitute(Σ(y: A, y → A), "A", Var("y"))
+        //   Naive: Σ(y: y, y → y)  // first y captured!
+        //   Correct: Σ(y_α0: y, y_α0 → y)
+        let term = sigma(
+            "y",
+            var("A"),
+            CoreTerm::App(Heap::new(var("y")), Heap::new(var("A"))),
+        );
+        let v = var("y");
+        let result = substitute(&term, "A", &v);
+        match result {
+            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+                assert_ne!(binder.as_str(), "y");
+                assert_eq!(*fst_ty, var("y"), "first component is the value");
+                match &*snd_ty {
+                    CoreTerm::App(f, a) => {
+                        assert_eq!(
+                            **f,
+                            CoreTerm::Var(binder.clone()),
+                            "snd's first arg is the fresh binder",
+                        );
+                        assert_eq!(**a, var("y"), "snd's second arg is value's free y");
+                    }
+                    _ => panic!("expected App in snd_ty"),
+                }
+            }
+            _ => panic!("expected Sigma"),
+        }
+    }
+
+    #[test]
+    fn capture_avoidance_refine_renames_binder() {
+        // substitute(Refine(A, x: <App x A>), "A", Var("x"))
+        //   Naive: Refine(x, x: <App x x>) — outer x captured
+        //   Correct: Refine(x, x_α0: <App x_α0 x>)
+        let term = refine(
+            var("A"),
+            "x",
+            CoreTerm::App(Heap::new(var("x")), Heap::new(var("A"))),
+        );
+        let v = var("x");
+        let result = substitute(&term, "A", &v);
+        match result {
+            CoreTerm::Refine { base, binder, predicate } => {
+                assert_eq!(*base, var("x"));
+                assert_ne!(binder.as_str(), "x");
+                match &*predicate {
+                    CoreTerm::App(f, a) => {
+                        assert_eq!(**f, CoreTerm::Var(binder.clone()));
+                        assert_eq!(**a, var("x"));
+                    }
+                    _ => panic!("expected App in predicate"),
+                }
+            }
+            _ => panic!("expected Refine"),
+        }
+    }
+
+    // ---- No-conflict simple-recurse ----
+
+    #[test]
+    fn no_conflict_simple_recurse_preserves_binder() {
+        // substitute(Π(x: A, x → A), "A", v) where x is NOT free
+        //   in v.  Binder unchanged; A → v in both domain and
+        //   codomain.
+        let term = pi("x", var("A"), CoreTerm::App(Heap::new(var("x")), Heap::new(var("A"))));
+        let v = var("y"); // y, not x — no capture risk
+        let result = substitute(&term, "A", &v);
+        match result {
+            CoreTerm::Pi { binder, domain, codomain } => {
+                assert_eq!(binder.as_str(), "x", "binder unchanged in no-conflict case");
+                assert_eq!(*domain, var("y"));
+                match &*codomain {
+                    CoreTerm::App(f, a) => {
+                        assert_eq!(**f, var("x"));
+                        assert_eq!(**a, var("y"));
+                    }
+                    _ => panic!("expected App"),
+                }
+            }
+            _ => panic!("expected Pi"),
+        }
+    }
+
+    // ---- Free-variable invariant ----
+
+    #[test]
+    fn substituted_value_free_vars_remain_free() {
+        // The load-bearing soundness invariant: every name free in
+        // `value` must STILL be free in `substitute(term, name, value)`.
+        // Naive substitution can violate this through capture; the
+        // capture-avoiding substitute preserves it for every binder
+        // shape we cover above.
+        let cases: Vec<(CoreTerm, &str, CoreTerm, &[&str])> = vec![
+            // Pi case — `x` free in value, captured by Π's binder.
+            (pi("x", var("A"), var("x")), "A", var("x"), &["x"]),
+            // Lam case.
+            (
+                lam("z", var("A"), CoreTerm::App(Heap::new(var("A")), Heap::new(var("z")))),
+                "A",
+                var("z"),
+                &["z"],
+            ),
+            // Sigma case.
+            (
+                sigma(
+                    "y",
+                    var("A"),
+                    CoreTerm::App(Heap::new(var("y")), Heap::new(var("A"))),
+                ),
+                "A",
+                var("y"),
+                &["y"],
+            ),
+            // Refine case.
+            (
+                refine(
+                    var("A"),
+                    "x",
+                    CoreTerm::App(Heap::new(var("x")), Heap::new(var("A"))),
+                ),
+                "A",
+                var("x"),
+                &["x"],
+            ),
+        ];
+        for (term, name, v, must_remain_free) in cases {
+            let result = substitute(&term, name, &v);
+            for n in must_remain_free {
+                assert!(
+                    var_occurs_free(&result, n),
+                    "{} must remain free after substitute(_, {}, {:?}); got {:?}",
+                    n,
+                    name,
+                    v,
+                    result,
+                );
+            }
         }
     }
 }
