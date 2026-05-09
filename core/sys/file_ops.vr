@@ -17,6 +17,14 @@ module sys.file_ops;
 mount core.*;
 mount super.raw.*;
 
+// =============================================================================
+// Default file-creation mode
+// =============================================================================
+// rw-r--r-- — POSIX-canonical default for newly-created files.  Matches
+// `core.io.file::DEFAULT_FILE_MODE` so the two file-creation paths
+// (sys layer + io layer) cannot drift.
+const DEFAULT_FILE_MODE: Int = 0o644;
+
 // Open mode flags (matching POSIX O_* values)
 public type OpenMode is {
     flags: Int,
@@ -59,7 +67,7 @@ public fn write_file(path: Text, content: Text) -> Bool {
 
 /// Append Text to file.
 public fn append_file(path: Text, content: Text) -> Bool {
-    let fd = __file_open_raw(path, 0x409, 0o644);
+    let fd = __file_open_raw(path, 0x409, DEFAULT_FILE_MODE);
     if fd < 0 {
         return false;
     }
