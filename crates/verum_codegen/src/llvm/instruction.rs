@@ -31298,7 +31298,7 @@ fn lower_iter_next<'ctx>(
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         // Return unit if no element, tuple otherwise
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = ctx
             .builder()
             .build_select(has_element, tuple_as_int, unit_tag, "iter_value")

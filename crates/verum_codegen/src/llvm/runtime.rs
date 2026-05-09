@@ -425,7 +425,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .into_int_value();
 
         // Return unit (0x7FFB_0000_0000_0000) if empty
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let result = builder
             .build_select(is_empty, unit_tag, value, "pop_result")
             .or_llvm_err()?
@@ -761,7 +761,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
 
         // value = current (or unit if exhausted)
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = builder
             .build_select(has_element, current, unit_tag, "range_value")
             .or_llvm_err()?
@@ -1001,7 +1001,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_store(index_ptr, new_index).or_llvm_err()?;
 
         // Return unit if no element
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = builder
             .build_select(has_element, element, unit_tag, "iter_value")
             .or_llvm_err()?
@@ -1132,7 +1132,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_store(index_ptr, new_index).or_llvm_err()?;
 
         // Return unit if no element
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = builder
             .build_select(has_element, element, unit_tag, "iter_value")
             .or_llvm_err()?
@@ -1414,7 +1414,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_store(index_field, new_index).or_llvm_err()?;
 
         // Return unit if no element
-        let unit_tag = i64_type.const_int(0x7FFB_0000_0000_0000, false);
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
         let value = builder
             .build_select(has_element, element, unit_tag, "iter_value")
             .or_llvm_err()?

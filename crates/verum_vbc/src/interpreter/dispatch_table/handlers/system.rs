@@ -164,11 +164,11 @@ fn nan_box_payload_to_i64(raw: u64) -> i64 {
 /// Mirrors `Value::from_i64` for the inline-integer case.
 #[inline]
 fn i64_to_nan_box_payload(v: i64) -> u64 {
-    // NAN_BITS = 0x7FF8_0000_0000_0000, TAG_INTEGER << TAG_SHIFT = 0x0001_0000_0000_0000
-    // Combined NaN+TAG header = 0x7FF9_0000_0000_0000.
-    const NAN_INT_HEADER: u64 = 0x7FF9_0000_0000_0000;
-    const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
-    NAN_INT_HEADER | ((v as u64) & PAYLOAD_MASK)
+    // Headers and payload mask come from the canonical
+    // `verum_vbc::value::nanbox` submodule — single source of truth
+    // shared with codegen-emitted IR for cross-tier value boundaries.
+    use crate::value::nanbox::{NAN_INTEGER_HEADER, PAYLOAD_MASK};
+    NAN_INTEGER_HEADER | ((v as u64) & PAYLOAD_MASK)
 }
 
 /// AtomicStore (0xE4)

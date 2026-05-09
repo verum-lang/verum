@@ -93,16 +93,24 @@ was migrated to typed dispatch ahead of #168 close-out.
 
 VBC uses NaN-boxing for efficient tagged values in 64 bits:
 
-| Type | Tag Bits | Payload |
-|------|----------|---------|
-| Float64 | Not NaN | IEEE 754 double |
-| Int | 0x7FF8 | 48-bit signed |
-| Bool | 0x7FF9 | 0 or 1 |
-| Null | 0x7FFA | 0 |
-| Unit | 0x7FFB | 0 |
-| Pointer | 0x7FFC | 48-bit address |
-| String | 0x7FFD | Small string or ptr |
-| Object | 0x7FFE | Object reference |
+| Type | 16-bit Tag Header | Payload |
+|------|-------------------|---------|
+| Float64 | Not a NaN | IEEE 754 double |
+| Pointer | `0x7FF8` | 48-bit heap address |
+| Int | `0x7FF9` | 48-bit signed |
+| Bool | `0x7FFA` | 0 or 1 |
+| Unit | `0x7FFB` | 0 |
+| Small String | `0x7FFC` | Inline 6-byte string |
+| Type Ref | `0x7FFD` | 48-bit type-id |
+| Func Ref | `0x7FFE` | 48-bit function-id |
+| NaN | `0x7FFF` | Sentinel quiet NaN |
+
+The full 64-bit Value layout is `NAN_BITS (0x7FF8_0000_0000_0000) | (TAG << 48) | payload`.
+All canonical constants live in `verum_vbc::value::nanbox` (re-exported from
+`verum_vbc::value`). LLVM codegen reads `NAN_*_HEADER` constants when emitting
+Tier-1 IR; the dispatch handlers consult the same module — drift between Tier-0
+and Tier-1 value classification is structurally impossible. Drift contract
+pinned by `verum_vbc::value::tests::nanbox_headers_pinned`.
 
 ## Dependent-Type Runtime Packaging (T1-H)
 
