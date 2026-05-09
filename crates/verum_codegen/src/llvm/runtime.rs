@@ -10781,15 +10781,23 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 module.add_function("verum_text_get_ptr", ft, None)
             });
 
-        // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent values.
-        // Cross-compilation-correct: dispatch on the LLVM module's
-        // target triple, never the compile host. Pre-fix a Linux
-        // target binary built on macOS would emit Darwin's 0xFFFF /
-        // 4 into setsockopt, which Linux rejects with ENOPROTOOPT.
+        // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent values, sourced
+        // from the canonical `verum_common::posix_sockets` per-platform
+        // submodules. Pre-fix a Linux target binary built on macOS
+        // would emit Darwin's 0xFFFF / 4 into setsockopt, which Linux
+        // rejects with ENOPROTOOPT — that bug is closed by the
+        // platform-conditional dispatch on the LLVM module's target
+        // triple (never the compile host).
         let (sol_socket, so_reuseaddr): (u64, u64) = if target_is_darwin(module) {
-            (0xffff, 4)
+            (
+                verum_common::posix_sockets::darwin::SOL_SOCKET as u64,
+                verum_common::posix_sockets::darwin::SO_REUSEADDR as u64,
+            )
         } else {
-            (1, 2)
+            (
+                verum_common::posix_sockets::linux::SOL_SOCKET as u64,
+                verum_common::posix_sockets::linux::SO_REUSEADDR as u64,
+            )
         };
 
         // ai_addr offset within struct addrinfo (differs macOS vs Linux).

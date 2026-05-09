@@ -1897,16 +1897,22 @@ impl VbcCodegen {
             ("GEN_FREED", 0),
             // Memory management constants
             ("MADV_FREE", 8),
-            // Network/socket constants (core/net/, core/sys/)
-            ("AF_INET", 2),
-            ("AF_INET6", 30),
-            ("SOCK_STREAM", 1),
-            ("SOCK_DGRAM", 2),
-            ("SOL_SOCKET", 0xFFFF_i64),
-            ("SO_REUSEADDR", 2),
-            ("SO_KEEPALIVE", 8),
-            ("IPPROTO_TCP", 6),
-            ("TCP_NODELAY", 1),
+            // Cross-platform POSIX socket constants — Linux + Darwin agree,
+            // sourced from `verum_common::posix_sockets` (single source of truth).
+            ("AF_INET", verum_common::posix_sockets::AF_INET),
+            ("SOCK_STREAM", verum_common::posix_sockets::SOCK_STREAM),
+            ("SOCK_DGRAM", verum_common::posix_sockets::SOCK_DGRAM),
+            ("IPPROTO_TCP", verum_common::posix_sockets::IPPROTO_TCP),
+            ("TCP_NODELAY", verum_common::posix_sockets::TCP_NODELAY),
+            // Platform-divergent socket constants. Values below mix
+            // Linux and Darwin assignments preserved for ABI continuity
+            // with the historical hand-table. Future work (TODO
+            // #52-phase-2) makes this table target-conditional via
+            // `posix_sockets::socket_const_for_target(name, target_os)`.
+            ("AF_INET6", verum_common::posix_sockets::darwin::AF_INET6),       // 30 (Darwin)
+            ("SOL_SOCKET", verum_common::posix_sockets::darwin::SOL_SOCKET),   // 0xFFFF (Darwin)
+            ("SO_REUSEADDR", verum_common::posix_sockets::linux::SO_REUSEADDR), // 2 (Linux)
+            ("SO_KEEPALIVE", verum_common::posix_sockets::darwin::SO_KEEPALIVE), // 8 (Darwin)
             // File open flags
             ("O_RDONLY", 0),
             ("O_WRONLY", 1),
