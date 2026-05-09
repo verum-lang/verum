@@ -35285,426 +35285,7 @@ impl TypeChecker {
                             self.ctx.env.insert(register_name, scheme);
                         }
                     }
-                    ExportKind::Type | ExportKind::Protocol => {
-                        // For types, find the full type declaration and register it properly.
-                        // This ensures variant types get their constructors registered,
-                        // record types get their field information, etc.
-                        // Try to find the type declaration, following re-export chains if needed
-                        let mut registered_successfully = false;
-                        if let Some((type_decl, source_module_path)) = self
-                            .find_type_declaration_with_source_module(
-                                &module_info.ast,
-                                item_name,
-                                &resolved_module_path,
-                                registry,
-                            )
-                        {
-                            // CRITICAL: Import transitive type dependencies BEFORE registering the type.
-                            // This ensures types used in field types (like `SemVer` in
-                            // `Package.versions: List<SemVer>`) are available for resolution.
-                            //
-
-                            // The fix analyzes the type declaration to find all referenced types,
-                            // then imports each one from the module registry before proceeding.
-                            //
-
-                            // Example: When importing `Package` from domain/package.vr:
-                            // 1. Collect dependencies: ["List", "SemVer", "Text", "Int"]
-                            // 2. Import each dependency that's not already available
-                            // 3. Register `Package` type with all dependencies resolved
-                            //
-
-                            // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — Imports
-                            let type_dependencies = self.collect_type_dependencies(&type_decl);
-                            // #[cfg(debug_assertions)]
-                            // eprintln!(
-                            // "[DEBUG] Type '{}' has dependencies: [{}]",
-                            // item_name,
-                            // type_dependencies
-                            // .iter()
-                            // .map(|d| d.as_str())
-                            // .collect::<Vec<_>>()
-                            // .join(", ")
-                            // );
-
-                            // Use path aliases since "core.io.path" may be stored as "std.io.path"
-                            if let Some(source_module) = self
-                                .get_module_with_path_aliases(source_module_path.as_str(), registry)
-                            {
-                                // Import each dependency transitively
-                                for dep_name in type_dependencies.iter() {
-                                    // Skip if already defined (including built-in types)
-                                    if self.ctx.lookup_type(dep_name.as_str()).is_some() {
-                                        continue;
-                                    }
-
-                                    // Try to import the dependency from the source module first
-                                    // (the module that actually declares the parent type — this is
-                                    // the canonical location for sibling types that the parent
-                                    // depends on directly).
-                                    let mut imported = match self.import_item_from_module(
-                                        &source_module_path,
-                                        dep_name.as_str(),
-                                        registry,
-                                    ) {
-                                        Ok(()) => self.ctx.lookup_type(dep_name.as_str()).is_some(),
-                                        Err(_) => false,
-                                    };
-
-                                    // Fallback 1: when the source module is a *submodule* of the
-                                    // requesting module (e.g. parent type in `core.base.iterator`,
-                                    // dep declared in `core.base.maybe`), the dep is reachable via
-                                    // the requesting module's re-export surface. Retry against the
-                                    // original `module_path` (e.g. `core.base`) which collects all
-                                    // submodule re-exports under one roof.
-                                    //
-                                    // This closes the silent-drop where `Iterator` (declared in
-                                    // `core.base.iterator`) depends on `Maybe` (declared in
-                                    // `core.base.maybe`) — the source module `core.base.iterator`
-                                    // doesn't export `Maybe`, but the requesting module
-                                    // `core.base` does (via `public mount .maybe.{Maybe, ...}`).
-                                    if !imported && resolved_module_path != source_module_path {
-                                        if let Ok(()) = self.import_item_from_module(
-                                            &resolved_module_path,
-                                            dep_name.as_str(),
-                                            registry,
-                                        ) {
-                                            imported =
-                                                self.ctx.lookup_type(dep_name.as_str()).is_some();
-                                        }
-                                    }
-
-                                    if !imported {
-                                        tracing::debug!(
-                                            "Could not import transitive dependency '{}' for type '{}' (tried source={}, root={})",
-                                            dep_name,
-                                            item_name,
-                                            source_module_path.as_str(),
-                                            resolved_module_path.as_str(),
-                                        );
-                                        // Don't fail - the dependency might be a built-in type
-                                        // or from a different module that's already imported
-                                    }
-                                }
-                            }
-
-                            // Register the type declaration - this handles variants, records, etc.
-                            // Set flag so register_type_declaration_body knows this is an explicit import
-                            // and allows overwriting any existing type (even from metadata/global passes).
-                            let is_explicit =
-                                import_span.is_some() && self.explicit_imports.contains(item_name);
-                            if is_explicit {
-                                self.in_explicit_import_registration = true;
-                            }
-                            let reg_result = self.register_type_declaration(&type_decl);
-                            // Reset flag after registration completes (success or failure)
-                            if is_explicit {
-                                self.in_explicit_import_registration = false;
-                            }
-                            if let Err(e) = reg_result {
-                                if e.is_soundness_critical() {
-                                    return Err(e);
-                                }
-                                // Log the error but don't fail - some imports may have issues
-                                // #[cfg(debug_assertions)]
-                                // eprintln!(
-                                // "[DEBUG] Failed to register imported type '{}' from module '{}': {}",
-                                // item_name,
-                                // resolved_module_path.as_str(),
-                                // e
-                                // );
-                                // Fall through to fallback registration
-                            } else {
-                                // #[cfg(debug_assertions)]
-                                // eprintln!(
-                                // "[DEBUG] Successfully registered type '{}' from module '{}'",
-                                // item_name,
-                                // resolved_module_path.as_str()
-                                // );
-                                registered_successfully = true;
-
-                                // CRITICAL FIX: Also import implement block methods for the type.
-                                // This enables cross-file method resolution for calls like
-                                // RegistryError.validation_error(...) where the method is defined
-                                // in an `implement RegistryError { ... }` block in the source module.
-                                //
-
-                                // We need to find the source module (following re-exports if necessary)
-                                // and import all public methods from its implement blocks.
-                                if let Some((_, source_path)) = self
-                                    .find_type_declaration_with_source_module(
-                                        &module_info.ast,
-                                        item_name,
-                                        &resolved_module_path,
-                                        registry,
-                                    )
-                                {
-                                    // Get the source module and import its implement blocks.
-                                    // Pin the checker's module path to the resolved source
-                                    // module so bare type references inside impl blocks
-                                    // resolve against that module's qualified-name layer
-                                    // first (avoids same-name collisions via the flat map).
-                                    let src_path = source_path.as_str().to_string();
-                                    if let Some(source_module) = self.get_module_with_path_aliases(
-                                        source_path.as_str(),
-                                        registry,
-                                    ) && let Err(e) = self.import_impl_blocks_for_type_in_module(
-                                        &source_module.ast,
-                                        item_name,
-                                        Some(&src_path),
-                                    ) {
-                                        tracing::debug!(
-                                            "Failed to import implement blocks for '{}' from '{}': {}",
-                                            item_name,
-                                            source_path.as_str(),
-                                            e
-                                        );
-                                    }
-                                } else {
-                                    // Fallback: try to import from the direct module.
-                                    let direct_path = resolved_module_path.as_str().to_string();
-                                    if let Err(e) = self.import_impl_blocks_for_type_in_module(
-                                        &module_info.ast,
-                                        item_name,
-                                        Some(&direct_path),
-                                    ) {
-                                        tracing::debug!(
-                                            "Failed to import implement blocks for '{}' from '{}': {}",
-                                            item_name,
-                                            resolved_module_path.as_str(),
-                                            e
-                                        );
-                                    }
-                                }
-
-                                // After successful type registration, also check if there is a
-                                // corresponding inline module (companion namespace) with the same name.
-                                //
-
-                                // Pattern: `public type Foo<A,B> is {...}; public module Foo {...}`
-                                // When both exist, Type wins over Module in export deduplication,
-                                // but the inline module's static methods (e.g. Foo.map(...)) need
-                                // to be accessible.
-                                //
-
-                                // We scan the source module's AST directly (not the registry),
-                                // because inline modules are not registered as separate registry
-                                // entries — they are embedded in their parent file's module AST.
-                                //
-
-                                // Without this, `Transducer.map(...)` fails when Transducer is
-                                // imported transitively (e.g. via core.prelude.*) because only
-                                // the type is registered, not the companion module namespace.
-                                let short_name = verum_common::Text::from(register_name);
-                                if !self.inline_modules.contains_key(&short_name) {
-                                    // First check the source module's AST for an inline module
-                                    let source_ast_opt = self
-                                        .get_module_with_path_aliases(
-                                            source_module_path.as_str(),
-                                            registry,
-                                        )
-                                        .map(|m| m.ast.clone());
-                                    let inline_mod_found =
-                                        source_ast_opt.as_ref().and_then(|ast| {
-                                            ast.items.iter().find_map(|ast_item| {
-                                                if let verum_ast::ItemKind::Module(mod_decl) =
-                                                    &ast_item.kind
-                                                {
-                                                    if mod_decl.name.name.as_str() == item_name {
-                                                        return Some(mod_decl.clone());
-                                                    }
-                                                }
-                                                None
-                                            })
-                                        });
-                                    if let Some(mod_decl) = inline_mod_found {
-                                        self.inline_modules.insert(short_name, mod_decl);
-                                    } else {
-                                        // Fallback: try the registry for historical compatibility
-                                        let inline_path_str = format!(
-                                            "{}.{}",
-                                            source_module_path.as_str(),
-                                            item_name
-                                        );
-                                        if let verum_common::Maybe::Some(inline_mod_info) =
-                                            registry.get_by_path(&inline_path_str)
-                                        {
-                                            let synthetic_decl = verum_ast::decl::ModuleDecl {
-                                                visibility: verum_ast::decl::Visibility::Public,
-                                                name: verum_ast::ty::Ident::new(
-                                                    verum_common::Text::from(item_name),
-                                                    inline_mod_info.ast.span,
-                                                ),
-                                                items: verum_common::Maybe::Some(
-                                                    inline_mod_info.ast.items.clone(),
-                                                ),
-                                                profile: verum_common::Maybe::None,
-                                                features: verum_common::Maybe::None,
-                                                contexts: verum_common::List::new(),
-                                                span: inline_mod_info.ast.span,
-                                            };
-                                            let key = verum_common::Text::from(register_name);
-                                            self.inline_modules.insert(key, synthetic_decl);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Fallback: register as a named type reference if full registration failed
-                        if !registered_successfully {
-                            // Function-shadowing guard: if find_type_declaration_with_source_module
-                            // returned None we still don't know whether the
-                            // imported item is genuinely a missing type or a
-                            // FUNCTION exported via a re-export chain that
-                            // resolve_export_kind_with_reexports failed to
-                            // re-classify (ExportKind::Type is the default
-                            // for re-exported items — see the comment at
-                            // 33858).  When the source module's AST DOES
-                            // hold a function declaration for this name,
-                            // register the function signature in env and
-                            // SKIP the Named-type placeholder.  Without
-                            // this guard, mounting `core.shell.{run}` —
-                            // where `core.shell` re-exports
-                            // `core.shell.exec.run` and the export kind
-                            // resolves as Type — leaves `run` registered
-                            // as `Type::Named { path: "run" }`, so every
-                            // call site fails with "not a function: run"
-                            // because the env-lookup hits the
-                            // self-referential placeholder before the
-                            // function lookup gets a chance.
-                            if let Some((func_type, type_vars, _src)) = self
-                                .find_function_with_source_module(
-                                    &module_info.ast,
-                                    item_name,
-                                    &resolved_module_path,
-                                    registry,
-                                )
-                            {
-                                let scheme = if type_vars.is_empty() {
-                                    TypeScheme::mono(func_type)
-                                } else {
-                                    TypeScheme::poly(type_vars, func_type)
-                                };
-                                self.ctx.env.insert(register_name, scheme);
-                                registered_successfully = true;
-                            } else {
-                                if let Some(metadata) = self.core_metadata.clone() {
-                                    if let Some(func_type) = self
-                                        .resolve_metadata_reexport_function(
-                                            &metadata,
-                                            &module_info.ast,
-                                            item_name,
-                                            &resolved_module_path,
-                                        )
-                                    {
-                                        self.ctx
-                                            .env
-                                            .insert(register_name, TypeScheme::mono(func_type));
-                                        registered_successfully = true;
-                                    }
-                                }
-                            }
-                        }
-                        if !registered_successfully {
-                            // CRITICAL FIX: Check if the type already exists before overwriting.
-                            // Bootstrap registers types like Maybe<T> as Type::Variant.
-                            // We must NOT overwrite these with Type::Named fallbacks.
-                            // This preserves pattern matching support for bootstrap types.
-                            let existing_ty = self.ctx.lookup_type(register_name);
-                            let should_register_fallback = match existing_ty {
-                                // Type doesn't exist - register fallback
-                                Option::None => true,
-                                // Type exists as Named - safe to overwrite with another Named
-                                Option::Some(Type::Named { .. }) => true,
-                                // Type exists as Variant - DO NOT overwrite (preserves pattern matching)
-                                Option::Some(Type::Variant(_)) => false,
-                                // Type exists as another concrete type - don't overwrite
-                                _ => false,
-                            };
-
-                            if should_register_fallback {
-                                use verum_ast::ty::{Ident, Path};
-                                // Use register_name for the fallback type reference
-                                let ident = Ident::new(register_name, Span::dummy());
-                                let type_ref = Type::Named {
-                                    path: Path::single(ident),
-                                    args: List::new(),
-                                };
-                                self.ctx
-                                    .define_type(verum_common::Text::from(register_name), type_ref);
-
-                                // Also try to register the companion inline module from the
-                                // source module (found via exported.source_module).
-                                // This handles the case where Type+Module coexist (like Transducer)
-                                // and the type is imported via a glob re-export (e.g., core.prelude.*),
-                                // where find_type_declaration_with_source_module returns None.
-                                let short_name = verum_common::Text::from(register_name);
-                                if !self.inline_modules.contains_key(&short_name) {
-                                    if let verum_common::Maybe::Some(source_mod_info) =
-                                        registry.get(exported.source_module)
-                                    {
-                                        // The source_module may be an intermediate re-exporter (e.g., core.base).
-                                        // Use find_type_declaration_with_source_module to follow the re-export chain
-                                        // all the way to the ACTUAL declaring module (e.g., core.base.iterator).
-                                        let source_path = verum_common::Text::from(
-                                            source_mod_info.path.to_string(),
-                                        );
-                                        let actual_source_path = self
-                                            .find_type_declaration_with_source_module(
-                                                &source_mod_info.ast,
-                                                item_name,
-                                                &source_path,
-                                                registry,
-                                            )
-                                            .map(|(_, path)| path)
-                                            .unwrap_or(source_path);
-                                        // Now look for the inline module in the actual source module
-                                        let actual_inline_mod = self
-                                            .get_module_with_path_aliases(
-                                                actual_source_path.as_str(),
-                                                registry,
-                                            )
-                                            .and_then(|m| {
-                                                m.ast.items.iter().find_map(|ast_item| {
-                                                    if let verum_ast::ItemKind::Module(mod_decl) =
-                                                        &ast_item.kind
-                                                    {
-                                                        if mod_decl.name.name.as_str() == item_name
-                                                        {
-                                                            return Some(mod_decl.clone());
-                                                        }
-                                                    }
-                                                    None
-                                                })
-                                            });
-                                        if let Some(mod_decl) = actual_inline_mod {
-                                            self.inline_modules.insert(short_name, mod_decl);
-                                        }
-                                        // Register blanket impls from the actual source module.
-                                        // This is needed when the type is imported transitively
-                                        // (e.g. via core.prelude.*), so that blanket impl methods
-                                        // like `transduce` from `implement<I: Iterator> I { ... }`
-                                        // are available on all Iterator types.
-                                        let source_blanket_ast = self
-                                            .get_module_with_path_aliases(
-                                                actual_source_path.as_str(),
-                                                registry,
-                                            )
-                                            .map(|m| (m.ast.clone(), m.path.to_string()));
-                                        if let Some((blanket_ast, blanket_path)) =
-                                            source_blanket_ast
-                                        {
-                                            self.register_module_blanket_impls(
-                                                &blanket_ast,
-                                                &blanket_path,
-                                            );
-                                        }
-                                    } // closes registry.get if-let
-                                } // closes !contains_key if
-                            } // closes if should_register_fallback
-                        } // closes if !registered_successfully
-                    }
+                    ExportKind::Type | ExportKind::Protocol => self.import_type_export(&*module_info, item_name, register_name, &resolved_module_path, registry, import_span, exported.source_module)?,
                     ExportKind::Const | ExportKind::Static => {
                         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
                             eprintln!(
@@ -35751,199 +35332,7 @@ impl TypeChecker {
                             }
                         }
                     }
-                    ExportKind::Context => {
-                        // Context protocols need to be registered BOTH as a type AND as a context.
-                        // The type registration allows the protocol to be used in type annotations,
-                        // while the context registration allows it to be used in `using [...]` clauses.
-                        //
-
-                        // CRITICAL: We must build a proper Record type with method signatures
-                        // so that method calls like `Database.get_trending(...)` resolve correctly.
-                        //
-
-                        // There are TWO forms of context declarations:
-                        // 1. `context protocol Database { ... }` - parsed as ProtocolDecl with is_context=true
-                        // 2. `context Database { ... }` - parsed as ContextDecl
-                        //
-
-                        // We must handle both forms.
-                        //
-
-                        // Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
-
-                        // First, try to find as a `context protocol` (ProtocolDecl with is_context=true)
-                        // Use the variant that returns the source module path so we can import sibling types
-                        let context_type = if let Some((proto_decl, source_module_path)) = self
-                            .find_context_protocol_with_source_module(
-                                &module_info.ast,
-                                item_name,
-                                &resolved_module_path,
-                                registry,
-                            ) {
-                            // CRITICAL: Import all types from the protocol's source module BEFORE
-                            // building the protocol type. This ensures types used in method signatures
-                            // (like `SearchResponse`, `SearchError`) are available for resolution.
-                            //
-
-                            // Without this, `ast_to_type_lenient` would fall back to fresh type variables
-                            // for unresolved types, causing field access on return values to fail with
-                            // "Cannot access field on non-record type: τXX" errors.
-                            //
-
-                            // Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
-                            // Use path aliases since "core.io.path" may be stored as "std.io.path"
-                            if let Some(source_module) = self
-                                .get_module_with_path_aliases(source_module_path.as_str(), registry)
-                            {
-                                let src_path = source_module_path.as_str().to_string();
-                                self.import_types_from_module_ast_in_module(
-                                    &source_module.ast,
-                                    Some(&src_path),
-                                );
-                            }
-
-                            // Found a context protocol - build Record type with methods.
-                            // Module-aware: pin the checker's module path to the SOURCE
-                            // module while resolving the protocol body so that bare type
-                            // references inside method signatures (e.g. `LogLevel` in
-                            // `fn log(level: LogLevel, msg: Text)` inside
-                            // `core.context.standard.Logger`) resolve against the source
-                            // module's qualified-name layer first — not the flat map
-                            // which may surface a same-named stranger from another
-                            // module (`core.base.log.LogLevel` vs
-                            // `core.context.standard.LogLevel`).
-                            let saved_ctx_path = self.current_module_path().clone();
-                            self.set_current_module_path(source_module_path.clone());
-                            let ctx_type_result =
-                                self.build_context_type_from_protocol(&proto_decl);
-                            self.set_current_module_path(saved_ctx_path);
-
-                            match ctx_type_result {
-                                Ok(record_type) => record_type,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to build context type for protocol '{}' from module '{}': {}",
-                                        item_name,
-                                        resolved_module_path.as_str(),
-                                        e
-                                    );
-                                    // Fallback to Named type
-                                    use verum_ast::ty::{Ident, Path};
-                                    let ident = Ident::new(item_name, Span::dummy());
-                                    Type::Named {
-                                        path: Path::single(ident),
-                                        args: List::new(),
-                                    }
-                                }
-                            }
-                        } else if let Some(ctx_decl) = self.find_context_declaration_with_reexports(
-                            &module_info.ast,
-                            item_name,
-                            &resolved_module_path,
-                            registry,
-                        ) {
-                            // Found a context declaration - build Record type with methods.
-                            // Module-aware: pin the checker's module path to the SOURCE
-                            // module while resolving the context body so that bare type
-                            // references inside method signatures (e.g. `LogLevel` in
-                            // `fn log(level: LogLevel, msg: Text)` inside
-                            // `core.context.standard.Logger`) resolve against the
-                            // source module's qualified-name layer first — not the
-                            // flat map which may surface a same-named stranger from
-                            // another module.
-                            let saved_ctx_path = self.current_module_path().clone();
-                            self.set_current_module_path(resolved_module_path.clone());
-                            let ctx_type_result = self.build_context_type_from_decl(&ctx_decl);
-                            self.set_current_module_path(saved_ctx_path);
-
-                            match ctx_type_result {
-                                Ok(record_type) => {
-                                    // Store the context declaration for method-level capability extraction
-                                    let context_name: Text = item_name.into();
-                                    self.context_declarations.insert(context_name, ctx_decl);
-                                    record_type
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to build context type for '{}' from module '{}': {}",
-                                        item_name,
-                                        resolved_module_path.as_str(),
-                                        e
-                                    );
-                                    // Fallback to Named type
-                                    use verum_ast::ty::{Ident, Path};
-                                    let ident = Ident::new(item_name, Span::dummy());
-                                    Type::Named {
-                                        path: Path::single(ident),
-                                        args: List::new(),
-                                    }
-                                }
-                            }
-                        } else {
-                            // Neither context protocol nor context declaration found - fallback
-                            use verum_ast::ty::{Ident, Path};
-                            let ident = Ident::new(item_name, Span::dummy());
-                            let fallback_type = Type::Named {
-                                path: Path::single(ident),
-                                args: List::new(),
-                            };
-
-                            // Try to find as a type declaration
-                            if let Some(type_decl) = self.find_type_declaration_with_reexports(
-                                &module_info.ast,
-                                item_name,
-                                &resolved_module_path,
-                                registry,
-                            ) {
-                                if let Err(e) = self.register_type_declaration(&type_decl) {
-                                    if e.is_soundness_critical() {
-                                        return Err(e);
-                                    }
-                                    tracing::warn!(
-                                        "Failed to register imported context type '{}' from module '{}': {}",
-                                        item_name,
-                                        resolved_module_path.as_str(),
-                                        e
-                                    );
-                                }
-                            } else if let Some(_proto_decl) = self
-                                .find_protocol_declaration_in_module(&module_info.ast, item_name)
-                            {
-                                // Protocol declaration found - register as Named type
-                                self.ctx.define_type(
-                                    verum_common::Text::from(register_name),
-                                    fallback_type.clone(),
-                                );
-                            } else {
-                                // Fallback: register as a named type reference
-                                self.ctx.define_type(
-                                    verum_common::Text::from(register_name),
-                                    fallback_type.clone(),
-                                );
-                            }
-                            fallback_type
-                        };
-
-                        // Register as a context for `using [...]` clauses
-                        self.register_protocol_as_context(verum_common::Text::from(register_name));
-
-                        // Register the context type so that it can be accessed as a variable
-                        // in function bodies that use this context (e.g., `Database.query(...)`)
-                        // Guard: don't overwrite context types that were pre-registered
-                        // from the embedded stdlib archive with full method signatures.
-                        // The archive-based registration has richer type info (Record with
-                        // method names) than the fallback here (often Type::Named).
-                        let ctx_key = verum_common::Text::from(register_name);
-                        let already_has_rich_type = self
-                            .context_resolver
-                            .get_context_type(&ctx_key)
-                            .map(|t| matches!(t, Type::Record(_)))
-                            .unwrap_or(false);
-                        if !already_has_rich_type {
-                            self.context_resolver
-                                .register_context_type(ctx_key, context_type);
-                        }
-                    }
+                    ExportKind::Context => self.import_context_export(&*module_info, item_name, register_name, &resolved_module_path, registry)?,
                     ExportKind::ContextGroup => {
                         // Context groups are registered as contexts only (they expand to multiple contexts)
                         self.register_protocol_as_context(verum_common::Text::from(register_name));
@@ -36392,6 +35781,646 @@ impl TypeChecker {
     }
 
     /// Find a type declaration in a module's AST by name.
+    /// Import a type or protocol export from a module.
+    /// Resolves transitive type dependencies, registers the type declaration
+    /// (including companion inline module + blanket impls), and falls back to
+    /// a Named-type placeholder when full registration fails.
+    fn import_type_export(
+        &mut self,
+        module_info: &verum_modules::ModuleInfo,
+        item_name: &str,
+        register_name: &str,
+        resolved_module_path: &Text,
+        registry: &verum_modules::ModuleRegistry,
+        import_span: Option<Span>,
+        export_source_module: verum_modules::path::ModuleId,
+    ) -> Result<()> {
+                        // For types, find the full type declaration and register it properly.
+                        // This ensures variant types get their constructors registered,
+                        // record types get their field information, etc.
+                        // Try to find the type declaration, following re-export chains if needed
+                        let mut registered_successfully = false;
+                        if let Some((type_decl, source_module_path)) = self
+                            .find_type_declaration_with_source_module(
+                                &module_info.ast,
+                                item_name,
+                                &resolved_module_path,
+                                registry,
+                            )
+                        {
+                            // CRITICAL: Import transitive type dependencies BEFORE registering the type.
+                            // This ensures types used in field types (like `SemVer` in
+                            // `Package.versions: List<SemVer>`) are available for resolution.
+                            //
+
+                            // The fix analyzes the type declaration to find all referenced types,
+                            // then imports each one from the module registry before proceeding.
+                            //
+
+                            // Example: When importing `Package` from domain/package.vr:
+                            // 1. Collect dependencies: ["List", "SemVer", "Text", "Int"]
+                            // 2. Import each dependency that's not already available
+                            // 3. Register `Package` type with all dependencies resolved
+                            //
+
+                            // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — Imports
+                            let type_dependencies = self.collect_type_dependencies(&type_decl);
+                            // #[cfg(debug_assertions)]
+                            // eprintln!(
+                            // "[DEBUG] Type '{}' has dependencies: [{}]",
+                            // item_name,
+                            // type_dependencies
+                            // .iter()
+                            // .map(|d| d.as_str())
+                            // .collect::<Vec<_>>()
+                            // .join(", ")
+                            // );
+
+                            // Use path aliases since "core.io.path" may be stored as "std.io.path"
+                            if let Some(source_module) = self
+                                .get_module_with_path_aliases(source_module_path.as_str(), registry)
+                            {
+                                // Import each dependency transitively
+                                for dep_name in type_dependencies.iter() {
+                                    // Skip if already defined (including built-in types)
+                                    if self.ctx.lookup_type(dep_name.as_str()).is_some() {
+                                        continue;
+                                    }
+
+                                    // Try to import the dependency from the source module first
+                                    // (the module that actually declares the parent type — this is
+                                    // the canonical location for sibling types that the parent
+                                    // depends on directly).
+                                    let mut imported = match self.import_item_from_module(
+                                        &source_module_path,
+                                        dep_name.as_str(),
+                                        registry,
+                                    ) {
+                                        Ok(()) => self.ctx.lookup_type(dep_name.as_str()).is_some(),
+                                        Err(_) => false,
+                                    };
+
+                                    // Fallback 1: when the source module is a *submodule* of the
+                                    // requesting module (e.g. parent type in `core.base.iterator`,
+                                    // dep declared in `core.base.maybe`), the dep is reachable via
+                                    // the requesting module's re-export surface. Retry against the
+                                    // original `module_path` (e.g. `core.base`) which collects all
+                                    // submodule re-exports under one roof.
+                                    //
+                                    // This closes the silent-drop where `Iterator` (declared in
+                                    // `core.base.iterator`) depends on `Maybe` (declared in
+                                    // `core.base.maybe`) — the source module `core.base.iterator`
+                                    // doesn't export `Maybe`, but the requesting module
+                                    // `core.base` does (via `public mount .maybe.{Maybe, ...}`).
+                                    if !imported && *resolved_module_path != source_module_path {
+                                        if let Ok(()) = self.import_item_from_module(
+                                            resolved_module_path,
+                                            dep_name.as_str(),
+                                            registry,
+                                        ) {
+                                            imported =
+                                                self.ctx.lookup_type(dep_name.as_str()).is_some();
+                                        }
+                                    }
+
+                                    if !imported {
+                                        tracing::debug!(
+                                            "Could not import transitive dependency '{}' for type '{}' (tried source={}, root={})",
+                                            dep_name,
+                                            item_name,
+                                            source_module_path.as_str(),
+                                            resolved_module_path.as_str(),
+                                        );
+                                        // Don't fail - the dependency might be a built-in type
+                                        // or from a different module that's already imported
+                                    }
+                                }
+                            }
+
+                            // Register the type declaration - this handles variants, records, etc.
+                            // Set flag so register_type_declaration_body knows this is an explicit import
+                            // and allows overwriting any existing type (even from metadata/global passes).
+                            let is_explicit =
+                                import_span.is_some() && self.explicit_imports.contains(item_name);
+                            if is_explicit {
+                                self.in_explicit_import_registration = true;
+                            }
+                            let reg_result = self.register_type_declaration(&type_decl);
+                            // Reset flag after registration completes (success or failure)
+                            if is_explicit {
+                                self.in_explicit_import_registration = false;
+                            }
+                            if let Err(e) = reg_result {
+                                if e.is_soundness_critical() {
+                                    return Err(e);
+                                }
+                                // Log the error but don't fail - some imports may have issues
+                                // #[cfg(debug_assertions)]
+                                // eprintln!(
+                                // "[DEBUG] Failed to register imported type '{}' from module '{}': {}",
+                                // item_name,
+                                // resolved_module_path.as_str(),
+                                // e
+                                // );
+                                // Fall through to fallback registration
+                            } else {
+                                // #[cfg(debug_assertions)]
+                                // eprintln!(
+                                // "[DEBUG] Successfully registered type '{}' from module '{}'",
+                                // item_name,
+                                // resolved_module_path.as_str()
+                                // );
+                                registered_successfully = true;
+
+                                // CRITICAL FIX: Also import implement block methods for the type.
+                                // This enables cross-file method resolution for calls like
+                                // RegistryError.validation_error(...) where the method is defined
+                                // in an `implement RegistryError { ... }` block in the source module.
+                                //
+
+                                // We need to find the source module (following re-exports if necessary)
+                                // and import all public methods from its implement blocks.
+                                if let Some((_, source_path)) = self
+                                    .find_type_declaration_with_source_module(
+                                        &module_info.ast,
+                                        item_name,
+                                        &resolved_module_path,
+                                        registry,
+                                    )
+                                {
+                                    // Get the source module and import its implement blocks.
+                                    // Pin the checker's module path to the resolved source
+                                    // module so bare type references inside impl blocks
+                                    // resolve against that module's qualified-name layer
+                                    // first (avoids same-name collisions via the flat map).
+                                    let src_path = source_path.as_str().to_string();
+                                    if let Some(source_module) = self.get_module_with_path_aliases(
+                                        source_path.as_str(),
+                                        registry,
+                                    ) && let Err(e) = self.import_impl_blocks_for_type_in_module(
+                                        &source_module.ast,
+                                        item_name,
+                                        Some(&src_path),
+                                    ) {
+                                        tracing::debug!(
+                                            "Failed to import implement blocks for '{}' from '{}': {}",
+                                            item_name,
+                                            source_path.as_str(),
+                                            e
+                                        );
+                                    }
+                                } else {
+                                    // Fallback: try to import from the direct module.
+                                    let direct_path = resolved_module_path.as_str().to_string();
+                                    if let Err(e) = self.import_impl_blocks_for_type_in_module(
+                                        &module_info.ast,
+                                        item_name,
+                                        Some(&direct_path),
+                                    ) {
+                                        tracing::debug!(
+                                            "Failed to import implement blocks for '{}' from '{}': {}",
+                                            item_name,
+                                            resolved_module_path.as_str(),
+                                            e
+                                        );
+                                    }
+                                }
+
+                                // After successful type registration, also check if there is a
+                                // corresponding inline module (companion namespace) with the same name.
+                                //
+
+                                // Pattern: `public type Foo<A,B> is {...}; public module Foo {...}`
+                                // When both exist, Type wins over Module in export deduplication,
+                                // but the inline module's static methods (e.g. Foo.map(...)) need
+                                // to be accessible.
+                                //
+
+                                // We scan the source module's AST directly (not the registry),
+                                // because inline modules are not registered as separate registry
+                                // entries — they are embedded in their parent file's module AST.
+                                //
+
+                                // Without this, `Transducer.map(...)` fails when Transducer is
+                                // imported transitively (e.g. via core.prelude.*) because only
+                                // the type is registered, not the companion module namespace.
+                                let short_name = verum_common::Text::from(register_name);
+                                if !self.inline_modules.contains_key(&short_name) {
+                                    // First check the source module's AST for an inline module
+                                    let source_ast_opt = self
+                                        .get_module_with_path_aliases(
+                                            source_module_path.as_str(),
+                                            registry,
+                                        )
+                                        .map(|m| m.ast.clone());
+                                    let inline_mod_found =
+                                        source_ast_opt.as_ref().and_then(|ast| {
+                                            ast.items.iter().find_map(|ast_item| {
+                                                if let verum_ast::ItemKind::Module(mod_decl) =
+                                                    &ast_item.kind
+                                                {
+                                                    if mod_decl.name.name.as_str() == item_name {
+                                                        return Some(mod_decl.clone());
+                                                    }
+                                                }
+                                                None
+                                            })
+                                        });
+                                    if let Some(mod_decl) = inline_mod_found {
+                                        self.inline_modules.insert(short_name, mod_decl);
+                                    } else {
+                                        // Fallback: try the registry for historical compatibility
+                                        let inline_path_str = format!(
+                                            "{}.{}",
+                                            source_module_path.as_str(),
+                                            item_name
+                                        );
+                                        if let verum_common::Maybe::Some(inline_mod_info) =
+                                            registry.get_by_path(&inline_path_str)
+                                        {
+                                            let synthetic_decl = verum_ast::decl::ModuleDecl {
+                                                visibility: verum_ast::decl::Visibility::Public,
+                                                name: verum_ast::ty::Ident::new(
+                                                    verum_common::Text::from(item_name),
+                                                    inline_mod_info.ast.span,
+                                                ),
+                                                items: verum_common::Maybe::Some(
+                                                    inline_mod_info.ast.items.clone(),
+                                                ),
+                                                profile: verum_common::Maybe::None,
+                                                features: verum_common::Maybe::None,
+                                                contexts: verum_common::List::new(),
+                                                span: inline_mod_info.ast.span,
+                                            };
+                                            let key = verum_common::Text::from(register_name);
+                                            self.inline_modules.insert(key, synthetic_decl);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fallback: register as a named type reference if full registration failed
+                        if !registered_successfully {
+                            // Function-shadowing guard: if find_type_declaration_with_source_module
+                            // returned None we still don't know whether the
+                            // imported item is genuinely a missing type or a
+                            // FUNCTION exported via a re-export chain that
+                            // resolve_export_kind_with_reexports failed to
+                            // re-classify (ExportKind::Type is the default
+                            // for re-exported items — see the comment at
+                            // 33858).  When the source module's AST DOES
+                            // hold a function declaration for this name,
+                            // register the function signature in env and
+                            // SKIP the Named-type placeholder.  Without
+                            // this guard, mounting `core.shell.{run}` —
+                            // where `core.shell` re-exports
+                            // `core.shell.exec.run` and the export kind
+                            // resolves as Type — leaves `run` registered
+                            // as `Type::Named { path: "run" }`, so every
+                            // call site fails with "not a function: run"
+                            // because the env-lookup hits the
+                            // self-referential placeholder before the
+                            // function lookup gets a chance.
+                            if let Some((func_type, type_vars, _src)) = self
+                                .find_function_with_source_module(
+                                    &module_info.ast,
+                                    item_name,
+                                    &resolved_module_path,
+                                    registry,
+                                )
+                            {
+                                let scheme = if type_vars.is_empty() {
+                                    TypeScheme::mono(func_type)
+                                } else {
+                                    TypeScheme::poly(type_vars, func_type)
+                                };
+                                self.ctx.env.insert(register_name, scheme);
+                                registered_successfully = true;
+                            } else {
+                                if let Some(metadata) = self.core_metadata.clone() {
+                                    if let Some(func_type) = self
+                                        .resolve_metadata_reexport_function(
+                                            &metadata,
+                                            &module_info.ast,
+                                            item_name,
+                                            &resolved_module_path,
+                                        )
+                                    {
+                                        self.ctx
+                                            .env
+                                            .insert(register_name, TypeScheme::mono(func_type));
+                                        registered_successfully = true;
+                                    }
+                                }
+                            }
+                        }
+                        if !registered_successfully {
+                            // CRITICAL FIX: Check if the type already exists before overwriting.
+                            // Bootstrap registers types like Maybe<T> as Type::Variant.
+                            // We must NOT overwrite these with Type::Named fallbacks.
+                            // This preserves pattern matching support for bootstrap types.
+                            let existing_ty = self.ctx.lookup_type(register_name);
+                            let should_register_fallback = match existing_ty {
+                                // Type doesn't exist - register fallback
+                                Option::None => true,
+                                // Type exists as Named - safe to overwrite with another Named
+                                Option::Some(Type::Named { .. }) => true,
+                                // Type exists as Variant - DO NOT overwrite (preserves pattern matching)
+                                Option::Some(Type::Variant(_)) => false,
+                                // Type exists as another concrete type - don't overwrite
+                                _ => false,
+                            };
+
+                            if should_register_fallback {
+                                use verum_ast::ty::{Ident, Path};
+                                // Use register_name for the fallback type reference
+                                let ident = Ident::new(register_name, Span::dummy());
+                                let type_ref = Type::Named {
+                                    path: Path::single(ident),
+                                    args: List::new(),
+                                };
+                                self.ctx
+                                    .define_type(verum_common::Text::from(register_name), type_ref);
+
+                                // Also try to register the companion inline module from the
+                                // source module (found via exported.source_module).
+                                // This handles the case where Type+Module coexist (like Transducer)
+                                // and the type is imported via a glob re-export (e.g., core.prelude.*),
+                                // where find_type_declaration_with_source_module returns None.
+                                let short_name = verum_common::Text::from(register_name);
+                                if !self.inline_modules.contains_key(&short_name) {
+                                    if let verum_common::Maybe::Some(source_mod_info) =
+                                        registry.get(export_source_module)
+                                    {
+                                        // The source_module may be an intermediate re-exporter (e.g., core.base).
+                                        // Use find_type_declaration_with_source_module to follow the re-export chain
+                                        // all the way to the ACTUAL declaring module (e.g., core.base.iterator).
+                                        let source_path = verum_common::Text::from(
+                                            source_mod_info.path.to_string(),
+                                        );
+                                        let actual_source_path = self
+                                            .find_type_declaration_with_source_module(
+                                                &source_mod_info.ast,
+                                                item_name,
+                                                &source_path,
+                                                registry,
+                                            )
+                                            .map(|(_, path)| path)
+                                            .unwrap_or(source_path);
+                                        // Now look for the inline module in the actual source module
+                                        let actual_inline_mod = self
+                                            .get_module_with_path_aliases(
+                                                actual_source_path.as_str(),
+                                                registry,
+                                            )
+                                            .and_then(|m| {
+                                                m.ast.items.iter().find_map(|ast_item| {
+                                                    if let verum_ast::ItemKind::Module(mod_decl) =
+                                                        &ast_item.kind
+                                                    {
+                                                        if mod_decl.name.name.as_str() == item_name
+                                                        {
+                                                            return Some(mod_decl.clone());
+                                                        }
+                                                    }
+                                                    None
+                                                })
+                                            });
+                                        if let Some(mod_decl) = actual_inline_mod {
+                                            self.inline_modules.insert(short_name, mod_decl);
+                                        }
+                                        // Register blanket impls from the actual source module.
+                                        // This is needed when the type is imported transitively
+                                        // (e.g. via core.prelude.*), so that blanket impl methods
+                                        // like `transduce` from `implement<I: Iterator> I { ... }`
+                                        // are available on all Iterator types.
+                                        let source_blanket_ast = self
+                                            .get_module_with_path_aliases(
+                                                actual_source_path.as_str(),
+                                                registry,
+                                            )
+                                            .map(|m| (m.ast.clone(), m.path.to_string()));
+                                        if let Some((blanket_ast, blanket_path)) =
+                                            source_blanket_ast
+                                        {
+                                            self.register_module_blanket_impls(
+                                                &blanket_ast,
+                                                &blanket_path,
+                                            );
+                                        }
+                                    } // closes registry.get if-let
+                                } // closes !contains_key if
+                            } // closes if should_register_fallback
+                        } // closes if !registered_successfully
+        Ok(())
+    }
+
+    /// Import a `context` or `context protocol` export from a module.
+    /// Registers the item as both a context type (for `using [...]`) and a type
+    /// so method calls like `Database.query(...)` resolve in the importing file.
+    fn import_context_export(
+        &mut self,
+        module_info: &verum_modules::ModuleInfo,
+        item_name: &str,
+        register_name: &str,
+        resolved_module_path: &Text,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Result<()> {
+                        // Context protocols need to be registered BOTH as a type AND as a context.
+                        // The type registration allows the protocol to be used in type annotations,
+                        // while the context registration allows it to be used in `using [...]` clauses.
+                        //
+
+                        // CRITICAL: We must build a proper Record type with method signatures
+                        // so that method calls like `Database.get_trending(...)` resolve correctly.
+                        //
+
+                        // There are TWO forms of context declarations:
+                        // 1. `context protocol Database { ... }` - parsed as ProtocolDecl with is_context=true
+                        // 2. `context Database { ... }` - parsed as ContextDecl
+                        //
+
+                        // We must handle both forms.
+                        //
+
+                        // Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
+
+                        // First, try to find as a `context protocol` (ProtocolDecl with is_context=true)
+                        // Use the variant that returns the source module path so we can import sibling types
+                        let context_type = if let Some((proto_decl, source_module_path)) = self
+                            .find_context_protocol_with_source_module(
+                                &module_info.ast,
+                                item_name,
+                                &resolved_module_path,
+                                registry,
+                            ) {
+                            // CRITICAL: Import all types from the protocol's source module BEFORE
+                            // building the protocol type. This ensures types used in method signatures
+                            // (like `SearchResponse`, `SearchError`) are available for resolution.
+                            //
+
+                            // Without this, `ast_to_type_lenient` would fall back to fresh type variables
+                            // for unresolved types, causing field access on return values to fail with
+                            // "Cannot access field on non-record type: τXX" errors.
+                            //
+
+                            // Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
+                            // Use path aliases since "core.io.path" may be stored as "std.io.path"
+                            if let Some(source_module) = self
+                                .get_module_with_path_aliases(source_module_path.as_str(), registry)
+                            {
+                                let src_path = source_module_path.as_str().to_string();
+                                self.import_types_from_module_ast_in_module(
+                                    &source_module.ast,
+                                    Some(&src_path),
+                                );
+                            }
+
+                            // Found a context protocol - build Record type with methods.
+                            // Module-aware: pin the checker's module path to the SOURCE
+                            // module while resolving the protocol body so that bare type
+                            // references inside method signatures (e.g. `LogLevel` in
+                            // `fn log(level: LogLevel, msg: Text)` inside
+                            // `core.context.standard.Logger`) resolve against the source
+                            // module's qualified-name layer first — not the flat map
+                            // which may surface a same-named stranger from another
+                            // module (`core.base.log.LogLevel` vs
+                            // `core.context.standard.LogLevel`).
+                            let saved_ctx_path = self.current_module_path().clone();
+                            self.set_current_module_path(source_module_path.clone());
+                            let ctx_type_result =
+                                self.build_context_type_from_protocol(&proto_decl);
+                            self.set_current_module_path(saved_ctx_path);
+
+                            match ctx_type_result {
+                                Ok(record_type) => record_type,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to build context type for protocol '{}' from module '{}': {}",
+                                        item_name,
+                                        resolved_module_path.as_str(),
+                                        e
+                                    );
+                                    // Fallback to Named type
+                                    use verum_ast::ty::{Ident, Path};
+                                    let ident = Ident::new(item_name, Span::dummy());
+                                    Type::Named {
+                                        path: Path::single(ident),
+                                        args: List::new(),
+                                    }
+                                }
+                            }
+                        } else if let Some(ctx_decl) = self.find_context_declaration_with_reexports(
+                            &module_info.ast,
+                            item_name,
+                            &resolved_module_path,
+                            registry,
+                        ) {
+                            // Found a context declaration - build Record type with methods.
+                            // Module-aware: pin the checker's module path to the SOURCE
+                            // module while resolving the context body so that bare type
+                            // references inside method signatures (e.g. `LogLevel` in
+                            // `fn log(level: LogLevel, msg: Text)` inside
+                            // `core.context.standard.Logger`) resolve against the
+                            // source module's qualified-name layer first — not the
+                            // flat map which may surface a same-named stranger from
+                            // another module.
+                            let saved_ctx_path = self.current_module_path().clone();
+                            self.set_current_module_path(resolved_module_path.clone());
+                            let ctx_type_result = self.build_context_type_from_decl(&ctx_decl);
+                            self.set_current_module_path(saved_ctx_path);
+
+                            match ctx_type_result {
+                                Ok(record_type) => {
+                                    // Store the context declaration for method-level capability extraction
+                                    let context_name: Text = item_name.into();
+                                    self.context_declarations.insert(context_name, ctx_decl);
+                                    record_type
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to build context type for '{}' from module '{}': {}",
+                                        item_name,
+                                        resolved_module_path.as_str(),
+                                        e
+                                    );
+                                    // Fallback to Named type
+                                    use verum_ast::ty::{Ident, Path};
+                                    let ident = Ident::new(item_name, Span::dummy());
+                                    Type::Named {
+                                        path: Path::single(ident),
+                                        args: List::new(),
+                                    }
+                                }
+                            }
+                        } else {
+                            // Neither context protocol nor context declaration found - fallback
+                            use verum_ast::ty::{Ident, Path};
+                            let ident = Ident::new(item_name, Span::dummy());
+                            let fallback_type = Type::Named {
+                                path: Path::single(ident),
+                                args: List::new(),
+                            };
+
+                            // Try to find as a type declaration
+                            if let Some(type_decl) = self.find_type_declaration_with_reexports(
+                                &module_info.ast,
+                                item_name,
+                                &resolved_module_path,
+                                registry,
+                            ) {
+                                if let Err(e) = self.register_type_declaration(&type_decl) {
+                                    if e.is_soundness_critical() {
+                                        return Err(e);
+                                    }
+                                    tracing::warn!(
+                                        "Failed to register imported context type '{}' from module '{}': {}",
+                                        item_name,
+                                        resolved_module_path.as_str(),
+                                        e
+                                    );
+                                }
+                            } else if let Some(_proto_decl) = self
+                                .find_protocol_declaration_in_module(&module_info.ast, item_name)
+                            {
+                                // Protocol declaration found - register as Named type
+                                self.ctx.define_type(
+                                    verum_common::Text::from(register_name),
+                                    fallback_type.clone(),
+                                );
+                            } else {
+                                // Fallback: register as a named type reference
+                                self.ctx.define_type(
+                                    verum_common::Text::from(register_name),
+                                    fallback_type.clone(),
+                                );
+                            }
+                            fallback_type
+                        };
+
+                        // Register as a context for `using [...]` clauses
+                        self.register_protocol_as_context(verum_common::Text::from(register_name));
+
+                        // Register the context type so that it can be accessed as a variable
+                        // in function bodies that use this context (e.g., `Database.query(...)`)
+                        // Guard: don't overwrite context types that were pre-registered
+                        // from the embedded stdlib archive with full method signatures.
+                        // The archive-based registration has richer type info (Record with
+                        // method names) than the fallback here (often Type::Named).
+                        let ctx_key = verum_common::Text::from(register_name);
+                        let already_has_rich_type = self
+                            .context_resolver
+                            .get_context_type(&ctx_key)
+                            .map(|t| matches!(t, Type::Record(_)))
+                            .unwrap_or(false);
+                        if !already_has_rich_type {
+                            self.context_resolver
+                                .register_context_type(ctx_key, context_type);
+                        }
+        Ok(())
+    }
+
     fn find_type_declaration_in_module(
         &self,
         ast: &verum_ast::Module,
