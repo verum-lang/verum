@@ -1805,83 +1805,215 @@ pub enum BinOp {
     ShrAssign,    // >>=
 }
 
-impl BinOp {
-    pub fn as_str(&self) -> &'static str {
+// =========================================================================
+// BinOp metadata — single source of truth for the 34 variants.
+//
+// Pre-refactor BinOp carried four parallel match-arm accessors —
+// `as_str`, `is_assignment`, `is_comparison`, `is_commutative` —
+// each independently spelling out per-variant data.  One latent
+// drift defect closed by structural per-variant tagging:
+//
+// * `is_commutative()` flagged 9 of the 10 commutative variants —
+//   `Iff` (biconditional `↔`, line 1782) was missed.  The SMT
+//   verification cache at
+//   `verum_smt/src/verification_cache.rs:82` uses
+//   `is_commutative` to canonicalise expressions for hashing;
+//   pre-fix it could not dedupe `a <-> b` vs `b <-> a` queries.
+//   Iff is commutative under classical logic
+//   (`a ↔ b ≡ b ↔ a`), so the pre-fix table was an oversight.
+//
+// Same drift-collapse pattern as the verum_vbc sub-opcode meta()
+// series, the verum_compiler LintMeta consolidation, and the
+// verum_kernel KernelRule.meta() / AntiPatternCode.meta() /
+// Lifecycle.meta() refactors.
+// =========================================================================
+
+/// Functional band a `BinOp` belongs to.  Bands are stamped
+/// per-variant via `meta()` rather than scattered across multiple
+/// `matches!()` predicates, so adding a new operator only requires
+/// updating the meta() arm — every accessor projects through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinOpCategory {
+    /// `+` / `-` / `*` / `/` / `%` / `**`.
+    Arithmetic,
+    /// `==` / `!=` / `<` / `<=` / `>` / `>=`.  `In` is
+    /// containment-check, not numeric comparison, and lives in
+    /// `Collection`.
+    Comparison,
+    /// `&&` / `||` / `->` / `<->`.
+    Logical,
+    /// `++` (list concat) / `in` (containment check).
+    Collection,
+    /// `&` / `|` / `^` / `<<` / `>>`.
+    Bitwise,
+    /// `=` and the `*Assign` family.
+    Assignment,
+}
+
+impl BinOpCategory {
+    /// Display string for diagnostics.
+    pub const fn as_str(self) -> &'static str {
         match self {
-            BinOp::Add => "+",
-            BinOp::Sub => "-",
-            BinOp::Mul => "*",
-            BinOp::Div => "/",
-            BinOp::Rem => "%",
-            BinOp::Pow => "**",
-            BinOp::Eq => "==",
-            BinOp::Ne => "!=",
-            BinOp::Lt => "<",
-            BinOp::Le => "<=",
-            BinOp::Gt => ">",
-            BinOp::Ge => ">=",
-            BinOp::In => "in",
-            BinOp::Concat => "++",
-            BinOp::And => "&&",
-            BinOp::Or => "||",
-            BinOp::Imply => "->",
-            BinOp::BitAnd => "&",
-            BinOp::BitOr => "|",
-            BinOp::BitXor => "^",
-            BinOp::Shl => "<<",
-            BinOp::Shr => ">>",
-            BinOp::Assign => "=",
-            BinOp::AddAssign => "+=",
-            BinOp::SubAssign => "-=",
-            BinOp::MulAssign => "*=",
-            BinOp::DivAssign => "/=",
-            BinOp::RemAssign => "%=",
-            BinOp::BitAndAssign => "&=",
-            BinOp::BitOrAssign => "|=",
-            BinOp::BitXorAssign => "^=",
-            BinOp::ShlAssign => "<<=",
-            BinOp::ShrAssign => ">>=",
-            BinOp::Iff => "<->",
+            Self::Arithmetic => "Arithmetic",
+            Self::Comparison => "Comparison",
+            Self::Logical    => "Logical",
+            Self::Collection => "Collection",
+            Self::Bitwise    => "Bitwise",
+            Self::Assignment => "Assignment",
+        }
+    }
+}
+
+/// Co-located metadata for one `BinOp` variant.
+///
+/// Every reference-data field a caller might ask for is captured
+/// here; `BinOp::meta()` is the only site that constructs values
+/// of this type.
+#[derive(Debug, Clone, Copy)]
+pub struct BinOpMeta {
+    /// Surface-syntax string (`"+"`, `"<->"`, `"+="`).
+    pub as_str: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: BinOpCategory,
+    /// True for assignment ops (`=`, `+=`, etc.) — also encoded
+    /// as `category == Assignment` (band-iff invariant pinned in
+    /// drift tests).
+    pub is_assignment: bool,
+    /// True for ordered/equality comparisons that produce a
+    /// `Bool` — `==` / `!=` / `<` / `<=` / `>` / `>=`.  Also
+    /// encoded as `category == Comparison`.
+    pub is_comparison: bool,
+    /// True for cross-cutting commutativity (`a op b == b op a`).
+    /// Spans bands: arithmetic `Add`/`Mul`, comparison `Eq`/`Ne`,
+    /// logical `And`/`Or`/`Iff`, bitwise `BitAnd`/`BitOr`/`BitXor`.
+    /// Closing the legacy `Iff` undercount restores SMT
+    /// canonicalization parity for biconditional queries.
+    pub is_commutative: bool,
+}
+
+impl BinOp {
+    /// All variants in stable order.  The canonical iteration
+    /// source for drift-pin tests; adding a new operator requires
+    /// exactly one entry here plus one `meta()` arm.
+    pub const ALL: &'static [Self] = &[
+        // Arithmetic
+        Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Rem, Self::Pow,
+        // Comparison
+        Self::Eq, Self::Ne, Self::Lt, Self::Le, Self::Gt, Self::Ge,
+        // Collection
+        Self::In, Self::Concat,
+        // Logical
+        Self::And, Self::Or, Self::Imply, Self::Iff,
+        // Bitwise
+        Self::BitAnd, Self::BitOr, Self::BitXor, Self::Shl, Self::Shr,
+        // Assignment
+        Self::Assign,
+        Self::AddAssign, Self::SubAssign, Self::MulAssign,
+        Self::DivAssign, Self::RemAssign,
+        Self::BitAndAssign, Self::BitOrAssign, Self::BitXorAssign,
+        Self::ShlAssign, Self::ShrAssign,
+    ];
+
+    /// Returns co-located metadata for this binary operator.
+    /// Single source of truth for `as_str` / `category` /
+    /// `is_assignment` / `is_comparison` / `is_commutative`.
+    pub const fn meta(self) -> BinOpMeta {
+        use BinOpCategory::{
+            Arithmetic, Assignment, Bitwise, Collection, Comparison, Logical,
+        };
+        macro_rules! m {
+            ($s:expr, $cat:ident, asgn=$asgn:literal, cmp=$cmp:literal, comm=$comm:literal $(,)?) => {
+                BinOpMeta {
+                    as_str: $s,
+                    category: $cat,
+                    is_assignment: $asgn,
+                    is_comparison: $cmp,
+                    is_commutative: $comm,
+                }
+            };
+        }
+        match self {
+            // ===== Arithmetic =====
+            Self::Add        => m!("+",    Arithmetic, asgn=false, cmp=false, comm=true),
+            Self::Sub        => m!("-",    Arithmetic, asgn=false, cmp=false, comm=false),
+            Self::Mul        => m!("*",    Arithmetic, asgn=false, cmp=false, comm=true),
+            Self::Div        => m!("/",    Arithmetic, asgn=false, cmp=false, comm=false),
+            Self::Rem        => m!("%",    Arithmetic, asgn=false, cmp=false, comm=false),
+            Self::Pow        => m!("**",   Arithmetic, asgn=false, cmp=false, comm=false),
+
+            // ===== Comparison =====
+            Self::Eq         => m!("==",   Comparison, asgn=false, cmp=true,  comm=true),
+            Self::Ne         => m!("!=",   Comparison, asgn=false, cmp=true,  comm=true),
+            Self::Lt         => m!("<",    Comparison, asgn=false, cmp=true,  comm=false),
+            Self::Le         => m!("<=",   Comparison, asgn=false, cmp=true,  comm=false),
+            Self::Gt         => m!(">",    Comparison, asgn=false, cmp=true,  comm=false),
+            Self::Ge         => m!(">=",   Comparison, asgn=false, cmp=true,  comm=false),
+
+            // ===== Collection =====
+            Self::In         => m!("in",   Collection, asgn=false, cmp=false, comm=false),
+            Self::Concat     => m!("++",   Collection, asgn=false, cmp=false, comm=false),
+
+            // ===== Logical =====
+            // Iff is commutative — closes the legacy
+            // `is_commutative()` undercount that broke SMT cache
+            // canonicalisation of biconditional queries
+            // (`verum_smt/src/verification_cache.rs:82`).
+            Self::And        => m!("&&",   Logical,    asgn=false, cmp=false, comm=true),
+            Self::Or         => m!("||",   Logical,    asgn=false, cmp=false, comm=true),
+            Self::Imply      => m!("->",   Logical,    asgn=false, cmp=false, comm=false),
+            Self::Iff        => m!("<->",  Logical,    asgn=false, cmp=false, comm=true),
+
+            // ===== Bitwise =====
+            Self::BitAnd     => m!("&",    Bitwise,    asgn=false, cmp=false, comm=true),
+            Self::BitOr      => m!("|",    Bitwise,    asgn=false, cmp=false, comm=true),
+            Self::BitXor     => m!("^",    Bitwise,    asgn=false, cmp=false, comm=true),
+            Self::Shl        => m!("<<",   Bitwise,    asgn=false, cmp=false, comm=false),
+            Self::Shr        => m!(">>",   Bitwise,    asgn=false, cmp=false, comm=false),
+
+            // ===== Assignment =====
+            Self::Assign       => m!("=",    Assignment, asgn=true,  cmp=false, comm=false),
+            Self::AddAssign    => m!("+=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::SubAssign    => m!("-=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::MulAssign    => m!("*=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::DivAssign    => m!("/=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::RemAssign    => m!("%=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::BitAndAssign => m!("&=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::BitOrAssign  => m!("|=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::BitXorAssign => m!("^=",   Assignment, asgn=true,  cmp=false, comm=false),
+            Self::ShlAssign    => m!("<<=",  Assignment, asgn=true,  cmp=false, comm=false),
+            Self::ShrAssign    => m!(">>=",  Assignment, asgn=true,  cmp=false, comm=false),
         }
     }
 
-    pub fn is_assignment(&self) -> bool {
-        matches!(
-            self,
-            BinOp::Assign
-                | BinOp::AddAssign
-                | BinOp::SubAssign
-                | BinOp::MulAssign
-                | BinOp::DivAssign
-                | BinOp::RemAssign
-                | BinOp::BitAndAssign
-                | BinOp::BitOrAssign
-                | BinOp::BitXorAssign
-                | BinOp::ShlAssign
-                | BinOp::ShrAssign
-        )
+    /// Surface-syntax string for this operator.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().as_str
     }
 
-    pub fn is_comparison(&self) -> bool {
-        matches!(
-            self,
-            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
-        )
+    /// Functional band this operator belongs to.
+    #[inline]
+    pub const fn category(&self) -> BinOpCategory {
+        self.meta().category
     }
 
-    pub fn is_commutative(&self) -> bool {
-        matches!(
-            self,
-            BinOp::Add
-                | BinOp::Mul
-                | BinOp::Eq
-                | BinOp::Ne
-                | BinOp::And
-                | BinOp::Or
-                | BinOp::BitAnd
-                | BinOp::BitOr
-                | BinOp::BitXor
-        )
+    /// True for assignment operators (`=`, `+=`, etc.).
+    #[inline]
+    pub const fn is_assignment(&self) -> bool {
+        self.meta().is_assignment
+    }
+
+    /// True for ordered/equality comparisons producing a `Bool`.
+    #[inline]
+    pub const fn is_comparison(&self) -> bool {
+        self.meta().is_comparison
+    }
+
+    /// True for commutative operators (`a op b == b op a`).
+    /// Includes `Iff` (closed legacy undercount).
+    #[inline]
+    pub const fn is_commutative(&self) -> bool {
+        self.meta().is_commutative
     }
 }
 
@@ -2788,3 +2920,134 @@ impl Spanned for MacroArgsExt {
 
 // Forward declaration - actual Stmt is in stmt.rs
 pub use crate::stmt::Stmt;
+
+// =========================================================================
+// BinOp meta() drift-pin tests
+// =========================================================================
+
+#[cfg(test)]
+mod binop_meta_drift_pins {
+    use super::*;
+
+    /// Total reachable-variant count.  Bumping this assertion is
+    /// the explicit signal that a new BinOp has landed and the
+    /// corresponding `meta()` arm + `ALL` entry are in place.
+    #[test]
+    fn binop_count_pinned_at_thirty_four() {
+        assert_eq!(BinOp::ALL.len(), 34,
+            "BinOp variant count drift: expected 34 (6 arith + 6 cmp + 2 coll + 4 logic + 5 bit + 11 assign)");
+    }
+
+    /// `is_assignment` ⇔ `category == Assignment`.  Pins the
+    /// band-membership equivalence so renaming an op or moving it
+    /// between bands surfaces here.
+    #[test]
+    fn binop_is_assignment_iff_assignment_band() {
+        for &op in BinOp::ALL {
+            let in_band = op.category() == BinOpCategory::Assignment;
+            assert_eq!(op.is_assignment(), in_band,
+                "{:?}: is_assignment={} but Assignment band membership={}",
+                op, op.is_assignment(), in_band);
+        }
+    }
+
+    /// `is_comparison` ⇔ `category == Comparison`.
+    #[test]
+    fn binop_is_comparison_iff_comparison_band() {
+        for &op in BinOp::ALL {
+            let in_band = op.category() == BinOpCategory::Comparison;
+            assert_eq!(op.is_comparison(), in_band,
+                "{:?}: is_comparison={} but Comparison band membership={}",
+                op, op.is_comparison(), in_band);
+        }
+    }
+
+    /// `is_assignment` and `is_comparison` are disjoint.
+    #[test]
+    fn binop_is_assignment_xor_is_comparison() {
+        for &op in BinOp::ALL {
+            assert!(!(op.is_assignment() && op.is_comparison()),
+                "{:?}: tagged both is_assignment and is_comparison", op);
+        }
+    }
+
+    /// Pin the canonical 10-variant commutative set.  Was 9 in
+    /// the legacy `is_commutative()` table — `Iff` was missed.
+    /// The SMT verification cache canonicalisation depended on
+    /// this predicate; the legacy gap meant `a <-> b` and
+    /// `b <-> a` produced distinct cache keys.
+    #[test]
+    fn binop_is_commutative_set_pinned() {
+        let commutative = [
+            // Arithmetic
+            BinOp::Add, BinOp::Mul,
+            // Comparison
+            BinOp::Eq, BinOp::Ne,
+            // Logical (Iff closed legacy gap)
+            BinOp::And, BinOp::Or, BinOp::Iff,
+            // Bitwise
+            BinOp::BitAnd, BinOp::BitOr, BinOp::BitXor,
+        ];
+        for op in &commutative {
+            assert!(op.is_commutative(),
+                "{:?} should be commutative (a {} b == b {} a)",
+                op, op.as_str(), op.as_str());
+        }
+        let mut count = 0;
+        for &op in BinOp::ALL {
+            if op.is_commutative() { count += 1; }
+        }
+        assert_eq!(count, commutative.len(),
+            "is_commutative count drift: expected {} (was 9 pre-fix; Iff closed)",
+            commutative.len());
+        // Named regression assertion for the closed gap:
+        assert!(BinOp::Iff.is_commutative(),
+            "Iff is commutative under classical logic (a <-> b ≡ b <-> a)");
+    }
+
+    /// Negative pins on commutativity — non-commutative ops stay
+    /// non-commutative.  Catches any future overgeneralisation.
+    #[test]
+    fn binop_known_non_commutative_stays_non_commutative() {
+        let non_commutative = [
+            BinOp::Sub, BinOp::Div, BinOp::Rem, BinOp::Pow,
+            BinOp::Lt, BinOp::Le, BinOp::Gt, BinOp::Ge,
+            BinOp::Imply,  // a -> b ≢ b -> a
+            BinOp::Shl, BinOp::Shr,
+            BinOp::In, BinOp::Concat,
+            BinOp::Assign,
+        ];
+        for op in &non_commutative {
+            assert!(!op.is_commutative(),
+                "{:?} should NOT be commutative", op);
+        }
+    }
+
+    /// Pin the canonical 11-variant assignment set.  Adding a
+    /// new compound assignment requires bumping this count.
+    #[test]
+    fn binop_assignment_count_pinned_at_eleven() {
+        let mut count = 0;
+        for &op in BinOp::ALL {
+            if op.is_assignment() { count += 1; }
+        }
+        assert_eq!(count, 11,
+            "assignment count drift: expected 11 (= + 10 *Assign)");
+    }
+
+    /// Every variant has a non-empty surface-syntax string.
+    /// Catches drift if a new operator is added with `as_str ==
+    /// ""` accidentally.
+    #[test]
+    fn binop_as_str_non_empty_and_unique() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(BinOp::ALL.len());
+        for &op in BinOp::ALL {
+            let s = op.as_str();
+            assert!(!s.is_empty(), "{:?}: empty as_str", op);
+            assert!(!seen.contains(&s),
+                "duplicate as_str {:?} on variant {:?}", s, op);
+            seen.push(s);
+        }
+        assert_eq!(seen.len(), 34);
+    }
+}

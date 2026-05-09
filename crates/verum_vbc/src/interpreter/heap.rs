@@ -199,6 +199,82 @@ pub unsafe fn write_variant_data_header(data: *mut u8, tag: u32, field_count: u3
     }
 }
 
+// ============================================================================
+// Closure heap-object header read helpers
+// ============================================================================
+//
+// Closure heap layout (matches `calls::handle_make_closure`):
+//
+//   [ObjectHeader (24)][func_id: u32][capture_count: u32][captures: Value * N]
+//
+// The (func_id, capture_count) pair occupies the same 8 bytes that the
+// variant header uses for (tag, field_count) — `verum_common::layout::
+// VARIANT_PAYLOAD_OFFSET` (= 32) doubles as the captures-array base
+// because the structural layout is parallel.  Pre-this-helper, 3 sites
+// (`call_closure_sync` in dispatch_table/mod.rs, `handle_call_closure`
+// + `handle_make_closure` in calls.rs) each repeated the same
+// raw-pointer arithmetic with hardcoded `header_offset + 4` / `+ 8`
+// literals.  The drift-pin test
+// `closure_captures_offset_matches_variant_payload_offset` enforces the
+// shared-offset invariant.
+
+/// Read the `(func_id, capture_count)` pair from a closure heap pointer.
+///
+/// # Safety
+/// `ptr` must point to a live heap object whose data section starts
+/// with the closure `(func_id: u32, capture_count: u32)` pair —
+/// `handle_make_closure` is the canonical producer.
+#[inline]
+pub unsafe fn closure_header(ptr: *const u8) -> (u32, u32) {
+    let data = unsafe { ptr.add(verum_common::layout::VARIANT_TAG_OFFSET as usize) as *const u32 };
+    unsafe { (*data, *data.add(1)) }
+}
+
+/// Get a `*const Value` to the `idx`-th capture slot of a closure
+/// heap pointer.  Mirror of [`variant_payload_ptr`] for the closure
+/// layout; both share `VARIANT_PAYLOAD_OFFSET` (= 32) as the base.
+///
+/// # Safety
+/// `ptr` must satisfy [`closure_header`]'s contract; `idx` must be in
+/// `0..capture_count` of the closure.
+#[inline]
+pub unsafe fn closure_captures_ptr(ptr: *const u8, idx: usize) -> *const Value {
+    let base =
+        unsafe { ptr.add(verum_common::layout::VARIANT_PAYLOAD_OFFSET as usize) as *const Value };
+    unsafe { base.add(idx) }
+}
+
+/// Mutable counterpart to [`closure_captures_ptr`] — for codegen-side
+/// capture writes (e.g. `handle_make_closure` storing captured values
+/// after `alloc_with_init`).
+///
+/// # Safety
+/// Same contract as [`closure_captures_ptr`]; the underlying memory
+/// must be uniquely owned for the duration of the write.
+#[inline]
+pub unsafe fn closure_captures_ptr_mut(ptr: *mut u8, idx: usize) -> *mut Value {
+    let base =
+        unsafe { ptr.add(verum_common::layout::VARIANT_PAYLOAD_OFFSET as usize) as *mut Value };
+    unsafe { base.add(idx) }
+}
+
+/// Write the `(func_id, capture_count)` header pair into a freshly
+/// allocated closure data section.  Canonical writer used by
+/// `handle_make_closure`'s `alloc_with_init` closure.
+///
+/// # Safety
+/// `data` must point to a closure data section (8-byte header + N
+/// capture slots).  The helper writes exactly 8 bytes
+/// `[0..VARIANT_PAYLOAD_OFFSET - VARIANT_TAG_OFFSET]`.
+#[inline]
+pub unsafe fn write_closure_data_header(data: *mut u8, func_id: u32, capture_count: u32) {
+    let head_ptr = data as *mut u32;
+    unsafe {
+        *head_ptr = func_id;
+        *head_ptr.add(1) = capture_count;
+    }
+}
+
 bitflags! {
     /// Object flags for runtime state.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -999,6 +1075,56 @@ mod tests {
             verum_common::layout::OBJECT_HEADER_SIZE,
             "VARIANT_TAG_OFFSET must equal OBJECT_HEADER_SIZE (tag is the first data field)",
         );
+    }
+
+    /// Closure layout shares offsets with the variant layout (header
+    /// + 8 bytes for the (func_id, capture_count) pair, then captures).
+    /// `closure_header` / `closure_captures_ptr` reuse `VARIANT_TAG_OFFSET`
+    /// and `VARIANT_PAYLOAD_OFFSET` directly — pin the architectural
+    /// alignment so a future closure-layout edit doesn't silently
+    /// desync from the variant offsets.
+    #[test]
+    fn closure_helpers_share_variant_offsets() {
+        assert_eq!(
+            verum_common::layout::VARIANT_TAG_OFFSET,
+            verum_common::layout::OBJECT_HEADER_SIZE,
+        );
+        assert_eq!(
+            verum_common::layout::VARIANT_PAYLOAD_OFFSET,
+            verum_common::layout::OBJECT_HEADER_SIZE + 8,
+        );
+    }
+
+    /// `closure_header` / `closure_captures_ptr` round-trip with
+    /// `write_closure_data_header` — produced bytes match what
+    /// `handle_make_closure`'s `alloc_with_init` writes, and what
+    /// `handle_call_closure` / `call_closure_sync` read back.
+    #[test]
+    fn closure_header_helpers_roundtrip() {
+        let mut heap = Heap::new();
+        let payload_a = Value::from_i64(11);
+        let payload_b = Value::from_i64(22);
+        let obj = heap
+            .alloc_with_init(
+                TypeId(0xC000),
+                8 + 2 * std::mem::size_of::<Value>(),
+                |data| unsafe {
+                    write_closure_data_header(data.as_mut_ptr(), 42, 2);
+                    let captures = data.as_mut_ptr().add(8) as *mut Value;
+                    *captures = payload_a;
+                    *captures.add(1) = payload_b;
+                },
+            )
+            .unwrap();
+
+        let obj_ptr = obj.as_ptr() as *const u8;
+        unsafe {
+            let (func_id, capture_count) = closure_header(obj_ptr);
+            assert_eq!(func_id, 42);
+            assert_eq!(capture_count, 2);
+            assert_eq!((*closure_captures_ptr(obj_ptr, 0)).as_i64(), 11);
+            assert_eq!((*closure_captures_ptr(obj_ptr, 1)).as_i64(), 22);
+        }
     }
 
     #[test]

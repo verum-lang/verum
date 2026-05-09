@@ -681,15 +681,16 @@ pub(in super::super) fn handle_call_closure(
     }
 
     let base_ptr = closure_val.as_ptr::<u8>();
-    let header_offset = super::super::super::heap::OBJECT_HEADER_SIZE;
 
-    let (func_id, capture_count) = unsafe {
-        let func_id = *(base_ptr.add(header_offset) as *const u32);
-        let capture_count = *(base_ptr.add(header_offset + 4) as *const u32);
-        (func_id, capture_count as usize)
+    // SAFETY: caller validated `closure_val` is a non-null heap
+    // pointer; `closure_header` reads (func_id, capture_count) at
+    // the canonical offsets pinned by `verum_common::layout` and
+    // produced by `handle_make_closure`.
+    let (raw_func_id, capture_count_u32) = unsafe {
+        super::super::super::heap::closure_header(base_ptr)
     };
-
-    let func_id = FunctionId(func_id);
+    let capture_count = capture_count_u32 as usize;
+    let func_id = FunctionId(raw_func_id);
     let func = state
         .module
         .get_function(func_id)
@@ -705,14 +706,13 @@ pub(in super::super) fn handle_call_closure(
         arg_values.push(state.registers.get(caller_base, Reg(args_start.0 + i)));
     }
 
-    // Collect captured values
+    // Collect captured values via the canonical helper.
     let mut capture_values = Vec::with_capacity(capture_count);
     unsafe {
-        let captures_offset = header_offset + 8; // after func_id + capture_count
         for i in 0..capture_count {
-            let cap_ptr =
-                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
-            capture_values.push(std::ptr::read(cap_ptr));
+            capture_values.push(std::ptr::read(
+                super::super::super::heap::closure_captures_ptr(base_ptr, i),
+            ));
         }
     }
 
@@ -795,31 +795,38 @@ pub(in super::super) fn handle_new_closure(
         capture_regs.push(read_reg(state)?);
     }
 
-    // Allocate closure object on heap
+    // Allocate closure object on heap.
     // Layout: [ObjectHeader][func_id:u32][capture_count:u32][captures:Value...]
+    // Header offsets and writer routed through canonical helpers in
+    // `verum_vbc::interpreter::heap` (see `closure_header` /
+    // `closure_captures_ptr_mut` / `write_closure_data_header`).
     let data_size = 8 + capture_count * std::mem::size_of::<Value>();
     let type_id = TypeId(0xC000); // Closure type ID
 
     let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
-        let ptr = data.as_mut_ptr();
+        // SAFETY: data section is exactly `data_size` bytes; helper
+        // writes the leading 8 (func_id + capture_count header).
         unsafe {
-            // Write func_id
-            *(ptr as *mut u32) = func_id;
-            // Write capture count
-            *(ptr.add(4) as *mut u32) = capture_count as u32;
-        }
+            super::super::super::heap::write_closure_data_header(
+                data.as_mut_ptr(),
+                func_id,
+                capture_count as u32,
+            )
+        };
     })?;
     state.record_allocation();
 
-    // Write captured values
+    // Write captured values via the canonical helper.
     let base_ptr = obj.as_ptr() as *mut u8;
-    let captures_offset = super::super::super::heap::OBJECT_HEADER_SIZE + 8;
     for (i, cap_reg) in capture_regs.iter().enumerate() {
         let val = state.get_reg(*cap_reg);
+        // SAFETY: i < capture_count, base_ptr is a freshly allocated
+        // closure with `capture_count` slots after the header.
         unsafe {
-            let cap_ptr =
-                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *mut Value;
-            std::ptr::write(cap_ptr, val);
+            std::ptr::write(
+                super::super::super::heap::closure_captures_ptr_mut(base_ptr, i),
+                val,
+            );
         }
     }
 
