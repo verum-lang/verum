@@ -987,6 +987,7 @@ async fn run_tests(
     config.executor_config.compile_time_only = opts.compile_time_only;
     config.executor_config.vbc_output_dir = opts.vbc_output;
     config.executor_config.vbc_preserve_paths = opts.vbc_preserve_paths;
+    config.executor_config.coverage = opts.coverage;
 
     let runner = VTestRunner::new(config);
 
