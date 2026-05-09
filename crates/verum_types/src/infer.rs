@@ -14645,71 +14645,7 @@ impl TypeChecker {
 
                 // If expressions - with flow-sensitive refinement narrowing
                 // If expressions: both branches must unify to same type; if-let patterns narrow types in the then-branch
-                If {
-                    condition,
-                    then_branch,
-                    else_branch,
-                } => {
-                    self.ctx.env.push_scope();
-                    self.refinement_evidence.push_scope();
-
-                    let mut condition_exprs: Vec<Expr> = Vec::new();
-
-                    for cond in &condition.conditions {
-                        match cond {
-                            verum_ast::expr::ConditionKind::Expr(cond_expr) => {
-                                if let ExprKind::Is {
-                                    expr: test_expr,
-                                    pattern,
-                                    negated,
-                                } = &cond_expr.kind
-                                {
-                                    let test_result = self.synth_expr(test_expr)?;
-                                    if !negated {
-                                        self.bind_pattern(pattern, &test_result.ty)?;
-                                    }
-                                } else {
-                                    self.check_expr(cond_expr, &Type::bool())?;
-                                    self.refinement_evidence
-                                        .add_evidence_from_condition(cond_expr, cond_expr.span);
-                                    self.narrow_variable_types_from_condition(cond_expr, false);
-                                    condition_exprs.push(cond_expr.clone());
-                                }
-                            }
-                            verum_ast::expr::ConditionKind::Let { pattern, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                self.bind_pattern(pattern, &value_result.ty)?;
-                            }
-                        }
-                    }
-
-                    let then_result = self.infer_block(then_branch)?;
-
-                    self.ctx.env.pop_scope();
-                    self.refinement_evidence.pop_scope();
-
-                    let else_result = if let Some(else_expr) = else_branch {
-                        self.ctx.env.push_scope();
-                        self.refinement_evidence.push_scope();
-                        for cond_expr in &condition_exprs {
-                            self.refinement_evidence
-                                .add_negated_evidence(cond_expr, cond_expr.span);
-                            self.narrow_variable_types_from_condition(cond_expr, true);
-                        }
-                        let result = self.synth_expr(else_expr)?;
-                        self.ctx.env.pop_scope();
-                        self.refinement_evidence.pop_scope();
-                        result
-                    } else {
-                        InferResult::new(Type::unit())
-                    };
-
-                    // Unify branch types
-                    let span = expr.span;
-                    self.unifier.unify(&then_result.ty, &else_result.ty, span)?;
-
-                    Ok(InferResult::new(then_result.ty))
-                }
+                If { .. } => self.infer_if_expr(current_expr),
 
                 // Lambda synthesis: create fresh type variables for parameters
                 // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types (dependent functions)
@@ -14792,78 +14728,7 @@ impl TypeChecker {
                 }
 
                 // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-                While {
-                    label: _,
-                    condition,
-                    body,
-                    invariants: _,
-                    decreases: _,
-                } => {
-                    // Enter loop context for affine tracking
-                    self.affine_tracker.enter_loop();
-
-                    // Check if condition is an `is` expression with pattern bindings
-                    // For `while value is Pattern(x)`, bind x in the body scope
-                    // Spec: L0-critical/builtin-syntax/is_operator.vr
-                    if let ExprKind::Is {
-                        expr: test_expr,
-                        pattern,
-                        negated,
-                    } = &condition.kind
-                    {
-                        // Type check the expression being tested
-                        let test_result = self.synth_expr(test_expr)?;
-
-                        // Enter scope for body with pattern bindings
-                        self.ctx.env.push_scope();
-                        self.refinement_evidence.push_scope();
-
-                        // For non-negated `is`, bind the pattern in body scope
-                        if !negated {
-                            self.bind_pattern(pattern, &test_result.ty)?;
-                            // Add pattern evidence for the matched pattern
-                            if let Maybe::Some(var_name) = self.extract_simple_var_name(test_expr) {
-                                self.add_pattern_evidence(pattern, var_name, test_expr.span);
-                            }
-                        }
-
-                        self.infer_block(body)?;
-
-                        self.refinement_evidence.pop_scope();
-                        self.ctx.env.pop_scope();
-                    } else {
-                        // Regular condition - must be Bool
-                        self.check_expr(condition, &Type::bool())?;
-
-                        // Add condition evidence for the loop body
-                        // Inside the loop, condition is true
-                        self.refinement_evidence.push_scope();
-                        self.refinement_evidence
-                            .add_evidence_from_condition(condition, condition.span);
-
-                        // Add method evidence if applicable
-                        if let Maybe::Some((var_name, method_name, negated)) =
-                            crate::refinement_evidence::EvidencePropagator::analyze_method_condition(
-                                condition,
-                            )
-                        {
-                            self.refinement_evidence.add_method_evidence(
-                                var_name,
-                                method_name.as_str(),
-                                negated,
-                                condition.span,
-                            );
-                        }
-
-                        self.infer_block(body)?;
-                        self.refinement_evidence.pop_scope();
-                    }
-
-                    // Exit loop context
-                    self.affine_tracker.exit_loop();
-
-                    Ok(InferResult::new(Type::unit()))
-                }
+                While { .. } => self.infer_while_loop(current_expr),
 
                 For { .. } => self.infer_for_loop(current_expr),
 
@@ -14968,90 +14833,7 @@ impl TypeChecker {
 
                 // Map comprehension: {k: v for (k, v) in pairs if condition}
                 // Async generator expressions: "async fn*" combining async iteration with yield
-                MapComprehension {
-                    key_expr,
-                    value_expr,
-                    clauses,
-                } => {
-                    self.ctx.enter_scope();
-
-                    // Process each clause (same as list comprehension)
-                    for clause in clauses.iter() {
-                        use verum_ast::expr::ComprehensionClauseKind;
-                        match &clause.kind {
-                            ComprehensionClauseKind::For { pattern, iter } => {
-                                let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution
-                                let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&iter_result.ty)
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback: Try Iterator protocol's Item associated type
-                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_iter_ty,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over type in map comprehension: {}",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                };
-
-                                let elem_scheme = TypeScheme::mono(elem_ty);
-                                self.bind_pattern_scheme(pattern, elem_scheme)?;
-                            }
-                            ComprehensionClauseKind::If(condition) => {
-                                let cond_result = self.synth_expr(condition)?;
-                                self.unifier
-                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
-                            }
-                            ComprehensionClauseKind::Let { pattern, ty, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                let binding_ty = if let Some(ty_ast) = ty {
-                                    let annotated_ty = self.ast_to_type(ty_ast)?;
-                                    self.unifier.unify(
-                                        &value_result.ty,
-                                        &annotated_ty,
-                                        value.span,
-                                    )?;
-                                    annotated_ty
-                                } else {
-                                    value_result.ty
-                                };
-                                let binding_scheme = TypeScheme::mono(binding_ty);
-                                self.bind_pattern_scheme(pattern, binding_scheme)?;
-                            }
-                        }
-                    }
-
-                    let key_result = self.synth_expr(key_expr)?;
-                    let value_result = self.synth_expr(value_expr)?;
-
-                    self.ctx.exit_scope();
-
-                    // Result is a Map<K, V>
-                    let result_ty = Type::Generic {
-                        name: verum_common::Text::from(WKT::Map.as_str()),
-                        args: vec![key_result.ty, value_result.ty].into(),
-                    };
-
-                    Ok(InferResult::new(result_ty))
-                }
+                MapComprehension { .. } => self.infer_map_comprehension_expr(current_expr),
 
                 // Set comprehension: set{x for x in items if condition}
                 // Generator pipeline operations: composing generators with map/filter/take combinators
@@ -15072,62 +14854,7 @@ impl TypeChecker {
                 // Try-finally: try { ... } finally { ... }
                 // Executes try block, then always executes finally block
                 // Returns value from try block (wrapped in Result if ? is used)
-                TryFinally {
-                    try_block,
-                    finally_block,
-                } => {
-                    // Determine error type: prefer the enclosing function's error type
-                    // (if it returns Result<T, E>), then fall back to extracting from ? operators.
-                    // This avoids ambiguous unification with stdlib types like CheckedResult.
-                    let error_type_opt = self
-                        .extract_function_error_type()
-                        .or_else(|| self.extract_try_block_error_type(try_block).ok());
-                    let error_type = error_type_opt
-                        .clone()
-                        .unwrap_or_else(|| Type::Var(crate::ty::TypeVar::fresh()));
-
-                    // Set function return type to Result<T, E> so ? operator AND
-                    // Ok()/Err() constructors resolve against the correct Result type.
-                    let saved_return_type = self.current_function_return_type.clone();
-                    let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-                    self.current_function_return_type =
-                        Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-
-                    // Infer type of try block
-                    let try_result = self.synth_expr(try_block)?;
-
-                    // Restore original function return type
-                    self.current_function_return_type = saved_return_type;
-
-                    // Type check finally block (result is discarded)
-                    self.synth_expr(finally_block)?;
-
-                    // If the try body uses ? (error_type was extracted), the try-finally
-                    // expression produces Result<T, E>, not just T. The ? operator
-                    // unwraps inside the block, but errors propagate out after finally runs.
-                    let result_ty = if error_type_opt.is_some() {
-                        // Check if the try body already produces a Result type
-                        let resolved = self.unifier.apply(&try_result.ty);
-                        // Structural check: is this a Result<T, E>? This also matches
-                        // variant types with Ok/Err constructors via Type::is_result().
-                        // Also accept any variant type that implements the Try protocol.
-                        let already_result = resolved.is_result()
-                            || matches!(&resolved, Type::Variant(_))
-                                && self
-                                    .protocol_checker
-                                    .read()
-                                    .implements_protocol(&resolved, "Try");
-                        if already_result {
-                            try_result.ty
-                        } else {
-                            Type::result(try_result.ty, error_type)
-                        }
-                    } else {
-                        try_result.ty
-                    };
-
-                    Ok(InferResult::new(result_ty))
-                }
+                TryFinally { .. } => self.infer_try_finally_expr(current_expr),
 
                 // Try-recover-finally: try { ... } recover { ... } finally { ... }
                 // Combines both recover and finally behaviors
@@ -15376,11 +15103,332 @@ impl TypeChecker {
 
                 // Inline assembly expression: @asm("template", operands..., options)
                 // Low-level type operations: raw pointer casting, transmute, memory layout control
-                ExprKind::InlineAsm {
-                    template: _,
-                    operands,
-                    options,
-                } => {
+                ExprKind::InlineAsm { .. } => self.infer_inline_asm_expr(current_expr),
+
+                // =========================================================================
+                // Destructuring assignment: (a, b) = expr, [x, y] = arr, Point { x, y } = p
+                // Compound destructuring: (x, y) += (dx, dy), [a, b] *= scale
+                // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Destructuring assignment expressions
+                // Unified destructuring: consistent pattern syntax for let bindings, match arms, and function parameters
+                // =========================================================================
+                DestructuringAssign { .. } => self.infer_expr_destructuring_assign(current_expr),
+
+                // Calc blocks are proof constructs - they evaluate to unit
+                CalcBlock(_) => Ok(InferResult::new(Type::unit())),
+
+                // Inject expression: `inject TypeName`
+                // Level 1 static DI - resolves a type from the context/DI container
+                Inject { .. } => self.infer_expr_inject(current_expr),
+
+                // All other expression kinds are handled above.
+                // This fallback is kept for safety - if a new variant is added to ExprKind
+                // but not handled, this provides a clear error message instead of a panic.
+                #[allow(unreachable_patterns)]
+                _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Type inference for expression kind '{}' requires additional context.\n  \
+                     Hint: Add type annotations or ensure all required types are in scope.",
+                    expr_kind_description(&current_expr.kind)
+                )))),
+            },
+        }
+    }
+    /// Type-infer a closure (lambda) expression.
+    /// Performs capture analysis, borrow tracking, parameter binding,
+    /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
+    /// Type-infer a match expression.
+    /// Auto-derefs reference scrutinees, dispatches to dependent-type match
+    /// when applicable, checks each arm's pattern + body, unifies arm types,
+    /// and propagates refinement evidence.
+    /// Type-check an `if` expression with flow-sensitive refinement narrowing.
+    /// Binds let-conditions in the then-branch; propagates evidence.
+    fn infer_if_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::If { condition, then_branch, else_branch } = &expr.kind
+            else { unreachable!() };
+                    self.ctx.env.push_scope();
+                    self.refinement_evidence.push_scope();
+
+                    let mut condition_exprs: Vec<Expr> = Vec::new();
+
+                    for cond in &condition.conditions {
+                        match cond {
+                            verum_ast::expr::ConditionKind::Expr(cond_expr) => {
+                                if let ExprKind::Is {
+                                    expr: test_expr,
+                                    pattern,
+                                    negated,
+                                } = &cond_expr.kind
+                                {
+                                    let test_result = self.synth_expr(test_expr)?;
+                                    if !negated {
+                                        self.bind_pattern(pattern, &test_result.ty)?;
+                                    }
+                                } else {
+                                    self.check_expr(cond_expr, &Type::bool())?;
+                                    self.refinement_evidence
+                                        .add_evidence_from_condition(cond_expr, cond_expr.span);
+                                    self.narrow_variable_types_from_condition(cond_expr, false);
+                                    condition_exprs.push(cond_expr.clone());
+                                }
+                            }
+                            verum_ast::expr::ConditionKind::Let { pattern, value } => {
+                                let value_result = self.synth_expr(value)?;
+                                self.bind_pattern(pattern, &value_result.ty)?;
+                            }
+                        }
+                    }
+
+                    let then_result = self.infer_block(then_branch)?;
+
+                    self.ctx.env.pop_scope();
+                    self.refinement_evidence.pop_scope();
+
+                    let else_result = if let Some(else_expr) = else_branch {
+                        self.ctx.env.push_scope();
+                        self.refinement_evidence.push_scope();
+                        for cond_expr in &condition_exprs {
+                            self.refinement_evidence
+                                .add_negated_evidence(cond_expr, cond_expr.span);
+                            self.narrow_variable_types_from_condition(cond_expr, true);
+                        }
+                        let result = self.synth_expr(else_expr)?;
+                        self.ctx.env.pop_scope();
+                        self.refinement_evidence.pop_scope();
+                        result
+                    } else {
+                        InferResult::new(Type::unit())
+                    };
+
+                    // Unify branch types
+                    let span = expr.span;
+                    self.unifier.unify(&then_result.ty, &else_result.ty, span)?;
+
+                    Ok(InferResult::new(then_result.ty))
+    }
+
+    /// Type-check a `while` loop.
+    /// Checks while-is pattern bindings, body, and affine drop on exit.
+    fn infer_while_loop(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::While { label: _, condition, body, invariants: _, decreases: _ } = &expr.kind
+            else { unreachable!() };
+                    // Enter loop context for affine tracking
+                    self.affine_tracker.enter_loop();
+
+                    // Check if condition is an `is` expression with pattern bindings
+                    // For `while value is Pattern(x)`, bind x in the body scope
+                    // Spec: L0-critical/builtin-syntax/is_operator.vr
+                    if let ExprKind::Is {
+                        expr: test_expr,
+                        pattern,
+                        negated,
+                    } = &condition.kind
+                    {
+                        // Type check the expression being tested
+                        let test_result = self.synth_expr(test_expr)?;
+
+                        // Enter scope for body with pattern bindings
+                        self.ctx.env.push_scope();
+                        self.refinement_evidence.push_scope();
+
+                        // For non-negated `is`, bind the pattern in body scope
+                        if !negated {
+                            self.bind_pattern(pattern, &test_result.ty)?;
+                            // Add pattern evidence for the matched pattern
+                            if let Maybe::Some(var_name) = self.extract_simple_var_name(test_expr) {
+                                self.add_pattern_evidence(pattern, var_name, test_expr.span);
+                            }
+                        }
+
+                        self.infer_block(body)?;
+
+                        self.refinement_evidence.pop_scope();
+                        self.ctx.env.pop_scope();
+                    } else {
+                        // Regular condition - must be Bool
+                        self.check_expr(condition, &Type::bool())?;
+
+                        // Add condition evidence for the loop body
+                        // Inside the loop, condition is true
+                        self.refinement_evidence.push_scope();
+                        self.refinement_evidence
+                            .add_evidence_from_condition(condition, condition.span);
+
+                        // Add method evidence if applicable
+                        if let Maybe::Some((var_name, method_name, negated)) =
+                            crate::refinement_evidence::EvidencePropagator::analyze_method_condition(
+                                condition,
+                            )
+                        {
+                            self.refinement_evidence.add_method_evidence(
+                                var_name,
+                                method_name.as_str(),
+                                negated,
+                                condition.span,
+                            );
+                        }
+
+                        self.infer_block(body)?;
+                        self.refinement_evidence.pop_scope();
+                    }
+
+                    // Exit loop context
+                    self.affine_tracker.exit_loop();
+
+                    Ok(InferResult::new(Type::unit()))
+    }
+
+    /// Type-check a `{k: v for (k, v) in iter if cond}` map comprehension.
+    /// Returns `Map<K, V>` where K and V are inferred from key/value exprs.
+    fn infer_map_comprehension_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::MapComprehension { key_expr, value_expr, clauses } = &expr.kind
+            else { unreachable!() };
+                    self.ctx.enter_scope();
+
+                    // Process each clause (same as list comprehension)
+                    for clause in clauses.iter() {
+                        use verum_ast::expr::ComprehensionClauseKind;
+                        match &clause.kind {
+                            ComprehensionClauseKind::For { pattern, iter } => {
+                                let iter_result = self.synth_expr(iter)?;
+
+                                // Protocol-based IntoIterator resolution
+                                let elem_ty = match self
+                                    .protocol_checker
+                                    .read()
+                                    .resolve_into_iterator_protocol(&iter_result.ty)
+                                {
+                                    Some(resolution) => resolution.item,
+                                    None => {
+                                        // Fallback: Try Iterator protocol's Item associated type
+                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
+                                        let iter_item =
+                                            self.protocol_checker.read().try_find_associated_type(
+                                                &resolved_iter_ty,
+                                                &verum_common::Text::from("Item"),
+                                            );
+                                        if let Some(item_ty) = iter_item {
+                                            self.protocol_checker
+                                                .read()
+                                                .normalize_projection_type(&item_ty)
+                                        } else {
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Cannot iterate over type in map comprehension: {}",
+                                                    resolved_iter_ty
+                                                )),
+                                            ));
+                                        }
+                                    }
+                                };
+
+                                let elem_scheme = TypeScheme::mono(elem_ty);
+                                self.bind_pattern_scheme(pattern, elem_scheme)?;
+                            }
+                            ComprehensionClauseKind::If(condition) => {
+                                let cond_result = self.synth_expr(condition)?;
+                                self.unifier
+                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
+                            }
+                            ComprehensionClauseKind::Let { pattern, ty, value } => {
+                                let value_result = self.synth_expr(value)?;
+                                let binding_ty = if let Some(ty_ast) = ty {
+                                    let annotated_ty = self.ast_to_type(ty_ast)?;
+                                    self.unifier.unify(
+                                        &value_result.ty,
+                                        &annotated_ty,
+                                        value.span,
+                                    )?;
+                                    annotated_ty
+                                } else {
+                                    value_result.ty
+                                };
+                                let binding_scheme = TypeScheme::mono(binding_ty);
+                                self.bind_pattern_scheme(pattern, binding_scheme)?;
+                            }
+                        }
+                    }
+
+                    let key_result = self.synth_expr(key_expr)?;
+                    let value_result = self.synth_expr(value_expr)?;
+
+                    self.ctx.exit_scope();
+
+                    // Result is a Map<K, V>
+                    let result_ty = Type::Generic {
+                        name: verum_common::Text::from(WKT::Map.as_str()),
+                        args: vec![key_result.ty, value_result.ty].into(),
+                    };
+
+                    Ok(InferResult::new(result_ty))
+    }
+
+    /// Type-check a `try { ... } finally { ... }` expression.
+    /// Always executes the finally block; returns the try-block type.
+    fn infer_try_finally_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::TryFinally { try_block, finally_block } = &expr.kind
+            else { unreachable!() };
+                    // Determine error type: prefer the enclosing function's error type
+                    // (if it returns Result<T, E>), then fall back to extracting from ? operators.
+                    // This avoids ambiguous unification with stdlib types like CheckedResult.
+                    let error_type_opt = self
+                        .extract_function_error_type()
+                        .or_else(|| self.extract_try_block_error_type(try_block).ok());
+                    let error_type = error_type_opt
+                        .clone()
+                        .unwrap_or_else(|| Type::Var(crate::ty::TypeVar::fresh()));
+
+                    // Set function return type to Result<T, E> so ? operator AND
+                    // Ok()/Err() constructors resolve against the correct Result type.
+                    let saved_return_type = self.current_function_return_type.clone();
+                    let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
+                    self.current_function_return_type =
+                        Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
+
+                    // Infer type of try block
+                    let try_result = self.synth_expr(try_block)?;
+
+                    // Restore original function return type
+                    self.current_function_return_type = saved_return_type;
+
+                    // Type check finally block (result is discarded)
+                    self.synth_expr(finally_block)?;
+
+                    // If the try body uses ? (error_type was extracted), the try-finally
+                    // expression produces Result<T, E>, not just T. The ? operator
+                    // unwraps inside the block, but errors propagate out after finally runs.
+                    let result_ty = if error_type_opt.is_some() {
+                        // Check if the try body already produces a Result type
+                        let resolved = self.unifier.apply(&try_result.ty);
+                        // Structural check: is this a Result<T, E>? This also matches
+                        // variant types with Ok/Err constructors via Type::is_result().
+                        // Also accept any variant type that implements the Try protocol.
+                        let already_result = resolved.is_result()
+                            || matches!(&resolved, Type::Variant(_))
+                                && self
+                                    .protocol_checker
+                                    .read()
+                                    .implements_protocol(&resolved, "Try");
+                        if already_result {
+                            try_result.ty
+                        } else {
+                            Type::result(try_result.ty, error_type)
+                        }
+                    } else {
+                        try_result.ty
+                    };
+
+                    Ok(InferResult::new(result_ty))
+    }
+
+    /// Type-check an inline assembly (`@asm`) expression.
+    /// Validates operand types and options; returns unit.
+    fn infer_inline_asm_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::InlineAsm { template: _, operands, options } = &expr.kind
+            else { unreachable!() };
                     use verum_ast::expr::AsmOperandKind;
 
                     // Type-check all operands
@@ -15442,42 +15490,8 @@ impl TypeChecker {
                         // Inline assembly returns unit by default
                         Ok(InferResult::new(Type::unit()))
                     }
-                }
-
-                // =========================================================================
-                // Destructuring assignment: (a, b) = expr, [x, y] = arr, Point { x, y } = p
-                // Compound destructuring: (x, y) += (dx, dy), [a, b] *= scale
-                // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Destructuring assignment expressions
-                // Unified destructuring: consistent pattern syntax for let bindings, match arms, and function parameters
-                // =========================================================================
-                DestructuringAssign { .. } => self.infer_expr_destructuring_assign(current_expr),
-
-                // Calc blocks are proof constructs - they evaluate to unit
-                CalcBlock(_) => Ok(InferResult::new(Type::unit())),
-
-                // Inject expression: `inject TypeName`
-                // Level 1 static DI - resolves a type from the context/DI container
-                Inject { .. } => self.infer_expr_inject(current_expr),
-
-                // All other expression kinds are handled above.
-                // This fallback is kept for safety - if a new variant is added to ExprKind
-                // but not handled, this provides a clear error message instead of a panic.
-                #[allow(unreachable_patterns)]
-                _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                    "Type inference for expression kind '{}' requires additional context.\n  \
-                     Hint: Add type annotations or ensure all required types are in scope.",
-                    expr_kind_description(&current_expr.kind)
-                )))),
-            },
-        }
     }
-    /// Type-infer a closure (lambda) expression.
-    /// Performs capture analysis, borrow tracking, parameter binding,
-    /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
-    /// Type-infer a match expression.
-    /// Auto-derefs reference scrutinees, dispatches to dependent-type match
-    /// when applicable, checks each arm's pattern + body, unifies arm types,
-    /// and propagates refinement evidence.
+
     fn infer_match_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         use crate::refinement_evidence::{PathCondition, PathConditionKind};
         let ExprKind::Match { expr: scrutinee, arms } = &expr.kind
