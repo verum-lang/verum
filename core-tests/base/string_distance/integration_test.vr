@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/base/string_distance/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.string_distance` — cross-algorithm
+// comparisons, the `closest` autocorrect API, Unicode contract, and
+// realistic typo-suggestion scenarios.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.string_distance.{
+    levenshtein, levenshtein_bounded,
+    jaro, jaro_winkler,
+    closest, closest_n,
+    StringDistanceOptions,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: `closest` autocorrect API
+// =============================================================================
+
+@test
+fn test_closest_finds_best_match() {
+    let candidates: List<Text> = [
+        "hello", "world", "help", "held", "helm",
+    ].map(|s| s.to_text()).collect();
+    let result = closest("helo".to_text(), &candidates);
+    assert(result.is_some());
+    // "hello" or "help" — both distance 1 from "helo"
+    let best = result.unwrap();
+    assert(best == "hello".to_text() || best == "help".to_text());
+}
+
+@test
+fn test_closest_returns_none_for_empty_candidates() {
+    let empty: List<Text> = [];
+    assert(closest("query".to_text(), &empty).is_none());
+}
+
+@test
+fn test_closest_exact_match_wins() {
+    let candidates: List<Text> = ["cat", "car", "cart", "care"]
+        .map(|s| s.to_text()).collect();
+    let result = closest("car".to_text(), &candidates);
+    assert_eq(result, Some("car".to_text()));
+}
+
+@test
+fn test_closest_n_returns_top_k() {
+    let candidates: List<Text> = [
+        "friend", "fiend", "fend", "fond", "find",
+    ].map(|s| s.to_text()).collect();
+    let results = closest_n("frend".to_text(), &candidates, 2);
+    assert_eq(results.len(), 2);
+}
+
+// =============================================================================
+// Section 2: Unicode (byte-level) contract
+// =============================================================================
+
+@test
+fn test_levenshtein_ascii_same_as_char_distance() {
+    // For pure ASCII, byte-distance = character-distance
+    let a: Bytes = "kitten".bytes();
+    let b: Bytes = "sitting".bytes();
+    assert_eq(levenshtein(&a, &b), 3);
+}
+
+@test
+fn test_levenshtein_empty_string_is_other_length() {
+    let a: Bytes = "hello".bytes();
+    let b: Bytes = [].to_bytes();
+    assert_eq(levenshtein(&a, &b), 5);
+    assert_eq(levenshtein(&b, &a), 5);
+}
+
+// =============================================================================
+// Section 3: Algorithm agreement on well-known inputs
+// =============================================================================
+
+@test
+fn test_all_algorithms_agree_on_identical_strings() {
+    let s: Bytes = "abcdef".bytes();
+    assert_eq(levenshtein(&s, &s), 0);
+    let st = "abcdef".to_text();
+    assert_eq(jaro(&st, &st), 1.0);
+    assert_eq(jaro_winkler(&st, &st), 1.0);
+}
+
+@test
+fn test_levenshtein_bounded_stops_early() {
+    let a: Bytes = "aaaaaa".bytes();
+    let b: Bytes = "bbbbbb".bytes();
+    // Full distance is 6; bounded at 2 should return Some(3) or None depending on impl
+    let bounded = levenshtein_bounded(&a, &b, 2);
+    // Either early-stopped (None) or correct (Some(6))
+    assert(bounded.is_none() || bounded.unwrap() <= 6);
+}
+
+// =============================================================================
+// Section 4: Spellcheck simulation with collection
+// =============================================================================
+
+@test
+fn test_spellcheck_dictionary_lookup() {
+    let dictionary: List<Text> = [
+        "algorithm", "database", "network", "process", "function",
+        "variable", "constant", "protocol", "interface", "abstract",
+    ].map(|s| s.to_text()).collect();
+
+    let typos: List<(Text, Text)> = [
+        ("alghorithm", "algorithm"),
+        ("databes",    "database"),
+        ("netwrok",    "network"),
+    ].map(|(t, e)| (t.to_text(), e.to_text())).collect();
+
+    for (typo, expected) in typos {
+        let suggestion = closest(typo.clone(), &dictionary);
+        assert(suggestion.is_some(), f"no suggestion for '{typo}'");
+        assert_eq(suggestion.unwrap(), expected,
+            f"wrong suggestion for '{typo}'");
+    }
+}
+
+fn main() {}

@@ -89,4 +89,41 @@ fn test_compile_with_case_sensitivity() {
     assert(!p_cs.matches_path("foo.txt"));  // case-sensitive
 }
 
+// =============================================================================
+// Section 7: Negated character classes [!abc]
+// =============================================================================
+
+@test
+fn test_negated_class_excludes_listed_chars() {
+    assert(matches("[!aeiou]at", "cat"));
+    assert(matches("[!aeiou]at", "bat"));
+    assert(!matches("[!aeiou]at", "aat"));
+    assert(!matches("[!aeiou]at", "eat"));
+}
+
+@test
+fn test_negated_class_with_range() {
+    assert(matches("[!0-9]oo", "foo"));
+    assert(!matches("[!0-9]oo", "1oo"));
+    assert(!matches("[!0-9]oo", "0oo"));
+}
+
+// =============================================================================
+// Section 8: Escape sequences — literal special characters
+// =============================================================================
+
+@test
+fn test_escape_star_matches_literal_star() {
+    let p = compile("file\\*.txt").unwrap();
+    assert(p.matches_path("file*.txt"));
+    assert(!p.matches_path("fileX.txt"));
+}
+
+@test
+fn test_escape_question_matches_literal_question() {
+    let p = compile("item\\?.txt").unwrap();
+    assert(p.matches_path("item?.txt"));
+    assert(!p.matches_path("itemX.txt"));
+}
+
 fn main() {}

@@ -99,4 +99,46 @@ fn parametrised_exact_match(a: Text, b: Text, expected: Bool) {
     assert_eq(matches_default(&c, &ver(b)), expected);
 }
 
+// =============================================================================
+// §E  Pre-release matching mode — allow_prerelease flag.
+// =============================================================================
+
+@test
+fn test_caret_default_excludes_prerelease_of_higher_minor() {
+    let c = caret(ver("1.2.3".to_text()));
+    let pre = ver("1.3.0-beta".to_text());
+    assert(!matches_default(&c, &pre));
+}
+
+@test
+fn test_caret_allow_prerelease_includes_beta() {
+    let c = caret(ver("1.2.3".to_text()));
+    let pre = ver("1.3.0-beta".to_text());
+    assert(matches_allow_prerelease(&c, &pre));
+}
+
+@test
+fn test_exact_default_excludes_prerelease() {
+    let c = exact(ver("1.0.0".to_text()));
+    let pre = ver("1.0.0-rc.1".to_text());
+    assert(!matches_default(&c, &pre));
+}
+
+// =============================================================================
+// §F  X-ranges — wildcard expansions.
+// =============================================================================
+
+@test_case("*",    "1.0.0",  true)
+@test_case("*",    "99.9.9", true)
+@test_case("1.x",  "1.5.0",  true)
+@test_case("1.x",  "2.0.0",  false)
+@test_case("1.2.x","1.2.5",  true)
+@test_case("1.2.x","1.3.0",  false)
+fn parametrised_x_range(constraint: Text, version: Text, expected: Bool) {
+    let c = parse_constraint(&constraint).unwrap();
+    let v = ver(version.to_text());
+    assert_eq(c.matches(&v), expected,
+        f"x-range '{constraint}'.matches('{version}') expected {expected}");
+}
+
 fn main() {}

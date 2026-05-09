@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/base/log/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.log` — LogLevel ordering, LogRecord
+// construction, structured-field encoding, and severity-filter behaviour.
+// Context-system Logger integration is tested at the language conformance
+// level; here we test the pure data types.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.log.{
+    LogLevel, LogRecord, LogRecordBuilder,
+    level_trace, level_debug, level_info, level_warn, level_error,
+};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: LogLevel total-order filter simulation
+// =============================================================================
+
+@test
+fn test_filter_records_by_min_level() {
+    let records: List<LogRecord> = [
+        LogRecord.new(level_trace(), "trace msg", []),
+        LogRecord.new(level_debug(), "debug msg", []),
+        LogRecord.new(level_info(),  "info msg",  []),
+        LogRecord.new(level_warn(),  "warn msg",  []),
+        LogRecord.new(level_error(), "error msg", []),
+    ];
+    let min_level = level_info();
+    let emitted: List<LogRecord> = records.filter(|r| {
+        r.level.severity() >= min_level.severity()
+    }).collect();
+    assert_eq(emitted.len(), 3);   // info + warn + error
+}
+
+@test
+fn test_level_trace_passes_all() {
+    let records: List<LogRecord> = [
+        LogRecord.new(level_trace(), "t", []),
+        LogRecord.new(level_error(), "e", []),
+    ];
+    let min = level_trace();
+    let emitted: List<LogRecord> = records.filter(|r| {
+        r.level.severity() >= min.severity()
+    }).collect();
+    assert_eq(emitted.len(), 2);
+}
+
+@test
+fn test_level_error_passes_only_error() {
+    let records: List<LogRecord> = [
+        LogRecord.new(level_debug(), "d", []),
+        LogRecord.new(level_warn(),  "w", []),
+        LogRecord.new(level_error(), "e", []),
+    ];
+    let min = level_error();
+    let emitted: List<LogRecord> = records.filter(|r| {
+        r.level.severity() >= min.severity()
+    }).collect();
+    assert_eq(emitted.len(), 1);
+    assert_eq(emitted.get(0).map(|r| r.message), Some("e".to_text()));
+}
+
+// =============================================================================
+// Section 2: Structured-field encoding
+// =============================================================================
+
+@test
+fn test_log_record_fields_preserved() {
+    let fields: List<(Text, Text)> = [
+        ("user_id".to_text(), "42".to_text()),
+        ("action".to_text(), "login".to_text()),
+    ];
+    let rec = LogRecord.new(level_info(), "user action", fields);
+    assert_eq(rec.fields.len(), 2);
+    let uid = rec.fields.iter().find(|(k, _)| *k == "user_id");
+    assert(uid.is_some());
+    assert_eq(uid.map(|(_, v)| v.clone()), Some("42".to_text()));
+}
+
+@test
+fn test_log_record_builder_chain_preserves_fields() {
+    let rec = LogRecordBuilder.new()
+        .level(level_warn())
+        .message("disk full".to_text())
+        .field("disk".to_text(), "/var".to_text())
+        .field("free_gb".to_text(), "0".to_text())
+        .build();
+    assert_eq(rec.level.name(), "WARN");
+    assert_eq(rec.message, "disk full".to_text());
+    assert_eq(rec.fields.len(), 2);
+}
+
+@test
+fn test_log_record_with_no_fields() {
+    let rec = LogRecord.new(level_debug(), "bare message", []);
+    assert_eq(rec.fields.len(), 0);
+    assert_eq(rec.message, "bare message".to_text());
+}
+
+// =============================================================================
+// Section 3: Batch log processing
+// =============================================================================
+
+@test
+fn test_group_records_by_level() {
+    let records: List<LogRecord> = [
+        LogRecord.new(level_info(),  "i1", []),
+        LogRecord.new(level_warn(),  "w1", []),
+        LogRecord.new(level_info(),  "i2", []),
+        LogRecord.new(level_error(), "e1", []),
+        LogRecord.new(level_warn(),  "w2", []),
+    ];
+    let warns: List<LogRecord> = records.filter(|r| r.level.name() == "WARN").collect();
+    let infos: List<LogRecord> = records.filter(|r| r.level.name() == "INFO").collect();
+    assert_eq(warns.len(), 2);
+    assert_eq(infos.len(), 2);
+}
+
+fn main() {}

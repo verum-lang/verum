@@ -123,4 +123,46 @@ fn parametrised_prerelease_ordering(a_s: Text, b_s: Text, expected_sign: Int) {
     else { assert_eq(n, 0); }
 }
 
+// =============================================================================
+// §G  Build-metadata MUST be ignored for precedence (RFC §10)
+// =============================================================================
+
+@test
+fn law_build_metadata_ignored_in_comparison() {
+    let a = parse(&"1.0.0+build.1".to_text()).unwrap();
+    let b = parse(&"1.0.0+build.2".to_text()).unwrap();
+    assert_eq(cmp(&a, &b), 0);
+}
+
+@test
+fn law_prerelease_with_build_lt_release_with_build() {
+    let pre = parse(&"1.0.0-alpha+001".to_text()).unwrap();
+    let release = parse(&"1.0.0+build.1".to_text()).unwrap();
+    assert(cmp(&pre, &release) < 0);
+}
+
+@test
+fn law_two_releases_with_different_build_metadata_equal() {
+    let a = parse(&"2.3.4+sha.aabbcc".to_text()).unwrap();
+    let b = parse(&"2.3.4+sha.ddeeff".to_text()).unwrap();
+    assert_eq(cmp(&a, &b), 0);
+}
+
+// =============================================================================
+// §H  Remaining RFC §11 ordered list (items 8-11)
+// =============================================================================
+
+@test_case("2.0.0".to_text(), "2.1.0".to_text(), -1)
+@test_case("2.1.0".to_text(), "2.1.1".to_text(), -1)
+@test_case("0.0.1".to_text(), "0.0.2".to_text(), -1)
+@test_case("1.0.0".to_text(), "1.0.0".to_text(), 0)
+fn parametrised_additional_fixtures(a_s: Text, b_s: Text, expected_sign: Int) {
+    let a = parse(&a_s).unwrap();
+    let b = parse(&b_s).unwrap();
+    let n = cmp(&a, &b);
+    if expected_sign < 0 { assert(n < 0); }
+    else if expected_sign > 0 { assert(n > 0); }
+    else { assert_eq(n, 0); }
+}
+
 fn main() {}

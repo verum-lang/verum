@@ -1,0 +1,133 @@
+// =============================================================================
+// core-tests/base/uuid/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.uuid` — RFC 4122 variant-bits validation,
+// cross-collection usage, v4/v7 differentiation, and parse edge cases.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.uuid.{Uuid, v4, v7, nil, parse};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: RFC 4122 variant bits validation
+// =============================================================================
+
+@test
+fn test_v4_has_correct_variant_bits() {
+    // RFC 4122: variant bits must be 10xx (bits 7-6 of octet 8 = 0b10)
+    let id = v4();
+    let bytes = id.to_bytes();
+    let octet8 = bytes.get(8).unwrap();
+    // High bits must be 1 and 0 (0b10xxxxxx)
+    assert_eq((octet8 >> 6) & 0b11, 0b10,
+        "v4 variant bits must be 10 (RFC 4122 variant 1)");
+}
+
+@test
+fn test_v7_has_correct_variant_bits() {
+    let id = v7();
+    let bytes = id.to_bytes();
+    let octet8 = bytes.get(8).unwrap();
+    assert_eq((octet8 >> 6) & 0b11, 0b10);
+}
+
+@test
+fn test_nil_uuid_has_all_zero_bytes() {
+    let n = nil();
+    let bytes = n.to_bytes();
+    for b in bytes {
+        assert_eq(b, 0);
+    }
+}
+
+// =============================================================================
+// Section 2: Version byte validation
+// =============================================================================
+
+@test
+fn test_v4_version_nibble_is_4() {
+    let id = v4();
+    let bytes = id.to_bytes();
+    let octet6 = bytes.get(6).unwrap();
+    assert_eq((octet6 >> 4) & 0xF, 4);
+}
+
+@test
+fn test_v7_version_nibble_is_7() {
+    let id = v7();
+    let bytes = id.to_bytes();
+    let octet6 = bytes.get(6).unwrap();
+    assert_eq((octet6 >> 4) & 0xF, 7);
+}
+
+// =============================================================================
+// Section 3: UUIDs as map keys
+// =============================================================================
+
+@test
+fn test_uuid_as_map_key() {
+    let mut m: Map<Text, Int> = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        let id = v4();
+        m.insert(id.to_text(), i);
+        i = i + 1;
+    }
+    assert_eq(m.len(), 10);
+}
+
+@test
+fn test_uuid_set_deduplication() {
+    let id = v4();
+    let mut s: Set<Text> = Set.new();
+    s.insert(id.to_text());
+    s.insert(id.to_text());   // duplicate
+    assert_eq(s.len(), 1);
+}
+
+// =============================================================================
+// Section 4: Parse error cases
+// =============================================================================
+
+@test
+fn test_parse_empty_string_fails() {
+    assert(parse("".to_text()).is_err());
+}
+
+@test
+fn test_parse_wrong_length_fails() {
+    // Standard UUID: 36 chars (32 hex + 4 dashes)
+    assert(parse("550e8400-e29b-41d4-a716-44665544000".to_text()).is_err());
+    assert(parse("550e8400-e29b-41d4-a716-4466554400001".to_text()).is_err());
+}
+
+@test
+fn test_parse_invalid_hex_chars_fails() {
+    assert(parse("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".to_text()).is_err());
+}
+
+// =============================================================================
+// Section 5: v7 monotonicity (ms-boundary)
+// =============================================================================
+
+@test
+fn test_v7_ids_are_non_decreasing() {
+    let mut ids: List<Uuid> = [];
+    let mut i = 0;
+    while i < 50 {
+        ids.push(v7());
+        i = i + 1;
+    }
+    let texts: List<Text> = ids.map(|id| id.to_text()).collect();
+    for i2 in 0..49 {
+        let a = texts.get(i2).unwrap();
+        let b = texts.get(i2 + 1).unwrap();
+        assert(a <= b, "v7 UUIDs must be non-decreasing");
+    }
+}
+
+fn main() {}

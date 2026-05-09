@@ -84,4 +84,41 @@ fn test_sequential_ulids_lexicographically_ordered() {
     assert(a.to_text() <= b.to_text());
 }
 
+// =============================================================================
+// Section 5: Case-insensitive parse normalisation
+// =============================================================================
+
+@test
+fn test_parse_uppercase_equals_lowercase() {
+    let id = Ulid.new();
+    let upper = id.to_text();
+    let lower = upper.to_lowercase();
+    assert_eq(Ulid.parse(&upper), Ulid.parse(&lower));
+}
+
+@test
+fn test_parse_uppercase_equals_original() {
+    let id = Ulid.new();
+    let text = id.to_text();
+    let parsed = Ulid.parse(&text).unwrap();
+    assert_eq(parsed, id);
+}
+
+// =============================================================================
+// Section 6: Boundary conditions
+// =============================================================================
+
+@test
+fn test_from_parts_timestamp_zero() {
+    let id = Ulid.from_parts(0, 0);
+    assert_eq(id.timestamp_ms(), 0);
+}
+
+@test
+fn test_from_parts_max_timestamp() {
+    let max_ts: Int = 281474976710655;   // 2^48 - 1
+    let id = Ulid.from_parts(max_ts, 0);
+    assert_eq(id.timestamp_ms(), max_ts);
+}
+
 fn main() {}

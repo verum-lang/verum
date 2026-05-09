@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/base/coinductive/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.coinductive` — coinductive types,
+// productivity checks, and observation streams used in cross-stdlib contexts.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coinductive.{
+    CorecursiveCall, Observation, ObservationTrace,
+    check_productivity, trace_prefix, ProductivityVerdict,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: CorecursiveCall composition
+// =============================================================================
+
+@test
+fn test_corecursive_chain_depth_two() {
+    let outer = CorecursiveCall.new("outer", 1, [
+        CorecursiveCall.new("inner", 1, [])
+    ]);
+    assert(outer.is_guarded());
+    assert(outer.recursive_calls.get(0).is_some());
+}
+
+@test
+fn test_corecursive_nested_structure() {
+    let deep = CorecursiveCall.new("deep", 3, [
+        CorecursiveCall.new("mid", 2, [
+            CorecursiveCall.new("leaf", 1, [])
+        ])
+    ]);
+    assert(deep.is_guarded());
+    assert_eq(deep.call_depth, 3);
+}
+
+// =============================================================================
+// Section 2: ObservationTrace built from multiple observations
+// =============================================================================
+
+@test
+fn test_observation_trace_multi_step() {
+    let obs1 = Observation.new(1, "step-1");
+    let obs2 = Observation.new(2, "step-2");
+    let obs3 = Observation.new(3, "step-3");
+    let trace = ObservationTrace.from_list([obs1, obs2, obs3]);
+    let prefix = trace_prefix(&trace, 2);
+    assert_eq(prefix.len(), 2);
+    assert_eq(prefix.get(0).map(|o| o.value), Some(1));
+    assert_eq(prefix.get(1).map(|o| o.value), Some(2));
+}
+
+@test
+fn test_observation_trace_prefix_shorter_than_length() {
+    let trace = ObservationTrace.from_list([
+        Observation.new(10, "a"),
+        Observation.new(20, "b"),
+        Observation.new(30, "c"),
+        Observation.new(40, "d"),
+    ]);
+    let p = trace_prefix(&trace, 3);
+    assert_eq(p.len(), 3);
+    assert_eq(p.get(2).map(|o| o.value), Some(30));
+}
+
+// =============================================================================
+// Section 3: Productivity verdict pinning
+// =============================================================================
+
+@test
+fn test_guarded_call_is_productive() {
+    let call = CorecursiveCall.new("f", 1, []);
+    let verdict = check_productivity(&call);
+    assert(verdict.is_productive());
+}
+
+@test
+fn test_unguarded_call_is_not_productive() {
+    let call = CorecursiveCall.new("f", 0, []);
+    let verdict = check_productivity(&call);
+    assert(!verdict.is_productive());
+}
+
+@test
+fn test_deeply_guarded_is_productive() {
+    let call = CorecursiveCall.new("g", 5, [
+        CorecursiveCall.new("h", 2, [])
+    ]);
+    let verdict = check_productivity(&call);
+    assert(verdict.is_productive());
+}
+
+// =============================================================================
+// Section 4: Observation round-trip across list
+// =============================================================================
+
+@test
+fn test_observation_list_map_values() {
+    let observations: List<Observation<Int>> = [
+        Observation.new(1, "one"),
+        Observation.new(2, "two"),
+        Observation.new(3, "three"),
+    ];
+    let values: List<Int> = observations.map(|o| o.value).collect();
+    assert_eq(values, [1, 2, 3]);
+}
+
+fn main() {}

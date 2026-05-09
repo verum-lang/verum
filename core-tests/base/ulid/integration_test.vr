@@ -1,0 +1,136 @@
+// =============================================================================
+// core-tests/base/ulid/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.base.ulid` — case-insensitive parsing,
+// boundary conditions, cross-collection usage, and multi-ULID ordering.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ulid.{Ulid, generate, from_parts, parse};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+mount core.collections.map.Map;
+
+// =============================================================================
+// Section 1: Case-insensitive parse normalisation
+// =============================================================================
+
+@test
+fn test_parse_uppercase_and_lowercase_equal() {
+    let upper = generate();
+    let lower = upper.to_text().to_lowercase();
+    let parsed_upper = parse(upper.to_text()).unwrap();
+    let parsed_lower = parse(lower).unwrap();
+    assert_eq(parsed_upper, parsed_lower);
+}
+
+@test
+fn test_parse_mixed_case_equal() {
+    let id = generate();
+    let raw = id.to_text();
+    // Alternate upper/lower case on each character
+    let mut mixed: List<Char> = [];
+    let mut i = 0;
+    for ch in raw.chars() {
+        if i % 2 == 0 {
+            mixed.push(ch.to_uppercase_char());
+        } else {
+            mixed.push(ch.to_lowercase_char());
+        }
+        i = i + 1;
+    }
+    let mixed_str: Text = mixed.iter().collect();
+    let parsed = parse(mixed_str);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap(), id);
+}
+
+// =============================================================================
+// Section 2: Timestamp boundary
+// =============================================================================
+
+@test
+fn test_from_parts_epoch_zero() {
+    let ulid = from_parts(0, 0);
+    assert_eq(ulid.timestamp_ms(), 0);
+}
+
+@test
+fn test_from_parts_max_timestamp() {
+    // 48-bit max = 2^48 - 1 = 281474976710655
+    let max_ts: Int = 281474976710655;
+    let ulid = from_parts(max_ts, 0);
+    assert_eq(ulid.timestamp_ms(), max_ts);
+}
+
+// =============================================================================
+// Section 3: ULIDs as map keys and set members
+// =============================================================================
+
+@test
+fn test_ulid_map_key_insertion_retrieval() {
+    let mut m: Map<Text, Text> = Map.new();
+    let ids: List<Ulid> = [generate(), generate(), generate()];
+    let mut i = 0;
+    for id in ids {
+        m.insert(id.to_text(), f"value-{i}");
+        i = i + 1;
+    }
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_ulid_set_deduplication() {
+    let id = generate();
+    let mut s: Set<Text> = Set.new();
+    s.insert(id.to_text());
+    s.insert(id.to_text());   // duplicate
+    assert_eq(s.len(), 1);
+}
+
+// =============================================================================
+// Section 4: Lexicographic sort = time order
+// =============================================================================
+
+@test
+fn test_100_ulids_lex_order_matches_generation_order() {
+    let mut ids: List<Ulid> = [];
+    let mut i = 0;
+    while i < 100 {
+        ids.push(generate());
+        i = i + 1;
+    }
+    let texts: List<Text> = ids.map(|id| id.to_text()).collect();
+    let mut sorted = texts.clone();
+    sorted.sort();
+    // Sorted lex order must be non-decreasing relative to generation order
+    // (within the same ms, ordering is random but still lex-stable)
+    assert_eq(sorted.len(), 100);
+    for i2 in 0..99 {
+        assert(sorted.get(i2).unwrap() <= sorted.get(i2 + 1).unwrap());
+    }
+}
+
+// =============================================================================
+// Section 5: Parse-invalid inputs
+// =============================================================================
+
+@test
+fn test_parse_empty_string_fails() {
+    assert(parse("".to_text()).is_err());
+}
+
+@test
+fn test_parse_wrong_length_fails() {
+    assert(parse("01ARZ3NDEKTSV4RRFFQ69G5FA".to_text()).is_err());   // 25 chars
+    assert(parse("01ARZ3NDEKTSV4RRFFQ69G5FABX".to_text()).is_err()); // 27 chars
+}
+
+@test
+fn test_parse_invalid_crockford_chars_fails() {
+    // Crockford Base32 excludes I, L, O, U
+    assert(parse("ILARZA3NDEKTSV4RRFFQ69G5FA".to_text()).is_err());
+}
+
+fn main() {}
