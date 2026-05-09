@@ -1,0 +1,81 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: base, coercion, IntCoercible, TensorLike, negative, type-error
+// @timeout: 10000
+// @expected-error: E400
+// @expected-error-count: 3
+// @description: Types that do NOT implement a coercion marker protocol must be
+//               rejected by the type-checker at use sites where coercion would
+//               otherwise be required (#79).
+//
+// The four coercion-marker protocols (IntCoercible, TensorLike, Indexable,
+// RangeLike) are opt-in: a type must carry an `implement X for T {}` block for
+// the unifier to allow the coercion.  A plain struct with no such block must
+// produce E400 (type mismatch) at each coercion site.
+//
+// This spec pins three refusal sites:
+//
+//   1. Passing a non-IntCoercible record to a function that expects Int.
+//   2. Passing a non-TensorLike record where a TensorLike parameter is
+//      required.
+//   3. Using a non-IntCoercible record in an arithmetic expression with Int.
+//
+// The correct fixes (implement the marker or add an explicit cast) are shown
+// in comments so the intent is clear.
+
+mount core.base.coercion.{IntCoercible, TensorLike};
+
+// ── Types intentionally without coercion markers ──────────────────────────────
+
+// Plain handle type — does NOT implement IntCoercible.
+// Contrast: `core/sys/common.vr`'s FileDesc, which DOES implement it.
+type SocketHandle is { raw: Int };
+
+// Plain tensor-like struct — does NOT implement TensorLike.
+// Contrast: `core/math/tensor.vr`'s DynTensor, which DOES implement it.
+type PseudoMatrix is { rows: Int, cols: Int };
+
+// ── Helper functions that expect coercion-marker types ────────────────────────
+
+fn double_int(n: Int) -> Int {
+    n * 2
+}
+
+fn requires_tensor_like<T: TensorLike>(t: T) -> Int {
+    0  // shape is the point, not the body
+}
+
+// ── Refusal site 1: non-IntCoercible record passed as Int ─────────────────────
+
+fn refusal_non_int_coercible_arg() {
+    let h = SocketHandle { raw: 4 };
+    // ERROR E400: SocketHandle does not implement IntCoercible.
+    // The unifier cannot coerce SocketHandle → Int without the marker.
+    // FIX: double_int(h.raw)  or  implement IntCoercible for SocketHandle {}
+    let _ = double_int(h);
+}
+
+// ── Refusal site 2: non-TensorLike record where TensorLike bound required ─────
+
+fn refusal_non_tensor_like_bound() {
+    let m = PseudoMatrix { rows: 3, cols: 3 };
+    // ERROR E400: PseudoMatrix does not implement TensorLike.
+    // FIX: implement TensorLike for PseudoMatrix {}
+    let _ = requires_tensor_like(m);
+}
+
+// ── Refusal site 3: non-IntCoercible in arithmetic with Int ───────────────────
+
+fn refusal_arithmetic_no_marker() {
+    let h = SocketHandle { raw: 7 };
+    // ERROR E400: operator + cannot unify Int and SocketHandle without IntCoercible.
+    // FIX: h.raw + 1  or  implement IntCoercible for SocketHandle {}
+    let _ = h + 1;
+}
+
+fn main() {
+    refusal_non_int_coercible_arg();
+    refusal_non_tensor_like_bound();
+    refusal_arithmetic_no_marker();
+}
