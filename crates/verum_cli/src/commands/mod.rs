@@ -103,6 +103,11 @@ pub mod tactic;
 /// Drives `CompilationPipeline::compile_core` and writes a `.vbca`
 /// archive that the compiler binary embeds at build time (Phase 5).
 pub mod stdlib_precompile;
+/// `verum stdlib install` / `verify` / `list` — #104 endgame.  Installs
+/// the on-disk Verum SDK at `~/.verum/sdk-<blake3>/core/` so production
+/// binaries can drop the embedded source archive.  Pairs with
+/// `verum_compiler::sdk_lookup::SdkLookup` on the consumer side.
+pub mod stdlib_install;
 pub mod fuzz;
 pub mod property;
 #[cfg(feature = "verification")]

@@ -1219,7 +1219,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// so source-only changes invalidate as before AND schema changes
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
-const PRECOMPILE_SCHEMA_VERSION: &str = "v8-2026-05-09-decl_spans_field";
+const PRECOMPILE_SCHEMA_VERSION: &str = "v9-2026-05-09-source_blake3_in_metadata";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
