@@ -913,24 +913,49 @@ pub enum OptimizationLevel {
     Balanced,
 }
 
+/// Per-variant projection for [`OptimizationLevel`].
+///
+/// Single source of truth: `meta()` returns this struct, all projections
+/// (`as_str`) are derived from it, and `from_str` scans `ALL` for the
+/// canonical name. Round-trip `from_str(x.as_str()) == Some(x)` is pinned.
+#[derive(Debug, Clone, Copy)]
+pub struct OptimizationLevelMeta {
+    pub name: &'static str,
+}
+
 impl OptimizationLevel {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "none" => Maybe::Some(OptimizationLevel::None),
-            "size" => Maybe::Some(OptimizationLevel::Size),
-            "speed" => Maybe::Some(OptimizationLevel::Speed),
-            "balanced" => Maybe::Some(OptimizationLevel::Balanced),
-            _ => Maybe::None,
+    /// Every variant in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::Size,
+        Self::Speed,
+        Self::Balanced,
+    ];
+
+    pub const fn meta(self) -> OptimizationLevelMeta {
+        match self {
+            Self::None => OptimizationLevelMeta { name: "none" },
+            Self::Size => OptimizationLevelMeta { name: "size" },
+            Self::Speed => OptimizationLevelMeta { name: "speed" },
+            Self::Balanced => OptimizationLevelMeta { name: "balanced" },
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            OptimizationLevel::None => "none",
-            OptimizationLevel::Size => "size",
-            OptimizationLevel::Speed => "speed",
-            OptimizationLevel::Balanced => "balanced",
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -992,24 +1017,47 @@ pub enum VectorizeMode {
     Never,
 }
 
+/// Per-variant projection for [`VectorizeMode`].
+#[derive(Debug, Clone, Copy)]
+pub struct VectorizeModeMeta {
+    pub name: &'static str,
+}
+
 impl VectorizeMode {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "auto" | "" => Maybe::Some(VectorizeMode::Auto),
-            "force" => Maybe::Some(VectorizeMode::Force),
-            "prefer" => Maybe::Some(VectorizeMode::Prefer),
-            "never" => Maybe::Some(VectorizeMode::Never),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::Auto,
+        Self::Force,
+        Self::Prefer,
+        Self::Never,
+    ];
+
+    pub const fn meta(self) -> VectorizeModeMeta {
+        match self {
+            Self::Auto => VectorizeModeMeta { name: "auto" },
+            Self::Force => VectorizeModeMeta { name: "force" },
+            Self::Prefer => VectorizeModeMeta { name: "prefer" },
+            Self::Never => VectorizeModeMeta { name: "never" },
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            VectorizeMode::Auto => "auto",
-            VectorizeMode::Force => "force",
-            VectorizeMode::Prefer => "prefer",
-            VectorizeMode::Never => "never",
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        if s.is_empty() {
+            return Maybe::Some(Self::Auto);
         }
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -1150,13 +1198,41 @@ pub enum PrefetchAccess {
     Write,
 }
 
+/// Per-variant projection for [`PrefetchAccess`].
+#[derive(Debug, Clone, Copy)]
+pub struct PrefetchAccessMeta {
+    pub name: &'static str,
+}
+
 impl PrefetchAccess {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "read" => Maybe::Some(PrefetchAccess::Read),
-            "write" => Maybe::Some(PrefetchAccess::Write),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[Self::Read, Self::Write];
+
+    pub const fn meta(self) -> PrefetchAccessMeta {
+        match self {
+            Self::Read => PrefetchAccessMeta { name: "read" },
+            Self::Write => PrefetchAccessMeta { name: "write" },
         }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical kebab-case name (closes a drift defect: previously
+    /// `from_str` was present but `as_str` was missing, so consumers
+    /// could parse from a string but had no symmetric way to format
+    /// back).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -1582,13 +1658,50 @@ impl DeterministicFpAttr {
     }
 }
 
+/// Per-variant projection for [`DeterministicFpStrictness`].
+#[derive(Debug, Clone, Copy)]
+pub struct DeterministicFpStrictnessMeta {
+    pub name: &'static str,
+    pub is_strict: bool,
+}
+
 impl DeterministicFpStrictness {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "warn" => Maybe::Some(DeterministicFpStrictness::Warn),
-            "strict" => Maybe::Some(DeterministicFpStrictness::Strict),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[Self::Warn, Self::Strict];
+
+    pub const fn meta(self) -> DeterministicFpStrictnessMeta {
+        match self {
+            Self::Warn => DeterministicFpStrictnessMeta {
+                name: "warn",
+                is_strict: false,
+            },
+            Self::Strict => DeterministicFpStrictnessMeta {
+                name: "strict",
+                is_strict: true,
+            },
         }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical name (closes drift defect: was missing previously).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    #[inline]
+    pub const fn is_strict(&self) -> bool {
+        self.meta().is_strict
     }
 }
 
@@ -2109,6 +2222,41 @@ pub enum ConstEvalMode {
     Propagate,
 }
 
+/// Per-variant projection for [`ConstEvalMode`].
+#[derive(Debug, Clone, Copy)]
+pub struct ConstEvalModeMeta {
+    pub name: &'static str,
+}
+
+impl ConstEvalMode {
+    pub const ALL: &'static [Self] = &[Self::Eval, Self::Fold, Self::Propagate];
+
+    pub const fn meta(self) -> ConstEvalModeMeta {
+        match self {
+            Self::Eval => ConstEvalModeMeta { name: "eval" },
+            Self::Fold => ConstEvalModeMeta { name: "fold" },
+            Self::Propagate => ConstEvalModeMeta { name: "propagate" },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConstEvalAttr {
     pub mode: ConstEvalMode,
@@ -2222,6 +2370,41 @@ pub enum LtoMode {
     Thin,
 }
 
+/// Per-variant projection for [`LtoMode`].
+#[derive(Debug, Clone, Copy)]
+pub struct LtoModeMeta {
+    pub name: &'static str,
+}
+
+impl LtoMode {
+    pub const ALL: &'static [Self] = &[Self::None, Self::Always, Self::Thin];
+
+    pub const fn meta(self) -> LtoModeMeta {
+        match self {
+            Self::None => LtoModeMeta { name: "none" },
+            Self::Always => LtoModeMeta { name: "always" },
+            Self::Thin => LtoModeMeta { name: "thin" },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LtoAttr {
     pub mode: LtoMode,
@@ -2275,14 +2458,39 @@ pub enum SymbolVisibility {
     Protected,
 }
 
+/// Per-variant projection for [`SymbolVisibility`].
+#[derive(Debug, Clone, Copy)]
+pub struct SymbolVisibilityMeta {
+    pub name: &'static str,
+}
+
 impl SymbolVisibility {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "hidden" => Maybe::Some(SymbolVisibility::Hidden),
-            "default" => Maybe::Some(SymbolVisibility::Default),
-            "protected" => Maybe::Some(SymbolVisibility::Protected),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[Self::Hidden, Self::Default, Self::Protected];
+
+    pub const fn meta(self) -> SymbolVisibilityMeta {
+        match self {
+            Self::Hidden => SymbolVisibilityMeta { name: "hidden" },
+            Self::Default => SymbolVisibilityMeta { name: "default" },
+            Self::Protected => SymbolVisibilityMeta { name: "protected" },
         }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical name (closes drift defect: was missing previously).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -2441,30 +2649,84 @@ pub enum LinkageKind {
     AvailableExternally,
 }
 
+/// Per-variant projection for [`LinkageKind`].
+#[derive(Debug, Clone, Copy)]
+pub struct LinkageKindMeta {
+    pub name: &'static str,
+    pub allows_multiple_definitions: bool,
+}
+
 impl LinkageKind {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "external" => Maybe::Some(LinkageKind::External),
-            "internal" => Maybe::Some(LinkageKind::Internal),
-            "private" => Maybe::Some(LinkageKind::Private),
-            "weak" => Maybe::Some(LinkageKind::Weak),
-            "linkonce" => Maybe::Some(LinkageKind::Linkonce),
-            "linkonce_odr" => Maybe::Some(LinkageKind::LinkonceOdr),
-            "common" => Maybe::Some(LinkageKind::Common),
-            "available_externally" => Maybe::Some(LinkageKind::AvailableExternally),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::External,
+        Self::Internal,
+        Self::Private,
+        Self::Weak,
+        Self::Linkonce,
+        Self::LinkonceOdr,
+        Self::Common,
+        Self::AvailableExternally,
+    ];
+
+    pub const fn meta(self) -> LinkageKindMeta {
+        match self {
+            Self::External => LinkageKindMeta {
+                name: "external",
+                allows_multiple_definitions: false,
+            },
+            Self::Internal => LinkageKindMeta {
+                name: "internal",
+                allows_multiple_definitions: false,
+            },
+            Self::Private => LinkageKindMeta {
+                name: "private",
+                allows_multiple_definitions: false,
+            },
+            Self::Weak => LinkageKindMeta {
+                name: "weak",
+                allows_multiple_definitions: true,
+            },
+            Self::Linkonce => LinkageKindMeta {
+                name: "linkonce",
+                allows_multiple_definitions: true,
+            },
+            Self::LinkonceOdr => LinkageKindMeta {
+                name: "linkonce_odr",
+                allows_multiple_definitions: true,
+            },
+            Self::Common => LinkageKindMeta {
+                name: "common",
+                allows_multiple_definitions: true,
+            },
+            Self::AvailableExternally => LinkageKindMeta {
+                name: "available_externally",
+                allows_multiple_definitions: false,
+            },
         }
     }
 
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical name (closes drift defect: was missing previously).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
     /// Returns true if this linkage allows multiple definitions.
-    pub fn allows_multiple_definitions(&self) -> bool {
-        matches!(
-            self,
-            LinkageKind::Weak
-                | LinkageKind::Linkonce
-                | LinkageKind::LinkonceOdr
-                | LinkageKind::Common
-        )
+    #[inline]
+    pub const fn allows_multiple_definitions(&self) -> bool {
+        self.meta().allows_multiple_definitions
     }
 }
 
@@ -3338,14 +3600,39 @@ pub enum AccessPattern {
     Streaming,
 }
 
+/// Per-variant projection for [`AccessPattern`].
+#[derive(Debug, Clone, Copy)]
+pub struct AccessPatternMeta {
+    pub name: &'static str,
+}
+
 impl AccessPattern {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "sequential" => Maybe::Some(AccessPattern::Sequential),
-            "random" => Maybe::Some(AccessPattern::Random),
-            "streaming" => Maybe::Some(AccessPattern::Streaming),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[Self::Sequential, Self::Random, Self::Streaming];
+
+    pub const fn meta(self) -> AccessPatternMeta {
+        match self {
+            Self::Sequential => AccessPatternMeta { name: "sequential" },
+            Self::Random => AccessPatternMeta { name: "random" },
+            Self::Streaming => AccessPatternMeta { name: "streaming" },
         }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical name (closes drift defect: was missing previously).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 }
 
@@ -3413,27 +3700,91 @@ pub enum Repr {
     SimdMask,
 }
 
+/// Per-variant projection for [`Repr`].
+#[derive(Debug, Clone, Copy)]
+pub struct ReprMeta {
+    pub name: &'static str,
+    pub is_simd: bool,
+    pub is_simd_mask: bool,
+}
+
 impl Repr {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "packed" => Maybe::Some(Repr::Packed),
-            "C" | "c" => Maybe::Some(Repr::C),
-            "cache_optimal" => Maybe::Some(Repr::CacheOptimal),
-            "transparent" => Maybe::Some(Repr::Transparent),
-            "simd" => Maybe::Some(Repr::Simd),
-            "simd_mask" => Maybe::Some(Repr::SimdMask),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::Packed,
+        Self::C,
+        Self::CacheOptimal,
+        Self::Transparent,
+        Self::Simd,
+        Self::SimdMask,
+    ];
+
+    pub const fn meta(self) -> ReprMeta {
+        match self {
+            Self::Packed => ReprMeta {
+                name: "packed",
+                is_simd: false,
+                is_simd_mask: false,
+            },
+            Self::C => ReprMeta {
+                name: "C",
+                is_simd: false,
+                is_simd_mask: false,
+            },
+            Self::CacheOptimal => ReprMeta {
+                name: "cache_optimal",
+                is_simd: false,
+                is_simd_mask: false,
+            },
+            Self::Transparent => ReprMeta {
+                name: "transparent",
+                is_simd: false,
+                is_simd_mask: false,
+            },
+            Self::Simd => ReprMeta {
+                name: "simd",
+                is_simd: true,
+                is_simd_mask: false,
+            },
+            Self::SimdMask => ReprMeta {
+                name: "simd_mask",
+                is_simd: true,
+                is_simd_mask: true,
+            },
         }
     }
 
-    /// Check if this repr is for SIMD vector types
-    pub fn is_simd(&self) -> bool {
-        matches!(self, Repr::Simd | Repr::SimdMask)
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        // `"c"` is a tolerant lower-case alias for the canonical `"C"`.
+        if s == "c" {
+            return Maybe::Some(Self::C);
+        }
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
     }
 
-    /// Check if this repr is for SIMD mask types
-    pub fn is_simd_mask(&self) -> bool {
-        matches!(self, Repr::SimdMask)
+    /// Canonical name (closes drift defect: was missing previously).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Check if this repr is for SIMD vector types.
+    #[inline]
+    pub const fn is_simd(&self) -> bool {
+        self.meta().is_simd
+    }
+
+    /// Check if this repr is for SIMD mask types.
+    #[inline]
+    pub const fn is_simd_mask(&self) -> bool {
+        self.meta().is_simd_mask
     }
 }
 
