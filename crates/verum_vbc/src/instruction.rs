@@ -6804,6 +6804,116 @@ pub enum MathSubOpcode {
     IsFiniteF32 = 0x6A,
 }
 
+// =========================================================================
+// MathSubOpcode metadata — single source of truth for the 80 variants.
+//
+// The legacy implementation maintained nine parallel match arms (one per
+// `mnemonic` / `category` / `is_f64` / `is_f32` / `operand_count` /
+// `llvm_intrinsic` / `mlir_op` accessor) plus byte-range matches on top
+// of `to_byte()` for `category` / `is_f64` — three independently-spelled
+// places where each variant's metadata lived.  The old `category()`
+// + `is_f64()` byte-range tests also coupled the categorisation to the
+// raw discriminant assignment, so renumbering a variant silently moved
+// its category.
+//
+// `MathOpMeta` collapses every reference-data field into one struct and
+// `MathSubOpcode::meta()` is the sole match site that maps variant →
+// metadata.  All seven reference accessors become single-line
+// projections; drift between mnemonic / llvm-name / category / width is
+// structurally impossible because the entries are co-located.
+//
+// Drift-pin tests sit alongside the type definitions — see the
+// `math_meta_drift` test module further down in this file.
+// =========================================================================
+
+/// Width of an IEEE-754 floating-point operation handled by `MathSubOpcode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FloatWidth {
+    /// Single-precision (32-bit) IEEE-754.
+    F32,
+    /// Double-precision (64-bit) IEEE-754.
+    F64,
+}
+
+impl FloatWidth {
+    /// Mnemonic suffix matching the spelling baked into variant names
+    /// (`SIN_F64`, `SIN_F32`).
+    pub const fn mnemonic_suffix(self) -> &'static str {
+        match self {
+            Self::F32 => "F32",
+            Self::F64 => "F64",
+        }
+    }
+
+    /// LLVM intrinsic suffix (`f64`, `f32`).
+    pub const fn llvm_suffix(self) -> &'static str {
+        match self {
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+}
+
+/// Functional grouping a `MathSubOpcode` belongs to.  Mirrors the
+/// 0x00-aligned 16-byte encoding bands but is now driven from the
+/// per-variant `meta()` table — *not* from byte-range arithmetic — so
+/// renumbering a variant can never silently move it between bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MathCategory {
+    /// `sin` / `cos` / `tan` / `asin` / `acos` / `atan` / `atan2`.
+    Trigonometric,
+    /// Hyperbolic forms of the trig functions.
+    Hyperbolic,
+    /// `exp` / `expm1` / `log` family + `pow` / `powi`.
+    ExpLog,
+    /// `sqrt` / `cbrt` / `hypot`.
+    RootPower,
+    /// `floor` / `ceil` / `round` / `trunc`.
+    Rounding,
+    /// `abs` / `copysign` / `fma` / `fmod` / `remainder` / `fdim`
+    /// / `minnum` / `maxnum`.
+    Special,
+    /// `is_nan` / `is_infinite` / `is_finite`.
+    Classification,
+}
+
+impl MathCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Trigonometric => "Trigonometric",
+            Self::Hyperbolic => "Hyperbolic",
+            Self::ExpLog => "Exponential/Logarithmic",
+            Self::RootPower => "Root/Power",
+            Self::Rounding => "Rounding",
+            Self::Special => "Special",
+            Self::Classification => "Classification",
+        }
+    }
+}
+
+/// Co-located metadata for one `MathSubOpcode` variant.
+///
+/// Every reference-data field a caller might ask for is captured here;
+/// `MathSubOpcode::meta()` is the only site that constructs values of
+/// this type, so a single match keeps every accessor consistent.
+#[derive(Debug, Clone, Copy)]
+pub struct MathOpMeta {
+    /// All-caps mnemonic (`"SIN_F64"`).
+    pub mnemonic: &'static str,
+    /// Functional category for diagnostics / docs.
+    pub category: MathCategory,
+    /// IEEE-754 width.
+    pub width: FloatWidth,
+    /// Number of source operands (1 = unary, 2 = binary, 3 = ternary).
+    pub operand_count: u8,
+    /// Fully-qualified LLVM intrinsic name (`"llvm.sin.f64"`).
+    pub llvm_intrinsic: &'static str,
+    /// Equivalent MLIR `math` dialect op (`Some("math.sin")`), or
+    /// `None` when LLVM is the only lowering path.
+    pub mlir_op: Option<&'static str>,
+}
+
 impl MathSubOpcode {
     /// Creates a math sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -6911,271 +7021,178 @@ impl MathSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this math sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            // Trigonometric F64
-            Self::SinF64 => "SIN_F64",
-            Self::CosF64 => "COS_F64",
-            Self::TanF64 => "TAN_F64",
-            Self::AsinF64 => "ASIN_F64",
-            Self::AcosF64 => "ACOS_F64",
-            Self::AtanF64 => "ATAN_F64",
-            Self::Atan2F64 => "ATAN2_F64",
-            // Trigonometric F32
-            Self::SinF32 => "SIN_F32",
-            Self::CosF32 => "COS_F32",
-            Self::TanF32 => "TAN_F32",
-            Self::AsinF32 => "ASIN_F32",
-            Self::AcosF32 => "ACOS_F32",
-            Self::AtanF32 => "ATAN_F32",
-            Self::Atan2F32 => "ATAN2_F32",
-            // Hyperbolic F64
-            Self::SinhF64 => "SINH_F64",
-            Self::CoshF64 => "COSH_F64",
-            Self::TanhF64 => "TANH_F64",
-            Self::AsinhF64 => "ASINH_F64",
-            Self::AcoshF64 => "ACOSH_F64",
-            Self::AtanhF64 => "ATANH_F64",
-            // Hyperbolic F32
-            Self::SinhF32 => "SINH_F32",
-            Self::CoshF32 => "COSH_F32",
-            Self::TanhF32 => "TANH_F32",
-            Self::AsinhF32 => "ASINH_F32",
-            Self::AcoshF32 => "ACOSH_F32",
-            Self::AtanhF32 => "ATANH_F32",
-            // Exponential F64
-            Self::ExpF64 => "EXP_F64",
-            Self::Exp2F64 => "EXP2_F64",
-            Self::Expm1F64 => "EXPM1_F64",
-            Self::LogF64 => "LOG_F64",
-            Self::Log2F64 => "LOG2_F64",
-            Self::Log10F64 => "LOG10_F64",
-            Self::Log1pF64 => "LOG1P_F64",
-            Self::PowF64 => "POW_F64",
-            Self::PowiF64 => "POWI_F64",
-            // Exponential F32
-            Self::ExpF32 => "EXP_F32",
-            Self::Exp2F32 => "EXP2_F32",
-            Self::Expm1F32 => "EXPM1_F32",
-            Self::LogF32 => "LOG_F32",
-            Self::Log2F32 => "LOG2_F32",
-            Self::Log10F32 => "LOG10_F32",
-            Self::Log1pF32 => "LOG1P_F32",
-            // Root F64
-            Self::SqrtF64 => "SQRT_F64",
-            Self::CbrtF64 => "CBRT_F64",
-            Self::HypotF64 => "HYPOT_F64",
-            // Root F32
-            Self::SqrtF32 => "SQRT_F32",
-            Self::CbrtF32 => "CBRT_F32",
-            Self::HypotF32 => "HYPOT_F32",
-            Self::PowF32 => "POW_F32",
-            Self::PowiF32 => "POWI_F32",
-            // Rounding F64
-            Self::FloorF64 => "FLOOR_F64",
-            Self::CeilF64 => "CEIL_F64",
-            Self::RoundF64 => "ROUND_F64",
-            Self::TruncF64 => "TRUNC_F64",
-            // Rounding F32
-            Self::FloorF32 => "FLOOR_F32",
-            Self::CeilF32 => "CEIL_F32",
-            Self::RoundF32 => "ROUND_F32",
-            Self::TruncF32 => "TRUNC_F32",
-            // Special F64
-            Self::AbsF64 => "ABS_F64",
-            Self::CopysignF64 => "COPYSIGN_F64",
-            Self::FmaF64 => "FMA_F64",
-            Self::FmodF64 => "FMOD_F64",
-            Self::RemainderF64 => "REMAINDER_F64",
-            Self::FdimF64 => "FDIM_F64",
-            Self::MinnumF64 => "MINNUM_F64",
-            Self::MaxnumF64 => "MAXNUM_F64",
-            // Special F32
-            Self::AbsF32 => "ABS_F32",
-            Self::CopysignF32 => "COPYSIGN_F32",
-            Self::FmaF32 => "FMA_F32",
-            Self::MinnumF32 => "MINNUM_F32",
-            Self::MaxnumF32 => "MAXNUM_F32",
-            Self::FmodF32 => "FMOD_F32",
-            Self::RemainderF32 => "REMAINDER_F32",
-            Self::FdimF32 => "FDIM_F32",
-            // Classification F64
-            Self::IsNanF64 => "IS_NAN_F64",
-            Self::IsInfF64 => "IS_INF_F64",
-            Self::IsFiniteF64 => "IS_FINITE_F64",
-            // Classification F32
-            Self::IsNanF32 => "IS_NAN_F32",
-            Self::IsInfF32 => "IS_INF_F32",
-            Self::IsFiniteF32 => "IS_FINITE_F32",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` / `width` /
+    /// `operand_count` / `llvm_intrinsic` / `mlir_op`.  All sibling
+    /// accessors are thin projections of this method's return value;
+    /// new variants must be added here once and only once.
+    pub const fn meta(self) -> MathOpMeta {
+        use FloatWidth::{F32, F64};
+        use MathCategory::{
+            Classification, ExpLog, Hyperbolic, Rounding, RootPower, Special, Trigonometric,
+        };
+
+        // One-line entries.  Field order matches the MathOpMeta struct
+        // declaration (mnemonic, category, width, operand_count,
+        // llvm_intrinsic, mlir_op) so each variant fits on a single
+        // visual row and drift between sibling variants is obvious.
+        macro_rules! m {
+            ($mn:expr, $cat:ident, $w:ident, $oc:expr, $llvm:expr, $mlir:expr $(,)?) => {
+                MathOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    width: $w,
+                    operand_count: $oc,
+                    llvm_intrinsic: $llvm,
+                    mlir_op: $mlir,
+                }
+            };
         }
+
+        match self {
+            // ===== Trigonometric =====
+            Self::SinF64    => m!("SIN_F64",    Trigonometric, F64, 1, "llvm.sin.f64",    Some("math.sin")),
+            Self::CosF64    => m!("COS_F64",    Trigonometric, F64, 1, "llvm.cos.f64",    Some("math.cos")),
+            Self::TanF64    => m!("TAN_F64",    Trigonometric, F64, 1, "llvm.tan.f64",    Some("math.tan")),
+            Self::AsinF64   => m!("ASIN_F64",   Trigonometric, F64, 1, "llvm.asin.f64",   Some("math.asin")),
+            Self::AcosF64   => m!("ACOS_F64",   Trigonometric, F64, 1, "llvm.acos.f64",   Some("math.acos")),
+            Self::AtanF64   => m!("ATAN_F64",   Trigonometric, F64, 1, "llvm.atan.f64",   Some("math.atan")),
+            Self::Atan2F64  => m!("ATAN2_F64",  Trigonometric, F64, 2, "llvm.atan2.f64",  Some("math.atan2")),
+            Self::SinF32    => m!("SIN_F32",    Trigonometric, F32, 1, "llvm.sin.f32",    Some("math.sin")),
+            Self::CosF32    => m!("COS_F32",    Trigonometric, F32, 1, "llvm.cos.f32",    Some("math.cos")),
+            Self::TanF32    => m!("TAN_F32",    Trigonometric, F32, 1, "llvm.tan.f32",    Some("math.tan")),
+            Self::AsinF32   => m!("ASIN_F32",   Trigonometric, F32, 1, "llvm.asin.f32",   Some("math.asin")),
+            Self::AcosF32   => m!("ACOS_F32",   Trigonometric, F32, 1, "llvm.acos.f32",   Some("math.acos")),
+            Self::AtanF32   => m!("ATAN_F32",   Trigonometric, F32, 1, "llvm.atan.f32",   Some("math.atan")),
+            Self::Atan2F32  => m!("ATAN2_F32",  Trigonometric, F32, 2, "llvm.atan2.f32",  Some("math.atan2")),
+
+            // ===== Hyperbolic =====
+            Self::SinhF64   => m!("SINH_F64",   Hyperbolic,    F64, 1, "llvm.sinh.f64",   None),
+            Self::CoshF64   => m!("COSH_F64",   Hyperbolic,    F64, 1, "llvm.cosh.f64",   None),
+            Self::TanhF64   => m!("TANH_F64",   Hyperbolic,    F64, 1, "llvm.tanh.f64",   Some("math.tanh")),
+            Self::AsinhF64  => m!("ASINH_F64",  Hyperbolic,    F64, 1, "llvm.asinh.f64",  None),
+            Self::AcoshF64  => m!("ACOSH_F64",  Hyperbolic,    F64, 1, "llvm.acosh.f64",  None),
+            Self::AtanhF64  => m!("ATANH_F64",  Hyperbolic,    F64, 1, "llvm.atanh.f64",  None),
+            Self::SinhF32   => m!("SINH_F32",   Hyperbolic,    F32, 1, "llvm.sinh.f32",   None),
+            Self::CoshF32   => m!("COSH_F32",   Hyperbolic,    F32, 1, "llvm.cosh.f32",   None),
+            Self::TanhF32   => m!("TANH_F32",   Hyperbolic,    F32, 1, "llvm.tanh.f32",   Some("math.tanh")),
+            Self::AsinhF32  => m!("ASINH_F32",  Hyperbolic,    F32, 1, "llvm.asinh.f32",  None),
+            Self::AcoshF32  => m!("ACOSH_F32",  Hyperbolic,    F32, 1, "llvm.acosh.f32",  None),
+            Self::AtanhF32  => m!("ATANH_F32",  Hyperbolic,    F32, 1, "llvm.atanh.f32",  None),
+
+            // ===== Exponential / Logarithmic =====
+            Self::ExpF64    => m!("EXP_F64",    ExpLog,        F64, 1, "llvm.exp.f64",        Some("math.exp")),
+            Self::Exp2F64   => m!("EXP2_F64",   ExpLog,        F64, 1, "llvm.exp2.f64",       Some("math.exp2")),
+            Self::Expm1F64  => m!("EXPM1_F64",  ExpLog,        F64, 1, "llvm.expm1.f64",      Some("math.expm1")),
+            Self::LogF64    => m!("LOG_F64",    ExpLog,        F64, 1, "llvm.log.f64",        Some("math.log")),
+            Self::Log2F64   => m!("LOG2_F64",   ExpLog,        F64, 1, "llvm.log2.f64",       Some("math.log2")),
+            Self::Log10F64  => m!("LOG10_F64",  ExpLog,        F64, 1, "llvm.log10.f64",      Some("math.log10")),
+            Self::Log1pF64  => m!("LOG1P_F64",  ExpLog,        F64, 1, "llvm.log1p.f64",      Some("math.log1p")),
+            Self::PowF64    => m!("POW_F64",    ExpLog,        F64, 2, "llvm.pow.f64",        Some("math.powf")),
+            Self::PowiF64   => m!("POWI_F64",   ExpLog,        F64, 2, "llvm.powi.f64.i32",   Some("math.ipowi")),
+            Self::ExpF32    => m!("EXP_F32",    ExpLog,        F32, 1, "llvm.exp.f32",        Some("math.exp")),
+            Self::Exp2F32   => m!("EXP2_F32",   ExpLog,        F32, 1, "llvm.exp2.f32",       Some("math.exp2")),
+            Self::Expm1F32  => m!("EXPM1_F32",  ExpLog,        F32, 1, "llvm.expm1.f32",      Some("math.expm1")),
+            Self::LogF32    => m!("LOG_F32",    ExpLog,        F32, 1, "llvm.log.f32",        Some("math.log")),
+            Self::Log2F32   => m!("LOG2_F32",   ExpLog,        F32, 1, "llvm.log2.f32",       Some("math.log2")),
+            Self::Log10F32  => m!("LOG10_F32",  ExpLog,        F32, 1, "llvm.log10.f32",      Some("math.log10")),
+            Self::Log1pF32  => m!("LOG1P_F32",  ExpLog,        F32, 1, "llvm.log1p.f32",      Some("math.log1p")),
+
+            // ===== Root / Power =====
+            Self::SqrtF64   => m!("SQRT_F64",   RootPower,     F64, 1, "llvm.sqrt.f64",   Some("math.sqrt")),
+            Self::CbrtF64   => m!("CBRT_F64",   RootPower,     F64, 1, "llvm.cbrt.f64",   Some("math.cbrt")),
+            Self::HypotF64  => m!("HYPOT_F64",  RootPower,     F64, 2, "llvm.hypot.f64",  None),
+            Self::SqrtF32   => m!("SQRT_F32",   RootPower,     F32, 1, "llvm.sqrt.f32",   Some("math.sqrt")),
+            Self::CbrtF32   => m!("CBRT_F32",   RootPower,     F32, 1, "llvm.cbrt.f32",   Some("math.cbrt")),
+            Self::HypotF32  => m!("HYPOT_F32",  RootPower,     F32, 2, "llvm.hypot.f32",  None),
+            Self::PowF32    => m!("POW_F32",    RootPower,     F32, 2, "llvm.pow.f32",    Some("math.powf")),
+            Self::PowiF32   => m!("POWI_F32",   RootPower,     F32, 2, "llvm.powi.f32.i32", Some("math.ipowi")),
+
+            // ===== Rounding =====
+            Self::FloorF64  => m!("FLOOR_F64",  Rounding,      F64, 1, "llvm.floor.f64",  Some("math.floor")),
+            Self::CeilF64   => m!("CEIL_F64",   Rounding,      F64, 1, "llvm.ceil.f64",   Some("math.ceil")),
+            Self::RoundF64  => m!("ROUND_F64",  Rounding,      F64, 1, "llvm.round.f64",  Some("math.round")),
+            Self::TruncF64  => m!("TRUNC_F64",  Rounding,      F64, 1, "llvm.trunc.f64",  Some("math.trunc")),
+            Self::FloorF32  => m!("FLOOR_F32",  Rounding,      F32, 1, "llvm.floor.f32",  Some("math.floor")),
+            Self::CeilF32   => m!("CEIL_F32",   Rounding,      F32, 1, "llvm.ceil.f32",   Some("math.ceil")),
+            Self::RoundF32  => m!("ROUND_F32",  Rounding,      F32, 1, "llvm.round.f32",  Some("math.round")),
+            Self::TruncF32  => m!("TRUNC_F32",  Rounding,      F32, 1, "llvm.trunc.f32",  Some("math.trunc")),
+
+            // ===== Special =====
+            Self::AbsF64       => m!("ABS_F64",       Special, F64, 1, "llvm.fabs.f64",      Some("math.absf")),
+            Self::CopysignF64  => m!("COPYSIGN_F64",  Special, F64, 2, "llvm.copysign.f64",  Some("math.copysign")),
+            Self::FmaF64       => m!("FMA_F64",       Special, F64, 3, "llvm.fma.f64",       Some("math.fma")),
+            Self::FmodF64      => m!("FMOD_F64",      Special, F64, 2, "llvm.fmod.f64",      None),
+            Self::RemainderF64 => m!("REMAINDER_F64", Special, F64, 2, "llvm.remainder.f64", None),
+            Self::FdimF64      => m!("FDIM_F64",      Special, F64, 2, "llvm.fdim.f64",      None),
+            Self::MinnumF64    => m!("MINNUM_F64",    Special, F64, 2, "llvm.minnum.f64",    None),
+            Self::MaxnumF64    => m!("MAXNUM_F64",    Special, F64, 2, "llvm.maxnum.f64",    None),
+            Self::AbsF32       => m!("ABS_F32",       Special, F32, 1, "llvm.fabs.f32",      Some("math.absf")),
+            Self::CopysignF32  => m!("COPYSIGN_F32",  Special, F32, 2, "llvm.copysign.f32",  Some("math.copysign")),
+            Self::FmaF32       => m!("FMA_F32",       Special, F32, 3, "llvm.fma.f32",       Some("math.fma")),
+            Self::MinnumF32    => m!("MINNUM_F32",    Special, F32, 2, "llvm.minnum.f32",    None),
+            Self::MaxnumF32    => m!("MAXNUM_F32",    Special, F32, 2, "llvm.maxnum.f32",    None),
+            Self::FmodF32      => m!("FMOD_F32",      Special, F32, 2, "llvm.fmod.f32",      None),
+            Self::RemainderF32 => m!("REMAINDER_F32", Special, F32, 2, "llvm.remainder.f32", None),
+            Self::FdimF32      => m!("FDIM_F32",      Special, F32, 2, "llvm.fdim.f32",      None),
+
+            // ===== Classification =====
+            Self::IsNanF64    => m!("IS_NAN_F64",    Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsInfF64    => m!("IS_INF_F64",    Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsFiniteF64 => m!("IS_FINITE_F64", Classification, F64, 1, "llvm.is.fpclass.f64", None),
+            Self::IsNanF32    => m!("IS_NAN_F32",    Classification, F32, 1, "llvm.is.fpclass.f32", None),
+            Self::IsInfF32    => m!("IS_INF_F32",    Classification, F32, 1, "llvm.is.fpclass.f32", None),
+            Self::IsFiniteF32 => m!("IS_FINITE_F32", Classification, F32, 1, "llvm.is.fpclass.f32", None),
+        }
+    }
+
+    /// Returns the mnemonic string for this math sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "Trigonometric",
-            0x10..=0x1F => "Hyperbolic",
-            0x20..=0x2F => "Exponential/Logarithmic",
-            0x30..=0x3F => "Root/Power",
-            0x40..=0x4F => "Rounding",
-            0x50..=0x5F => "Special",
-            0x60..=0x6F => "Classification",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
+    }
+
+    /// Returns the IEEE-754 width of this operation.
+    #[inline]
+    pub fn width(self) -> FloatWidth {
+        self.meta().width
     }
 
     /// Returns true if this is an F64 operation.
+    #[inline]
     pub fn is_f64(self) -> bool {
-        matches!(
-            self.to_byte(),
-            0x00..=0x06 | 0x10..=0x15 | 0x20..=0x28 | 0x30..=0x32
-            | 0x40..=0x43 | 0x50..=0x57 | 0x60..=0x62
-        )
+        matches!(self.meta().width, FloatWidth::F64)
     }
 
     /// Returns true if this is an F32 operation.
+    #[inline]
     pub fn is_f32(self) -> bool {
-        !self.is_f64()
+        matches!(self.meta().width, FloatWidth::F32)
     }
 
     /// Returns the number of source operands for this operation.
+    #[inline]
     pub fn operand_count(self) -> usize {
-        match self {
-            // Binary operations (two operands)
-            Self::Atan2F64 | Self::Atan2F32 => 2,
-            Self::PowF64 | Self::PowiF64 | Self::PowF32 | Self::PowiF32 => 2,
-            Self::HypotF64 | Self::HypotF32 => 2,
-            Self::CopysignF64 | Self::CopysignF32 => 2,
-            Self::FmodF64
-            | Self::RemainderF64
-            | Self::FdimF64
-            | Self::FmodF32
-            | Self::RemainderF32
-            | Self::FdimF32 => 2,
-            Self::MinnumF64 | Self::MaxnumF64 | Self::MinnumF32 | Self::MaxnumF32 => 2,
-            // Ternary operations (three operands)
-            Self::FmaF64 | Self::FmaF32 => 3,
-            // Unary operations (one operand) - default
-            _ => 1,
-        }
+        self.meta().operand_count as usize
     }
 
     /// Returns the LLVM intrinsic name for this operation.
+    #[inline]
     pub fn llvm_intrinsic(self) -> &'static str {
-        match self {
-            Self::SinF64 => "llvm.sin.f64",
-            Self::CosF64 => "llvm.cos.f64",
-            Self::TanF64 => "llvm.tan.f64",
-            Self::AsinF64 => "llvm.asin.f64",
-            Self::AcosF64 => "llvm.acos.f64",
-            Self::AtanF64 => "llvm.atan.f64",
-            Self::Atan2F64 => "llvm.atan2.f64",
-            Self::SinhF64 => "llvm.sinh.f64",
-            Self::CoshF64 => "llvm.cosh.f64",
-            Self::TanhF64 => "llvm.tanh.f64",
-            Self::AsinhF64 => "llvm.asinh.f64",
-            Self::AcoshF64 => "llvm.acosh.f64",
-            Self::AtanhF64 => "llvm.atanh.f64",
-            Self::ExpF64 => "llvm.exp.f64",
-            Self::Exp2F64 => "llvm.exp2.f64",
-            Self::Expm1F64 => "llvm.expm1.f64",
-            Self::LogF64 => "llvm.log.f64",
-            Self::Log2F64 => "llvm.log2.f64",
-            Self::Log10F64 => "llvm.log10.f64",
-            Self::Log1pF64 => "llvm.log1p.f64",
-            Self::PowF64 => "llvm.pow.f64",
-            Self::PowiF64 => "llvm.powi.f64.i32",
-            Self::SqrtF64 => "llvm.sqrt.f64",
-            Self::CbrtF64 => "llvm.cbrt.f64",
-            Self::HypotF64 => "llvm.hypot.f64",
-            Self::FloorF64 => "llvm.floor.f64",
-            Self::CeilF64 => "llvm.ceil.f64",
-            Self::RoundF64 => "llvm.round.f64",
-            Self::TruncF64 => "llvm.trunc.f64",
-            Self::AbsF64 => "llvm.fabs.f64",
-            Self::CopysignF64 => "llvm.copysign.f64",
-            Self::FmaF64 => "llvm.fma.f64",
-            Self::FmodF64 => "llvm.fmod.f64",
-            Self::RemainderF64 => "llvm.remainder.f64",
-            Self::FdimF64 => "llvm.fdim.f64",
-            Self::MinnumF64 => "llvm.minnum.f64",
-            Self::MaxnumF64 => "llvm.maxnum.f64",
-            Self::IsNanF64 | Self::IsInfF64 | Self::IsFiniteF64 => "llvm.is.fpclass.f64",
-            // F32 variants
-            Self::SinF32 => "llvm.sin.f32",
-            Self::CosF32 => "llvm.cos.f32",
-            Self::TanF32 => "llvm.tan.f32",
-            Self::AsinF32 => "llvm.asin.f32",
-            Self::AcosF32 => "llvm.acos.f32",
-            Self::AtanF32 => "llvm.atan.f32",
-            Self::Atan2F32 => "llvm.atan2.f32",
-            Self::SinhF32 => "llvm.sinh.f32",
-            Self::CoshF32 => "llvm.cosh.f32",
-            Self::TanhF32 => "llvm.tanh.f32",
-            Self::AsinhF32 => "llvm.asinh.f32",
-            Self::AcoshF32 => "llvm.acosh.f32",
-            Self::AtanhF32 => "llvm.atanh.f32",
-            Self::ExpF32 => "llvm.exp.f32",
-            Self::Exp2F32 => "llvm.exp2.f32",
-            Self::Expm1F32 => "llvm.expm1.f32",
-            Self::LogF32 => "llvm.log.f32",
-            Self::Log2F32 => "llvm.log2.f32",
-            Self::Log10F32 => "llvm.log10.f32",
-            Self::Log1pF32 => "llvm.log1p.f32",
-            Self::SqrtF32 => "llvm.sqrt.f32",
-            Self::CbrtF32 => "llvm.cbrt.f32",
-            Self::HypotF32 => "llvm.hypot.f32",
-            Self::PowF32 => "llvm.pow.f32",
-            Self::PowiF32 => "llvm.powi.f32.i32",
-            Self::FloorF32 => "llvm.floor.f32",
-            Self::CeilF32 => "llvm.ceil.f32",
-            Self::RoundF32 => "llvm.round.f32",
-            Self::TruncF32 => "llvm.trunc.f32",
-            Self::AbsF32 => "llvm.fabs.f32",
-            Self::CopysignF32 => "llvm.copysign.f32",
-            Self::FmaF32 => "llvm.fma.f32",
-            Self::MinnumF32 => "llvm.minnum.f32",
-            Self::MaxnumF32 => "llvm.maxnum.f32",
-            Self::FmodF32 => "llvm.fmod.f32",
-            Self::RemainderF32 => "llvm.remainder.f32",
-            Self::FdimF32 => "llvm.fdim.f32",
-            Self::IsNanF32 | Self::IsInfF32 | Self::IsFiniteF32 => "llvm.is.fpclass.f32",
-        }
+        self.meta().llvm_intrinsic
     }
 
     /// Returns the MLIR operation name for this operation (if available).
+    #[inline]
     pub fn mlir_op(self) -> Option<&'static str> {
-        match self {
-            Self::SinF64 | Self::SinF32 => Some("math.sin"),
-            Self::CosF64 | Self::CosF32 => Some("math.cos"),
-            Self::TanF64 | Self::TanF32 => Some("math.tan"),
-            Self::AsinF64 | Self::AsinF32 => Some("math.asin"),
-            Self::AcosF64 | Self::AcosF32 => Some("math.acos"),
-            Self::AtanF64 | Self::AtanF32 => Some("math.atan"),
-            Self::Atan2F64 | Self::Atan2F32 => Some("math.atan2"),
-            Self::TanhF64 | Self::TanhF32 => Some("math.tanh"),
-            Self::ExpF64 | Self::ExpF32 => Some("math.exp"),
-            Self::Exp2F64 | Self::Exp2F32 => Some("math.exp2"),
-            Self::Expm1F64 | Self::Expm1F32 => Some("math.expm1"),
-            Self::LogF64 | Self::LogF32 => Some("math.log"),
-            Self::Log2F64 | Self::Log2F32 => Some("math.log2"),
-            Self::Log10F64 | Self::Log10F32 => Some("math.log10"),
-            Self::Log1pF64 | Self::Log1pF32 => Some("math.log1p"),
-            Self::PowF64 | Self::PowF32 => Some("math.powf"),
-            Self::PowiF64 | Self::PowiF32 => Some("math.ipowi"),
-            Self::SqrtF64 | Self::SqrtF32 => Some("math.sqrt"),
-            Self::CbrtF64 | Self::CbrtF32 => Some("math.cbrt"),
-            Self::FloorF64 | Self::FloorF32 => Some("math.floor"),
-            Self::CeilF64 | Self::CeilF32 => Some("math.ceil"),
-            Self::RoundF64 | Self::RoundF32 => Some("math.round"),
-            Self::TruncF64 | Self::TruncF32 => Some("math.trunc"),
-            Self::AbsF64 | Self::AbsF32 => Some("math.absf"),
-            Self::CopysignF64 | Self::CopysignF32 => Some("math.copysign"),
-            Self::FmaF64 | Self::FmaF32 => Some("math.fma"),
-            // Operations without direct MLIR math dialect support use LLVM intrinsics
-            _ => None,
-        }
+        self.meta().mlir_op
     }
 }
 
@@ -14930,5 +14947,179 @@ mod tests {
 
         let cloned = original.clone();
         assert_eq!(original, cloned);
+    }
+
+    // ========================================================================
+    // MathSubOpcode meta() drift pins
+    //
+    // These tests pin the invariants that the consolidated meta() table
+    // is meant to enforce.  They walk the full byte range, drive the
+    // accessors through every reachable variant, and verify the cross-
+    // field invariants that used to live implicitly in nine parallel
+    // match arms.
+    // ========================================================================
+
+    /// Iterate the eighty defined `MathSubOpcode` discriminants.
+    fn for_every_math_sub_opcode<F: FnMut(MathSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = MathSubOpcode::from_byte(byte) {
+                assert_eq!(
+                    op.to_byte(),
+                    byte,
+                    "MathSubOpcode::from_byte({:#04x}).to_byte() drift",
+                    byte
+                );
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn math_meta_mnemonic_format_matches_width() {
+        // Mnemonic must end with the width suffix (`_F32` / `_F64`).
+        // Catches `mnemonic` strings that drift away from the variant
+        // name on rename, and catches a width field that drifts away
+        // from the spelling in `mnemonic`.
+        for_every_math_sub_opcode(|op| {
+            let m = op.meta();
+            let suffix = match m.width {
+                FloatWidth::F32 => "_F32",
+                FloatWidth::F64 => "_F64",
+            };
+            assert!(
+                m.mnemonic.ends_with(suffix),
+                "mnemonic {:?} does not end with {} (variant {:?})",
+                m.mnemonic, suffix, op
+            );
+        });
+    }
+
+    #[test]
+    fn math_meta_llvm_intrinsic_format_matches_width() {
+        // Every LLVM intrinsic ends with the bare width tag matching
+        // the meta's width.  `llvm.powi.f64.i32` is special-cased
+        // (powi takes an i32 exponent, so the canonical name has a
+        // trailing `.i32`), but the *float* slot still has to match.
+        for_every_math_sub_opcode(|op| {
+            let m = op.meta();
+            let suffix = m.width.llvm_suffix(); // "f64" / "f32"
+            let core_segment = m.llvm_intrinsic.trim_end_matches(".i32");
+            assert!(
+                core_segment.ends_with(suffix),
+                "llvm_intrinsic {:?} does not encode width {:?} (variant {:?})",
+                m.llvm_intrinsic, m.width, op
+            );
+            assert!(
+                m.llvm_intrinsic.starts_with("llvm."),
+                "llvm_intrinsic {:?} not in `llvm.*` namespace (variant {:?})",
+                m.llvm_intrinsic, op
+            );
+        });
+    }
+
+    #[test]
+    fn math_meta_is_f64_xor_is_f32() {
+        // The width predicates partition the variant set.
+        for_every_math_sub_opcode(|op| {
+            assert_ne!(
+                op.is_f64(),
+                op.is_f32(),
+                "is_f64 / is_f32 must be mutually exclusive (variant {:?})",
+                op
+            );
+            assert_eq!(op.is_f64(), op.meta().width == FloatWidth::F64);
+            assert_eq!(op.is_f32(), op.meta().width == FloatWidth::F32);
+        });
+    }
+
+    #[test]
+    fn math_meta_operand_count_matches_legacy_table() {
+        // The ternary FMA family is the only 3-operand op; the binary
+        // arithmetic / classification-adjacent family is exactly the
+        // set named below.  Every other variant is unary.
+        let ternary = [
+            MathSubOpcode::FmaF64,
+            MathSubOpcode::FmaF32,
+        ];
+        let binary = [
+            MathSubOpcode::Atan2F64, MathSubOpcode::Atan2F32,
+            MathSubOpcode::PowF64,   MathSubOpcode::PowF32,
+            MathSubOpcode::PowiF64,  MathSubOpcode::PowiF32,
+            MathSubOpcode::HypotF64, MathSubOpcode::HypotF32,
+            MathSubOpcode::CopysignF64, MathSubOpcode::CopysignF32,
+            MathSubOpcode::FmodF64,  MathSubOpcode::FmodF32,
+            MathSubOpcode::RemainderF64, MathSubOpcode::RemainderF32,
+            MathSubOpcode::FdimF64,  MathSubOpcode::FdimF32,
+            MathSubOpcode::MinnumF64, MathSubOpcode::MinnumF32,
+            MathSubOpcode::MaxnumF64, MathSubOpcode::MaxnumF32,
+        ];
+        for_every_math_sub_opcode(|op| {
+            let oc = op.operand_count();
+            if ternary.contains(&op) {
+                assert_eq!(oc, 3, "{:?} should be ternary", op);
+            } else if binary.contains(&op) {
+                assert_eq!(oc, 2, "{:?} should be binary", op);
+            } else {
+                assert_eq!(oc, 1, "{:?} should be unary", op);
+            }
+        });
+    }
+
+    #[test]
+    fn math_meta_category_matches_legacy_byte_ranges() {
+        // The legacy `category()` accessor inferred the band by
+        // matching `to_byte()` against 16-byte windows.  The new
+        // category-via-meta() result must agree on every defined
+        // variant, so renaming a band remains a single-edit change.
+        for_every_math_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => MathCategory::Trigonometric,
+                0x10..=0x1F => MathCategory::Hyperbolic,
+                0x20..=0x2F => MathCategory::ExpLog,
+                0x30..=0x3F => MathCategory::RootPower,
+                0x40..=0x4F => MathCategory::Rounding,
+                0x50..=0x5F => MathCategory::Special,
+                0x60..=0x6F => MathCategory::Classification,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(
+                op.meta().category, expected,
+                "category drift: {:?} (byte {:#04x}) reports {:?}, byte-range gives {:?}",
+                op, op.to_byte(), op.meta().category, expected
+            );
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn math_meta_classification_uses_is_fpclass() {
+        // The IS_NAN / IS_INF / IS_FINITE family folds onto a single
+        // LLVM intrinsic per width.  This test pins that the
+        // classification band's lowering is unified — drift here
+        // (e.g. someone introducing per-predicate llvm.* names) would
+        // miscompile or duplicate codegen support.
+        for_every_math_sub_opcode(|op| {
+            if op.meta().category == MathCategory::Classification {
+                let expected = match op.meta().width {
+                    FloatWidth::F64 => "llvm.is.fpclass.f64",
+                    FloatWidth::F32 => "llvm.is.fpclass.f32",
+                };
+                assert_eq!(op.llvm_intrinsic(), expected,
+                    "classification {:?} must lower to {} (width-folded fpclass)",
+                    op, expected);
+            }
+        });
+    }
+
+    #[test]
+    fn math_meta_count_pinned_at_eighty() {
+        // Total reachable-variant count.  Bumping this assertion is
+        // the explicit signal that a new MathSubOpcode entry has
+        // landed and the corresponding meta() arm is in place.
+        let mut count = 0;
+        for_every_math_sub_opcode(|_| count += 1);
+        assert_eq!(count, 80,
+            "MathSubOpcode variant count drift: expected 80, got {}",
+            count);
     }
 }
