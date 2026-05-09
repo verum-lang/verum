@@ -1038,76 +1038,71 @@ pub mod type_names {
     }
 
     /// Returns true if `name` is a signed integer type.
+    ///
+    /// Recognises all three naming conventions in lock-step with
+    /// `verum_common::layout::primitive_size_by_name`:
+    /// canonical Verum (`Int`, `Int8`..`Int128`, `IntSize`),
+    /// legacy uppercase-short (`I8`..`I128`, `Isize`),
+    /// and Rust-style lowercase (`i8`..`i128`, `isize`).
     pub fn is_signed_integer_type(name: &str) -> bool {
         matches!(
             name,
-            "Int"
-                | "Int8"
-                | "Int16"
-                | "Int32"
-                | "Int64"
-                | "Int128"
-                | "IntSize"
-                | "i8"
-                | "i16"
-                | "i32"
-                | "i64"
-                | "i128"
-                | "isize"
+            // Canonical Verum
+            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+            // Legacy uppercase-short Verum aliases
+            | "I8" | "I16" | "I32" | "I64" | "I128" | "Isize"
+            // Rust-style lowercase aliases
+            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
         )
     }
 
     /// Returns true if `name` is an unsigned integer type.
+    ///
+    /// Recognises canonical Verum (`UInt8`..`UInt128`, `USize`, `UIntSize`,
+    /// `Byte`), legacy uppercase-short (`U8`..`U128`, `Usize`), and
+    /// Rust-style lowercase (`u8`..`u128`, `usize`).
     pub fn is_unsigned_integer_type(name: &str) -> bool {
         matches!(
             name,
-            "UInt8"
-                | "UInt16"
-                | "UInt32"
-                | "UInt64"
-                | "UInt128"
-                | "UIntSize"
-                | "USize"
-                | "Byte"
-                | "u8"
-                | "u16"
-                | "u32"
-                | "u64"
-                | "u128"
-                | "usize"
+            // Canonical Verum
+            "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+            | "UIntSize" | "USize" | "Byte"
+            // Legacy uppercase-short Verum aliases
+            | "U8" | "U16" | "U32" | "U64" | "U128" | "Usize"
+            // Rust-style lowercase aliases
+            | "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
         )
     }
 
-    /// Returns true if `name` is any float type variant (Float, Float32, Float64).
+    /// Returns true if `name` is any float type variant.
+    ///
+    /// Recognises canonical Verum (`Float`, `Float32`, `Float64`),
+    /// legacy uppercase-short (`F32`, `F64`), and Rust-style lowercase
+    /// (`f32`, `f64`).
     pub fn is_float_type(name: &str) -> bool {
-        matches!(name, "Float" | "Float32" | "Float64" | "f32" | "f64")
-    }
-
-    /// Returns true if `name` is a primitive value type (no heap allocation needed).
-    pub fn is_primitive_value_type(name: &str) -> bool {
         matches!(
             name,
-            "Int"
-                | "Float"
-                | "Bool"
-                | "Char"
-                | "Byte"
-                | "Unit"
-                | "Int8"
-                | "Int16"
-                | "Int32"
-                | "Int64"
-                | "Int128"
-                | "IntSize"
-                | "UInt8"
-                | "UInt16"
-                | "UInt32"
-                | "UInt64"
-                | "UInt128"
-                | "USize"
-                | "Float32"
-                | "Float64"
+            "Float" | "Float32" | "Float64"
+            | "F32" | "F64"
+            | "f32" | "f64"
         )
+    }
+
+    /// Returns true if `name` is a primitive value type (no heap allocation
+    /// needed). Includes scalar numerics in all three naming conventions
+    /// plus `Bool` / `Char` / `Unit` / `()` / `Never`. Excludes `Text`
+    /// (heap-backed value type).
+    pub fn is_primitive_value_type(name: &str) -> bool {
+        // The numeric set is the union of integer + float predicates;
+        // delegating keeps the alias coverage in lock-step.
+        is_numeric_type(name)
+            || matches!(
+                name,
+                "Bool" | "bool"
+                | "Char" | "char"
+                | "Unit" | "()"
+                | "Never"
+            )
     }
 
     /// Returns true if `name` is a collection type that supports `.len()` and iteration.
@@ -1159,13 +1154,28 @@ pub mod type_names {
     }
 
     /// Returns the bit width of a numeric type, or None if not a fixed-width numeric.
+    ///
+    /// Recognises every alias accepted by [`is_signed_integer_type`] /
+    /// [`is_unsigned_integer_type`] / [`is_float_type`] — drift between
+    /// these tables and the canonical
+    /// `verum_common::layout::primitive_size_by_name` is pinned by the
+    /// alias-consistency tests in this module.
     pub fn numeric_bit_width(name: &str) -> Option<u32> {
         match name {
-            "Int8" | "UInt8" | "Byte" | "i8" | "u8" | "Bool" => Some(8),
-            "Int16" | "UInt16" | "i16" | "u16" => Some(16),
-            "Int32" | "UInt32" | "i32" | "u32" | "Float32" | "f32" => Some(32),
-            "Int" | "Int64" | "UInt64" | "i64" | "u64" | "Float" | "Float64" | "f64" => Some(64),
-            "Int128" | "UInt128" | "i128" | "u128" => Some(128),
+            // 8-bit
+            "Int8" | "UInt8" | "Byte" | "I8" | "U8" | "i8" | "u8" | "Bool" | "bool" => Some(8),
+            // 16-bit
+            "Int16" | "UInt16" | "I16" | "U16" | "i16" | "u16" => Some(16),
+            // 32-bit
+            "Int32" | "UInt32" | "Float32" | "I32" | "U32" | "F32"
+            | "i32" | "u32" | "f32" => Some(32),
+            // 64-bit (incl. pointer-width aliases)
+            "Int" | "Int64" | "UInt64" | "Float" | "Float64"
+            | "I64" | "U64" | "F64"
+            | "i64" | "u64" | "f64"
+            | "IntSize" | "USize" | "UIntSize" | "Isize" | "Usize" | "isize" | "usize" => Some(64),
+            // 128-bit
+            "Int128" | "UInt128" | "I128" | "U128" | "i128" | "u128" => Some(128),
             _ => None,
         }
     }
@@ -1628,5 +1638,178 @@ mod tests {
         assert_eq!(primitive_implements_protocol("UInt128", "Copy"), None);
         // Unknown protocol → None.
         assert_eq!(primitive_implements_protocol("Int", "NotAProtocol"), None);
+    }
+
+    // =========================================================================
+    // Naming-convention drift protection
+    //
+    // The predicates `is_signed_integer_type` / `is_unsigned_integer_type` /
+    // `is_float_type` / `is_primitive_value_type` / `numeric_bit_width` and
+    // the `verum_common::layout::primitive_size_by_name` table must agree on
+    // their alias set: any name resolved by `primitive_size_by_name` to a
+    // numeric width MUST be classified by the matching predicate, and vice
+    // versa. Drift here would silently make two equivalent source spellings
+    // dispatch to different codegen paths or stack-budget rules.
+    // =========================================================================
+
+    /// The full canonical / legacy-uppercase / Rust-lowercase alias matrix
+    /// for numeric scalars. Each row is `(canonical, [aliases...])`.
+    /// Tests below iterate this matrix to pin invariants without relying
+    /// on the predicates' internal pattern shape.
+    const NUMERIC_ALIAS_MATRIX: &[(&str, u32, bool, bool, &[&str])] = &[
+        // (canonical, bit_width, is_signed, is_float, [other accepted names])
+        ("Int",     64,  true,  false, &["i64"]),
+        ("Int8",    8,   true,  false, &["I8", "i8"]),
+        ("Int16",   16,  true,  false, &["I16", "i16"]),
+        ("Int32",   32,  true,  false, &["I32", "i32"]),
+        ("Int64",   64,  true,  false, &["I64", "i64"]),
+        ("Int128",  128, true,  false, &["I128", "i128"]),
+        ("IntSize", 64,  true,  false, &["Isize", "isize"]),
+        ("UInt8",   8,   false, false, &["U8", "u8", "Byte"]),
+        ("UInt16",  16,  false, false, &["U16", "u16"]),
+        ("UInt32",  32,  false, false, &["U32", "u32"]),
+        ("UInt64",  64,  false, false, &["U64", "u64"]),
+        ("UInt128", 128, false, false, &["U128", "u128"]),
+        ("USize",   64,  false, false, &["UIntSize", "Usize", "usize"]),
+        ("Float",   64,  false, true,  &["f64"]),
+        ("Float32", 32,  false, true,  &["F32", "f32"]),
+        ("Float64", 64,  false, true,  &["F64", "f64"]),
+    ];
+
+    /// Every alias in the matrix is recognized by `is_primitive_value_type`,
+    /// `is_numeric_type`, and the appropriate signed/unsigned/float predicate.
+    #[test]
+    fn alias_matrix_classification_pinned() {
+        for (canon, _bits, is_signed, is_float, aliases) in NUMERIC_ALIAS_MATRIX {
+            let names = std::iter::once(*canon).chain(aliases.iter().copied());
+            for n in names {
+                assert!(
+                    type_names::is_primitive_value_type(n),
+                    "is_primitive_value_type({:?}) must be true (canonical {:?})",
+                    n, canon,
+                );
+                assert!(
+                    type_names::is_numeric_type(n),
+                    "is_numeric_type({:?}) must be true (canonical {:?})",
+                    n, canon,
+                );
+                if *is_float {
+                    assert!(
+                        type_names::is_float_type(n),
+                        "is_float_type({:?}) must be true (canonical {:?})",
+                        n, canon,
+                    );
+                    assert!(
+                        !type_names::is_integer_type(n),
+                        "is_integer_type({:?}) must be false for float canonical {:?}",
+                        n, canon,
+                    );
+                } else {
+                    assert!(
+                        type_names::is_integer_type(n),
+                        "is_integer_type({:?}) must be true (canonical {:?})",
+                        n, canon,
+                    );
+                    if *is_signed {
+                        assert!(
+                            type_names::is_signed_integer_type(n),
+                            "is_signed_integer_type({:?}) must be true",
+                            n,
+                        );
+                        assert!(
+                            !type_names::is_unsigned_integer_type(n),
+                            "is_unsigned_integer_type({:?}) must be false",
+                            n,
+                        );
+                    } else {
+                        assert!(
+                            type_names::is_unsigned_integer_type(n),
+                            "is_unsigned_integer_type({:?}) must be true",
+                            n,
+                        );
+                        assert!(
+                            !type_names::is_signed_integer_type(n),
+                            "is_signed_integer_type({:?}) must be false",
+                            n,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `numeric_bit_width` agrees with the matrix for every alias.
+    #[test]
+    fn alias_matrix_bit_width_pinned() {
+        for (canon, bits, _is_signed, _is_float, aliases) in NUMERIC_ALIAS_MATRIX {
+            let names = std::iter::once(*canon).chain(aliases.iter().copied());
+            for n in names {
+                assert_eq!(
+                    type_names::numeric_bit_width(n),
+                    Some(*bits),
+                    "numeric_bit_width({:?}) ≠ {} (canonical {:?})",
+                    n, bits, canon,
+                );
+            }
+        }
+    }
+
+    /// `layout::primitive_size_by_name` agrees on byte width
+    /// (8 × bit_width per primitive). Single drift contract: the
+    /// layout module is the size oracle, the type_names module is the
+    /// classification oracle — they MUST agree on the alias set and
+    /// on the byte/bit conversion.
+    #[test]
+    fn alias_matrix_layout_consistency_pinned() {
+        use crate::layout::primitive_size_by_name;
+        for (canon, bits, _is_signed, _is_float, aliases) in NUMERIC_ALIAS_MATRIX {
+            let names = std::iter::once(*canon).chain(aliases.iter().copied());
+            let expected_bytes = (*bits / 8) as u64;
+            for n in names {
+                assert_eq!(
+                    primitive_size_by_name(n),
+                    Some(expected_bytes),
+                    "layout::primitive_size_by_name({:?}) ≠ {} (canonical {:?})",
+                    n, expected_bytes, canon,
+                );
+            }
+        }
+    }
+
+    /// Bool / Char / Unit / () / Never are primitive value types but not
+    /// numeric — pin the boundary explicitly (a regression here would
+    /// silently make `is_numeric_type("Bool")` true and break
+    /// arithmetic-only optimisation passes).
+    #[test]
+    fn non_numeric_primitives_pinned() {
+        for n in ["Bool", "bool", "Char", "char", "Unit", "()", "Never"] {
+            assert!(
+                type_names::is_primitive_value_type(n),
+                "{:?} must classify as primitive value",
+                n,
+            );
+            assert!(
+                !type_names::is_numeric_type(n),
+                "{:?} must NOT classify as numeric",
+                n,
+            );
+            assert!(!type_names::is_integer_type(n));
+            assert!(!type_names::is_float_type(n));
+        }
+    }
+
+    /// Compound / unknown names: every predicate returns false.
+    #[test]
+    fn compound_and_unknown_names_rejected() {
+        for n in ["List", "Map", "Set", "Maybe", "Result", "MyType", "T", "Item"] {
+            assert!(!type_names::is_primitive_value_type(n));
+            assert!(!type_names::is_numeric_type(n));
+            assert!(!type_names::is_integer_type(n));
+            assert!(!type_names::is_float_type(n));
+            assert_eq!(type_names::numeric_bit_width(n), None);
+        }
+        // Text is value-typed but heap-backed — explicitly excluded
+        // from the primitive-value classification.
+        assert!(!type_names::is_primitive_value_type("Text"));
     }
 }
