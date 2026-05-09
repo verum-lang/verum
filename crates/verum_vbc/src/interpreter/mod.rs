@@ -535,13 +535,15 @@ impl Interpreter {
     /// `payload` = ordered field values; pass an empty slice for unit variants
     /// (e.g. `None`, `Less`, `Equal`, `Greater`).
     ///
-    /// The legacy `0x8000 + tag` TypeId sentinel matches the `MakeVariant`
+    /// The legacy synthetic TypeId sentinel matches the `MakeVariant`
     /// opcode path — downstream consumers recognise it as "tag is meaningful
-    /// but the parent sum-type id is not available".
+    /// but the parent sum-type id is not available". Composed via
+    /// `verum_common::layout::synthetic_variant_type_id` so the formula
+    /// is single-sourced with the canonical opcode handler.
     pub fn alloc_variant(&mut self, tag: u32, payload: &[Value]) -> InterpreterResult<Value> {
         let field_count = payload.len() as u32;
         let data_size = 8 + payload.len() * std::mem::size_of::<Value>();
-        let type_id = crate::types::TypeId(0x8000 + tag);
+        let type_id = crate::types::TypeId(verum_common::layout::synthetic_variant_type_id(tag));
         let obj = self.state.heap.alloc_with_init(type_id, data_size, |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {

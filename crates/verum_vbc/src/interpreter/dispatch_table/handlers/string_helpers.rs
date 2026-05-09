@@ -442,8 +442,13 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let type_id_a = unsafe { *(ptr_a as *const u32) };
         let type_id_b = unsafe { *(ptr_b as *const u32) };
 
-        // Variant types have type_id >= 0x8000 (0x8000 + tag)
-        if type_id_a >= 0x8000 && type_id_b >= 0x8000 {
+        // Variant types from `MakeVariant` carry a synthetic TypeId
+        // composed via `verum_common::layout::synthetic_variant_type_id`;
+        // the predicate below is the canonical sibling that recognises
+        // them — see `is_synthetic_variant_type_id` for the contract.
+        if verum_common::layout::is_synthetic_variant_type_id(type_id_a)
+            && verum_common::layout::is_synthetic_variant_type_id(type_id_b)
+        {
             // Both are variants - compare tags first
             let tag_a = unsafe { *(ptr_a.add(OBJECT_HEADER_SIZE) as *const u32) };
             let tag_b = unsafe { *(ptr_b.add(OBJECT_HEADER_SIZE) as *const u32) };

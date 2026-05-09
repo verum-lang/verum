@@ -325,6 +325,83 @@ pub const VARIANT_TAG_OFFSET: u64 = OBJECT_HEADER_SIZE; // 24
 pub const VARIANT_PAYLOAD_OFFSET: u64 = OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE; // 32
 
 // ============================================================================
+// Synthetic TypeId convention for legacy `MakeVariant`
+// ============================================================================
+//
+// The Verum bytecode supports two variant-construction opcodes:
+//
+//   * `MakeVariantTyped { type_id, tag, field_count }` — modern form;
+//     stores the parent sum-type's real TypeId in the heap header so
+//     the runtime can resolve variant names type-scoped (O(1) lookup
+//     in the type's variants list).
+//
+//   * `MakeVariant { tag, field_count }` — legacy fallback emitted
+//     when codegen lacks a real TypeId for the parent type (e.g. the
+//     archive descriptor hasn't been imported yet, or the type is
+//     anonymous). The runtime synthesises a sentinel TypeId of
+//     `SYNTHETIC_VARIANT_TYPE_ID_BASE + tag` so consumers can still
+//     scan for a matching variant via the global tag-scan fallback in
+//     `format_variant_for_print_depth`.
+//
+// Both producers (the runtime allocators that materialise variant
+// values) AND consumers (predicates that need to detect "this is a
+// variant heap object") must agree on the sentinel range. Pre-this
+// section, the formula `0x8000 + tag` and the `>= 0x8000` predicate
+// were duplicated across 5+ producer sites and 3+ consumer sites
+// in `verum_vbc::interpreter` and `verum_vbc::codegen`. Editing the
+// sentinel base required touching every duplicate; missed sites
+// silently degraded to incorrect classification.
+//
+// Centralising the convention here makes the contract drift-protected
+// by construction.
+
+/// Base of the synthetic-variant TypeId range.
+///
+/// Variants emitted by the legacy `MakeVariant` opcode (no parent
+/// type info available at codegen time) carry
+/// `synthetic_variant_type_id(tag) == SYNTHETIC_VARIANT_TYPE_ID_BASE + tag`
+/// in the heap header. Real (user / stdlib) TypeIds are bounded by
+/// `verum_vbc::types::TypeId::LAST_SEMANTIC = 1023` plus the
+/// `alloc_user_type_id` allocator's range below `0x8000`, so the
+/// `>= 0x8000` predicate cleanly partitions synthetic vs typed
+/// variants. The choice of `0x8000` (i.e. bit 15 set) makes the
+/// predicate a single bit-test in tight loops.
+pub const SYNTHETIC_VARIANT_TYPE_ID_BASE: u32 = 0x8000;
+
+/// Synthetic TypeId for record fallback in `wrap_in_variant`-style
+/// helpers when the type-name → real-id lookup misses.
+///
+/// Distinct from the variant base above so the consumer-side
+/// `is_synthetic_variant_type_id` predicate (`>= 0x8000`) doesn't
+/// false-positive on records. The gap `[0x8000..0x9000)` reserves
+/// 4096 distinct synthetic variant tags; `0x9000` is far enough above
+/// to avoid practical collision with high-tag variants.
+pub const SYNTHETIC_RECORD_TYPE_ID: u32 = 0x9000;
+
+/// Compose a synthetic variant TypeId from a `tag`.
+///
+/// Used by every runtime site that materialises a `MakeVariant` heap
+/// object — see `verum_vbc::interpreter::dispatch_table::handlers::
+/// pattern_matching::alloc_variant_into` for the canonical caller.
+#[inline]
+pub const fn synthetic_variant_type_id(tag: u32) -> u32 {
+    SYNTHETIC_VARIANT_TYPE_ID_BASE + tag
+}
+
+/// Returns `true` iff `type_id` is in the synthetic-variant range
+/// `[0x8000..)`.
+///
+/// Consumed by:
+///  * the `format_variant_for_print_depth` global tag-scan fallback,
+///  * the `deep_value_eq` cross-type variant check,
+///  * the variant-detection guard in `string_helpers` and
+///    `ffi_extended` runtime intercepts.
+#[inline]
+pub const fn is_synthetic_variant_type_id(type_id: u32) -> bool {
+    type_id >= SYNTHETIC_VARIANT_TYPE_ID_BASE
+}
+
+// ============================================================================
 // Heap configuration (allocator-wide invariants)
 // ============================================================================
 //
@@ -733,5 +810,59 @@ mod tests {
         assert_eq!(primitive_alignment_by_name("Unit"), Some(1));
         // Text aligns to pointer, not to its 24-byte total width.
         assert_eq!(primitive_alignment_by_name("Text"), Some(POINTER_SIZE));
+    }
+
+    // ========================================================================
+    // Synthetic-variant TypeId convention — drift contract
+    // ========================================================================
+    //
+    // These pin the contract that runtime allocators (producer side) and
+    // variant-detection predicates (consumer side) share. A drift here
+    // would silently mis-classify variant heap objects across the runtime.
+
+    /// Base sentinel matches the documented `0x8000` value.
+    #[test]
+    fn synthetic_variant_base_pinned() {
+        assert_eq!(SYNTHETIC_VARIANT_TYPE_ID_BASE, 0x8000);
+    }
+
+    /// Record-fallback sentinel above the synthetic-variant range so
+    /// `is_synthetic_variant_type_id` doesn't false-positive on records.
+    #[test]
+    fn synthetic_record_above_variant_range() {
+        assert_eq!(SYNTHETIC_RECORD_TYPE_ID, 0x9000);
+        assert!(SYNTHETIC_RECORD_TYPE_ID >= SYNTHETIC_VARIANT_TYPE_ID_BASE);
+    }
+
+    /// `synthetic_variant_type_id(tag)` matches the canonical formula.
+    #[test]
+    fn synthetic_variant_formula_canonical() {
+        assert_eq!(synthetic_variant_type_id(0), 0x8000);
+        assert_eq!(synthetic_variant_type_id(1), 0x8001);
+        assert_eq!(synthetic_variant_type_id(0xFF), 0x80FF);
+        // Round-trip: composing then classifying recovers the
+        // synthetic-variant property.
+        for tag in [0u32, 1, 7, 0x42, 0xFF, 0xFFF] {
+            assert!(is_synthetic_variant_type_id(synthetic_variant_type_id(tag)));
+        }
+    }
+
+    /// `is_synthetic_variant_type_id` partitions the TypeId space at
+    /// `0x8000`. Real user/stdlib TypeIds sit below; everything at or
+    /// above is synthetic.
+    #[test]
+    fn synthetic_variant_predicate_partitions() {
+        // Real TypeId range (well below 0x8000).
+        assert!(!is_synthetic_variant_type_id(0));
+        assert!(!is_synthetic_variant_type_id(17));   // FIRST_USER
+        assert!(!is_synthetic_variant_type_id(515));  // MAYBE
+        assert!(!is_synthetic_variant_type_id(516));  // RESULT
+        assert!(!is_synthetic_variant_type_id(1023)); // LAST_SEMANTIC
+        assert!(!is_synthetic_variant_type_id(0x7FFF));
+        // Synthetic range starts at 0x8000.
+        assert!(is_synthetic_variant_type_id(0x8000));
+        assert!(is_synthetic_variant_type_id(0x8001));
+        assert!(is_synthetic_variant_type_id(SYNTHETIC_RECORD_TYPE_ID));
+        assert!(is_synthetic_variant_type_id(u32::MAX));
     }
 }

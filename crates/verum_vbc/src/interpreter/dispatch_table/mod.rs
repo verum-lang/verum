@@ -1235,8 +1235,13 @@ pub(crate) fn deep_value_eq(va: &Value, vb: &Value, state: &InterpreterState) ->
         let type_id_a = unsafe { *(ptr_a as *const u32) };
         let type_id_b = unsafe { *(ptr_b as *const u32) };
 
-        // Variant comparison
-        if type_id_a >= 0x8000 && type_id_b >= 0x8000 {
+        // Variant comparison — both pointers must be in the synthetic
+        // variant TypeId range (`MakeVariant` opcode emission).  See
+        // `verum_common::layout::is_synthetic_variant_type_id` for the
+        // canonical predicate.
+        if verum_common::layout::is_synthetic_variant_type_id(type_id_a)
+            && verum_common::layout::is_synthetic_variant_type_id(type_id_b)
+        {
             let tag_a = unsafe { *(ptr_a.add(OBJECT_HEADER_SIZE) as *const u32) };
             let tag_b = unsafe { *(ptr_b.add(OBJECT_HEADER_SIZE) as *const u32) };
 
