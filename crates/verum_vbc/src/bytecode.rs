@@ -4673,7 +4673,6 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 // Sub_op 0xFF is now handled by the register-based arm
                 // below (TensorSubOpcode::BatchNorm is listed there
                 // with `param_count = 6` = dst + 5 args).
-                Some(TensorSubOpcode::BatchNorm) if false => unreachable!(),
 
                 // Try TensorExtSubOpcode for overflow operations
                 None => {
