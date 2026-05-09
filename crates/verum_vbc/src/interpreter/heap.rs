@@ -109,9 +109,21 @@ bitflags! {
 
 /// Object header placed before object data.
 ///
-
-/// Layout matches CBGR requirements with generation, epoch, and capabilities.
-#[repr(C)]
+/// Layout matches CBGR requirements with generation, epoch, and
+/// capabilities.  The explicit `align(8)` is load-bearing: the
+/// header is followed by 8-byte `Value` slots in CBGR-tracked
+/// objects, and the `header_struct_size_matches_canonical`
+/// drift-contract test demands
+/// `align_of::<ObjectHeader>() == verum_common::layout::POINTER_SIZE`
+/// (8) so that field-offset GEPs emitted by
+/// `verum_codegen::llvm::runtime::RuntimeLowering` are
+/// pointer-aligned.  Without `align(8)` the struct's natural
+/// alignment is 4 (max of u32 fields), and every per-object
+/// field-access GEP silently bypasses an 8-byte alignment
+/// invariant assumed by Tier-1 codegen.  The `_padding: u32`
+/// field below already brings the size to 24 (a multiple of 8),
+/// so adding `align(8)` does not grow the struct.
+#[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
 pub struct ObjectHeader {
     /// Type ID for this object.
@@ -136,7 +148,9 @@ pub struct ObjectHeader {
     /// CBGR capabilities (16-bit) - read/write/delegate permissions.
     pub capabilities: u16,
 
-    /// Padding for 8-byte alignment.
+    /// Padding to round the struct to 24 bytes (a `POINTER_SIZE`
+    /// multiple).  Required by the cross-tier drift contract
+    /// against `verum_common::layout::OBJECT_HEADER_SIZE`.
     _padding: u32,
 }
 
