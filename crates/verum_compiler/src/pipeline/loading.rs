@@ -242,12 +242,19 @@ impl<'s> CompilationPipeline<'s> {
 
                 match stdlib_candidates.into_iter().next() {
                     Some((stdlib, workspace)) => {
+                        eprintln!("[load_stdlib] filesystem path found: {:?}", stdlib);
                         debug!("Core stdlib resolved: {:?}", stdlib);
                         (stdlib, workspace)
                     }
                     None => {
-                        debug!("No core stdlib found on filesystem");
-                        return Ok(());
+                        // No filesystem stdlib found (external project, installed binary).
+                        // Fall back to the embedded stdlib archive that is baked into the
+                        // binary at build time.  This is the canonical path for external
+                        // cogs (e.g. `verum check` run from the registry directory where
+                        // there is no `core/` alongside the project).
+                        eprintln!("[load_stdlib] no filesystem stdlib — using embedded archive");
+                        debug!("No core stdlib on filesystem — populating registry from embedded archive");
+                        return self.load_stdlib_from_embedded();
                     }
                 }
             }
@@ -1150,6 +1157,183 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         export_table
+    }
+
+    /// Populate the module registry from the embedded CoreMetadata.
+    ///
+    /// Called when no filesystem stdlib directory is found (external-project
+    /// invocation where the binary is installed but `core/` is not adjacent).
+    ///
+    /// Instead of parsing all 2500+ .vr source files (expensive, OOM-prone),
+    /// we derive module paths and export tables directly from the `CoreMetadata`
+    /// that was already decoded and embedded in the binary. Each unique
+    /// `type.module_path` / `function.module_path` becomes a `ModuleInfo` entry
+    /// whose exports are the corresponding types/functions. This is O(n) over
+    /// the metadata records (~2 ms) vs O(n) over source parses (~60-120 min
+    /// on the full 2540-file stdlib).
+    fn load_stdlib_from_embedded(&mut self) -> Result<()> {
+        use verum_ast::{decl::Visibility, Span};
+        use verum_modules::{ExportKind, ExportTable, ExportedItem};
+
+        let start = std::time::Instant::now();
+
+        let metadata = match self.stdlib_metadata.get() {
+            Some(m) => m.clone(),
+            None => {
+                // No metadata either — nothing we can do.
+                debug!("No CoreMetadata available for embedded stdlib registry build");
+                return Ok(());
+            }
+        };
+
+        // Collect the set of all unique module paths declared in the metadata.
+        // We group types, protocols, and functions by their module_path.
+        //
+        // Shard: module_path → (types, protocols, functions)
+        let mut module_map: std::collections::BTreeMap<
+            String,                         // module_path (sorted for determinism)
+            (Vec<String>, Vec<String>, Vec<String>), // (types, protocols, functions)
+        > = std::collections::BTreeMap::new();
+
+        for (name, td) in metadata.types.iter() {
+            let mp = td.module_path.as_str().to_string();
+            if !mp.is_empty() {
+                let shard = module_map.entry(mp).or_default();
+                shard.0.push(name.as_str().to_string());
+                // Also export variant constructors so `Ok`, `Some`, `None`, etc.
+                // are in scope after `mount core.base.*`.
+                if let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } =
+                    &td.kind
+                {
+                    for case in cases {
+                        shard.0.push(case.name.as_str().to_string());
+                    }
+                }
+            }
+        }
+        for (name, pd) in metadata.protocols.iter() {
+            let mp = pd.module_path.as_str().to_string();
+            if !mp.is_empty() {
+                module_map.entry(mp).or_default().1.push(name.as_str().to_string());
+            }
+        }
+        for (name, fd) in metadata.functions.iter() {
+            let mp = fd.module_path.as_str().to_string();
+            if !mp.is_empty() {
+                module_map.entry(mp).or_default().2.push(name.as_str().to_string());
+            }
+        }
+
+        // Also register every file path from the embedded archive as a module,
+        // even if it has no types (mod.vr namespace files, empty modules, etc.).
+        if let Some(archive) = crate::embedded_stdlib::get_embedded_stdlib() {
+            for rel_path in archive.file_paths().filter(|p| p.ends_with(".vr")) {
+                let without_ext = rel_path.trim_end_matches(".vr");
+                let dotted = without_ext.replace('/', ".");
+                let mp: String = if dotted.ends_with(".mod") {
+                    format!("core.{}", dotted.trim_end_matches(".mod"))
+                } else {
+                    format!("core.{}", dotted)
+                };
+                module_map.entry(mp).or_default();
+            }
+        }
+
+        let mut registered = 0usize;
+        let module_registry = self.session.module_registry();
+
+        for (mp_str, (types, protocols, fns)) in &module_map {
+            let module_path_text = Text::from(mp_str.as_str());
+
+            // Skip if already in our modules map (populated by a previous call).
+            if self.modules.contains_key(&module_path_text) {
+                continue;
+            }
+
+            let module_path = ModulePath::from_str(mp_str.as_str());
+            let module_id = module_registry.read().allocate_id();
+            let file_id = FileId::new(0);
+
+            // Build a synthetic empty Module AST — the typechecker uses
+            // CoreMetadata (already loaded) for actual type resolution; the
+            // AST is only needed by the module registry for export tables.
+            let synthetic_module = verum_ast::Module {
+                items: verum_common::List::new(),
+                attributes: verum_common::List::new(),
+                file_id,
+                span: Span::dummy(),
+            };
+
+            // Build exports table from metadata records.
+            let mut export_table = ExportTable::new();
+            let dummy_span = Span::dummy();
+            for type_name in types {
+                let _ = export_table.add_export(ExportedItem::new(
+                    type_name.as_str(),
+                    ExportKind::Type,
+                    Visibility::Public,
+                    module_id,
+                    dummy_span,
+                ));
+            }
+            for proto_name in protocols {
+                let _ = export_table.add_export(ExportedItem::new(
+                    proto_name.as_str(),
+                    ExportKind::Protocol,
+                    Visibility::Public,
+                    module_id,
+                    dummy_span,
+                ));
+            }
+            for fn_name in fns {
+                // Strip the module path prefix from qualified function names
+                // (e.g., "core.base.maybe.Maybe::new" → "new").
+                let bare = fn_name
+                    .rsplit("::")
+                    .next()
+                    .or_else(|| fn_name.rsplit('.').next())
+                    .unwrap_or(fn_name.as_str());
+                let _ = export_table.add_export(ExportedItem::new(
+                    bare,
+                    ExportKind::Function,
+                    Visibility::Public,
+                    module_id,
+                    dummy_span,
+                ));
+            }
+
+            let mut module_info = ModuleInfo::new(
+                module_id,
+                module_path.clone(),
+                synthetic_module.clone(),
+                file_id,
+                Text::from(""),
+            );
+            module_info.exports = export_table;
+
+            module_registry.write().register(module_info);
+            self.modules.insert(module_path_text, Arc::new(synthetic_module));
+            registered += 1;
+        }
+
+        // Warm the in-memory registry cache so subsequent module-level
+        // TypeChecker instances in check_project skip this work.
+        {
+            let cache = global_stdlib_registry_cache();
+            let mut guard = cache.write().unwrap_or_else(|p| p.into_inner());
+            if guard.is_none() {
+                let reg = module_registry.read();
+                *guard = Some(reg.deep_clone());
+            }
+        }
+
+        let elapsed = start.elapsed();
+        info!(
+            "Built stdlib module registry from CoreMetadata: {} modules in {:.2}ms",
+            registered,
+            elapsed.as_secs_f64() * 1000.0
+        );
+        Ok(())
     }
 
     /// Discover all .vr files in the stdlib directory.
