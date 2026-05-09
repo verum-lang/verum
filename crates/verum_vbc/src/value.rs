@@ -1518,6 +1518,84 @@ mod tests {
         );
     }
 
+    /// CBGR per-field offset drift contract.
+    ///
+    /// Codegen IR (`verum_codegen::llvm::platform_ir::emit_cbgr_ir` /
+    /// `mlir::dialect::cbgr`) loads `generation` / `epoch_and_caps` from
+    /// hardcoded byte offsets into the runtime struct. Those offsets are
+    /// now declared as named constants in `verum_common::layout`; this
+    /// test verifies that the actual Rust `#[repr(C)]` lowering puts
+    /// each field at the offset the codegen expects. Reordering a field
+    /// in `ThinRef` / `FatRef` without updating the layout module would
+    /// be silent miscompilation otherwise.
+    #[test]
+    fn cbgr_runtime_field_offsets_match_canonical() {
+        use verum_common::layout::{
+            FAT_REF_METADATA_OFFSET, FAT_REF_OFFSET_FROM_BASE_OFFSET, FAT_REF_RESERVED_OFFSET,
+            THIN_REF_EPOCH_CAPS_OFFSET, THIN_REF_GENERATION_OFFSET, THIN_REF_PTR_OFFSET,
+        };
+
+        // ThinRef field offsets — read by `verum_cbgr_check` IR.
+        assert_eq!(
+            std::mem::offset_of!(ThinRef, ptr) as u64,
+            THIN_REF_PTR_OFFSET,
+            "ThinRef::ptr offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(ThinRef, generation) as u64,
+            THIN_REF_GENERATION_OFFSET,
+            "ThinRef::generation offset drifted — check verum_cbgr_check IR emission",
+        );
+        assert_eq!(
+            std::mem::offset_of!(ThinRef, epoch_caps) as u64,
+            THIN_REF_EPOCH_CAPS_OFFSET,
+            "ThinRef::epoch_caps offset drifted — check verum_cbgr_check IR emission",
+        );
+
+        // FatRef extension fields — read by `verum_cbgr_check_fat` IR.
+        // Note: FatRef shares the first 3 fields with ThinRef (verified
+        // via the embedded `thin: ThinRef` field); checking the
+        // extension fields below covers the remaining 16 bytes.
+        assert_eq!(
+            std::mem::offset_of!(FatRef, metadata) as u64,
+            FAT_REF_METADATA_OFFSET,
+            "FatRef::metadata offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(FatRef, offset) as u64,
+            FAT_REF_OFFSET_FROM_BASE_OFFSET,
+            "FatRef::offset (offset_from_base) offset drifted",
+        );
+        assert_eq!(
+            std::mem::offset_of!(FatRef, reserved) as u64,
+            FAT_REF_RESERVED_OFFSET,
+            "FatRef::reserved offset drifted",
+        );
+    }
+
+    /// CBGR bit-packing matches the layout-module declarations.
+    ///
+    /// The runtime `ThinRef::epoch()` / `ThinRef::capabilities()` accessors
+    /// shift by `EPOCH_BITS` / `CAPS_BITS` and mask by `CAPS_MASK_U32`.
+    /// Codegen IR emits the same shifts/masks. Pinning the runtime
+    /// behaviour against the named constants closes the loop.
+    #[test]
+    fn cbgr_runtime_bit_pack_matches_canonical() {
+        use verum_common::layout::{CAPS_BITS, CAPS_MASK_U32, EPOCH_BITS};
+        let r = ThinRef::new(std::ptr::null_mut(), 0, 0xABCD, Capabilities(0xBEEF));
+        assert_eq!(r.epoch(), 0xABCD, "epoch round-trip through pack/unpack");
+        assert_eq!(
+            r.capabilities().0, 0xBEEF,
+            "caps round-trip through pack/unpack",
+        );
+        // Pinned widths
+        assert_eq!(EPOCH_BITS, 16);
+        assert_eq!(CAPS_BITS, 16);
+        // Mask covers exactly the lower half.
+        assert_eq!(r.epoch_caps & CAPS_MASK_U32, 0xBEEF);
+        assert_eq!(r.epoch_caps >> CAPS_BITS, 0xABCD);
+    }
+
     #[test]
     fn test_float_values() {
         let v = Value::from_f64(3.14);

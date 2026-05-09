@@ -96,6 +96,103 @@ pub const REF_TIER2_SIZE: u64 = POINTER_SIZE;
 pub const SLICE_FAT_PTR_SIZE: u64 = POINTER_SIZE * 2;
 
 // ============================================================================
+// CBGR field offsets (per `core/mem/{thin,fat}_ref.vr` declaration order)
+// ============================================================================
+//
+// These offsets are read by codegen (LLVM `verum_cbgr_check*` IR
+// emission, MLIR equivalents) when GEPing into a runtime `ThinRef` /
+// `FatRef` pointer to load the generation/epoch/capabilities for the
+// dereference safety check. They MUST agree with the Rust struct
+// layout in `verum_vbc::value::{ThinRef, FatRef}` and the canonical
+// declaration in `core/mem/`. The drift-protection test in
+// `verum_vbc::value::tests::cbgr_runtime_field_offsets_match_canonical`
+// uses `std::mem::offset_of!` to pin the contract at unit-test time.
+
+/// ThinRef field offsets (16 bytes total).
+///
+/// Layout (`core/mem/thin_ref.vr`):
+/// ```text
+///     ptr: *T            @ 0
+///     generation: u32    @ 8
+///     epoch_and_caps: u32@ 12
+/// ```
+
+/// Offset of the `ptr` field (always 0 — first field).
+pub const THIN_REF_PTR_OFFSET: u64 = 0;
+
+/// Offset of the 32-bit `generation` field. Read by `verum_cbgr_check`
+/// during dereference validation.
+pub const THIN_REF_GENERATION_OFFSET: u64 = POINTER_SIZE; // 8
+
+/// Offset of the packed `epoch_and_caps` u32 field
+/// (`epoch:hi16 | caps:lo16`).
+pub const THIN_REF_EPOCH_CAPS_OFFSET: u64 = POINTER_SIZE + 4; // 12
+
+/// FatRef shares its first three fields with ThinRef (same offsets);
+/// the additional fields below extend it to 32 bytes.
+///
+/// Layout (`core/mem/fat_ref.vr`):
+/// ```text
+///     ptr               @  0
+///     generation        @  8
+///     epoch_and_caps    @ 12
+///     metadata: i64     @ 16  (slice len / vtable pointer)
+///     offset_from_base  @ 24  (subslice view offset)
+///     reserved          @ 28  (padding for future extensions)
+/// ```
+
+/// Offset of the 64-bit `metadata` field (FatRef-only).
+pub const FAT_REF_METADATA_OFFSET: u64 = THIN_REF_SIZE; // 16
+
+/// Offset of the 32-bit `offset_from_base` field (FatRef-only).
+pub const FAT_REF_OFFSET_FROM_BASE_OFFSET: u64 = FAT_REF_METADATA_OFFSET + 8; // 24
+
+/// Offset of the 32-bit `reserved` padding field (FatRef-only).
+pub const FAT_REF_RESERVED_OFFSET: u64 = FAT_REF_OFFSET_FROM_BASE_OFFSET + 4; // 28
+
+// ============================================================================
+// CBGR bit-packing constants (epoch_and_caps u32)
+// ============================================================================
+//
+// Both ThinRef and FatRef pack a 16-bit `epoch` counter and a 16-bit
+// `capabilities` mask into a single 32-bit `epoch_and_caps` field:
+// `epoch` occupies the upper 16 bits, `caps` the lower 16. Validation
+// IR shifts/masks through this field; centralising the widths and mask
+// here keeps the wire format stable across LLVM, MLIR, and runtime.
+
+/// Bit width of the epoch counter (upper half of `epoch_and_caps`).
+pub const EPOCH_BITS: u32 = 16;
+
+/// Bit width of the capabilities mask (lower half of `epoch_and_caps`).
+pub const CAPS_BITS: u32 = 16;
+
+/// Total bit width of the packed `epoch_and_caps` u32.
+pub const EPOCH_CAPS_BITS: u32 = EPOCH_BITS + CAPS_BITS; // 32
+
+/// Mask isolating the capabilities portion of `epoch_and_caps`.
+pub const CAPS_MASK_U32: u32 = (1u32 << CAPS_BITS) - 1; // 0xFFFF
+
+/// Mask isolating the epoch portion of `epoch_and_caps` after right-
+/// shifting by `CAPS_BITS`.
+pub const EPOCH_MASK_U32: u32 = (1u32 << EPOCH_BITS) - 1; // 0xFFFF
+
+// ============================================================================
+// CBGR allocation header
+// ============================================================================
+
+/// Size of the CBGR per-allocation header that precedes every heap
+/// object on the data side.
+///
+/// **Authoritative source:** `core/mem/header.vr` declares
+/// `HEADER_SIZE: Int = 32`. The runtime mirror is
+/// `verum_common::cbgr::AllocationHeader::SIZE` (also 32). The header
+/// stores `{ generation: u32, epoch_and_caps: u32, type_id: u32,
+/// size: u32, ... }` — codegen back-pointer arithmetic
+/// (`user_ptr - ALLOCATION_HEADER_SIZE`) recovers the header from a
+/// data pointer for runtime CBGR validation.
+pub const ALLOCATION_HEADER_SIZE: u64 = 32;
+
+// ============================================================================
 // Built-in scalar layouts
 // ============================================================================
 
@@ -216,6 +313,40 @@ mod tests {
         assert_eq!(REF_TIER2_SIZE, POINTER_SIZE);
         assert_eq!(SLICE_FAT_PTR_SIZE, 16);
         assert_eq!(TEXT_SIZE, 24);
+    }
+
+    /// CBGR field offsets are derived from POINTER_SIZE / THIN_REF_SIZE
+    /// and must remain monotonic and non-overlapping for both ref shapes.
+    #[test]
+    fn cbgr_field_offsets_pinned() {
+        // ThinRef: ptr(0..8) + generation(8..12) + epoch_caps(12..16)
+        assert_eq!(THIN_REF_PTR_OFFSET, 0);
+        assert_eq!(THIN_REF_GENERATION_OFFSET, 8);
+        assert_eq!(THIN_REF_EPOCH_CAPS_OFFSET, 12);
+        // First three fields fit exactly into THIN_REF_SIZE.
+        assert_eq!(THIN_REF_EPOCH_CAPS_OFFSET + 4, THIN_REF_SIZE);
+
+        // FatRef extension: metadata(16..24) + offset_from_base(24..28) + reserved(28..32)
+        assert_eq!(FAT_REF_METADATA_OFFSET, 16);
+        assert_eq!(FAT_REF_OFFSET_FROM_BASE_OFFSET, 24);
+        assert_eq!(FAT_REF_RESERVED_OFFSET, 28);
+        // Last extra field fits exactly into FAT_REF_SIZE.
+        assert_eq!(FAT_REF_RESERVED_OFFSET + 4, FAT_REF_SIZE);
+    }
+
+    /// Bit-packing constants stay self-consistent: caps + epoch widths
+    /// fill the u32 exactly, masks isolate only their respective halves.
+    #[test]
+    fn cbgr_bit_pack_constants_consistent() {
+        assert_eq!(EPOCH_BITS + CAPS_BITS, EPOCH_CAPS_BITS);
+        assert_eq!(EPOCH_CAPS_BITS, 32, "packed field is u32");
+        assert_eq!(CAPS_MASK_U32, 0xFFFF);
+        assert_eq!(EPOCH_MASK_U32, 0xFFFF);
+        // Masks cover exactly half the packed u32.
+        assert_eq!(CAPS_MASK_U32.count_ones(), CAPS_BITS);
+        assert_eq!(EPOCH_MASK_U32.count_ones(), EPOCH_BITS);
+        // Caps mask doesn't overlap epoch bits.
+        assert_eq!(CAPS_MASK_U32 & (EPOCH_MASK_U32 << CAPS_BITS), 0);
     }
 
     /// All primitive scalars resolve to non-None sizes via the
