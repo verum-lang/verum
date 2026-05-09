@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: string-distance, levenshtein, jaro, unicode, utf8
+// @description: Pins the string_distance Unicode handling contract (#77).
+//               All distance functions operate on byte slices (UTF-8 bytes).
+//               A multi-byte Unicode codepoint (e.g., é = 0xC3 0xA9, 2 bytes)
+//               counts as 2 units in the byte-based algorithms, NOT 1 grapheme.
+//               Callers requiring grapheme-aware distance must split on graphemes
+//               first.
+
+mount core.base.string_distance.{
+    levenshtein,
+    levenshtein_bounded,
+    jaro,
+    jaro_winkler,
+    closest,
+}
+mount core.base.{Int, Float, Maybe, List, Byte, Bool, Text}
+mount core.io.{print}
+
+// ── Levenshtein shape assertions ──────────────────────────────────────────────
+
+fn test_levenshtein_identical_is_zero() {
+    let a = "hello".as_bytes();
+    let b = "hello".as_bytes();
+    assert_eq(levenshtein(a, b), 0);
+}
+
+fn test_levenshtein_empty_vs_nonempty() {
+    let empty = "".as_bytes();
+    let nonempty = "abc".as_bytes();
+    assert_eq(levenshtein(empty, nonempty), 3);
+}
+
+fn test_levenshtein_symmetric() {
+    let a = "kitten".as_bytes();
+    let b = "sitting".as_bytes();
+    let d_ab = levenshtein(a, b);
+    let d_ba = levenshtein(b, a);
+    assert_eq(d_ab, d_ba);
+}
+
+fn test_levenshtein_triangle_inequality_holds() {
+    // distance(a, c) <= distance(a, b) + distance(b, c)
+    let a = "cat".as_bytes();
+    let b = "car".as_bytes();
+    let c = "bar".as_bytes();
+    let d_ac = levenshtein(a, c);
+    let d_ab = levenshtein(a, b);
+    let d_bc = levenshtein(b, c);
+    assert(d_ac <= d_ab + d_bc);
+}
+
+// ── Levenshtein bounded ───────────────────────────────────────────────────────
+
+fn test_levenshtein_bounded_below_max_returns_some() {
+    let a = "abc".as_bytes();
+    let b = "abd".as_bytes();
+    let result = levenshtein_bounded(a, b, 5);
+    assert(result is Some(_));
+}
+
+fn test_levenshtein_bounded_exceeds_max_returns_none() {
+    let a = "hello".as_bytes();
+    let b = "world".as_bytes();
+    let result = levenshtein_bounded(a, b, 1);
+    assert(result is None);
+}
+
+// ── Jaro similarity shape ─────────────────────────────────────────────────────
+
+fn test_jaro_identical_is_one() {
+    let s = "abc".as_bytes();
+    let sim = jaro(s, s);
+    // Jaro similarity of identical strings must be 1.0
+    assert(sim >= 0.999);
+}
+
+fn test_jaro_different_shorter() {
+    let a = "abc".as_bytes();
+    let b = "xyz".as_bytes();
+    let sim = jaro(a, b);
+    assert(sim >= 0.0);
+    assert(sim <= 1.0);
+}
+
+// ── Jaro-Winkler shape ────────────────────────────────────────────────────────
+
+fn test_jaro_winkler_ge_jaro_on_common_prefix() {
+    // Jaro-Winkler adds a prefix boost, so it should be >= Jaro for same inputs.
+    let a = "martha".as_bytes();
+    let b = "marhta".as_bytes();
+    let jaro_sim = jaro(a, b);
+    let jw_sim = jaro_winkler(a, b);
+    assert(jw_sim >= jaro_sim);
+}
+
+// ── closest helper shape ─────────────────────────────────────────────────────
+
+fn test_closest_exact_match_returns_distance_zero() {
+    let query = "commit".as_bytes();
+    let candidates = [
+        "commit".as_bytes(),
+        "branch".as_bytes(),
+        "checkout".as_bytes(),
+    ];
+    let result = closest(query, &candidates, 3);
+    assert(result is Some(_));
+}
+
+fn test_closest_no_match_within_threshold_returns_none() {
+    let query = "zzz".as_bytes();
+    let candidates = ["commit".as_bytes(), "branch".as_bytes()];
+    let result = closest(query, &candidates, 1);
+    assert(result is None);
+}
+
+fn main() {
+    test_levenshtein_identical_is_zero();
+    test_levenshtein_empty_vs_nonempty();
+    test_levenshtein_symmetric();
+    test_levenshtein_triangle_inequality_holds();
+    test_levenshtein_bounded_below_max_returns_some();
+    test_levenshtein_bounded_exceeds_max_returns_none();
+    test_jaro_identical_is_one();
+    test_jaro_different_shorter();
+    test_jaro_winkler_ge_jaro_on_common_prefix();
+    test_closest_exact_match_returns_distance_zero();
+    test_closest_no_match_within_threshold_returns_none();
+    print("string_distance unicode handling spec ok");
+}

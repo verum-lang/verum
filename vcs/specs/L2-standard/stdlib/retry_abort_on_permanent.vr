@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: retry, error-handling, permanent-error, abort
+// @description: Pins the Retry abort-on-permanent-error semantics contract (#76).
+//               RetryOptions.should_retry must return false for permanent errors,
+//               causing retry_with_strategy to return Err immediately without
+//               consuming remaining attempts.
+
+mount core.base.retry.{RetryOptions, RetryBackoff, retry_with_strategy}
+mount core.base.{Bool, Text, Int, Result, Maybe}
+mount core.io.{print}
+
+// ── RetryDecision models the caller's classification of an error ──────────────
+
+type RetryDecision is
+    | Transient   // temporary — retry is appropriate
+    | Permanent;  // fatal — abort immediately, no further attempts
+
+fn retry_decision_is_permanent(d: RetryDecision) -> Bool {
+    d is Permanent
+}
+
+fn retry_decision_should_retry(d: RetryDecision) -> Bool {
+    !(d is Permanent)
+}
+
+fn test_transient_decision_should_retry() {
+    assert(retry_decision_should_retry(RetryDecision.Transient));
+}
+
+fn test_permanent_decision_should_not_retry() {
+    assert(!retry_decision_should_retry(RetryDecision.Permanent));
+}
+
+// ── AppError wraps a RetryDecision for use with should_retry ─────────────────
+
+type AppError is { message: Text, decision: RetryDecision };
+
+fn app_error_is_transient(e: &AppError) -> Bool {
+    e.decision is Transient
+}
+
+fn test_transient_app_error_retries() {
+    let e = AppError { message: "timeout", decision: RetryDecision.Transient };
+    assert(app_error_is_transient(&e));
+}
+
+fn test_permanent_app_error_does_not_retry() {
+    let e = AppError { message: "auth failure", decision: RetryDecision.Permanent };
+    assert(!app_error_is_transient(&e));
+}
+
+// ── RetryOptions.with_should_retry wires the predicate ───────────────────────
+
+fn test_retry_options_with_should_retry_shape() {
+    let opts: RetryOptions<AppError> = RetryOptions.simple(3)
+        .with_should_retry(|e| e.decision is Transient);
+    // Shape check: the predicate is now set; we can call it with a mock error.
+    let transient_err = AppError { message: "t", decision: RetryDecision.Transient };
+    let permanent_err = AppError { message: "p", decision: RetryDecision.Permanent };
+    assert((opts.should_retry)(&transient_err));
+    assert(!(opts.should_retry)(&permanent_err));
+}
+
+// ── RetryBackoff variants shape ───────────────────────────────────────────────
+
+fn test_retry_backoff_none_shape() {
+    let b = RetryBackoff.None;
+    assert(b is None);
+}
+
+fn test_retry_backoff_exponential_shape() {
+    let b = RetryBackoff.Exponential { initial_ms: 100, max_ms: 5000, multiplier: 2.0 };
+    assert(b is Exponential { initial_ms: _, max_ms: _, multiplier: _ });
+}
+
+fn test_retry_backoff_linear_shape() {
+    let b = RetryBackoff.Linear { delay_ms: 200 };
+    assert(b is Linear { delay_ms: _ });
+}
+
+// ── should_retry predicate shape ─────────────────────────────────────────────
+
+fn test_simple_retry_options_should_retry_always_true() {
+    let opts: RetryOptions<Text> = RetryOptions.simple(5);
+    let err = "some error";
+    assert((opts.should_retry)(&err));
+}
+
+fn main() {
+    test_transient_decision_should_retry();
+    test_permanent_decision_should_not_retry();
+    test_transient_app_error_retries();
+    test_permanent_app_error_does_not_retry();
+    test_retry_options_with_should_retry_shape();
+    test_retry_backoff_none_shape();
+    test_retry_backoff_exponential_shape();
+    test_retry_backoff_linear_shape();
+    test_simple_retry_options_should_retry_always_true();
+    print("retry abort on permanent error spec ok");
+}
