@@ -260,8 +260,12 @@ pub mod sync_flags {
 }
 
 impl TensorData {
-    /// Maximum single tensor allocation size (1 GB).
-    const MAX_TENSOR_ALLOC: usize = 1024 * 1024 * 1024;
+    /// Maximum single tensor allocation size — same 1 GiB cap as
+    /// every other heap allocator in the toolchain
+    /// (`verum_vbc::interpreter::heap::MAX_ALLOCATION_SIZE`,
+    /// `cbgr_heap`, the FFI raw-allocator). Single source of truth
+    /// is `verum_common::layout::MAX_ALLOCATION_SIZE`.
+    const MAX_TENSOR_ALLOC: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
 
     /// Allocates new tensor data with the given capacity.
     pub fn alloc(capacity: usize, align: usize, device: DeviceId) -> Option<NonNull<Self>> {

@@ -1632,7 +1632,7 @@ pub(in super::super) fn handle_new_map(
     let _capacity_hint = read_varint(state)?; // consume capacity varint from bytecode
 
     // Map header: [count, capacity, entries_ptr]
-    const DEFAULT_CAP: usize = 16;
+    const DEFAULT_CAP: usize = verum_common::layout::DEFAULT_COLLECTION_CAPACITY as usize;
 
     let obj = state
         .heap
@@ -1950,7 +1950,7 @@ pub(in super::super) fn handle_new_set(
     let _capacity_hint = read_varint(state)?; // consume capacity varint from bytecode
 
     // Set header: [count, capacity, entries_ptr]
-    const DEFAULT_CAP: usize = 16;
+    const DEFAULT_CAP: usize = verum_common::layout::DEFAULT_COLLECTION_CAPACITY as usize;
 
     let obj = state
         .heap
@@ -2245,7 +2245,7 @@ pub(in super::super) fn handle_new_deque(
     let dst = read_reg(state)?;
     let _capacity_hint = read_varint(state)?;
 
-    const DEFAULT_CAP: usize = 16;
+    const DEFAULT_CAP: usize = verum_common::layout::DEFAULT_COLLECTION_CAPACITY as usize;
 
     // Deque header: [data(0), head(1), len(2), cap(3)]
     // Layout matches stdlib: type Deque<T> is { data, head, len, cap }
