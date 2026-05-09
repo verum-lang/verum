@@ -754,7 +754,8 @@ pub use intrinsic_dispatch::{
 pub mod soundness;
 pub use soundness::{
     EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleCategory, RuleSpec, SoundnessBackend,
-    SoundnessExporter, canonical_rules, coq::CoqBackend, lean::LeanBackend,
+    SoundnessExporter, canonical_rules, coq::CoqBackend, isabelle::IsabelleBackend,
+    lean::LeanBackend,
 };
 
 /// Differential-kernel testing harness (#159) — Rust ↔ Verum kernel
