@@ -148,14 +148,14 @@ fn main() {
     // Phase 0: Register all type declarations FIRST (this registers affine types!)
     for item in &module.items {
         if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-            let _ = checker.register_type_declaration(type_decl);
+            let _ = checker.register_type_declaration(&type_decl);
         }
     }
 
     // Phase 1: Register function signatures
     for item in &module.items {
         if let verum_ast::ItemKind::Function(func) = &item.kind {
-            let _ = checker.register_function_signature(func);
+            let _ = checker.register_function_signature(&func);
         }
     }
 

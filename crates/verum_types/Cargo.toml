@@ -43,6 +43,7 @@ proptest = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 verum_fast_parser = { workspace = true }
+verum_parser = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
 # dev-only: test the SMT bridges that moved to verum_smt. This is safe

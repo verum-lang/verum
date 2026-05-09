@@ -5629,6 +5629,7 @@ dependencies = [
  "verum_error",
  "verum_fast_parser",
  "verum_modules",
+ "verum_parser",
  "verum_protocol_types",
  "verum_smt",
  "z3",
