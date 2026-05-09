@@ -203,10 +203,10 @@ impl FfiPlatform for DarwinPlatform {
 
         // Special cases for well-known libraries
         match name {
-            "c" | "libc" => "libSystem.B.dylib".to_string(),
-            "m" | "libm" => "libSystem.B.dylib".to_string(), // Math is in libSystem on macOS
-            "pthread" | "libpthread" => "libSystem.B.dylib".to_string(),
-            "System" | "libSystem" => "libSystem.B.dylib".to_string(),
+            "c" | "libc" => verum_common::platform_libs::MACOS_LIBSYSTEM.to_string(),
+            "m" | "libm" => verum_common::platform_libs::MACOS_LIBSYSTEM.to_string(), // Math is in libSystem on macOS
+            "pthread" | "libpthread" => verum_common::platform_libs::MACOS_LIBSYSTEM.to_string(),
+            "System" | "libSystem" => verum_common::platform_libs::MACOS_LIBSYSTEM.to_string(),
             _ => {
                 // Add lib prefix and .dylib suffix
                 if name.starts_with("lib") {
@@ -262,7 +262,7 @@ mod tests {
     fn test_normalize_library_name() {
         let platform = DarwinPlatform::new();
 
-        assert_eq!(platform.normalize_library_name("c"), "libSystem.B.dylib");
+        assert_eq!(platform.normalize_library_name("c"), verum_common::platform_libs::MACOS_LIBSYSTEM);
         assert_eq!(platform.normalize_library_name("foo"), "libfoo.dylib");
         assert_eq!(platform.normalize_library_name("libbar"), "libbar.dylib");
         assert_eq!(platform.normalize_library_name("test.dylib"), "test.dylib");

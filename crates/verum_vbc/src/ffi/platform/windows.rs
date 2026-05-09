@@ -247,9 +247,9 @@ impl FfiPlatform for WindowsPlatform {
             "c" | "libc" | "msvcrt" => "msvcrt.dll".to_string(),
             "ucrt" | "libucrt" => "ucrtbase.dll".to_string(),
             // Core Windows DLLs
-            "kernel32" => "kernel32.dll".to_string(),
+            "kernel32" => verum_common::platform_libs::WINDOWS_KERNEL32.to_string(),
             "user32" => "user32.dll".to_string(),
-            "ntdll" => "ntdll.dll".to_string(),
+            "ntdll" => verum_common::platform_libs::WINDOWS_NTDLL.to_string(),
             "advapi32" => "advapi32.dll".to_string(),
             "ws2_32" => "ws2_32.dll".to_string(),
             "shell32" => "shell32.dll".to_string(),
@@ -330,9 +330,9 @@ mod tests {
         assert_eq!(platform.normalize_library_name("ucrt"), "ucrtbase.dll");
 
         // Core Windows DLLs
-        assert_eq!(platform.normalize_library_name("kernel32"), "kernel32.dll");
+        assert_eq!(platform.normalize_library_name("kernel32"), verum_common::platform_libs::WINDOWS_KERNEL32);
         assert_eq!(platform.normalize_library_name("user32"), "user32.dll");
-        assert_eq!(platform.normalize_library_name("ntdll"), "ntdll.dll");
+        assert_eq!(platform.normalize_library_name("ntdll"), verum_common::platform_libs::WINDOWS_NTDLL);
 
         // Generic library name
         assert_eq!(platform.normalize_library_name("foo"), "foo.dll");

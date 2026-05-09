@@ -993,7 +993,7 @@ mod tests {
         let mut module = VbcModule::new("ffi_test".to_string());
 
         // Add FFI library
-        let lib_name = module.intern_string("libSystem.B.dylib");
+        let lib_name = module.intern_string(verum_common::platform_libs::MACOS_LIBSYSTEM);
         module.ffi_libraries.push(FfiLibrary {
             name: lib_name,
             platform: FfiPlatform::Darwin,
@@ -1002,7 +1002,7 @@ mod tests {
         });
 
         // Add second library for Windows
-        let win_lib_name = module.intern_string("kernel32.dll");
+        let win_lib_name = module.intern_string(verum_common::platform_libs::WINDOWS_KERNEL32);
         let win_version = module.intern_string("10.0");
         module.ffi_libraries.push(FfiLibrary {
             name: win_lib_name,
@@ -1088,13 +1088,13 @@ mod tests {
         assert_eq!(loaded.ffi_libraries.len(), 2);
         assert_eq!(
             loaded.get_string(loaded.ffi_libraries[0].name),
-            Some("libSystem.B.dylib")
+            Some(verum_common::platform_libs::MACOS_LIBSYSTEM)
         );
         assert_eq!(loaded.ffi_libraries[0].platform, FfiPlatform::Darwin);
         assert!(loaded.ffi_libraries[0].required);
         assert_eq!(
             loaded.get_string(loaded.ffi_libraries[1].name),
-            Some("kernel32.dll")
+            Some(verum_common::platform_libs::WINDOWS_KERNEL32)
         );
         assert_eq!(loaded.ffi_libraries[1].platform, FfiPlatform::Windows);
         assert!(!loaded.ffi_libraries[1].required);
