@@ -3,6 +3,7 @@
 
 //! Transforms Verum AST statements into VBC instructions.
 
+use super::error::CodegenOptionExt;
 use super::{CodegenError, CodegenResult, VbcCodegen};
 use crate::instruction::{Instruction, Reg};
 
@@ -1063,7 +1064,7 @@ impl VbcCodegen {
         // Compile value
         let value_reg = self
             .compile_expr(value)?
-            .ok_or_else(|| CodegenError::internal("let-else value has no value"))?;
+            .or_internal("let-else value has no value")?;
 
         // Test pattern match
         let match_reg = self.ctx.alloc_temp();
@@ -1135,7 +1136,7 @@ impl VbcCodegen {
             for (ctx_name, expr) in provides {
                 let value_reg = self
                     .compile_expr(&expr)?
-                    .ok_or_else(|| CodegenError::internal("layer provide value has no value"))?;
+                    .or_internal("layer provide value has no value")?;
                 let ctx_id = self.intern_string(&ctx_name);
                 self.ctx.emit(Instruction::CtxProvide {
                     ctx_type: ctx_id,
@@ -1149,7 +1150,7 @@ impl VbcCodegen {
         // Normal provide: compile value and emit single CtxProvide
         let value_reg = self
             .compile_expr(value)?
-            .ok_or_else(|| CodegenError::internal("provide value has no value"))?;
+            .or_internal("provide value has no value")?;
 
         let context_id = self.intern_string(context);
 
@@ -1221,7 +1222,7 @@ impl VbcCodegen {
         // Compile value
         let value_reg = self
             .compile_expr(value)?
-            .ok_or_else(|| CodegenError::internal("provide-scope value has no value"))?;
+            .or_internal("provide-scope value has no value")?;
 
         let context_id = self.intern_string(context);
 

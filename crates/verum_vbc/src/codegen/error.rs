@@ -192,6 +192,36 @@ impl CodegenError {
     pub fn register_overflow(needed: usize, max: usize) -> Self {
         Self::new(CodegenErrorKind::RegisterOverflow { needed, max })
     }
+}
+
+/// Extension trait for converting `Option<T>` into
+/// `CodegenResult<T>` via [`CodegenOptionExt::or_internal`].
+///
+/// Mirrors the same pattern as `verum_codegen::llvm::error::OptionExt`
+/// — the codegen path has its own `CodegenError` enum, so it gets
+/// its own helper trait.  Replaces the verbose
+///
+///     .ok_or_else(|| CodegenError::internal("<msg>"))
+///
+/// pattern repeated 175+ times across `crates/verum_vbc/src/codegen/`
+/// with the much shorter
+///
+///     .or_internal("<msg>")?
+///
+/// while preserving the "internal compiler error: <msg>" diagnostic.
+pub trait CodegenOptionExt<T> {
+    /// Convert `None` into a `CodegenError::Internal(<msg>)`.
+    fn or_internal(self, msg: &str) -> CodegenResult<T>;
+}
+
+impl<T> CodegenOptionExt<T> for Option<T> {
+    #[inline]
+    fn or_internal(self, msg: &str) -> CodegenResult<T> {
+        self.ok_or_else(|| CodegenError::internal(msg))
+    }
+}
+
+impl CodegenError {
 
     /// Returns the undefined function name if this is an UndefinedFunction error.
     ///
