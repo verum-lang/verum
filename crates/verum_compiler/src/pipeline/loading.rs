@@ -170,95 +170,57 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
 
-        // SLOW PATH: No in-memory registry cache, load from source
-        debug!("No in-memory registry cache, loading stdlib from source");
-
-        // Determine stdlib path based on build mode:
-        // - StdlibBootstrap mode: Use the configured stdlib_path directly
-        // - Normal mode: Find workspace root and look for core/
+        // ARCHITECTURE: Normal builds use the embedded precompiled
+        // stdlib archive (`target/precompiled-stdlib/runtime.vbca` baked
+        // into the binary at build time) as the SINGLE source of stdlib
+        // types, functions, and constants.  Source-driven filesystem
+        // loading is the StdlibBootstrap mode only (used to *produce*
+        // the archive).  Routing user-facing builds through filesystem
+        // creates an asymmetry vs `compile_ast_to_vbc`'s archive-only
+        // codegen path: typecheck would see one stdlib snapshot while
+        // codegen consults another, and any mismatch surfaces as
+        // `UndefinedVariable` at the use site after typecheck succeeds.
         //
-
-        // ARCHITECTURE NOTE: The embedded stdlib (embedded_stdlib.rs) contains all
-        // core/*.vr sources compressed in the binary. Currently we still resolve from
-        // the filesystem for dev mode (workspace core/). In production builds, the
-        // embedded archive can be used instead of filesystem by switching the source.
-        // The embedded archive API: crate::embedded_stdlib::get_embedded_stdlib()
-        let (stdlib_path, workspace_root_for_cache) = match &self.build_mode {
-            BuildMode::StdlibBootstrap { config } => {
-                debug!(
-                    "StdlibBootstrap mode: using configured path {:?}",
-                    config.stdlib_path
-                );
-                (config.stdlib_path.clone(), None)
-            }
-            BuildMode::Normal => {
-                // Stdlib (core cog) resolution:
-                //  1. VERUM_STDLIB_PATH env var (explicit override)
-                //  2. Workspace core/ directory (dev mode — binary in target/)
-                //
-
-                // NOTE: ~/.verum/core/ resolution commented out — embedded stdlib
-                // replaces filesystem-based production installs.
-                let stdlib_candidates: Vec<(PathBuf, Option<PathBuf>)> = {
-                    let mut candidates = Vec::new();
-
-                    // 1. Explicit override
+        // `VERUM_STDLIB_PATH` retains its escape-hatch role for
+        // explicit out-of-tree experimentation; without it, Normal mode
+        // exclusively populates the registry from
+        // `load_stdlib_from_embedded` (CoreMetadata-driven, ~2 ms).
+        let (stdlib_path, workspace_root_for_cache): (PathBuf, Option<PathBuf>) =
+            match &self.build_mode {
+                BuildMode::StdlibBootstrap { config } => {
+                    debug!(
+                        "StdlibBootstrap mode: using configured path {:?}",
+                        config.stdlib_path
+                    );
+                    (config.stdlib_path.clone(), None)
+                }
+                BuildMode::Normal => {
+                    // Explicit override — opt-in only.  The default
+                    // Normal path skips filesystem entirely and goes
+                    // through the embedded archive.
                     if let Ok(path) = std::env::var("VERUM_STDLIB_PATH") {
                         let p = PathBuf::from(&path);
                         if p.exists() {
-                            candidates.push((p, None));
+                            debug!("VERUM_STDLIB_PATH override: using {:?}", p);
+                            (p, None)
+                        } else {
+                            debug!(
+                                "VERUM_STDLIB_PATH set to non-existent path {:?} — falling back to embedded archive",
+                                p
+                            );
+                            return self.load_stdlib_from_embedded();
                         }
-                    }
-
-                    // 2. Workspace root (dev mode).
-                    //
-
-                    // T6.0.2 — only accept the candidate when
-                    // `core/mod.vr` is present. A bare `core/`
-                    // directory (e.g. inside a user cog that
-                    // happened to scaffold the namespace but
-                    // never populated it) silently shadowed the
-                    // embedded stdlib pre-fix; cogs whose `core/`
-                    // is empty (or absent) now fall through to
-                    // the embedded path correctly.
-                    if let Ok(workspace_root) = self.find_workspace_root() {
-                        let core_path = workspace_root.join("core");
-                        let mod_file = core_path.join("mod.vr");
-                        if mod_file.is_file() {
-                            candidates.push((core_path, Some(workspace_root)));
-                        }
-                    }
-
-                    // 3. ~/.verum/core/ — DISABLED: embedded stdlib replaces this
-                    // if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-                    //  let verum_core = PathBuf::from(&home).join(".verum").join("core");
-                    //  if verum_core.exists() {
-                    //  candidates.push((verum_core, None));
-                    //  }
-                    // }
-
-                    candidates
-                };
-
-                match stdlib_candidates.into_iter().next() {
-                    Some((stdlib, workspace)) => {
-                        eprintln!("[load_stdlib] filesystem path found: {:?}", stdlib);
-                        debug!("Core stdlib resolved: {:?}", stdlib);
-                        (stdlib, workspace)
-                    }
-                    None => {
-                        // No filesystem stdlib found (external project, installed binary).
-                        // Fall back to the embedded stdlib archive that is baked into the
-                        // binary at build time.  This is the canonical path for external
-                        // cogs (e.g. `verum check` run from the registry directory where
-                        // there is no `core/` alongside the project).
-                        eprintln!("[load_stdlib] no filesystem stdlib — using embedded archive");
-                        debug!("No core stdlib on filesystem — populating registry from embedded archive");
+                    } else {
+                        debug!("Normal mode: populating registry from embedded archive");
                         return self.load_stdlib_from_embedded();
                     }
                 }
-            }
-        };
+            };
+
+        // SLOW PATH: source-driven parsing.  Reached only by
+        // StdlibBootstrap mode and the explicit `VERUM_STDLIB_PATH`
+        // override above.
+        debug!("No in-memory registry cache, loading stdlib from source");
 
         if !stdlib_path.exists() {
             debug!("Stdlib directory not found at {:?}, skipping", stdlib_path);
@@ -1224,18 +1186,17 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Also register every file path from the embedded archive as a module,
-        // even if it has no types (mod.vr namespace files, empty modules, etc.).
-        if let Some(archive) = crate::embedded_stdlib::get_embedded_stdlib() {
-            for rel_path in archive.file_paths().filter(|p| p.ends_with(".vr")) {
-                let without_ext = rel_path.trim_end_matches(".vr");
-                let dotted = without_ext.replace('/', ".");
-                let mp: String = if dotted.ends_with(".mod") {
-                    format!("core.{}", dotted.trim_end_matches(".mod"))
-                } else {
-                    format!("core.{}", dotted)
-                };
-                module_map.entry(mp).or_default();
+        // Also register every module path from the embedded VBC archive
+        // index, even if it has no types (mod.vr namespace files, empty
+        // modules, etc.).  #102 — switched away from
+        // `embedded_stdlib::file_paths()` (gzipped .vr sources) to
+        // `vbca.index` so the typechecker registers stdlib modules
+        // without consulting source.  The archive's module names are
+        // already the canonical dotted paths (`core.text`, `core.io.fs`),
+        // so no source-path → dotted-path conversion is needed.
+        if let Some(archive) = crate::embedded_stdlib_vbc::get_runtime_archive() {
+            for entry in &archive.index {
+                module_map.entry(entry.name.clone()).or_default();
             }
         }
 

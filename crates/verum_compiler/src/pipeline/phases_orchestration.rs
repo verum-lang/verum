@@ -369,112 +369,24 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Fallback: if the metadata cache doesn't have contexts
-        // (e.g., old cache format), extract them directly from the
-        // embedded stdlib source archive. This scans for
-        // `public context Name {` patterns in .vr files.
-        {
-            let has_metadata_contexts = self
-                .stdlib_metadata
-                .get()
-                .map(|m| !m.context_declarations.is_empty())
-                .unwrap_or(false);
-            if !has_metadata_contexts {
-                if let Some(archive) = crate::embedded_stdlib::get_embedded_stdlib() {
-                    // Enable lenient context checking during pre-registration.
-                    // Stdlib context method types may reference types from the
-                    // same module that aren't registered yet — lenient mode
-                    // defers method validation to call sites.
-                    checker.set_lenient_context_checking(true);
-                    let mut found_count = 0usize;
-                    // Preserve the user-file module path so we can restore after.
-                    let saved_ctx_path = checker.current_module_path().clone();
-                    for path in archive.file_paths() {
-                        if !path.ends_with(".vr") {
-                            continue;
-                        }
-                        let content = match archive.get_file(path) {
-                            Some(c) => c,
-                            None => continue,
-                        };
-                        // Quick check: skip files without context declarations
-                        if !content.contains("public context ") {
-                            continue;
-                        }
-                        // Compute the module path for this stdlib file so that
-                        // bare type references inside the context body (e.g.
-                        // `LogLevel` in `fn log(level: LogLevel, msg: Text)`
-                        // inside `core.context.standard.Logger`) resolve
-                        // against this file's qualified-name layer first.
-                        // Without this, `ast_to_type` falls back to the flat
-                        // `ctx.type_defs` map where a same-named stranger
-                        // (`core.base.log.LogLevel`) may be registered last
-                        // and silently overwrite the expected type.
-                        let mod_path = {
-                            let trimmed = path.trim_end_matches(".vr");
-                            // Archive paths are relative to core/, e.g.
-                            // "context/standard" -> "core.context.standard".
-                            let dotted = trimmed.replace('/', ".");
-                            let without_core = dotted
-                                .strip_prefix("core.")
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| dotted.clone());
-                            let absolute = format!("core.{}", without_core);
-                            // Handle `mod.vr` files (represent the parent dir).
-                            if let Some(stripped) = absolute.strip_suffix(".mod") {
-                                stripped.to_string()
-                            } else {
-                                absolute
-                            }
-                        };
-                        checker.set_current_module_path(verum_common::Text::from(mod_path));
-
-                        // Parse the file with the actual parser to get
-                        // full ContextDecl AST nodes with method signatures.
-                        let mut parser = verum_fast_parser::Parser::new(content);
-                        if let Ok(module) = parser.parse_module() {
-                            for item in &module.items {
-                                if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
-                                    if ctx_decl.visibility == verum_ast::decl::Visibility::Public {
-                                        let ctx_name =
-                                            verum_common::Text::from(ctx_decl.name.name.as_str());
-                                        // Register with FULL method signatures in
-                                        // both resolver and checker. We do NOT skip
-                                        // on `collected_contexts.contains(&ctx_name)`
-                                        // because the collected_contexts loop above
-                                        // only calls `register_protocol_as_context`
-                                        // (resolver-only), leaving the context_checker
-                                        // unaware of the declaration — which made
-                                        // call-site `check_provided_contexts` fail
-                                        // with "undefined context" even though the
-                                        // resolver accepted it.
-                                        //
-
-                                        // `register_stdlib_context_full` is idempotent
-                                        // enough: a second registration overwrites
-                                        // the declaration with the same content.
-                                        checker.register_stdlib_context_full(
-                                            ctx_name,
-                                            ctx_decl.clone(),
-                                        );
-                                        found_count += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    checker.set_current_module_path(saved_ctx_path);
-                    // Restore strict context checking for user code.
-                    checker.set_lenient_context_checking(false);
-                    if found_count > 0 {
-                        tracing::debug!(
-                            "Stdlib context pre-registration: {} contexts with full signatures from embedded archive",
-                            found_count
-                        );
-                    }
-                }
-            }
-        }
+        // #102 — embedded source-archive fallback for context
+        // declarations REMOVED.  Pre-fix this branch ran when
+        // `stdlib_metadata.context_declarations` was empty (the
+        // "old metadata cache format" case) and reparsed every
+        // `core/**/*.vr` looking for `public context …` patterns.
+        // That path was the last consumer of `embedded_stdlib`'s
+        // gzipped .vr sources for production typecheck — keeping it
+        // forced the binary to embed the full source archive.
+        //
+        // Post-fix: `CoreMetadata.context_declarations` /
+        // `context_decl_nodes` are populated unconditionally during
+        // precompile (`scan_context_declarations` in
+        // `precompile.rs::write_core_metadata_alongside_archive`)
+        // and the schema-version cache key (#97) invalidates any
+        // stale precompile that pre-dates that field.  An empty
+        // contexts list now indicates a real bug — re-precompile
+        // (`verum stdlib precompile`) is the correct remediation,
+        // not silent reparse-from-source.
 
         // Compute the current module path for resolving relative imports (self, super)
         // For single-file checking, we need to find the project's src root by looking
