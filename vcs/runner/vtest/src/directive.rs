@@ -31,6 +31,10 @@
 //! - `@snapshot: <name>` - Golden-file snapshot name; test output compared against stored snapshot
 //! - `@mock: <ContextType>` - Inject a mock for the named context type when running this test file
 //! - `@contract-tests: enabled` - Auto-generate property tests from @requires / @ensures annotations
+//! - `@flaky: <reason>` - Mark test as known-flaky; runner logs but does not fail CI on intermittent failure
+//! - `@slow: <threshold_ms>` - Expected slow test; warn (not fail) if it exceeds threshold_ms
+//! - `@hardware: <requirement>` - Test requires specific hardware (e.g. "gpu", "avx512", "tpm")
+//! - `@deprecated: <reason>` - Mark test as deprecated; still runs but emits a deprecation notice
 //!
 //! # Multi-line Values
 //!
@@ -844,6 +848,14 @@ pub struct TestDirectives {
     pub mocks: List<Text>,
     /// When true, auto-generate property tests from @requires / @ensures contract annotations.
     pub contract_tests: bool,
+    /// Reason this test is known-flaky; runner logs but does not fail CI on intermittent failure.
+    pub flaky: Option<Text>,
+    /// Expected slow-test threshold in milliseconds; runner warns (not fails) if exceeded.
+    pub slow_threshold_ms: Option<u64>,
+    /// Hardware requirement (e.g. "gpu", "avx512", "tpm"); test is skipped if unavailable.
+    pub hardware: Option<Text>,
+    /// Deprecation reason; test still runs but the runner emits a notice.
+    pub deprecated: Option<Text>,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -886,6 +898,10 @@ impl Default for TestDirectives {
             snapshot: None,
             mocks: List::new(),
             contract_tests: false,
+            flaky: None,
+            slow_threshold_ms: None,
+            hardware: None,
+            deprecated: None,
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1105,6 +1121,16 @@ impl TestDirectives {
                 }
             } else if let Some(rest) = comment.strip_prefix("@contract-tests:") {
                 directives.contract_tests = rest.trim() == "enabled";
+            } else if let Some(rest) = comment.strip_prefix("@flaky:") {
+                directives.flaky = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@slow:") {
+                if let Ok(ms) = rest.trim().parse::<u64>() {
+                    directives.slow_threshold_ms = Some(ms);
+                }
+            } else if let Some(rest) = comment.strip_prefix("@hardware:") {
+                directives.hardware = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@deprecated:") {
+                directives.deprecated = Some(rest.trim().to_string().into());
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()

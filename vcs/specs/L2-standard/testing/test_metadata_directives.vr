@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, metadata, flaky, slow, hardware, deprecated
+// @flaky: network dependent in CI
+// @slow: 5000
+// @hardware: avx2
+// @deprecated: superseded by test_metadata_v2.vr
+// @description: Pins the @flaky / @slow / @hardware / @deprecated test metadata
+//               directives (#65).
+
+mount core.base.{Text, List, Maybe, Bool, Int}
+mount core.io.{print}
+
+// TestMetadata captures all four metadata fields for a test entry.
+type TestMetadata is {
+    flaky_reason: Maybe<Text>,
+    slow_threshold_ms: Maybe<Int>,
+    hardware_requirement: Maybe<Text>,
+    deprecated_reason: Maybe<Text>,
+};
+
+implement TestMetadata {
+    fn none() -> TestMetadata {
+        TestMetadata {
+            flaky_reason: Maybe.None,
+            slow_threshold_ms: Maybe.None,
+            hardware_requirement: Maybe.None,
+            deprecated_reason: Maybe.None,
+        }
+    }
+
+    fn is_flaky(&self) -> Bool {
+        self.flaky_reason is Some(_)
+    }
+
+    fn is_slow(&self) -> Bool {
+        self.slow_threshold_ms is Some(_)
+    }
+
+    fn requires_hardware(&self) -> Bool {
+        self.hardware_requirement is Some(_)
+    }
+
+    fn is_deprecated(&self) -> Bool {
+        self.deprecated_reason is Some(_)
+    }
+}
+
+fn test_no_metadata_flags_all_false() {
+    let m = TestMetadata.none();
+    assert(!m.is_flaky());
+    assert(!m.is_slow());
+    assert(!m.requires_hardware());
+    assert(!m.is_deprecated());
+}
+
+fn test_flaky_metadata() {
+    let m = TestMetadata {
+        flaky_reason: Maybe.Some("network dependent"),
+        slow_threshold_ms: Maybe.None,
+        hardware_requirement: Maybe.None,
+        deprecated_reason: Maybe.None,
+    };
+    assert(m.is_flaky());
+    assert(!m.is_slow());
+}
+
+fn test_slow_metadata() {
+    let m = TestMetadata {
+        flaky_reason: Maybe.None,
+        slow_threshold_ms: Maybe.Some(5000),
+        hardware_requirement: Maybe.None,
+        deprecated_reason: Maybe.None,
+    };
+    assert(m.is_slow());
+}
+
+fn test_hardware_metadata() {
+    let m = TestMetadata {
+        flaky_reason: Maybe.None,
+        slow_threshold_ms: Maybe.None,
+        hardware_requirement: Maybe.Some("avx2"),
+        deprecated_reason: Maybe.None,
+    };
+    assert(m.requires_hardware());
+}
+
+fn test_deprecated_metadata() {
+    let m = TestMetadata {
+        flaky_reason: Maybe.None,
+        slow_threshold_ms: Maybe.None,
+        hardware_requirement: Maybe.None,
+        deprecated_reason: Maybe.Some("superseded by v2"),
+    };
+    assert(m.is_deprecated());
+}
+
+fn main() {
+    test_no_metadata_flags_all_false();
+    test_flaky_metadata();
+    test_slow_metadata();
+    test_hardware_metadata();
+    test_deprecated_metadata();
+    print("test metadata directives spec ok");
+}
