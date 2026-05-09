@@ -1442,44 +1442,222 @@ pub enum VerificationMode {
     Assume,
 }
 
+/// Per-variant projection for [`VerificationMode`].
+///
+/// Carries every property that previously lived in parallel match
+/// arms or implicit doc-comment claims:
+///
+///   * `name` — canonical kebab-case form used by `@verify(...)`
+///     and round-tripped through `from_str` / `as_str`.
+///   * `rank` — synthetic monotone position on the ν-coordinate
+///     ladder (0 = cheapest = `Runtime`; the assignment is dense
+///     and strictly monotone in declaration order, matching the
+///     ν-ordinal claims in the variant doc-comments). `Assume`
+///     gets the highest rank as a sentinel — it is not "more
+///     expensive than Synthesize"; it sits *outside* the ladder
+///     because it skips verification entirely. Treat it specially
+///     in any ordering logic.
+///   * `is_coherent` — `Coherent*` family (α/ε bidirectional).
+///   * `requires_smt` — needs an SMT backend at verification time.
+///   * `has_runtime_component` — emits runtime checks (Runtime
+///     itself + CoherentRuntime's ε-monitor).
+///   * `is_assume` — escape hatch; treat as "trust programmer".
+#[derive(Debug, Clone, Copy)]
+pub struct VerificationModeMeta {
+    pub name: &'static str,
+    pub rank: u8,
+    pub is_coherent: bool,
+    pub requires_smt: bool,
+    pub has_runtime_component: bool,
+    pub is_assume: bool,
+}
+
 impl VerificationMode {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "runtime" => Maybe::Some(VerificationMode::Runtime),
-            "static" => Maybe::Some(VerificationMode::Static),
-            "fast" => Maybe::Some(VerificationMode::Fast),
-            "complexity_typed" => Maybe::Some(VerificationMode::ComplexityTyped),
-            "formal" => Maybe::Some(VerificationMode::Formal),
-            "proof" => Maybe::Some(VerificationMode::Proof),
-            "thorough" => Maybe::Some(VerificationMode::Thorough),
-            "reliable" => Maybe::Some(VerificationMode::Reliable),
-            "certified" => Maybe::Some(VerificationMode::Certified),
-            "coherent_static" => Maybe::Some(VerificationMode::CoherentStatic),
-            "coherent_runtime" => Maybe::Some(VerificationMode::CoherentRuntime),
-            "coherent" => Maybe::Some(VerificationMode::Coherent),
-            "synthesize" => Maybe::Some(VerificationMode::Synthesize),
-            "assume" => Maybe::Some(VerificationMode::Assume),
-            _ => Maybe::None,
+    /// Every variant in ν-rank order (cheapest first; Assume last as
+    /// the off-ladder sentinel).
+    pub const ALL: &'static [Self] = &[
+        Self::Runtime,
+        Self::Static,
+        Self::Fast,
+        Self::ComplexityTyped,
+        Self::Formal,
+        Self::Proof,
+        Self::Thorough,
+        Self::Reliable,
+        Self::Certified,
+        Self::CoherentStatic,
+        Self::CoherentRuntime,
+        Self::Coherent,
+        Self::Synthesize,
+        Self::Assume,
+    ];
+
+    pub const fn meta(self) -> VerificationModeMeta {
+        match self {
+            Self::Runtime => VerificationModeMeta {
+                name: "runtime",
+                rank: 0,
+                is_coherent: false,
+                requires_smt: false,
+                has_runtime_component: true,
+                is_assume: false,
+            },
+            Self::Static => VerificationModeMeta {
+                name: "static",
+                rank: 1,
+                is_coherent: false,
+                requires_smt: false,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Fast => VerificationModeMeta {
+                name: "fast",
+                rank: 2,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::ComplexityTyped => VerificationModeMeta {
+                name: "complexity_typed",
+                rank: 3,
+                is_coherent: false,
+                requires_smt: false,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Formal => VerificationModeMeta {
+                name: "formal",
+                rank: 4,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Proof => VerificationModeMeta {
+                name: "proof",
+                rank: 5,
+                is_coherent: false,
+                requires_smt: false,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Thorough => VerificationModeMeta {
+                name: "thorough",
+                rank: 6,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Reliable => VerificationModeMeta {
+                name: "reliable",
+                rank: 7,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Certified => VerificationModeMeta {
+                name: "certified",
+                rank: 8,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::CoherentStatic => VerificationModeMeta {
+                name: "coherent_static",
+                rank: 9,
+                is_coherent: true,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::CoherentRuntime => VerificationModeMeta {
+                name: "coherent_runtime",
+                rank: 10,
+                is_coherent: true,
+                requires_smt: true,
+                has_runtime_component: true,
+                is_assume: false,
+            },
+            Self::Coherent => VerificationModeMeta {
+                name: "coherent",
+                rank: 11,
+                is_coherent: true,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Synthesize => VerificationModeMeta {
+                name: "synthesize",
+                rank: 12,
+                is_coherent: false,
+                requires_smt: true,
+                has_runtime_component: false,
+                is_assume: false,
+            },
+            Self::Assume => VerificationModeMeta {
+                name: "assume",
+                rank: 13,
+                is_coherent: false,
+                requires_smt: false,
+                has_runtime_component: false,
+                is_assume: true,
+            },
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            VerificationMode::Runtime => "runtime",
-            VerificationMode::Static => "static",
-            VerificationMode::Fast => "fast",
-            VerificationMode::ComplexityTyped => "complexity_typed",
-            VerificationMode::Formal => "formal",
-            VerificationMode::Proof => "proof",
-            VerificationMode::Thorough => "thorough",
-            VerificationMode::Reliable => "reliable",
-            VerificationMode::Certified => "certified",
-            VerificationMode::CoherentStatic => "coherent_static",
-            VerificationMode::CoherentRuntime => "coherent_runtime",
-            VerificationMode::Coherent => "coherent",
-            VerificationMode::Synthesize => "synthesize",
-            VerificationMode::Assume => "assume",
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// ν-ladder rank — strictly monotone in declaration order.
+    /// `Runtime` is 0; `Synthesize` is 12; `Assume` (off-ladder
+    /// escape hatch) is the sentinel 13.
+    #[inline]
+    pub const fn rank(&self) -> u8 {
+        self.meta().rank
+    }
+
+    /// True for the `Coherent*` family (α/ε bidirectional checks).
+    #[inline]
+    pub const fn is_coherent(&self) -> bool {
+        self.meta().is_coherent
+    }
+
+    /// True if this mode needs an SMT backend at verification time.
+    #[inline]
+    pub const fn requires_smt(&self) -> bool {
+        self.meta().requires_smt
+    }
+
+    /// True if this mode emits runtime checks (Runtime itself or
+    /// CoherentRuntime's ε-monitor).
+    #[inline]
+    pub const fn has_runtime_component(&self) -> bool {
+        self.meta().has_runtime_component
+    }
+
+    /// True for the `Assume` escape hatch — pin this in callers
+    /// that gate on "no verification at all" semantics.
+    #[inline]
+    pub const fn is_assume(&self) -> bool {
+        self.meta().is_assume
     }
 }
 
