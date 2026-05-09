@@ -38,13 +38,20 @@ inductive Level : Type where
   | max      (a b : Level)
   deriving DecidableEq, Inhabited, Repr
 
-/-- Minimal CoC `Term` — mirrors `proof_checker::Term`. -/
+/-- Minimal CoC `Term` — mirrors `proof_checker::Term` post-FV-20.
+    The structural fragment is Var/Universe/Pi/Lam/App plus
+    Sigma/Pair/Fst/Snd for dependent pairs. -/
 inductive Term : Type where
   | var      (i : Nat)
   | universe (lvl : Level)
   | pi       (dom : Term) (body : Term)
   | lam      (dom : Term) (body : Term)
   | app      (f : Term) (x : Term)
+  -- FV-20: Σ-types (dependent pairs).
+  | sigma    (dom : Term) (body : Term)
+  | pair     (fst : Term) (snd : Term)
+  | fst      (p : Term)
+  | snd      (p : Term)
   deriving DecidableEq, Inhabited, Repr
 
 /-- Type-checking error — mirrors `proof_checker::CheckError` for
@@ -53,6 +60,7 @@ inductive CheckError : Type where
   | unbound_variable     (idx : Nat)
   | not_a_type           (t : Term)
   | not_a_function       (t : Term)
+  | not_a_sigma          (t : Term)  -- FV-20: T-Fst/Snd-Elim
   | domain_mismatch      (expected actual : Term)
   | type_mismatch        (expected actual : Term)
   | universe_overflow    (level : Nat)
@@ -223,7 +231,8 @@ partial def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=
 
 /-- Shift up: every `var i` with `i ≥ cutoff` becomes `var (i + amount)`.
     Mirrors `proof_checker::shift_up`.  Universe levels pass through
-    unchanged — they're not term binders. -/
+    unchanged — they're not term binders.  Σ extends Π's binder
+    discipline; Pair/Fst/Snd are non-binding. -/
 partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   match t with
   | .var i        => if i ≥ cutoff then .var (i + amount) else .var i
@@ -231,6 +240,10 @@ partial def shiftUp (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   | .pi a b       => .pi (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) b)
   | .lam a body   => .lam (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) body)
   | .app f x      => .app (shiftUp amount cutoff f) (shiftUp amount cutoff x)
+  | .sigma a b    => .sigma (shiftUp amount cutoff a) (shiftUp amount (cutoff + 1) b)
+  | .pair a b     => .pair (shiftUp amount cutoff a) (shiftUp amount cutoff b)
+  | .fst p        => .fst (shiftUp amount cutoff p)
+  | .snd p        => .snd (shiftUp amount cutoff p)
 
 /-- Shift down — inverse of `shiftUp`. -/
 partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
@@ -243,6 +256,10 @@ partial def shiftDown (amount : Nat) (cutoff : Nat) (t : Term) : Term :=
   | .pi a b       => .pi (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) b)
   | .lam a body   => .lam (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) body)
   | .app f x      => .app (shiftDown amount cutoff f) (shiftDown amount cutoff x)
+  | .sigma a b    => .sigma (shiftDown amount cutoff a) (shiftDown amount (cutoff + 1) b)
+  | .pair a b     => .pair (shiftDown amount cutoff a) (shiftDown amount cutoff b)
+  | .fst p        => .fst (shiftDown amount cutoff p)
+  | .snd p        => .snd (shiftDown amount cutoff p)
 
 /-- Substitute `replacement` for `var target` in `t`. -/
 partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
@@ -255,11 +272,16 @@ partial def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
   | .pi a b     => .pi (subst target replacement a) (subst (target + 1) replacement b)
   | .lam a body => .lam (subst target replacement a) (subst (target + 1) replacement body)
   | .app f x    => .app (subst target replacement f) (subst target replacement x)
+  | .sigma a b  => .sigma (subst target replacement a) (subst (target + 1) replacement b)
+  | .pair a b   => .pair (subst target replacement a) (subst target replacement b)
+  | .fst p      => .fst (subst target replacement p)
+  | .snd p      => .snd (subst target replacement p)
 
 /-- Fuel ceiling for whnf. -/
 def whnfFuelCeiling : Nat := 1 <<< 20
 
-/-- Fuel-bounded whnf. -/
+/-- Fuel-bounded whnf — handles β-reduction at App and Σ-projection
+    at Fst/Snd. -/
 partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
   if fuel = 0 then t
   else
@@ -269,6 +291,16 @@ partial def whnfFuel (fuel : Nat) (t : Term) : Term :=
       match f' with
       | .lam _ body => whnfFuel (fuel - 1) (subst 0 x body)
       | other       => .app other x
+    | .fst p =>
+      let p' := whnfFuel (fuel - 1) p
+      match p' with
+      | .pair a _ => whnfFuel (fuel - 1) a
+      | other     => .fst other
+    | .snd p =>
+      let p' := whnfFuel (fuel - 1) p
+      match p' with
+      | .pair _ b => whnfFuel (fuel - 1) b
+      | other     => .snd other
     | other => other
 
 /-- Public whnf. -/
@@ -282,6 +314,10 @@ partial def isFreeIn (target : Nat) (t : Term) : Bool :=
   | .pi a b       => isFreeIn target a || isFreeIn (target + 1) b
   | .lam a body   => isFreeIn target a || isFreeIn (target + 1) body
   | .app f x      => isFreeIn target f || isFreeIn target x
+  | .sigma a b    => isFreeIn target a || isFreeIn (target + 1) b
+  | .pair a b     => isFreeIn target a || isFreeIn target b
+  | .fst p        => isFreeIn target p
+  | .snd p        => isFreeIn target p
 
 mutual
 
@@ -299,6 +335,13 @@ partial def defEqWhnf : Term → Term → Bool
   | .pi a1 b1,     .pi a2 b2     => defEq a1 a2 && defEq b1 b2
   | .lam a1 b1,    .lam a2 b2    => defEq a1 a2 && defEq b1 b2
   | .app f1 x1,    .app f2 x2    => defEq f1 f2 && defEq x1 x2
+  -- Σ-types (FV-20): structural component-wise equality.
+  -- β-projections (Fst(Pair) / Snd(Pair)) collapse in whnfFuel
+  -- before reaching here.
+  | .sigma a1 b1,  .sigma a2 b2  => defEq a1 a2 && defEq b1 b2
+  | .pair a1 b1,   .pair a2 b2   => defEq a1 a2 && defEq b1 b2
+  | .fst p1,       .fst p2       => defEq p1 p2
+  | .snd p1,       .snd p2       => defEq p1 p2
   | .lam _ body,   other         => etaMatch body other
   | other,         .lam _ body   => etaMatch body other
   | _,             _             => false
@@ -379,6 +422,47 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
           if defEq dom xTy then .ok (subst 0 x codom)
           else .error (.domain_mismatch dom xTy)
       | other => .error (.not_a_function other)
+  -- T-Sigma-Form: Σ(x : A). B : Universe(max(level(A), level(B))).
+  | .sigma a b =>
+    match infer Γ a with
+    | .error e => .error e
+    | .ok aTy =>
+      match expectUniverse aTy with
+      | none => .error (.not_a_type a)
+      | some n =>
+        match infer (a :: Γ) b with
+        | .error e => .error e
+        | .ok bTy =>
+          match expectUniverse bTy with
+          | none => .error (.not_a_type b)
+          | some m => .ok (.universe (Level.maxCanonical n m))
+  -- T-Pair-Intro: synthesis-mode mirror.  Synthesises the most-
+  -- specific non-dependent Σ that fits.
+  | .pair fst snd =>
+    match infer Γ fst with
+    | .error e => .error e
+    | .ok fstTy =>
+      match infer Γ snd with
+      | .error e => .error e
+      | .ok sndTy =>
+        let body := shiftUp 1 0 sndTy
+        .ok (.sigma fstTy body)
+  -- T-Fst-Elim: p : Σ(A, B) ⇒ Fst(p) : A.
+  | .fst p =>
+    match infer Γ p with
+    | .error e => .error e
+    | .ok pTy =>
+      match whnf pTy with
+      | .sigma a _ => .ok a
+      | other      => .error (.not_a_sigma other)
+  -- T-Snd-Elim: p : Σ(A, B) ⇒ Snd(p) : B[Fst(p)/0].
+  | .snd p =>
+    match infer Γ p with
+    | .error e => .error e
+    | .ok pTy =>
+      match whnf pTy with
+      | .sigma _ b => .ok (subst 0 (.fst p) b)
+      | other      => .error (.not_a_sigma other)
 
 /-- Check that `t` has type `expected` in `Γ`. -/
 partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit :=
@@ -511,5 +595,58 @@ def universeVar (name : String) : Term := .universe (.var name)
   | .error (.type_mismatch _ _) => true
   | _                            => false)
   -- Distinct level variables reject — true
+
+-- =============================================================================
+-- FV-20 Σ-types battery (mirrors proof_checker::tests Σ section)
+-- =============================================================================
+
+#eval! expectInfer []
+        (.sigma (universe 0) (universe 0))
+        (universe 1)
+  -- T-Sigma-Form at concrete universe — true
+
+#eval! expectInfer []
+        (.sigma (universe 2) (universe 5))
+        (universe 6)
+  -- T-Sigma-Form takes max universe — true
+
+#eval! expectInfer []
+        (.sigma (universeVar "u") (universeVar "v"))
+        (.universe (.succ (Level.maxCanonical (.var "u") (.var "v"))))
+  -- T-Sigma-Form polymorphic — true
+
+#eval! expectInfer []
+        (.pair (universe 0) (universe 0))
+        (.sigma (universe 1) (universe 1))
+  -- T-Pair-Intro non-dependent — true
+
+#eval! defEq (.fst (.pair (universe 0) (universe 1))) (universe 0)
+  -- β-projection: fst(pair(a, b)) ≡ a — true
+
+#eval! defEq (.snd (.pair (universe 0) (universe 1))) (universe 1)
+  -- β-projection: snd(pair(a, b)) ≡ b — true
+
+#eval! expectInferError []
+        (.fst (universe 0))
+        (fun e => match e with | .not_a_sigma _ => true | _ => false)
+  -- T-Fst-Elim rejects non-Σ — true
+
+#eval! expectInferError []
+        (.snd (universe 0))
+        (fun e => match e with | .not_a_sigma _ => true | _ => false)
+  -- T-Snd-Elim rejects non-Σ — true
+
+#eval! (
+  let term := Term.pair (universe 0) (universe 0)
+  let claim := Term.sigma (universe 1) (universe 1)
+  match verifyCertificate term claim with
+  | .ok _ => true
+  | _     => false)
+  -- Pair certificate at non-dependent Σ verifies — true
+
+#eval! expectInfer []
+        (.sigma (universe 0) (.sigma (universe 0) (universe 0)))
+        (universe 1)
+  -- Nested Σ — true
 
 end VerumKernel.Tests

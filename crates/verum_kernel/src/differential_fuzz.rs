@@ -284,6 +284,16 @@ fn lift_universes_in_term(term: &Term, delta: u32) -> Term {
             Box::new(lift_universes_in_term(f, delta)),
             Box::new(lift_universes_in_term(x, delta)),
         ),
+        Term::Sigma(a, b) => Term::Sigma(
+            Box::new(lift_universes_in_term(a, delta)),
+            Box::new(lift_universes_in_term(b, delta)),
+        ),
+        Term::Pair(a, b) => Term::Pair(
+            Box::new(lift_universes_in_term(a, delta)),
+            Box::new(lift_universes_in_term(b, delta)),
+        ),
+        Term::Fst(p) => Term::Fst(Box::new(lift_universes_in_term(p, delta))),
+        Term::Snd(p) => Term::Snd(Box::new(lift_universes_in_term(p, delta))),
     }
 }
 

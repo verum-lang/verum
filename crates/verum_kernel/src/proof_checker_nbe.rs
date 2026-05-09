@@ -115,6 +115,15 @@ pub enum Value {
     /// Neutral term: a free variable or stuck application that
     /// cannot reduce further.
     VNeutral(Neutral),
+    /// `Σ(x : A). B` as a closure-bearing semantic value.
+    VSigma {
+        /// Domain value (already evaluated).
+        domain: Box<Value>,
+        /// Codomain closure.
+        codomain: Closure,
+    },
+    /// Pair value `(a, b)`.
+    VPair(Box<Value>, Box<Value>),
 }
 
 /// Neutral term — a stuck reduction. Represents level-indexed free
@@ -126,6 +135,22 @@ pub enum Neutral {
     NVar(usize),
     /// Application `n x` where `n` is neutral. Cannot reduce.
     NApp(Box<Neutral>, Box<Value>),
+    /// Stuck first projection `fst(n)`.
+    NFst(Box<Neutral>),
+    /// Stuck second projection `snd(n)`.
+    NSnd(Box<Neutral>),
+    /// **FV-21 soundness gate**: a stuck head that is itself a
+    /// non-function, non-pair value (e.g. `Universe(_)` applied to
+    /// an argument or projected via `fst`/`snd`).  Wrapping the
+    /// offending value here preserves structural distinctness so
+    /// that `def_eq` does NOT silently equate `App(Universe(MAX), x)`
+    /// with `Universe(MAX)`.  In a sound run the type-checker
+    /// rejects BEFORE reaching this branch (NotAFunction /
+    /// NotASigma / UniverseOverflow), but the kernel runs on
+    /// adversarial fuzz input via the differential harness, and the
+    /// stuck-head form keeps the kernel's reject/accept verdicts in
+    /// sync with `proof_checker.rs`'s structural rejection.
+    NStuck(Box<Value>),
 }
 
 /// Environment — outer-first list of values. Pushed at binder
@@ -189,21 +214,76 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             let x_val = eval(x, env);
             apply_value(f_val, x_val)
         }
+
+        Term::Sigma(domain, body) => {
+            let dom_val = eval(domain, env);
+            Value::VSigma {
+                domain: Box::new(dom_val),
+                codomain: Closure {
+                    env: env.clone(),
+                    body: (**body).clone(),
+                },
+            }
+        }
+
+        Term::Pair(a, b) => {
+            Value::VPair(Box::new(eval(a, env)), Box::new(eval(b, env)))
+        }
+
+        Term::Fst(p) => apply_fst(eval(p, env)),
+        Term::Snd(p) => apply_snd(eval(p, env)),
     }
 }
 
-/// Apply one value to another.  When the function is a closure,
-/// β-reduces; when neutral, builds a stuck `NApp`.
+/// Apply one value to another.
+///
+/// β-reduces for `VLam`; builds a stuck `NApp` for neutrals; **for
+/// non-function heads (FV-21 soundness gate)** wraps the head in
+/// `NStuck` so the resulting `App` is structurally distinct from
+/// the bare head.  This closes the disagreement found by
+/// `multi_kernel_agreement_on_arbitrary_cert`: pre-FV-21 the
+/// fallback `_ => f` silently dropped the application, making
+/// `App(Universe(MAX), x)` evaluate to `Universe(MAX)` and unsoundly
+/// matching the term's inferred type.
 pub fn apply_value(f: Value, x: Value) -> Value {
     match f {
         Value::VLam { body, .. } => body.apply(x),
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(x))),
-        // VPi / VUniverse aren't valid functions — type-checker
-        // catches this; if the value is malformed we surface it
-        // as a stuck Value so quote produces a recognisable shape.
-        // (In a sound run with type-checked input this branch is
-        // unreachable.)
-        _ => f,
+        Value::VNeutral(n) => {
+            Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(x)))
+        }
+        other => {
+            // FV-21: wrap the non-function head in NStuck so def_eq
+            // sees the application structurally and doesn't equate
+            // `App(other, x)` with `other`.
+            Value::VNeutral(Neutral::NApp(
+                Box::new(Neutral::NStuck(Box::new(other))),
+                Box::new(x),
+            ))
+        }
+    }
+}
+
+/// First projection on a value (FV-20).  Reduces `VPair(a, _)` → `a`;
+/// stays stuck on neutrals via `NFst`; falls through `NStuck` for
+/// non-pair, non-neutral heads (FV-21).
+pub fn apply_fst(p: Value) -> Value {
+    match p {
+        Value::VPair(a, _) => *a,
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NFst(Box::new(n))),
+        other => Value::VNeutral(Neutral::NFst(Box::new(Neutral::NStuck(
+            Box::new(other),
+        )))),
+    }
+}
+
+/// Second projection on a value (FV-20).  Symmetric to [`apply_fst`].
+pub fn apply_snd(p: Value) -> Value {
+    match p {
+        Value::VPair(_, b) => *b,
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NSnd(Box::new(n))),
+        other => Value::VNeutral(Neutral::NSnd(Box::new(Neutral::NStuck(
+            Box::new(other),
+        )))),
     }
 }
 
@@ -237,6 +317,18 @@ pub fn quote(value: &Value, level: usize) -> Term {
         }
 
         Value::VNeutral(n) => quote_neutral(n, level),
+
+        Value::VSigma { domain, codomain } => {
+            let dom_term = quote(domain, level);
+            let fresh = Value::VNeutral(Neutral::NVar(level));
+            let body_val = codomain.apply(fresh);
+            let body_term = quote(&body_val, level + 1);
+            Term::Sigma(Box::new(dom_term), Box::new(body_term))
+        }
+
+        Value::VPair(a, b) => {
+            Term::Pair(Box::new(quote(a, level)), Box::new(quote(b, level)))
+        }
     }
 }
 
@@ -261,6 +353,13 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
             let x_term = quote(x, level);
             Term::App(Box::new(f_term), Box::new(x_term))
         }
+        Neutral::NFst(n) => Term::Fst(Box::new(quote_neutral(n, level))),
+        Neutral::NSnd(n) => Term::Snd(Box::new(quote_neutral(n, level))),
+        // FV-21: read back the wrapped value directly — quote sees
+        // exactly what the offending term was, so structural
+        // distinctness across `App(Stuck, x)` vs `bare_value` is
+        // preserved at readback time.
+        Neutral::NStuck(v) => quote(v, level),
     }
 }
 
@@ -323,6 +422,23 @@ pub fn def_eq(a: &Value, b: &Value, level: usize) -> bool {
 
         (Value::VNeutral(n1), Value::VNeutral(n2)) => def_eq_neutral(n1, n2, level),
 
+        (
+            Value::VSigma { domain: d1, codomain: c1 },
+            Value::VSigma { domain: d2, codomain: c2 },
+        ) => {
+            if !def_eq(d1, d2, level) {
+                return false;
+            }
+            let fresh = Value::VNeutral(Neutral::NVar(level));
+            let b1 = c1.apply(fresh.clone());
+            let b2 = c2.apply(fresh);
+            def_eq(&b1, &b2, level + 1)
+        }
+
+        (Value::VPair(a1, b1), Value::VPair(a2, b2)) => {
+            def_eq(a1, a2, level) && def_eq(b1, b2, level)
+        }
+
         _ => false,
     }
 }
@@ -342,6 +458,12 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
         (Neutral::NApp(f1, x1), Neutral::NApp(f2, x2)) => {
             def_eq_neutral(f1, f2, level) && def_eq(x1, x2, level)
         }
+        (Neutral::NFst(n1), Neutral::NFst(n2)) => def_eq_neutral(n1, n2, level),
+        (Neutral::NSnd(n1), Neutral::NSnd(n2)) => def_eq_neutral(n1, n2, level),
+        // FV-21: two stuck heads are equal iff their wrapped values
+        // are equal — preserves structural distinctness w.r.t. bare
+        // values (which compare via their own arms in `def_eq`).
+        (Neutral::NStuck(v1), Neutral::NStuck(v2)) => def_eq(v1, v2, level),
         _ => false,
     }
 }
@@ -477,6 +599,64 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             }
             let x_value = eval(x, ctx.env());
             Ok(codom.apply(x_value))
+        }
+
+        // T-Sigma-Form (NbE): Σ(x:A).B : Universe(max(level(A), level(B)))
+        Term::Sigma(a, b) => {
+            let a_ty = infer_value(ctx, a)?;
+            let n = expect_universe(&a_ty).ok_or_else(|| CheckError::NotAType((**a).clone()))?;
+            let a_value = eval(a, ctx.env());
+            let extended = ctx.extend(a_value);
+            let b_ty = infer_value(&extended, b)?;
+            let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
+            Ok(Value::VUniverse(n.max_with(m)))
+        }
+
+        // T-Pair-Intro (NbE): synthesis-mode mirror.  The synthesised
+        // Σ is non-dependent (`B` doesn't reference de Bruijn 0);
+        // dependent claims are reached via `check`.  The closure
+        // body is the quoted snd-type at the OUTER level; we
+        // produce it via `Term::Pair`'s ad-hoc shift through
+        // re-evaluation below.
+        Term::Pair(a, b) => {
+            let a_ty = infer_value(ctx, a)?;
+            let b_ty = infer_value(ctx, b)?;
+            let b_ty_term = quote(&b_ty, ctx.level());
+            // Build a Σ-value using the existing Lam/Pi closure
+            // infrastructure: we evaluate `Sigma(quote(a_ty),
+            // shift_up(b_ty_term))` so the closure captures the
+            // current env at the binding site (the trick used by
+            // T-Lam-Intro above for Pi-from-Lam).
+            let a_ty_term = quote(&a_ty, ctx.level());
+            let b_ty_shifted =
+                crate::proof_checker::lift_term_one_binder(b_ty_term);
+            let result = Term::Sigma(Box::new(a_ty_term), Box::new(b_ty_shifted));
+            Ok(eval(&result, ctx.env()))
+        }
+
+        // T-Fst-Elim (NbE): Fst(p) : A where p : Σ(A, B).
+        Term::Fst(p) => {
+            let p_ty = infer_value(ctx, p)?;
+            match p_ty {
+                Value::VSigma { domain, .. } => Ok(*domain),
+                other => Err(CheckError::NotASigma(quote(&other, ctx.level()))),
+            }
+        }
+
+        // T-Snd-Elim (NbE): Snd(p) : B[Fst(p)/0] where p : Σ(A, B).
+        // Discharge the dependency by applying the codomain closure
+        // to `Fst(p)`'s VALUE — this is the NbE realisation of the
+        // term-level substitution `B[Fst(p)/0]`.
+        Term::Snd(p) => {
+            let p_ty = infer_value(ctx, p)?;
+            match p_ty {
+                Value::VSigma { codomain, .. } => {
+                    let p_value = eval(p, ctx.env());
+                    let fst_value = apply_fst(p_value);
+                    Ok(codomain.apply(fst_value))
+                }
+                other => Err(CheckError::NotASigma(quote(&other, ctx.level()))),
+            }
         }
     }
 }

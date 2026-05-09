@@ -153,6 +153,34 @@ pub enum ReflectedTerm {
         /// Reflected argument.
         argument: Box<ReflectedTerm>,
     },
+
+    /// Mirror of [`Term::Sigma`] — dependent pair type `Σ(x:A).B`.
+    Sigma {
+        /// Reflected domain `A`.
+        domain: Box<ReflectedTerm>,
+        /// Reflected codomain `B` under the binder.
+        body: Box<ReflectedTerm>,
+    },
+
+    /// Mirror of [`Term::Pair`].
+    Pair {
+        /// Reflected first component.
+        first: Box<ReflectedTerm>,
+        /// Reflected second component.
+        second: Box<ReflectedTerm>,
+    },
+
+    /// Mirror of [`Term::Fst`] — first projection.
+    Fst {
+        /// Reflected pair.
+        pair: Box<ReflectedTerm>,
+    },
+
+    /// Mirror of [`Term::Snd`] — second projection.
+    Snd {
+        /// Reflected pair.
+        pair: Box<ReflectedTerm>,
+    },
 }
 
 // =============================================================================
@@ -212,6 +240,20 @@ impl From<&Term> for ReflectedTerm {
                 function: Box::new(ReflectedTerm::from(f.as_ref())),
                 argument: Box::new(ReflectedTerm::from(x.as_ref())),
             },
+            Term::Sigma(a, b) => ReflectedTerm::Sigma {
+                domain: Box::new(ReflectedTerm::from(a.as_ref())),
+                body: Box::new(ReflectedTerm::from(b.as_ref())),
+            },
+            Term::Pair(a, b) => ReflectedTerm::Pair {
+                first: Box::new(ReflectedTerm::from(a.as_ref())),
+                second: Box::new(ReflectedTerm::from(b.as_ref())),
+            },
+            Term::Fst(p) => ReflectedTerm::Fst {
+                pair: Box::new(ReflectedTerm::from(p.as_ref())),
+            },
+            Term::Snd(p) => ReflectedTerm::Snd {
+                pair: Box::new(ReflectedTerm::from(p.as_ref())),
+            },
         }
     }
 }
@@ -235,6 +277,16 @@ impl TryFrom<&ReflectedTerm> for Term {
                 Term::try_from(function.as_ref())?,
                 Term::try_from(argument.as_ref())?,
             )),
+            ReflectedTerm::Sigma { domain, body } => Ok(Term::Sigma(
+                Box::new(Term::try_from(domain.as_ref())?),
+                Box::new(Term::try_from(body.as_ref())?),
+            )),
+            ReflectedTerm::Pair { first, second } => Ok(Term::Pair(
+                Box::new(Term::try_from(first.as_ref())?),
+                Box::new(Term::try_from(second.as_ref())?),
+            )),
+            ReflectedTerm::Fst { pair } => Ok(Term::Fst(Box::new(Term::try_from(pair.as_ref())?))),
+            ReflectedTerm::Snd { pair } => Ok(Term::Snd(Box::new(Term::try_from(pair.as_ref())?))),
         }
     }
 }
@@ -542,6 +594,14 @@ fn debruijn_in_range(term: &ReflectedTerm, depth: usize) -> bool {
         ReflectedTerm::App { function, argument } => {
             debruijn_in_range(function, depth) && debruijn_in_range(argument, depth)
         }
+        ReflectedTerm::Sigma { domain, body } => {
+            debruijn_in_range(domain, depth) && debruijn_in_range(body, depth + 1)
+        }
+        ReflectedTerm::Pair { first, second } => {
+            debruijn_in_range(first, depth) && debruijn_in_range(second, depth)
+        }
+        ReflectedTerm::Fst { pair } => debruijn_in_range(pair, depth),
+        ReflectedTerm::Snd { pair } => debruijn_in_range(pair, depth),
     }
 }
 
