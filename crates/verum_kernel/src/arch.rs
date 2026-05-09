@@ -560,23 +560,72 @@ pub enum ConfidenceLevel {
     High,
 }
 
+/// Per-variant metadata for a [`Lifecycle`] entry.
+///
+/// Pre-this-struct, [`Lifecycle`] carried three separate methods
+/// (`tag` / `cve_glyph` / `rank`), each with its own 9-arm match.
+/// Adding a new variant meant updating three places, with the
+/// CVE-7-symbol roster + the lifecycle ordering encoded twice
+/// (once in the match arm string, once in the rank arm number).
+/// The metadata now lives in one [`Lifecycle::meta`] match per
+/// variant; the three legacy accessors are trivial projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LifecycleMeta {
+    /// Stable single-token diagnostic tag (e.g. `"hypothesis"`,
+    /// `"theorem"`) used in audit JSON, anti-pattern messages, and
+    /// the dual-audience surface per ATS-V §32.4.
+    pub tag: &'static str,
+    /// CVE §3.5 status glyph: `"H"` / `"P"` / `"D"` / `"C"` /
+    /// `"T"` / `"I"` / `"✗"` / `"O"`. The ATS-V-legacy `Plan`
+    /// variant has no CVE-7-symbol glyph and reports `"Plan"`.
+    pub cve_glyph: &'static str,
+    /// Lifecycle-regression ordering rank (AP-009). Higher = more
+    /// mature. `[T]` = 6 > `[D]` = `[C]` = 5 > `[P]` = 4 >
+    /// `[Plan]` = 3 > `[H]` = 2 > `[I]` = 1 > `[✗]` = `[O]` = 0.
+    pub rank: u8,
+}
+
 impl Lifecycle {
+    /// Per-variant metadata: stable tag, CVE glyph, and
+    /// regression-ordering rank. **Single source of truth** —
+    /// every other accessor (`tag()`, `cve_glyph()`, `rank()`) is
+    /// a one-line projection over this struct, so adding a new
+    /// `Lifecycle` variant requires extending exactly one match
+    /// arm here.
+    pub fn meta(&self) -> LifecycleMeta {
+        let m = |tag, cve_glyph, rank| LifecycleMeta {
+            tag,
+            cve_glyph,
+            rank,
+        };
+        match self {
+            // [✗] / [O] (rank 0) — retracted / obsolete.
+            Lifecycle::Obsolete { .. } => m("obsolete", "O", 0),
+            Lifecycle::Retracted { .. } => m("retracted", "✗", 0),
+            // [I] (rank 1) — interpretation, mature-corpus-forbidden.
+            Lifecycle::Interpretation { .. } => m("interpretation", "I", 1),
+            // [H] (rank 2) — hypothesis.
+            Lifecycle::Hypothesis { .. } => m("hypothesis", "H", 2),
+            // [Plan] (rank 3) — ATS-V-legacy committed > hypothesis,
+            // no CVE-7-symbol glyph.
+            Lifecycle::Plan { .. } => m("plan", "Plan", 3),
+            // [P] (rank 4) — postulate (load-bearing assumption).
+            Lifecycle::Postulate { .. } => m("postulate", "P", 4),
+            // [D] = [C] (rank 5) — definition / conditional.
+            Lifecycle::Definition => m("definition", "D", 5),
+            Lifecycle::Conditional { .. } => m("conditional", "C", 5),
+            // [T] (rank 6) — theorem.
+            Lifecycle::Theorem { .. } => m("theorem", "T", 6),
+        }
+    }
+
     /// Stable diagnostic tag — single-token form used in audit
     /// JSON, anti-pattern messages, and the dual-audience surface
-    /// per ATS-V §32.4.  Tags align with the CVE 7-symbol canonical
-    /// taxonomy (CVE §3.5).
+    /// per ATS-V §32.4. Tags align with the CVE 7-symbol canonical
+    /// taxonomy (CVE §3.5). Thin accessor over [`Self::meta`].
+    #[inline]
     pub fn tag(&self) -> &'static str {
-        match self {
-            Lifecycle::Hypothesis { .. } => "hypothesis",
-            Lifecycle::Plan { .. } => "plan",
-            Lifecycle::Postulate { .. } => "postulate",
-            Lifecycle::Definition => "definition",
-            Lifecycle::Conditional { .. } => "conditional",
-            Lifecycle::Theorem { .. } => "theorem",
-            Lifecycle::Interpretation { .. } => "interpretation",
-            Lifecycle::Retracted { .. } => "retracted",
-            Lifecycle::Obsolete { .. } => "obsolete",
-        }
+        self.meta().tag
     }
 
     /// CVE §3.5 single-character status code — for compact
@@ -584,44 +633,29 @@ impl Lifecycle {
     /// Canonical ASCII glyphs: `H` Hypothesis, `P` Postulate,
     /// `D` Definition, `C` Conditional, `T` Theorem,
     /// `I` Interpretation, `O` Obsolete, `✗` Retracted.
+    /// `Plan` is an ATS-V-legacy variant outside the CVE 7-symbol
+    /// roster and reports the literal `"Plan"`. Thin accessor
+    /// over [`Self::meta`].
+    #[inline]
     pub fn cve_glyph(&self) -> &'static str {
-        match self {
-            Lifecycle::Hypothesis { .. } => "H",
-            Lifecycle::Plan { .. } => "Plan", // ATS-V legacy — no CVE glyph
-            Lifecycle::Postulate { .. } => "P",
-            Lifecycle::Definition => "D",
-            Lifecycle::Conditional { .. } => "C",
-            Lifecycle::Theorem { .. } => "T",
-            Lifecycle::Interpretation { .. } => "I",
-            Lifecycle::Retracted { .. } => "✗",
-            Lifecycle::Obsolete { .. } => "O",
-        }
+        self.meta().cve_glyph
     }
 
     /// Lifecycle ordering for `LifecycleRegression` (AP-009).
-    /// `[T] > [D] = [C] > [P] > [H] > [I] > [✗] > Obsolete`.
+    /// `[T] > [D] = [C] > [P] > [Plan] > [H] > [I] > [✗] = [O]`.
     /// CVE §3.5 + §3.1: definitions / conditionals / postulates
     /// rank above hypotheses (mature artifacts cite mature
     /// artifacts); interpretations and retractions rank LOWEST
-    /// (a Theorem citing an Interpretation is a defect).
+    /// (a Theorem citing an Interpretation is a defect). Thin
+    /// accessor over [`Self::meta`].
+    #[inline]
     pub fn rank(&self) -> u8 {
-        match self {
-            Lifecycle::Obsolete { .. } => 0,
-            Lifecycle::Retracted { .. } => 0,
-            Lifecycle::Interpretation { .. } => 1,
-            Lifecycle::Hypothesis { .. } => 2,
-            Lifecycle::Plan { .. } => 3, // committed > hypothesis
-            Lifecycle::Postulate { .. } => 4, // load-bearing assumption
-            Lifecycle::Definition => 5,
-            Lifecycle::Conditional { .. } => 5,
-            Lifecycle::Theorem { .. } => 6,
-        }
+        self.meta().rank
     }
 
     /// True iff the lifecycle is one CVE §6.7 forbids in mature
     /// corpus: `[I]` Interpretation without a maturation plan.
-    /// Used by future anti-pattern check
-    /// `InterpretationInMatureCorpus`.
+    /// Used by anti-pattern check `InterpretationInMatureCorpus`.
     pub fn is_mature_corpus_forbidden(&self) -> bool {
         matches!(self, Lifecycle::Interpretation { .. })
     }
@@ -1965,5 +1999,158 @@ mod tests {
         .copied()
         .collect();
         assert_eq!(documented_tags.len(), 9);
+    }
+
+    // =================================================================
+    // Structural pins for the Lifecycle::meta() consolidation.
+    // =================================================================
+
+    fn lifecycle_probes() -> Vec<Lifecycle> {
+        vec![
+            Lifecycle::Hypothesis {
+                confidence: ConfidenceLevel::Medium,
+            },
+            Lifecycle::Plan {
+                target_completion: "2026-12-31".into(),
+            },
+            Lifecycle::Postulate {
+                citation: "test".into(),
+            },
+            Lifecycle::Definition,
+            Lifecycle::Conditional {
+                conditions: vec!["c1".into()],
+            },
+            Lifecycle::Theorem {
+                since: "v1".into(),
+            },
+            Lifecycle::Interpretation {
+                reason: "transitional".into(),
+            },
+            Lifecycle::Retracted {
+                reason: "withdrawn".into(),
+                replacement: None,
+            },
+            Lifecycle::Obsolete {
+                deprecation_reason: "phase-out".into(),
+                replacement: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn lifecycle_meta_accessors_agree_with_legacy_methods() {
+        // Pin: every variant's tag()/cve_glyph()/rank() returns
+        // exactly what meta() carries. Future "optimisation" that
+        // re-implements one accessor bypassing meta() fails this
+        // unless all three stay in lock-step.
+        for lc in lifecycle_probes() {
+            let m = lc.meta();
+            assert_eq!(lc.tag(), m.tag, "tag() drift on {:?}", lc);
+            assert_eq!(
+                lc.cve_glyph(),
+                m.cve_glyph,
+                "cve_glyph() drift on {:?}",
+                lc
+            );
+            assert_eq!(lc.rank(), m.rank, "rank() drift on {:?}", lc);
+        }
+    }
+
+    #[test]
+    fn lifecycle_tags_are_unique_canonical_set() {
+        // Pin: the 9 tags form a unique 9-element set — used as
+        // dictionary keys in audit JSON; a duplicate tag would
+        // silently shadow one variant in cross-format output.
+        let tags: std::collections::BTreeSet<&'static str> =
+            lifecycle_probes().iter().map(|lc| lc.tag()).collect();
+        assert_eq!(tags.len(), 9);
+        for expected in [
+            "hypothesis",
+            "plan",
+            "postulate",
+            "definition",
+            "conditional",
+            "theorem",
+            "interpretation",
+            "retracted",
+            "obsolete",
+        ] {
+            assert!(
+                tags.contains(expected),
+                "Lifecycle tag roster missing canonical entry: {}",
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn lifecycle_cve_glyphs_match_canonical_seven_symbol_taxonomy() {
+        // Pin: the CVE-7-symbol roster is {H, P, D, C, T, I, ✗, O}
+        // (8 symbols when counting ✗ separately from O). The Plan
+        // variant is ATS-V-legacy and reports literal "Plan".
+        let glyphs: std::collections::BTreeSet<&'static str> = lifecycle_probes()
+            .iter()
+            .map(|lc| lc.cve_glyph())
+            .collect();
+        for expected in ["H", "P", "D", "C", "T", "I", "✗", "O", "Plan"] {
+            assert!(
+                glyphs.contains(expected),
+                "Lifecycle CVE-glyph roster missing entry: {}",
+                expected,
+            );
+        }
+        assert_eq!(glyphs.len(), 9);
+    }
+
+    #[test]
+    fn lifecycle_rank_partial_order_matches_cve_taxonomy() {
+        // Pin: rank ordering [T] > [D] = [C] > [P] > [Plan] > [H]
+        // > [I] > [✗] = [O]. Concrete invariants per CVE §3.5
+        // + §3.1 (mature artifacts cite mature artifacts).
+        let theorem = Lifecycle::Theorem {
+            since: "v1".into(),
+        }
+        .rank();
+        let definition = Lifecycle::Definition.rank();
+        let conditional = Lifecycle::Conditional {
+            conditions: vec![],
+        }
+        .rank();
+        let postulate = Lifecycle::Postulate {
+            citation: "c".into(),
+        }
+        .rank();
+        let plan = Lifecycle::Plan {
+            target_completion: "2026".into(),
+        }
+        .rank();
+        let hypothesis = Lifecycle::Hypothesis {
+            confidence: ConfidenceLevel::Low,
+        }
+        .rank();
+        let interpretation = Lifecycle::Interpretation {
+            reason: "r".into(),
+        }
+        .rank();
+        let retracted = Lifecycle::Retracted {
+            reason: "r".into(),
+            replacement: None,
+        }
+        .rank();
+        let obsolete = Lifecycle::Obsolete {
+            deprecation_reason: "r".into(),
+            replacement: None,
+        }
+        .rank();
+
+        // Strict ordering claims.
+        assert!(theorem > definition);
+        assert_eq!(definition, conditional);
+        assert!(conditional > postulate);
+        assert!(postulate > plan);
+        assert!(plan > hypothesis);
+        assert!(hypothesis > interpretation);
+        assert!(interpretation > retracted);
+        assert_eq!(retracted, obsolete);
     }
 }
