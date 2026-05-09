@@ -213,8 +213,7 @@ pub mod exhaustiveness; // Pattern exhaustiveness checking (Pattern exhaustivene
 pub mod existential; // Existential type inference (Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — )
 pub mod implicit; // Implicit argument resolution (Implicit arguments: compiler-inferred function arguments resolved by unification or type class search — )
 pub mod infer;
-pub(crate) mod infer_path_resolution; // Path resolution methods extracted from infer.rs
-pub(crate) mod infer_patterns; // Pattern binding methods extracted from infer.rs
+// infer_path_resolution and infer_patterns are now infer/path_resolution.rs + infer/patterns.rs
 pub mod integer_hierarchy;
 pub mod kripke; // Kripke semantics: modal worlds
 pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ?
