@@ -3290,7 +3290,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(8, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
                             "gen_ptr",
                         )
                         .or_llvm_err()?
@@ -3307,7 +3307,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(12, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
                             "caps_ptr",
                         )
                         .or_llvm_err()?
@@ -3318,7 +3318,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .into_int_value();
 
                 // Extract epoch (low 16 bits of epoch_caps)
-                let epoch_mask = i32_type.const_int(0xFFFF, false);
+                let epoch_mask = i32_type.const_int(verum_common::layout::CAPS_MASK_U32 as u64, false);
                 let epoch_i32 = builder
                     .build_and(epoch_caps, epoch_mask, "epoch_i32")
                     .or_llvm_err()?;
@@ -3331,7 +3331,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
                     .or_llvm_err()?;
                 let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(32, false), "epoch_shifted")
+                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
                     .or_llvm_err()?;
                 let packed = builder
                     .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
@@ -3376,7 +3376,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(8, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
                             "gen_ptr",
                         )
                         .or_llvm_err()?
@@ -3393,7 +3393,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(12, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
                             "caps_ptr",
                         )
                         .or_llvm_err()?
@@ -3411,7 +3411,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let caps_shifted = builder
                     .build_right_shift(
                         epoch_caps,
-                        i32_type.const_int(16, false),
+                        i32_type.const_int(verum_common::layout::CAPS_BITS as u64, false),
                         false,
                         "caps_shifted",
                     )
@@ -3441,7 +3441,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
                     .or_llvm_err()?;
                 let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(32, false), "epoch_shifted")
+                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
                     .or_llvm_err()?;
                 let packed = builder
                     .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
@@ -3494,7 +3494,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(8, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
                             "gen_ptr",
                         )
                         .or_llvm_err()?
@@ -3510,7 +3510,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_in_bounds_gep(
                             i8_type,
                             ref_ptr,
-                            &[i64_type.const_int(12, false)],
+                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
                             "caps_ptr",
                         )
                         .or_llvm_err()?
@@ -3520,7 +3520,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .or_llvm_err()?
                     .into_int_value();
 
-                let epoch_mask = i32_type.const_int(0xFFFF, false);
+                let epoch_mask = i32_type.const_int(verum_common::layout::CAPS_MASK_U32 as u64, false);
                 let epoch_i32 = builder
                     .build_and(epoch_caps, epoch_mask, "epoch_i32")
                     .or_llvm_err()?;
@@ -3532,7 +3532,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
                     .or_llvm_err()?;
                 let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(32, false), "epoch_shifted")
+                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
                     .or_llvm_err()?;
                 let packed = builder
                     .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
@@ -3705,7 +3705,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let shifted = builder
                     .build_right_shift(
                         expected_packed,
-                        i64_type.const_int(32, false),
+                        i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false),
                         false,
                         "shifted",
                     )
@@ -3716,7 +3716,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
                 // header_ptr = user_ptr - 32 (HEADER_SIZE)
                 let header_ptr_int = builder
-                    .build_int_sub(user_ptr, i64_type.const_int(32, false), "header_ptr_int")
+                    .build_int_sub(user_ptr, i64_type.const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false), "header_ptr_int")
                     .or_llvm_err()?;
                 let header_ptr = builder
                     .build_int_to_ptr(header_ptr_int, ptr_type, "header_ptr")
@@ -3856,7 +3856,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 builder.position_at_end(do_inc);
                 // header_ptr = inttoptr(ptr - 32)
                 let header_int = builder
-                    .build_int_sub(ptr_val, i64_type.const_int(32, false), "header_int")
+                    .build_int_sub(ptr_val, i64_type.const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false), "header_int")
                     .or_llvm_err()?;
                 let header_ptr = builder
                     .build_int_to_ptr(header_int, ptr_type, "header_ptr")
@@ -3922,7 +3922,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 builder.position_at_end(do_dec);
                 // header_ptr = inttoptr(ptr - 32)
                 let header_int = builder
-                    .build_int_sub(ptr_val, i64_type.const_int(32, false), "header_int")
+                    .build_int_sub(ptr_val, i64_type.const_int(verum_common::layout::ALLOCATION_HEADER_SIZE, false), "header_int")
                     .or_llvm_err()?;
                 let header_ptr = builder
                     .build_int_to_ptr(header_int, ptr_type, "header_ptr")
