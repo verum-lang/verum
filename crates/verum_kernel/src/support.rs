@@ -397,85 +397,23 @@ pub fn is_interval_one(term: &CoreTerm) -> bool {
 
 /// True iff `binder` occurs free in `body`. Respects shadowing
 /// introduced by inner binders (Pi / Lam / Sigma / Refine /
-/// PathOver-motive). Used by the cubical `transp-const` rule:
+/// PathOver-motive).  Used by the cubical `transp-const` rule:
 /// when the path-of-types is a constant lambda (binder unused in
 /// body) transport reduces to the identity.
+///
+/// Routes through [`var_occurs_free`] — both functions implement
+/// identical semantics with identical binder discipline.  Before
+/// the dedup, this carried a nested copy of the recursion with a
+/// `_ => true` conservative fallback; the canonical helper now
+/// covers every variant exhaustively, so the precision the cubical
+/// `transp-const` rule sees is strictly better (variants previously
+/// answering "true" pessimistically now give the precise answer,
+/// which means the rule fires more aggressively where it's
+/// genuinely warranted — sound, since the precise answer is always
+/// at most the conservative one).
+#[inline]
 fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
-    fn occurs(t: &CoreTerm, name: &str) -> bool {
-        match t {
-            CoreTerm::Var(n) => n.as_str() == name,
-            CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => false,
-            CoreTerm::App(f, a) => occurs(f, name) || occurs(a, name),
-            CoreTerm::Pi {
-                binder: b,
-                domain,
-                codomain,
-            } => occurs(domain, name) || (b.as_str() != name && occurs(codomain, name)),
-            CoreTerm::Lam {
-                binder: b,
-                domain,
-                body,
-            } => occurs(domain, name) || (b.as_str() != name && occurs(body, name)),
-            CoreTerm::Sigma {
-                binder: b,
-                fst_ty,
-                snd_ty,
-            } => occurs(fst_ty, name) || (b.as_str() != name && occurs(snd_ty, name)),
-            CoreTerm::Pair(a, b) => occurs(a, name) || occurs(b, name),
-            CoreTerm::Fst(p) | CoreTerm::Snd(p) => occurs(p, name),
-            CoreTerm::PathTy { carrier, lhs, rhs } => {
-                occurs(carrier, name) || occurs(lhs, name) || occurs(rhs, name)
-            }
-            CoreTerm::Refl(x) => occurs(x, name),
-            CoreTerm::PathOver {
-                motive,
-                path,
-                lhs,
-                rhs,
-            } => {
-                occurs(motive, name) || occurs(path, name) || occurs(lhs, name) || occurs(rhs, name)
-            }
-            CoreTerm::HComp { phi, walls, base } => {
-                occurs(phi, name) || occurs(walls, name) || occurs(base, name)
-            }
-            CoreTerm::Transp {
-                path,
-                regular,
-                value,
-            } => occurs(path, name) || occurs(regular, name) || occurs(value, name),
-            CoreTerm::Glue {
-                carrier,
-                phi,
-                fiber,
-                equiv,
-            } => {
-                occurs(carrier, name)
-                    || occurs(phi, name)
-                    || occurs(fiber, name)
-                    || occurs(equiv, name)
-            }
-            CoreTerm::Refine {
-                base,
-                binder: b,
-                predicate,
-            } => occurs(base, name) || (b.as_str() != name && occurs(predicate, name)),
-            CoreTerm::Quotient { base, equiv } => occurs(base, name) || occurs(equiv, name),
-            CoreTerm::QuotIntro { value, base, equiv } => {
-                occurs(value, name) || occurs(base, name) || occurs(equiv, name)
-            }
-            CoreTerm::QuotElim {
-                scrutinee,
-                motive,
-                case,
-            } => occurs(scrutinee, name) || occurs(motive, name) || occurs(case, name),
-            // Conservative fallback: assume usage for variants we
-            // don't enumerate. False positives keep the rule from
-            // firing (correct but less aggressive); they never
-            // produce unsound reductions.
-            _ => true,
-        }
-    }
-    occurs(body, binder)
+    var_occurs_free(body, binder)
 }
 
 fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
