@@ -23,6 +23,18 @@
 module core.io.process;
 mount core.*;
 
+// =============================================================================
+// Internal buffer constants
+// =============================================================================
+
+/// Pipe-drain chunk size for child stdout/stderr capture, in bytes.
+/// 4 KiB matches the OS default pipe-page size on Linux/macOS so the
+/// inner read syscall typically returns a full page; raising it does
+/// not improve throughput because the kernel never delivers more than
+/// one page at a time without extra read calls.  Centralised so the
+/// POSIX and Windows drain loops cannot drift on each other.
+const PIPE_CHUNK_SIZE: Int = 4096;
+
 // Windows-native process creation via kernel32.dll
 @cfg(target_os = "windows")
 mount sys.windows.kernel32.{
@@ -465,7 +477,7 @@ fn write_all_to_fd(handle_raw: Int, data: &[Byte]) -> Int {
     let len = data.len();
     while i < len {
         let mut bytes_written: UInt32 = 0;
-        let chunk_len = if (len - i) > 4096 { 4096 } else { len - i };
+        let chunk_len = if (len - i) > PIPE_CHUNK_SIZE { PIPE_CHUNK_SIZE } else { len - i };
         // Build a contiguous chunk slice
         let mut chunk: List<Byte> = List.with_capacity(chunk_len);
         let mut j = 0;
@@ -521,7 +533,7 @@ fn read_all_from_fd(fd: Int) -> List<Byte> {
     // Drain the fd by reading 4 KiB chunks until EOF.
     let mut out: List<Byte> = [];
     loop {
-        match native_fd_read_chunk(fd, 4096) {
+        match native_fd_read_chunk(fd, PIPE_CHUNK_SIZE) {
             Ok(chunk) => {
                 if chunk.is_empty() { break; }
                 for b in chunk.iter() { out.push(*b); }
@@ -720,15 +732,15 @@ fn wait_for_child(process_handle_raw: Int) -> Result<ExitStatus, Text> {
 fn read_all_from_fd(handle_raw: Int) -> List<Byte> {
     let handle = Handle.from_raw(handle_raw as UInt64);
     let mut result = List.new();
-    let mut buf = List.with_capacity(4096);
-    buf.resize(4096, 0);
+    let mut buf = List.with_capacity(PIPE_CHUNK_SIZE);
+    buf.resize(PIPE_CHUNK_SIZE, 0);
 
     loop {
         let mut bytes_read: UInt32 = 0;
         let ok = ReadFile(
             handle,
             buf.as_mut_ptr() as &unsafe Byte,
-            4096,
+            PIPE_CHUNK_SIZE as UInt32,
             &mut bytes_read,
             0 as &unsafe Byte,  // No overlapped I/O
         );

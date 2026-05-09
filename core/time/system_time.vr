@@ -39,7 +39,7 @@
 )
 module core.time.system_time;
 mount core.*;
-mount time.duration.Duration;
+mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI, NANOS_PER_MICRO, MILLIS_PER_SEC};
 
 // =============================================================================
 // V-LLSI Native Time Imports
@@ -58,9 +58,6 @@ mount sys.darwin.time.realtime_nanos;
 
 @cfg(target_os = "windows")
 mount sys.windows.time.realtime_nanos;
-
-/// Nanoseconds per second constant for conversion.
-const NANOS_PER_SEC: Int = 1_000_000_000;
 
 // =============================================================================
 // SystemTime
@@ -129,8 +126,8 @@ implement SystemTime {
 
     /// Returns Err if `earlier` is actually later than `self`.
     public fn duration_since(&self, earlier: &SystemTime) -> Result<Duration, SystemTimeError> {
-        let self_nanos = self.secs * 1_000_000_000 + self.nanos;
-        let earlier_nanos = earlier.secs * 1_000_000_000 + earlier.nanos;
+        let self_nanos = self.secs * NANOS_PER_SEC + self.nanos;
+        let earlier_nanos = earlier.secs * NANOS_PER_SEC + earlier.nanos;
 
         if self_nanos >= earlier_nanos {
             Ok(Duration.from_nanos(self_nanos - earlier_nanos))
@@ -150,8 +147,8 @@ implement SystemTime {
     /// Add a duration to this time.
     public fn checked_add(&self, duration: Duration) -> Maybe<SystemTime> {
         let total_nanos = self.nanos + duration.subsec_nanos();
-        let extra_secs = total_nanos / 1_000_000_000;
-        let remaining_nanos = total_nanos % 1_000_000_000;
+        let extra_secs = total_nanos / NANOS_PER_SEC;
+        let remaining_nanos = total_nanos % NANOS_PER_SEC;
 
         let new_secs = self.secs + duration.as_secs() + extra_secs;
         if new_secs < self.secs {
@@ -164,7 +161,7 @@ implement SystemTime {
 
     /// Subtract a duration from this time.
     public fn checked_sub(&self, duration: Duration) -> Maybe<SystemTime> {
-        let total_nanos = self.secs * 1_000_000_000 + self.nanos;
+        let total_nanos = self.secs * NANOS_PER_SEC + self.nanos;
         let dur_nanos = duration.as_nanos();
 
         if dur_nanos > total_nanos {
@@ -187,13 +184,13 @@ implement SystemTime {
     /// Get Unix timestamp in milliseconds.
     @inline(always)
     public fn timestamp_millis(&self) -> Int {
-        self.secs * 1000 + self.nanos / 1_000_000
+        self.secs * MILLIS_PER_SEC + self.nanos / NANOS_PER_MILLI
     }
 
     /// Get Unix timestamp in nanoseconds.
     @inline(always)
     public fn timestamp_nanos(&self) -> Int {
-        self.secs * 1_000_000_000 + self.nanos
+        self.secs * NANOS_PER_SEC + self.nanos
     }
 
     /// Create from Unix timestamp in seconds.
@@ -206,8 +203,8 @@ implement SystemTime {
     @inline(always)
     public fn from_timestamp_millis(ms: Int) -> SystemTime {
         SystemTime {
-            secs: ms / 1000,
-            nanos: (ms % 1000) * 1_000_000,
+            secs: ms / MILLIS_PER_SEC,
+            nanos: (ms % MILLIS_PER_SEC) * NANOS_PER_MILLI,
         }
     }
 }
@@ -324,7 +321,7 @@ implement Debug for SystemTime {
 implement Display for SystemTime {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         // Display as Unix timestamp with subsecond precision
-        let ms = self.nanos / 1_000_000;
+        let ms = self.nanos / NANOS_PER_MILLI;
         f.write_str(f"{self.secs}.{ms:03}s")
     }
 }
@@ -343,12 +340,12 @@ public fn now_unix_ns() -> Int {
 
 /// Wall-clock timestamp in microseconds since the Unix epoch.
 public fn now_unix_us() -> Int {
-    now_unix_ns() / 1_000
+    now_unix_ns() / NANOS_PER_MICRO
 }
 
 /// Wall-clock timestamp in milliseconds since the Unix epoch.
 public fn now_unix_ms() -> Int {
-    now_unix_ns() / 1_000_000
+    now_unix_ns() / NANOS_PER_MILLI
 }
 
 /// Wall-clock timestamp in seconds since the Unix epoch.

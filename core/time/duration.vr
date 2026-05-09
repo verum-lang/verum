@@ -37,11 +37,26 @@ mount core.base.coercion.{IntCoercible};
 // Constants
 // =============================================================================
 
-const NANOS_PER_MICRO: Int = 1_000;
-const NANOS_PER_MILLI: Int = 1_000_000;
-const NANOS_PER_SEC: Int = 1_000_000_000;
-const NANOS_PER_MIN: Int = 60_000_000_000;
-const NANOS_PER_HOUR: Int = 3_600_000_000_000;
+/// Nanoseconds per microsecond.
+public const NANOS_PER_MICRO: Int = 1_000;
+
+/// Nanoseconds per millisecond.
+public const NANOS_PER_MILLI: Int = 1_000_000;
+
+/// Nanoseconds per second.
+public const NANOS_PER_SEC: Int = 1_000_000_000;
+
+/// Nanoseconds per minute.
+public const NANOS_PER_MIN: Int = 60_000_000_000;
+
+/// Nanoseconds per hour.
+public const NANOS_PER_HOUR: Int = 3_600_000_000_000;
+
+/// Milliseconds per second.
+public const MILLIS_PER_SEC: Int = 1_000;
+
+/// Microseconds per second.
+public const MICROS_PER_SEC: Int = 1_000_000;
 
 // =============================================================================
 // Duration
@@ -145,7 +160,7 @@ implement Duration {
         } else {
             let whole_secs: Int = secs as Int;
             let frac: Float = secs - (whole_secs as Float);
-            let nanos: Int = (frac * 1_000_000_000.0) as Int;
+            let nanos: Int = (frac * (NANOS_PER_SEC as Float)) as Int;
             Duration { nanos: whole_secs * NANOS_PER_SEC + nanos }
         }
     }
