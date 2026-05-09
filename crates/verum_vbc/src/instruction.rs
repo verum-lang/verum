@@ -8042,6 +8042,94 @@ pub enum SimdSubOpcode {
     Bitcast = 0x95,
 }
 
+// =========================================================================
+// SimdSubOpcode metadata — single source of truth for the 67 variants.
+//
+// The legacy implementation maintained five parallel match-arm
+// methods (`mnemonic`, `category`, `operand_count`,
+// `llvm_intrinsic`, `mlir_op`).  `category()` was driven by
+// `match self.to_byte()` over irregular byte ranges (most 16-byte
+// windows but with a 32-byte 0x10-0x2F window for Arithmetic), so
+// renumbering a variant could silently move it between bands —
+// the irregular Arithmetic band is particularly drift-prone.
+//
+// Same drift-collapse pattern as CbgrSubOpcode.meta() (8e6c4cb93),
+// MlSubOpcode (ae5bc5896), ArithSubOpcode (06d64018d),
+// TensorSubOpcode (79369267d), GpuSubOpcode (dd84a929b),
+// SystemSubOpcode (60b4cc3b9), MathSubOpcode (4b2792881),
+// KernelRule (ec9cfc411).
+// =========================================================================
+
+/// Functional band a `SimdSubOpcode` belongs to.  Bands are
+/// stamped per-variant in `meta()` rather than inferred from
+/// byte-range arithmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SimdCategory {
+    /// `Splat` / `Extract` / `Insert` / `FromScalars`.
+    VectorCreation,
+    /// Element-wise arithmetic ops (Add / Sub / Mul / Div /
+    /// Neg / Abs / Sqrt / Fma / Min / Max / Rem / Recip /
+    /// Rsqrt) — occupies a 32-byte 0x10-0x2F band.
+    Arithmetic,
+    /// Horizontal reductions (`ReduceAdd` / `ReduceMul` /
+    /// `ReduceMin` / `ReduceMax` / `ReduceAnd` / `ReduceOr` /
+    /// `ReduceXor`).
+    Reduction,
+    /// Element-wise comparisons + `Select` blend.
+    Comparison,
+    /// Vector load/store (aligned / unaligned / masked / gather /
+    /// scatter).
+    Memory,
+    /// `Shuffle` / `Permute` / `Reverse` / `Rotate` /
+    /// `Interleave*` / `Concat`.
+    ShufflePermute,
+    /// Bitwise: AND / OR / XOR / NOT / shifts / AndNot.
+    Bitwise,
+    /// Mask helpers: predicate aggregation + compress/expand.
+    Mask,
+    /// Element-type / bit-pattern conversions.
+    TypeConversion,
+}
+
+impl SimdCategory {
+    /// Display string used by the legacy `category()` accessor.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::VectorCreation  => "Vector Creation",
+            Self::Arithmetic      => "Arithmetic",
+            Self::Reduction       => "Reduction",
+            Self::Comparison      => "Comparison",
+            Self::Memory          => "Memory",
+            Self::ShufflePermute  => "Shuffle/Permute",
+            Self::Bitwise         => "Bitwise",
+            Self::Mask            => "Mask",
+            Self::TypeConversion  => "Type Conversion",
+        }
+    }
+}
+
+/// Co-located metadata for one `SimdSubOpcode` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct SimdOpMeta {
+    /// All-caps mnemonic.  Bare names (no `SIMD_*` prefix) by
+    /// design — these are platform-agnostic operations whose
+    /// names map directly to LLVM / MLIR / target-ISA
+    /// (AVX/NEON) terminology.
+    pub mnemonic: &'static str,
+    /// Functional band the variant belongs to.
+    pub category: SimdCategory,
+    /// Number of source operands consumed (0 = nullary,
+    /// 1 = unary, 2 = binary, 3 = ternary).
+    pub operand_count: u8,
+    /// Stem of the LLVM intrinsic name when this op lowers to a
+    /// `@llvm.*` intrinsic; `None` when codegen produces an
+    /// instruction directly (e.g. `fadd <N x float>`).
+    pub llvm_intrinsic: Option<&'static str>,
+    /// MLIR dialect op when this op lowers via the MLIR pipeline;
+    /// `None` when there's no canonical MLIR-side mirror.
+    pub mlir_op: Option<&'static str>,
+}
+
 impl SimdSubOpcode {
     /// Creates a SIMD sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
@@ -8131,231 +8219,151 @@ impl SimdSubOpcode {
         self as u8
     }
 
-    /// Returns the mnemonic string for this SIMD sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::Splat => "SPLAT",
-            Self::Extract => "EXTRACT",
-            Self::Insert => "INSERT",
-            Self::FromScalars => "FROM_SCALARS",
-            Self::Add => "ADD",
-            Self::Sub => "SUB",
-            Self::Mul => "MUL",
-            Self::Div => "DIV",
-            Self::Neg => "NEG",
-            Self::Abs => "ABS",
-            Self::Sqrt => "SQRT",
-            Self::Fma => "FMA",
-            Self::Min => "MIN",
-            Self::Max => "MAX",
-            Self::Rem => "REM",
-            Self::Recip => "RECIP",
-            Self::Rsqrt => "RSQRT",
-            Self::ReduceAdd => "REDUCE_ADD",
-            Self::ReduceMul => "REDUCE_MUL",
-            Self::ReduceMin => "REDUCE_MIN",
-            Self::ReduceMax => "REDUCE_MAX",
-            Self::ReduceAnd => "REDUCE_AND",
-            Self::ReduceOr => "REDUCE_OR",
-            Self::ReduceXor => "REDUCE_XOR",
-            Self::CmpEq => "CMP_EQ",
-            Self::CmpNe => "CMP_NE",
-            Self::CmpLt => "CMP_LT",
-            Self::CmpLe => "CMP_LE",
-            Self::CmpGt => "CMP_GT",
-            Self::CmpGe => "CMP_GE",
-            Self::Select => "SELECT",
-            Self::LoadAligned => "LOAD_ALIGNED",
-            Self::LoadUnaligned => "LOAD_UNALIGNED",
-            Self::StoreAligned => "STORE_ALIGNED",
-            Self::StoreUnaligned => "STORE_UNALIGNED",
-            Self::MaskedLoad => "MASKED_LOAD",
-            Self::MaskedStore => "MASKED_STORE",
-            Self::Gather => "GATHER",
-            Self::Scatter => "SCATTER",
-            Self::Shuffle => "SHUFFLE",
-            Self::Permute => "PERMUTE",
-            Self::Reverse => "REVERSE",
-            Self::Rotate => "ROTATE",
-            Self::InterleaveLow => "INTERLEAVE_LOW",
-            Self::InterleaveHigh => "INTERLEAVE_HIGH",
-            Self::Concat => "CONCAT",
-            Self::BitwiseAnd => "AND",
-            Self::BitwiseOr => "OR",
-            Self::BitwiseXor => "XOR",
-            Self::BitwiseNot => "NOT",
-            Self::ShiftLeft => "SHL",
-            Self::ShiftRight => "SHR",
-            Self::ShiftRightArith => "SAR",
-            Self::AndNot => "ANDNOT",
-            Self::MaskAll => "MASK_ALL",
-            Self::MaskNone => "MASK_NONE",
-            Self::MaskAny => "MASK_ANY",
-            Self::MaskCount => "MASK_COUNT",
-            Self::MaskFirstTrue => "MASK_FIRST_TRUE",
-            Self::Compress => "COMPRESS",
-            Self::Expand => "EXPAND",
-            Self::Cast => "CAST",
-            Self::ConvertF32ToF64 => "CVTF32_F64",
-            Self::ConvertF64ToF32 => "CVTF64_F32",
-            Self::ConvertIntToFloat => "CVTI_F",
-            Self::ConvertFloatToInt => "CVTF_I",
-            Self::Bitcast => "BITCAST",
+    /// Returns co-located metadata for this sub-opcode.
+    ///
+    /// Single source of truth for `mnemonic` / `category` /
+    /// `operand_count` / `llvm_intrinsic` / `mlir_op`.  Sibling
+    /// accessors are `#[inline]` projections through this method.
+    pub const fn meta(self) -> SimdOpMeta {
+        use SimdCategory::{
+            Arithmetic, Bitwise, Comparison, Mask, Memory, Reduction, ShufflePermute,
+            TypeConversion, VectorCreation,
+        };
+
+        // Field order: mnemonic, category, operand_count,
+        // llvm_intrinsic, mlir_op.
+        macro_rules! m {
+            ($mn:expr, $cat:ident, oc=$oc:expr, llvm=$llvm:expr, mlir=$mlir:expr $(,)?) => {
+                SimdOpMeta {
+                    mnemonic: $mn,
+                    category: $cat,
+                    operand_count: $oc,
+                    llvm_intrinsic: $llvm,
+                    mlir_op: $mlir,
+                }
+            };
         }
+
+        match self {
+            // ===== Vector Creation (0x00-0x0F) =====
+            Self::Splat            => m!("SPLAT",            VectorCreation,  oc=1, llvm=None, mlir=Some("vector.splat")),
+            Self::Extract          => m!("EXTRACT",          VectorCreation,  oc=2, llvm=None, mlir=Some("vector.extract")),
+            Self::Insert           => m!("INSERT",           VectorCreation,  oc=3, llvm=None, mlir=Some("vector.insert")),
+            // FromScalars takes a reg_range — counted as 1
+            // logical operand (the range itself).
+            Self::FromScalars      => m!("FROM_SCALARS",     VectorCreation,  oc=1, llvm=None, mlir=None),
+
+            // ===== Arithmetic (0x10-0x2F — 32-byte band) =====
+            Self::Add              => m!("ADD",              Arithmetic,      oc=2, llvm=None,                  mlir=Some("arith.addf")),
+            Self::Sub              => m!("SUB",              Arithmetic,      oc=2, llvm=None,                  mlir=Some("arith.subf")),
+            Self::Mul              => m!("MUL",              Arithmetic,      oc=2, llvm=None,                  mlir=Some("arith.mulf")),
+            Self::Div              => m!("DIV",              Arithmetic,      oc=2, llvm=None,                  mlir=Some("arith.divf")),
+            Self::Neg              => m!("NEG",              Arithmetic,      oc=1, llvm=None,                  mlir=Some("arith.negf")),
+            Self::Abs              => m!("ABS",              Arithmetic,      oc=1, llvm=Some("llvm.fabs"),     mlir=None),
+            Self::Sqrt             => m!("SQRT",             Arithmetic,      oc=1, llvm=Some("llvm.sqrt"),     mlir=None),
+            Self::Fma              => m!("FMA",              Arithmetic,      oc=3, llvm=Some("llvm.fma"),      mlir=Some("math.fma")),
+            Self::Min              => m!("MIN",              Arithmetic,      oc=2, llvm=Some("llvm.minnum"),   mlir=Some("arith.minimumf")),
+            Self::Max              => m!("MAX",              Arithmetic,      oc=2, llvm=Some("llvm.maxnum"),   mlir=Some("arith.maximumf")),
+            Self::Rem              => m!("REM",              Arithmetic,      oc=2, llvm=None,                  mlir=None),
+            Self::Recip            => m!("RECIP",            Arithmetic,      oc=1, llvm=None,                  mlir=None),
+            Self::Rsqrt            => m!("RSQRT",            Arithmetic,      oc=1, llvm=None,                  mlir=None),
+
+            // ===== Reduction (0x30-0x3F) =====
+            Self::ReduceAdd        => m!("REDUCE_ADD",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.fadd"), mlir=Some("vector.reduction")),
+            Self::ReduceMul        => m!("REDUCE_MUL",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.fmul"), mlir=Some("vector.reduction")),
+            Self::ReduceMin        => m!("REDUCE_MIN",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.fmin"), mlir=Some("vector.reduction")),
+            Self::ReduceMax        => m!("REDUCE_MAX",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.fmax"), mlir=Some("vector.reduction")),
+            Self::ReduceAnd        => m!("REDUCE_AND",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.and"),  mlir=None),
+            Self::ReduceOr         => m!("REDUCE_OR",        Reduction,       oc=1, llvm=Some("llvm.vector.reduce.or"),   mlir=None),
+            Self::ReduceXor        => m!("REDUCE_XOR",       Reduction,       oc=1, llvm=Some("llvm.vector.reduce.xor"),  mlir=None),
+
+            // ===== Comparison (0x40-0x4F) =====
+            Self::CmpEq            => m!("CMP_EQ",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::CmpNe            => m!("CMP_NE",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::CmpLt            => m!("CMP_LT",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::CmpLe            => m!("CMP_LE",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::CmpGt            => m!("CMP_GT",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::CmpGe            => m!("CMP_GE",           Comparison,      oc=2, llvm=None, mlir=Some("arith.cmpf")),
+            Self::Select           => m!("SELECT",           Comparison,      oc=3, llvm=None, mlir=Some("arith.select")),
+
+            // ===== Memory (0x50-0x5F) =====
+            Self::LoadAligned      => m!("LOAD_ALIGNED",     Memory,          oc=1, llvm=None,                            mlir=Some("vector.load")),
+            Self::LoadUnaligned    => m!("LOAD_UNALIGNED",   Memory,          oc=1, llvm=None,                            mlir=Some("vector.load")),
+            Self::StoreAligned     => m!("STORE_ALIGNED",    Memory,          oc=2, llvm=None,                            mlir=Some("vector.store")),
+            Self::StoreUnaligned   => m!("STORE_UNALIGNED",  Memory,          oc=2, llvm=None,                            mlir=Some("vector.store")),
+            Self::MaskedLoad       => m!("MASKED_LOAD",      Memory,          oc=3, llvm=Some("llvm.masked.load"),        mlir=None),
+            Self::MaskedStore      => m!("MASKED_STORE",     Memory,          oc=3, llvm=Some("llvm.masked.store"),       mlir=None),
+            Self::Gather           => m!("GATHER",           Memory,          oc=3, llvm=Some("llvm.masked.gather"),      mlir=Some("vector.gather")),
+            Self::Scatter          => m!("SCATTER",          Memory,          oc=3, llvm=Some("llvm.masked.scatter"),     mlir=Some("vector.scatter")),
+
+            // ===== Shuffle/Permute (0x60-0x6F) =====
+            Self::Shuffle          => m!("SHUFFLE",          ShufflePermute,  oc=2, llvm=None, mlir=Some("vector.shuffle")),
+            Self::Permute          => m!("PERMUTE",          ShufflePermute,  oc=2, llvm=None, mlir=None),
+            Self::Reverse          => m!("REVERSE",          ShufflePermute,  oc=1, llvm=None, mlir=None),
+            Self::Rotate           => m!("ROTATE",           ShufflePermute,  oc=2, llvm=None, mlir=None),
+            Self::InterleaveLow    => m!("INTERLEAVE_LOW",   ShufflePermute,  oc=2, llvm=None, mlir=None),
+            Self::InterleaveHigh   => m!("INTERLEAVE_HIGH",  ShufflePermute,  oc=2, llvm=None, mlir=None),
+            Self::Concat           => m!("CONCAT",           ShufflePermute,  oc=2, llvm=None, mlir=None),
+
+            // ===== Bitwise (0x70-0x7F) =====
+            Self::BitwiseAnd       => m!("AND",              Bitwise,         oc=2, llvm=None, mlir=Some("arith.andi")),
+            Self::BitwiseOr        => m!("OR",               Bitwise,         oc=2, llvm=None, mlir=Some("arith.ori")),
+            Self::BitwiseXor       => m!("XOR",              Bitwise,         oc=2, llvm=None, mlir=Some("arith.xori")),
+            Self::BitwiseNot       => m!("NOT",              Bitwise,         oc=1, llvm=None, mlir=None),
+            Self::ShiftLeft        => m!("SHL",              Bitwise,         oc=2, llvm=None, mlir=Some("arith.shli")),
+            Self::ShiftRight       => m!("SHR",              Bitwise,         oc=2, llvm=None, mlir=Some("arith.shrui")),
+            Self::ShiftRightArith  => m!("SAR",              Bitwise,         oc=2, llvm=None, mlir=Some("arith.shrsi")),
+            Self::AndNot           => m!("ANDNOT",           Bitwise,         oc=2, llvm=None, mlir=None),
+
+            // ===== Mask (0x80-0x8F) =====
+            // MaskAll/MaskNone are nullary constants (no source
+            // mask operand consumed).
+            Self::MaskAll          => m!("MASK_ALL",         Mask,            oc=0, llvm=None,                                mlir=None),
+            Self::MaskNone         => m!("MASK_NONE",        Mask,            oc=0, llvm=None,                                mlir=None),
+            Self::MaskAny          => m!("MASK_ANY",         Mask,            oc=1, llvm=None,                                mlir=None),
+            Self::MaskCount        => m!("MASK_COUNT",       Mask,            oc=1, llvm=None,                                mlir=None),
+            Self::MaskFirstTrue    => m!("MASK_FIRST_TRUE",  Mask,            oc=1, llvm=None,                                mlir=None),
+            Self::Compress         => m!("COMPRESS",         Mask,            oc=2, llvm=Some("llvm.masked.compressstore"),   mlir=Some("vector.compressstore")),
+            Self::Expand           => m!("EXPAND",           Mask,            oc=2, llvm=Some("llvm.masked.expandload"),      mlir=Some("vector.expandload")),
+
+            // ===== Type Conversion (0x90-0x9F) =====
+            Self::Cast             => m!("CAST",             TypeConversion,  oc=1, llvm=None, mlir=Some("arith.extf")),
+            Self::ConvertF32ToF64  => m!("CVTF32_F64",       TypeConversion,  oc=1, llvm=None, mlir=None),
+            Self::ConvertF64ToF32  => m!("CVTF64_F32",       TypeConversion,  oc=1, llvm=None, mlir=None),
+            Self::ConvertIntToFloat=> m!("CVTI_F",           TypeConversion,  oc=1, llvm=None, mlir=None),
+            Self::ConvertFloatToInt=> m!("CVTF_I",           TypeConversion,  oc=1, llvm=None, mlir=None),
+            Self::Bitcast          => m!("BITCAST",          TypeConversion,  oc=1, llvm=None, mlir=Some("arith.bitcast")),
+        }
+    }
+
+    /// Returns the mnemonic string for this SIMD sub-opcode.
+    #[inline]
+    pub fn mnemonic(self) -> &'static str {
+        self.meta().mnemonic
     }
 
     /// Returns the category name for this sub-opcode.
+    #[inline]
     pub fn category(self) -> &'static str {
-        match self.to_byte() {
-            0x00..=0x0F => "Vector Creation",
-            0x10..=0x2F => "Arithmetic",
-            0x30..=0x3F => "Reduction",
-            0x40..=0x4F => "Comparison",
-            0x50..=0x5F => "Memory",
-            0x60..=0x6F => "Shuffle/Permute",
-            0x70..=0x7F => "Bitwise",
-            0x80..=0x8F => "Mask",
-            0x90..=0x9F => "Type Conversion",
-            _ => "Unknown",
-        }
+        self.meta().category.as_str()
     }
 
     /// Returns the number of source operands for this operation.
+    #[inline]
     pub fn operand_count(self) -> usize {
-        match self {
-            // Nullary (0 operands)
-            Self::MaskAll | Self::MaskNone => 0,
-            // Unary (1 operand)
-            Self::Neg
-            | Self::Abs
-            | Self::Sqrt
-            | Self::Recip
-            | Self::Rsqrt
-            | Self::BitwiseNot
-            | Self::Reverse
-            | Self::ReduceAdd
-            | Self::ReduceMul
-            | Self::ReduceMin
-            | Self::ReduceMax
-            | Self::ReduceAnd
-            | Self::ReduceOr
-            | Self::ReduceXor
-            | Self::MaskAny
-            | Self::MaskCount
-            | Self::MaskFirstTrue
-            | Self::Cast
-            | Self::ConvertF32ToF64
-            | Self::ConvertF64ToF32
-            | Self::ConvertIntToFloat
-            | Self::ConvertFloatToInt
-            | Self::Bitcast
-            | Self::Splat
-            | Self::LoadAligned
-            | Self::LoadUnaligned => 1,
-            // Binary (2 operands)
-            Self::Add
-            | Self::Sub
-            | Self::Mul
-            | Self::Div
-            | Self::Min
-            | Self::Max
-            | Self::Rem
-            | Self::CmpEq
-            | Self::CmpNe
-            | Self::CmpLt
-            | Self::CmpLe
-            | Self::CmpGt
-            | Self::CmpGe
-            | Self::BitwiseAnd
-            | Self::BitwiseOr
-            | Self::BitwiseXor
-            | Self::AndNot
-            | Self::ShiftLeft
-            | Self::ShiftRight
-            | Self::ShiftRightArith
-            | Self::Shuffle
-            | Self::Permute
-            | Self::InterleaveLow
-            | Self::InterleaveHigh
-            | Self::StoreAligned
-            | Self::StoreUnaligned
-            | Self::Extract
-            | Self::Compress
-            | Self::Expand
-            | Self::Concat
-            | Self::Rotate => 2,
-            // Ternary (3 operands)
-            Self::Fma | Self::Select | Self::Insert | Self::MaskedLoad | Self::MaskedStore => 3,
-            // Special
-            Self::Gather | Self::Scatter => 3,
-            Self::FromScalars => 1, // Takes a reg_range
-        }
+        self.meta().operand_count as usize
     }
 
     /// Returns the LLVM intrinsic name for this operation, if available.
+    #[inline]
     pub fn llvm_intrinsic(self) -> Option<&'static str> {
-        match self {
-            Self::Sqrt => Some("llvm.sqrt"),
-            Self::Fma => Some("llvm.fma"),
-            Self::Abs => Some("llvm.fabs"),
-            Self::Min => Some("llvm.minnum"),
-            Self::Max => Some("llvm.maxnum"),
-            Self::ReduceAdd => Some("llvm.vector.reduce.fadd"),
-            Self::ReduceMul => Some("llvm.vector.reduce.fmul"),
-            Self::ReduceMin => Some("llvm.vector.reduce.fmin"),
-            Self::ReduceMax => Some("llvm.vector.reduce.fmax"),
-            Self::ReduceAnd => Some("llvm.vector.reduce.and"),
-            Self::ReduceOr => Some("llvm.vector.reduce.or"),
-            Self::ReduceXor => Some("llvm.vector.reduce.xor"),
-            Self::MaskedLoad => Some("llvm.masked.load"),
-            Self::MaskedStore => Some("llvm.masked.store"),
-            Self::Gather => Some("llvm.masked.gather"),
-            Self::Scatter => Some("llvm.masked.scatter"),
-            Self::Compress => Some("llvm.masked.compressstore"),
-            Self::Expand => Some("llvm.masked.expandload"),
-            _ => None,
-        }
+        self.meta().llvm_intrinsic
     }
 
     /// Returns the MLIR operation name for this operation (if available).
+    #[inline]
     pub fn mlir_op(self) -> Option<&'static str> {
-        match self {
-            Self::Splat => Some("vector.splat"),
-            Self::Extract => Some("vector.extract"),
-            Self::Insert => Some("vector.insert"),
-            Self::Add => Some("arith.addf"),
-            Self::Sub => Some("arith.subf"),
-            Self::Mul => Some("arith.mulf"),
-            Self::Div => Some("arith.divf"),
-            Self::Neg => Some("arith.negf"),
-            Self::Fma => Some("math.fma"),
-            Self::Min => Some("arith.minimumf"),
-            Self::Max => Some("arith.maximumf"),
-            Self::CmpEq | Self::CmpNe | Self::CmpLt | Self::CmpLe | Self::CmpGt | Self::CmpGe => {
-                Some("arith.cmpf")
-            }
-            Self::Select => Some("arith.select"),
-            Self::LoadAligned | Self::LoadUnaligned => Some("vector.load"),
-            Self::StoreAligned | Self::StoreUnaligned => Some("vector.store"),
-            Self::Shuffle => Some("vector.shuffle"),
-            Self::BitwiseAnd => Some("arith.andi"),
-            Self::BitwiseOr => Some("arith.ori"),
-            Self::BitwiseXor => Some("arith.xori"),
-            Self::ShiftLeft => Some("arith.shli"),
-            Self::ShiftRight => Some("arith.shrui"),
-            Self::ShiftRightArith => Some("arith.shrsi"),
-            Self::ReduceAdd => Some("vector.reduction"),
-            Self::ReduceMul => Some("vector.reduction"),
-            Self::ReduceMin => Some("vector.reduction"),
-            Self::ReduceMax => Some("vector.reduction"),
-            Self::Compress => Some("vector.compressstore"),
-            Self::Expand => Some("vector.expandload"),
-            Self::Gather => Some("vector.gather"),
-            Self::Scatter => Some("vector.scatter"),
-            Self::Cast => Some("arith.extf"),
-            Self::Bitcast => Some("arith.bitcast"),
-            _ => None,
-        }
+        self.meta().mlir_op
     }
 }
 
@@ -16742,5 +16750,170 @@ mod tests {
             seen.push(m);
         });
         assert_eq!(seen.len(), 43);
+    }
+
+    // ========================================================================
+    // SimdSubOpcode meta() drift pins
+    //
+    // The legacy `category()` accessor used `match self.to_byte()`
+    // over irregular byte ranges — most 16-byte windows but with
+    // a 32-byte 0x10-0x2F window for Arithmetic.  The irregular
+    // band is particularly drift-prone; the new meta() table
+    // stamps band membership per-variant.
+    // ========================================================================
+
+    fn for_every_simd_sub_opcode<F: FnMut(SimdSubOpcode)>(mut f: F) {
+        for byte in 0u8..=0xFF {
+            if let Some(op) = SimdSubOpcode::from_byte(byte) {
+                assert_eq!(op.to_byte(), byte,
+                    "SimdSubOpcode::from_byte({:#04x}).to_byte() drift", byte);
+                f(op);
+            }
+        }
+    }
+
+    #[test]
+    fn simd_meta_count_pinned_at_sixty_seven() {
+        let mut count = 0;
+        for_every_simd_sub_opcode(|_| count += 1);
+        assert_eq!(count, 67,
+            "SimdSubOpcode variant count drift: expected 67, got {}", count);
+    }
+
+    #[test]
+    fn simd_meta_category_matches_byte_range_band() {
+        // Pin the irregular byte-range table — the 0x10-0x2F
+        // 32-byte Arithmetic band is the canonical layout.
+        for_every_simd_sub_opcode(|op| {
+            let expected = match op.to_byte() {
+                0x00..=0x0F => SimdCategory::VectorCreation,
+                0x10..=0x2F => SimdCategory::Arithmetic,
+                0x30..=0x3F => SimdCategory::Reduction,
+                0x40..=0x4F => SimdCategory::Comparison,
+                0x50..=0x5F => SimdCategory::Memory,
+                0x60..=0x6F => SimdCategory::ShufflePermute,
+                0x70..=0x7F => SimdCategory::Bitwise,
+                0x80..=0x8F => SimdCategory::Mask,
+                0x90..=0x9F => SimdCategory::TypeConversion,
+                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            };
+            assert_eq!(op.meta().category, expected,
+                "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
+                op, op.to_byte(), op.meta().category, expected);
+            assert_eq!(op.category(), expected.as_str());
+        });
+    }
+
+    #[test]
+    fn simd_meta_operand_count_partition() {
+        // Every variant returns operand_count in {0, 1, 2, 3}.
+        for_every_simd_sub_opcode(|op| {
+            let oc = op.operand_count();
+            assert!((0..=3).contains(&oc),
+                "{:?}: operand_count {} outside {{0,1,2,3}}", op, oc);
+        });
+        // Pin the named nullary set (only mask constants).
+        let nullary = [
+            SimdSubOpcode::MaskAll,
+            SimdSubOpcode::MaskNone,
+        ];
+        let mut nullary_count = 0;
+        for_every_simd_sub_opcode(|op| {
+            if op.operand_count() == 0 { nullary_count += 1; }
+        });
+        assert_eq!(nullary_count, nullary.len(),
+            "nullary count drift: expected {}", nullary.len());
+        for op in &nullary {
+            assert_eq!(op.operand_count(), 0, "{:?} should be nullary", op);
+        }
+        // Pin the canonical ternary set (Fma + Select + Insert +
+        // MaskedLoad/Store + Gather + Scatter = 7 ops).
+        let ternary = [
+            SimdSubOpcode::Fma,
+            SimdSubOpcode::Select,
+            SimdSubOpcode::Insert,
+            SimdSubOpcode::MaskedLoad,
+            SimdSubOpcode::MaskedStore,
+            SimdSubOpcode::Gather,
+            SimdSubOpcode::Scatter,
+        ];
+        let mut ternary_count = 0;
+        for_every_simd_sub_opcode(|op| {
+            if op.operand_count() == 3 { ternary_count += 1; }
+        });
+        assert_eq!(ternary_count, ternary.len(),
+            "ternary count drift: expected {}", ternary.len());
+        for op in &ternary {
+            assert_eq!(op.operand_count(), 3, "{:?} should be ternary", op);
+        }
+    }
+
+    #[test]
+    fn simd_meta_llvm_intrinsic_well_formed() {
+        // Every llvm_intrinsic value, when present, starts with
+        // `"llvm."` for grep-ability and to match the LLVM
+        // intrinsic-name convention.
+        for_every_simd_sub_opcode(|op| {
+            if let Some(name) = op.llvm_intrinsic() {
+                assert!(name.starts_with("llvm."),
+                    "{:?}: llvm_intrinsic {:?} not in `llvm.*` namespace", op, name);
+            }
+        });
+    }
+
+    #[test]
+    fn simd_meta_mlir_op_well_formed() {
+        // Every mlir_op value, when present, contains a `.`
+        // separator (dialect.op).
+        for_every_simd_sub_opcode(|op| {
+            if let Some(name) = op.mlir_op() {
+                assert!(name.contains('.'),
+                    "{:?}: mlir_op {:?} missing dialect.op separator", op, name);
+            }
+        });
+    }
+
+    #[test]
+    fn simd_meta_reduction_band_has_llvm_intrinsics() {
+        // Every Reduction-band variant must lower to a
+        // `@llvm.vector.reduce.*` intrinsic.  Pin the
+        // band-membership ⇒ intrinsic-presence implication.
+        for_every_simd_sub_opcode(|op| {
+            if op.meta().category == SimdCategory::Reduction {
+                let name = op.llvm_intrinsic()
+                    .unwrap_or_else(|| panic!("{:?}: Reduction band must define llvm_intrinsic", op));
+                assert!(name.starts_with("llvm.vector.reduce."),
+                    "{:?}: reduction llvm_intrinsic {:?} doesn't match `llvm.vector.reduce.*`",
+                    op, name);
+            }
+        });
+    }
+
+    #[test]
+    fn simd_meta_cmp_band_uses_arith_cmpf() {
+        // The float-comparison family (CmpEq..CmpGe) shares the
+        // single MLIR `arith.cmpf` op (predicate is an attribute).
+        // Pin that they all map there.
+        let cmp_family = [
+            SimdSubOpcode::CmpEq, SimdSubOpcode::CmpNe,
+            SimdSubOpcode::CmpLt, SimdSubOpcode::CmpLe,
+            SimdSubOpcode::CmpGt, SimdSubOpcode::CmpGe,
+        ];
+        for op in &cmp_family {
+            assert_eq!(op.mlir_op(), Some("arith.cmpf"),
+                "{:?} must lower to arith.cmpf", op);
+        }
+    }
+
+    #[test]
+    fn simd_meta_mnemonic_uniqueness() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(67);
+        for_every_simd_sub_opcode(|op| {
+            let m = op.mnemonic();
+            assert!(!seen.contains(&m),
+                "duplicate mnemonic {:?} on variant {:?}", m, op);
+            seen.push(m);
+        });
+        assert_eq!(seen.len(), 67);
     }
 }
