@@ -268,7 +268,44 @@ pub mod core_loader;
 pub mod core_source; // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod diagnostics_engine;
 pub mod embedded_prelude_seeds; // #102 — precomputed prelude seed list (replaces source-archive parse at runtime)
-pub mod embedded_stdlib; // Embedded stdlib source archive (zstd-compressed core/*.vr in binary)
+// #104 — embed gzipped stdlib .vr sources, gated behind the
+// `embed-stdlib-source` feature.  Default-on during the migration
+// window; disabling produces a leaner production binary that consumes
+// stdlib source exclusively through `SdkLookup` from on-disk
+// `~/.verum/sdk-<blake3>/core/`.  Source-walking dev tools
+// (classifier, audit, debugger) gracefully degrade to
+// `SdkNotInstalled` errors when both this feature and a disk SDK are
+// absent.
+#[cfg(feature = "embed-stdlib-source")]
+pub mod embedded_stdlib;
+#[cfg(not(feature = "embed-stdlib-source"))]
+pub mod embedded_stdlib {
+    //! No-op shim emitted when the binary is built without
+    //! `embed-stdlib-source`.  Production builds consume stdlib
+    //! source exclusively from `~/.verum/sdk-<blake3>/core/` via
+    //! `SdkLookup`; this shim keeps the old call sites compilable
+    //! (they all `match` on `Option<&'static StdlibArchive>` or
+    //! similar) while erasing the embedded archive bytes from the
+    //! final binary.
+    pub struct StdlibArchive;
+    impl StdlibArchive {
+        pub fn file_count(&self) -> usize {
+            0
+        }
+        pub fn file_paths(&self) -> std::iter::Empty<&'static str> {
+            std::iter::empty()
+        }
+        pub fn get_file(&self, _: &str) -> Option<&'static str> {
+            None
+        }
+    }
+    /// Always returns `None` when the feature is disabled — drives
+    /// every legacy source-archive consumer down its
+    /// SDK-only / vbca-fallback path.
+    pub fn get_embedded_stdlib() -> Option<&'static StdlibArchive> {
+        None
+    }
+}
 pub mod embedded_stdlib_vbc; // Embedded precompiled stdlib VBC archive (Phase 5 of #precompile-stdlib epic)
 pub mod graceful_fallback;
 pub mod hash; // Unified Blake3-based hashing infrastructure
