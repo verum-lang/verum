@@ -154,7 +154,7 @@ impl KernelSepBridge {
     /// | `PointsTo { .., .. }`     | `PointsTo { addr: Var(0), value: Var(1) }` (placeholder) |
     /// | `Sep { left, right }`     | `Sep { lhs, rhs }` (recurse)                             |
     /// | `And { left, right }`     | `And { lhs, rhs }` (recurse)                             |
-    /// | `Pure(_)`                 | `Pure(Term::Universe(0))`                                |
+    /// | `Pure(_)`                 | `Pure(Term::universe(0))`                                |
     /// | `Or { .., .. }`           | `Named { name: "or", args: [] }`                         |
     /// | `Wand { .., .. }`         | `Named { name: "wand", args: [] }`                       |
     /// | `Exists { .., .. }`       | `Named { name: "exists", args: [] }`                     |
@@ -178,7 +178,7 @@ impl KernelSepBridge {
                 lhs: Box::new(Self::lower(left)),
                 rhs: Box::new(Self::lower(right)),
             },
-            SepAssertion::Pure(_) => HeapPredicate::Pure(Term::Universe(0)),
+            SepAssertion::Pure(_) => HeapPredicate::Pure(Term::universe(0)),
             SepAssertion::Or { .. } => HeapPredicate::Named {
                 name: "or".to_string(),
                 args: vec![],
@@ -292,7 +292,16 @@ fn term_to_expr_placeholder(term: &Term, role: &str) -> Expr {
     let span = Span::dummy();
     let placeholder_name = match term {
         Term::Var(i) => format!("__verum_kernel_var_{role}_{i}"),
-        Term::Universe(n) => format!("__verum_kernel_univ_{role}_{n}"),
+        Term::Universe(level) => {
+            // Use the Level Display impl for a deterministic,
+            // identifier-safe rendering (e.g. `__verum_kernel_univ_role_0`
+            // for Concrete(0); `__verum_kernel_univ_role_succ(u)` for
+            // symbolic carriers).  The parentheses and commas in
+            // symbolic forms are kept inside the placeholder body —
+            // SMT solvers tolerate them in path identifiers, and
+            // structural distinctness across levels is preserved.
+            format!("__verum_kernel_univ_{role}_{level}")
+        }
         Term::Pi { .. } => format!("__verum_kernel_pi_{role}"),
         Term::Lam { .. } => format!("__verum_kernel_lam_{role}"),
         Term::App { .. } => format!("__verum_kernel_app_{role}"),
@@ -375,7 +384,7 @@ mod tests {
 
     #[test]
     fn lift_pure_produces_smt_pure() {
-        let kp = HeapPredicate::pure(Term::Universe(0));
+        let kp = HeapPredicate::pure(Term::universe(0));
         assert!(matches!(KernelSepBridge::lift(&kp), SepAssertion::Pure(_)));
     }
 
@@ -535,7 +544,7 @@ mod tests {
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
             HeapPredicate::sep(HeapPredicate::Emp, HeapPredicate::Emp),
             HeapPredicate::HeapPredicate_and_for_test(),
-            HeapPredicate::pure(Term::Universe(0)),
+            HeapPredicate::pure(Term::universe(0)),
             HeapPredicate::named("list", vec![]),
         ];
         // Compile-time exhaustive guard: extend lift if a variant is added.

@@ -14578,91 +14578,7 @@ impl TypeChecker {
 
                 // Variables and qualified paths
                 // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
-                Path(path) => {
-                    if path.segments.len() == 1 {
-                        // Single segment - simple variable lookup
-                        let name = if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                            id.name.as_str()
-                        } else {
-                            // Handle self/super/crate keywords
-                            match &path.segments[0] {
-                                verum_ast::ty::PathSegment::SelfValue => {
-                                    // Check if we're in a method context (implement block)
-                                    if let Maybe::Some(ref self_ty) = self.current_self_type {
-                                        // Look up 'self' in the environment
-                                        if let Some(scheme) = self.ctx.env.lookup("self") {
-                                            let ty = scheme.instantiate();
-                                            return Ok(InferResult::new(ty));
-                                        }
-                                    }
-                                    return Err(TypeError::Other(
-                                        "self keyword requires method context".into(),
-                                    ));
-                                }
-                                verum_ast::ty::PathSegment::Super => {
-                                    // super as a standalone path is used as a base for
-                                    // field access chains like super.module.function().
-                                    return Ok(InferResult::new(Type::Never));
-                                }
-                                verum_ast::ty::PathSegment::Cog => {
-                                    // cog as a standalone path is used as a base for qualified access
-                                    return Ok(InferResult::new(Type::Never));
-                                }
-                                _ => return Err(TypeError::Other("Invalid path".into())),
-                            }
-                        };
-
-                        // =====================================================================
-                        // Special built-in identifiers: null
-                        // Interop/FFI: foreign function interface for calling C/system code, marshalling rules — FFI null pointer handling
-                        // =====================================================================
-                        if name == "null" {
-                            // null is a polymorphic null pointer that can be any pointer type
-                            // It unifies with *T, *mut T, *const T, etc.
-                            let inner_var = Type::Var(TypeVar::fresh());
-                            return Ok(InferResult::new(Type::Pointer {
-                                mutable: true,
-                                inner: Box::new(inner_var),
-                            }));
-                        }
-
-                        // COMPLETE module-level lookup: Try local env first, then module context
-                        match self.ctx.env.lookup(name) {
-                            Some(scheme) => {
-                                // =====================================================================
-                                // DEFINITE ASSIGNMENT: Check variable is initialized before use
-                                // Spec: L0-critical/memory-safety/uninitialized
-                                // =====================================================================
-                                let var_name = verum_common::Text::from(name);
-                                self.check_variable_initialized(&var_name, expr.span)?;
-
-                                let ty = scheme.instantiate();
-                                // CRITICAL: Apply unifier to resolve type variables
-                                // When we have e.g. `wrapper: Wrapper<τ59>` and τ59 was unified with Text,
-                                // we need to return `Wrapper<Text>` so field access works correctly.
-                                let resolved_ty = self.unifier.apply(&ty);
-                                Ok(InferResult::new(resolved_ty))
-                            }
-                            None => {
-                                // Try module-level function lookup for cross-function inference
-                                if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
-                                    let ty = scheme.instantiate();
-                                    let resolved_ty = self.unifier.apply(&ty);
-                                    Ok(InferResult::new(resolved_ty))
-                                } else {
-                                    Err(TypeError::UnboundVariable {
-                                        name: name.to_text(),
-                                        span: expr.span,
-                                    })
-                                }
-                            }
-                        }
-                    } else {
-                        // Multi-segment path: module::Type::path::to::item
-                        // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Qualified path resolution
-                        self.resolve_multi_segment_path(path, expr.span)
-                    }
-                }
+                Path(_) => self.infer_expr_path(current_expr),
 
                 // Binary operations
                 Binary { op, left, right } => self.infer_binop(*op, left, right, expr.span),
@@ -14671,1158 +14587,10 @@ impl TypeChecker {
                 Unary { op, expr: inner } => self.infer_unop(*op, inner, expr.span),
 
                 // Function calls
-                Call {
-                    func,
-                    args,
-                    type_args,
-                } => {
-                    // ============================================================
-                    // Optional Chaining Method Call: obj?.method(args)
-                    // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Optional chaining with method calls
-                    // ============================================================
-                    // When the callee is OptionalChain { expr, field: method_name }, this is
-                    // actually an optional method call: obj?.method(args)
-                    // Semantics: If obj is None, return None. If Some(inner), call inner.method(args)
-                    // and wrap the result in Maybe<ReturnType>.
-                    if let ExprKind::OptionalChain {
-                        expr: obj,
-                        field: method,
-                    } = &func.kind
-                    {
-                        let obj_result = self.synth_expr(obj)?;
-
-                        // Use protocol-based Maybe resolution to extract inner type
-                        let maybe_resolution = self
-                            .protocol_checker
-                            .read()
-                            .resolve_maybe_protocol(&obj_result.ty);
-                        let inner_ty = match &maybe_resolution {
-                            Some(resolution) => resolution.inner.clone(),
-                            None => {
-                                // If not a Maybe type, the ?. is a no-op on the receiver
-                                // but we still need to handle it gracefully
-                                obj_result.ty.clone()
-                            }
-                        };
-
-                        // Delegate to the method call handler with the inner type.
-                        // This reuses all the existing method resolution logic (protocol methods,
-                        // inherent methods, borrow tracking, etc.)
-                        let method_result = self.infer_method_call_with_recv_type(
-                            inner_ty, obj, method, type_args, args, expr.span,
-                        )?;
-
-                        // Wrap result in Maybe if it isn't already
-                        // Monadic flattening: if return type is already Maybe, don't double wrap
-                        let result_ty = if maybe_resolution.is_some() {
-                            // Original was Maybe, wrap result in Maybe
-                            if self
-                                .protocol_checker
-                                .read()
-                                .resolve_maybe_protocol(&method_result.ty)
-                                .is_some()
-                            {
-                                // Return type is already Maybe - don't double wrap
-                                method_result.ty
-                            } else {
-                                Type::maybe(method_result.ty)
-                            }
-                        } else {
-                            method_result.ty
-                        };
-
-                        return Ok(InferResult::new(result_ty));
-                    }
-
-                    // ============================================================
-                    // Call Graph Building for Negative Context Verification
-                    // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-                    // ============================================================
-                    // Extract function name and record call site for transitive checking
-                    let callee_name: Option<Text> = match &func.kind {
-                        ExprKind::Path(path) => path.segments.last().and_then(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
-                            _ => None,
-                        }),
-                        _ => None,
-                    };
-
-                    // Record call site for call graph building
-                    if let Some(ref name) = callee_name {
-                        self.record_call_site(name.clone(), expr.span);
-
-                        // Check for immediate negative context violations
-                        // This catches violations before deep analysis
-                        self.check_negative_context_violation(name.as_str(), expr.span)?;
-
-                        // ============================================================
-                        // Cross-Stage Call Validation for N-level Staged Metaprogramming
-                        // Stage coherence: runtime code cannot depend on meta-only values, meta code cannot observe runtime state — Stage Coherence Rule
-                        // ============================================================
-                        // Validate cross-stage calls when inside a meta function
-                        if self.current_function_stage > 0 {
-                            // Look up the callee's stage from the stage checker
-                            // If the callee is registered (i.e., it's a meta function), validate
-                            if let Some(callee_info) = self.stage_checker.get_function_info(name) {
-                                let callee_stage = callee_info.stage;
-                                if let Err(stage_err) =
-                                    self.stage_checker.check_call(name, callee_stage, expr.span)
-                                {
-                                    return Err(Self::stage_error_to_type_error(stage_err));
-                                }
-                            }
-                            // Note: If callee is not registered, it's either:
-                            // - A runtime function (stage 0) - which is valid if we're generating code via quote
-                            // - A function not yet registered - will be caught in staged_pipeline
-                        }
-                    }
-
-                    // ============================================================
-                    // Arity-Aware Variant Constructor Disambiguation (#11)
-                    // ============================================================
-                    // When two registered types share a variant simple name
-                    // (canonical collision: `Result.Ok(T)` is a 1-arg tuple
-                    // variant, `ExitCode.Ok` is a unit variant — both live
-                    // in the stdlib so neither can claim "user override"
-                    // priority), the bare-name resolver in `synth_path`
-                    // picks the FIRST registered parent.  At call sites
-                    // like `Ok(())` the user's intent is clearly the
-                    // 1-arg ctor, but the resolver may pick the unit
-                    // variant — failing with "not a function: <Variant
-                    // | union>".  Disambiguate at the Call expression
-                    // BEFORE resolving the callee: pick by arity match
-                    // when the variant name resolves to multiple
-                    // candidates.  Only fires when the callee is a
-                    // single-segment Path (bare-name call).  Stdlib-
-                    // agnostic per `crates/verum_types/src/CLAUDE.md`:
-                    // the disambiguation key is the constructor's
-                    // payload count from its own registration, never a
-                    // hardcoded list of variant names.
-                    if let Some(ref name) = callee_name {
-                        // Only when the call is a single-segment Path
-                        // (bare-name `Ok(())`, not qualified
-                        // `ExitCode.Ok(...)`).
-                        let is_bare_path = matches!(
-                            &func.kind,
-                            ExprKind::Path(p) if p.segments.len() == 1
-                        );
-                        if is_bare_path
-                            && let Some(parents) =
-                                self.variant_constructor_parents.get(name)
-                            && parents.len() > 1
-                            && let Some(ctor_ty) = self
-                                .try_resolve_variant_constructor_with_arity(
-                                    name.as_str(),
-                                    Some(args.len()),
-                                )
-                        {
-                            // Re-enter the call type-check with the
-                            // disambiguated function type instead of
-                            // re-running synth_expr (which would loop
-                            // through the arity-blind path).  We
-                            // simulate the rest of the Call inference
-                            // body locally for this fast path.
-                            let func_ty = ctor_ty;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = func_ty
-                            {
-                                if params.len() != args.len() {
-                                    return Err(TypeError::Other(
-                                        verum_common::Text::from(format!(
-                                            "{} expects {} argument(s), got {}",
-                                            name.as_str(),
-                                            params.len(),
-                                            args.len()
-                                        )),
-                                    ));
-                                }
-                                let old_call_context = self.in_call_arg_context;
-                                self.in_call_arg_context = true;
-                                for (arg, param_ty) in
-                                    args.iter().zip(params.iter())
-                                {
-                                    let resolved_param =
-                                        self.unifier.apply(param_ty);
-                                    let resolved_param = if Self::contains_type_app(
-                                        &resolved_param,
-                                    ) {
-                                        self.normalize_type(&resolved_param)
-                                    } else {
-                                        resolved_param
-                                    };
-                                    self.check_expr(arg, &resolved_param)?;
-                                }
-                                self.in_call_arg_context = old_call_context;
-                                self.consume_affine_call_args(args, &params)?;
-                                let resolved_return =
-                                    self.unifier.apply(&return_type);
-                                let resolved_return = if Self::contains_type_app(
-                                    &resolved_return,
-                                ) {
-                                    self.normalize_type(&resolved_return)
-                                } else {
-                                    resolved_return
-                                };
-                                return Ok(InferResult::new(resolved_return));
-                            }
-                        }
-                    }
-
-                    // ============================================================
-                    // Type Constructor Call Handling (Heap, Shared)
-                    // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — Heap allocation
-                    // ============================================================
-                    // Handle type constructors like Heap(value) and Shared(value)
-                    // These are syntactic sugar for Heap.new(value) and Shared.new(value)
-                    if let Some(ref name) = callee_name {
-                        let name_str = name.as_str();
-                        if WKT::is_smart_pointer_name(name_str) {
-                            // Redirect to Type.new
-                            let new_func_name =
-                                verum_common::Text::from(format!("{}.new", name_str));
-                            if let Some(scheme) =
-                                self.ctx.env.lookup(new_func_name.as_str()).cloned()
-                            {
-                                let func_ty = scheme.instantiate();
-                                if let Type::Function {
-                                    params,
-                                    return_type,
-                                    ..
-                                } = func_ty
-                                {
-                                    // Check arity
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::Other(verum_common::Text::from(
-                                            format!(
-                                                "{} expects {} argument(s), got {}",
-                                                name_str,
-                                                params.len(),
-                                                args.len()
-                                            ),
-                                        )));
-                                    }
-                                    // Check arguments
-                                    // NLL: Set call argument context for proper borrow release
-                                    let old_call_context = self.in_call_arg_context;
-                                    self.in_call_arg_context = true;
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        // Normalize TypeApp projections (GAT/HKT) now that
-                                        // type vars may be resolved from explicit type args.
-                                        let resolved_param =
-                                            if Self::contains_type_app(&resolved_param) {
-                                                self.normalize_type(&resolved_param)
-                                            } else {
-                                                resolved_param
-                                            };
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    self.in_call_arg_context = old_call_context;
-                                    // Consume affine values passed by value
-                                    self.consume_affine_call_args(args, &params)?;
-                                    let resolved_return = self.unifier.apply(&return_type);
-                                    // Also normalize TypeApp in return type for GAT/HKT
-                                    let resolved_return =
-                                        if Self::contains_type_app(&resolved_return) {
-                                            self.normalize_type(&resolved_return)
-                                        } else {
-                                            resolved_return
-                                        };
-                                    return Ok(InferResult::new(resolved_return));
-                                }
-                            }
-                        }
-                    }
-
-                    // ============================================================
-                    // offset_of Special Form
-                    // Spec: offset_of(Type, field) returns byte offset of field
-                    // ============================================================
-                    // offset_of is special: the second argument is a field name
-                    // identifier, NOT a variable expression. We must not resolve
-                    // it as a variable.
-                    if let Some(ref name) = callee_name {
-                        if name.as_str() == "offset_of" {
-                            if args.len() != 2 {
-                                return Err(TypeError::Other(verum_common::Text::from(
-                                    "offset_of expects exactly 2 arguments (type, field_name)",
-                                )));
-                            }
-                            // First arg: type expression - synthesize normally
-                            let _type_result = self.synth_expr(&args[0])?;
-                            // Second arg: field name - do NOT resolve as a variable
-                            // Just verify it's a valid identifier
-                            match &args[1].kind {
-                                ExprKind::Path(path) if path.segments.len() == 1 => {
-                                    // Valid field name identifier - OK
-                                }
-                                ExprKind::Literal(_) => {
-                                    // String literal for field name - OK
-                                }
-                                _ => {
-                                    return Err(TypeError::Other(verum_common::Text::from(
-                                        "offset_of second argument must be a field name identifier",
-                                    )));
-                                }
-                            }
-                            // offset_of always returns Int
-                            return Ok(InferResult::new(Type::Int));
-                        }
-
-                        // ============================================================
-                        // Async join() Builtin
-                        // join(future1, future2, ...) -> Future<(T1, T2, ...)>
-                        // Awaiting the result yields a tuple of the awaited types
-                        // Only use this fallback if join is NOT defined in env (stdlib).
-                        // When the stdlib defines join() with a proper return type
-                        // (e.g., Join2<Fut1, Fut2>), we should use that instead.
-                        // ============================================================
-                        if name.as_str() == "join"
-                            && args.len() >= 2
-                            && self.ctx.env.lookup("join").is_none()
-                        {
-                            let mut awaited_types: List<Type> = List::new();
-                            for arg in args.iter() {
-                                let arg_result = self.synth_expr(arg)?;
-                                // Extract the awaited type from Future<T>
-                                let resolved = self.unifier.apply(&arg_result.ty);
-                                let awaited = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_future_protocol(&resolved)
-                                {
-                                    Some(resolution) => resolution.output,
-                                    None => resolved,
-                                };
-                                awaited_types.push(awaited);
-                            }
-                            let tuple_ty = Type::Tuple(awaited_types);
-                            return Ok(InferResult::new(Type::Future {
-                                output: Box::new(tuple_ty),
-                            }));
-                        }
-                    }
-
-                    // ============================================================
-                    // Variadic Builtin Function Handling
-                    // Spec: grammar/verum.ebnf Section 2.20.1 - builtin_assertion
-                    // ============================================================
-                    // Handle builtin functions that can take optional message arguments.
-                    // Redirect calls like assert(cond, "msg") to assert_msg internally.
-                    let effective_func_name: Option<Text> = if let Some(ref name) = callee_name {
-                        let name_str = name.as_str();
-                        match (name_str, args.len()) {
-                            // assert(cond, msg) -> assert_msg(cond, msg)
-                            ("assert", 2) => Some(verum_common::Text::from("assert_msg")),
-                            // debug_assert(cond, msg) -> debug_assert_msg(cond, msg)
-                            ("debug_assert", 2) => {
-                                Some(verum_common::Text::from("debug_assert_msg"))
-                            }
-                            // assert_eq(a, b, msg) -> assert_eq_msg(a, b, msg)
-                            ("assert_eq", 3) => Some(verum_common::Text::from("assert_eq_msg")),
-                            // assert_ne(a, b, msg) -> assert_ne_msg(a, b, msg)
-                            ("assert_ne", 3) => Some(verum_common::Text::from("assert_ne_msg")),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Synthesize function type - use redirected name for builtins if needed
-                    // CRITICAL: Handle explicit type arguments like get_default<Person>()
-                    // Track protocol bounds from generic type params for call-site verification.
-                    // These map fresh type vars -> protocol bounds that must be satisfied
-                    // after argument unification resolves the fresh vars to concrete types.
-                    let mut pending_protocol_bounds: Map<
-                        TypeVar,
-                        List<crate::protocol::ProtocolBound>,
-                    > = Map::new();
-
-                    let func_result = if let Some(ref redirected_name) = effective_func_name {
-                        // Look up the redirected function name
-                        if let Some(scheme) = self.ctx.env.lookup(redirected_name.as_str()).cloned()
-                        {
-                            let (ty, _fresh_vars, proto_bounds) =
-                                scheme.instantiate_with_protocol_bounds();
-                            pending_protocol_bounds = proto_bounds;
-                            InferResult::new(ty)
-                        } else {
-                            self.synth_expr(func)?
-                        }
-                    } else if !type_args.is_empty() {
-                        // Explicit type arguments: func<T, U>(args)
-                        // Need to instantiate with the provided types instead of fresh vars
-                        // Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
-                        //
-
-                        // IMPORTANT: Explicit type args should only bind to EXPLICIT params.
-                        // Implicit parameters (marked with {T}) are inferred from context.
-                        if let Some(ref name) = callee_name {
-                            if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
-                                let (ty, fresh_vars, implicit_vars) =
-                                    scheme.instantiate_with_implicit_info();
-                                // Also get protocol bounds mapped to fresh vars
-                                if !scheme.var_protocol_bounds.is_empty() {
-                                    let mut old_to_fresh_map: Map<TypeVar, TypeVar> = Map::new();
-                                    for (orig, fresh) in scheme.vars.iter().zip(fresh_vars.iter()) {
-                                        old_to_fresh_map.insert(*orig, *fresh);
-                                    }
-                                    for (old_var, bounds) in &scheme.var_protocol_bounds {
-                                        if let Some(fresh_var) = old_to_fresh_map.get(old_var) {
-                                            pending_protocol_bounds
-                                                .insert(*fresh_var, bounds.clone());
-                                        }
-                                    }
-                                }
-
-                                // Convert type_args to Types and unify with explicit fresh vars only
-                                // Skip implicit vars - they will be inferred from argument types
-                                let mut explicit_var_index = 0;
-                                for fresh_var in fresh_vars.iter() {
-                                    // Skip implicit vars - they don't consume explicit type args
-                                    if implicit_vars.contains(fresh_var) {
-                                        continue;
-                                    }
-
-                                    // Bind explicit type arg to this explicit var
-                                    if let Some(type_arg) = type_args.get(explicit_var_index) {
-                                        if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
-                                            let provided_ty = self.ast_to_type(ast_ty)?;
-                                            // Unify the fresh var with the provided type
-                                            self.unifier.unify(
-                                                &Type::Var(*fresh_var),
-                                                &provided_ty,
-                                                expr.span,
-                                            )?;
-                                        }
-                                    }
-                                    explicit_var_index += 1;
-                                }
-
-                                // Check that we don't have too many explicit type args
-                                let expected_explicit = fresh_vars.len() - implicit_vars.len();
-                                if type_args.len() > expected_explicit {
-                                    return Err(TypeError::Other(verum_common::Text::from(
-                                        format!(
-                                            "Function `{}` expects {} explicit type argument{}, got {}",
-                                            name,
-                                            expected_explicit,
-                                            if expected_explicit == 1 { "" } else { "s" },
-                                            type_args.len()
-                                        ),
-                                    )));
-                                }
-
-                                InferResult::new(ty)
-                            } else {
-                                self.synth_expr(func)?
-                            }
-                        } else {
-                            self.synth_expr(func)?
-                        }
-                    } else {
-                        // Default path: look up scheme for protocol bounds, then synth_expr for type
-                        if let Some(ref name) = callee_name {
-                            if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
-                                if !scheme.var_protocol_bounds.is_empty() {
-                                    let (ty, _fresh_vars, proto_bounds) =
-                                        scheme.instantiate_with_protocol_bounds();
-                                    pending_protocol_bounds = proto_bounds;
-                                    InferResult::new(ty)
-                                } else {
-                                    self.synth_expr(func)?
-                                }
-                            } else {
-                                self.synth_expr(func)?
-                            }
-                        } else {
-                            self.synth_expr(func)?
-                        }
-                    };
-                    let func_ty_raw = func_result.ty;
-
-                    // CRITICAL: Expand type aliases for function types
-                    // When a function call target is typed with a type alias like
-                    // `type Processor is fn(Int) -> Int;`, we need to resolve the
-                    // alias to the underlying function type before checking callability.
-                    // Without this, `let f: Processor = |x| x*2; f(21)` fails with
-                    // "not a function: Processor".
-                    let func_ty = match &func_ty_raw {
-                        Type::Named { .. } | Type::Generic { .. } => {
-                            self.expand_type_alias(&func_ty_raw).unwrap_or(func_ty_raw)
-                        }
-                        // Auto-deref references to functions: &fn(T) -> U becomes fn(T) -> U
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. }
-                            if matches!(**inner, Type::Function { .. }) =>
-                        {
-                            *inner.clone()
-                        }
-                        _ => func_ty_raw,
-                    };
-
-                    match func_ty {
-                        // Unknown propagation: in stdlib single-file mode,
-                        // unresolvable callees return Unknown — skip all
-                        // argument checking and return Unknown.
-                        Type::Unknown if self.stdlib_single_file_mode => {
-                            Ok(InferResult::new(Type::Unknown))
-                        }
-
-                        // Var propagation: unresolved type variables from
-                        // lenient-resolved generic functions skip checking.
-                        Type::Var(_) if self.stdlib_single_file_mode => {
-                            Ok(InferResult::new(Type::Unknown))
-                        }
-
-                        // Never propagation: calling Never returns Never
-                        Type::Never => Ok(InferResult::new(Type::Never)),
-
-                        // Pi type application: beta reduction for dependent functions
-                        // Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-level computation
-                        Type::Pi {
-                            param_name,
-                            param_type,
-                            return_type,
-                        } => {
-                            if args.len() != 1 {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Pi type expects exactly 1 argument, got {}",
-                                    args.len()
-                                ))));
-                            }
-
-                            // Check the argument against parameter type
-                            self.check_expr(&args[0], &param_type)?;
-
-                            // Beta reduction: substitute argument into return type
-                            // Convert argument expression to EqTerm for substitution
-                            let arg_term = self.expr_to_eq_term(&args[0])?;
-                            let result_ty =
-                                self.substitute_term_in_type(&return_type, &param_name, &arg_term);
-
-                            Ok(InferResult::new(result_ty))
-                        }
-
-                        Type::Function {
-                            params,
-                            return_type,
-                            contexts,
-                            ..
-                        } => {
-                            // Support default parameter values
-                            // Spec: Grammar default_value in function_param
-                            //
-
-                            // Get minimum required params for this function (if registered)
-                            let func_name = if let ExprKind::Path(path) = &func.kind {
-                                path.segments.last().and_then(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
-                                    _ => None,
-                                })
-                            } else {
-                                None
-                            };
-
-                            // Variadic functions can accept any number of args (including zero).
-                            // This includes: format, print, println, panic, assert, assert_eq
-                            let is_variadic = func_name
-                                .as_ref()
-                                .map(|name| {
-                                    matches!(
-                                        name.as_str(),
-                                        "format" | "print" | "println" | "panic" |
-                                        "unreachable" | "todo" |
-                                        "assert" | "assert_eq" | "assert_ne" |
-                                        "List.of" | "Set.of" | "min" | "max" |
-                                        "join" | "concat" |
-                                        // Meta reflection builtins accept variable args
-                                        // (e.g. type_name(Int, Text) for tuple type)
-                                        "type_name" | "type_id" | "size_of" | "align_of" |
-                                        "text_concat" | "compile_error" | "compile_warning" |
-                                        // Meta code generation builtins are variadic
-                                        "concat_idents" | "format_ident" | "quote" |
-                                        "unquote" | "stringify" | "gensym" |
-                                        // Meta context builtins
-                                        "emit_diagnostic" | "emit_warning" | "emit_error"
-                                    )
-                                })
-                                .unwrap_or(false);
-
-                            let required_params = {
-                                let from_registry = func_name
-                                    .as_ref()
-                                    .and_then(|name| {
-                                        self.function_required_params.get(name).copied()
-                                    })
-                                    .unwrap_or(params.len());
-                                let capped = from_registry.min(params.len());
-                                // Variadic functions accept 0 or more args
-                                if is_variadic { 0 } else { capped }
-                            };
-
-                            let total_params = params.len();
-                            let provided_args = args.len();
-
-                            let has_explicit_type_args = !type_args.is_empty();
-                            if provided_args < required_params
-                                && !has_explicit_type_args
-                                && !self.stdlib_single_file_mode
-                            {
-                                return Err(TypeError::OtherWithCodeSpanned {
-                                    code: verum_common::Text::from("E102"),
-                                    msg: verum_common::Text::from(format!(
-                                        "Function requires at least {} argument{}, got {}{}",
-                                        required_params,
-                                        if required_params == 1 { "" } else { "s" },
-                                        provided_args,
-                                        func_name
-                                            .as_ref()
-                                            .map(|n| format!(" (calling `{}`)", n))
-                                            .unwrap_or_default()
-                                    )),
-                                    span: expr.span,
-                                });
-                            }
-
-                            // In unsafe contexts, arity mismatches are often caused by
-                            // FFI function name collisions (e.g., extern `read` vs method `read`).
-                            // Allow extra args in unsafe contexts to avoid false positives.
-                            //
-
-                            // Also allow extra args when the function is generic and arguments
-                            // look like type names (PascalCase). This handles meta intrinsics
-                            // like `stride_of(U8)` where the stdlib declares `stride_of<T>()`
-                            // but the call passes the type as a regular arg.
-                            let all_args_are_type_like = args.iter().all(|arg| {
-                                if let ExprKind::Path(path) = &arg.kind {
-                                    if let Some(ident) = path.as_ident() {
-                                        let name = ident.as_str();
-                                        name.chars()
-                                            .next()
-                                            .map(|c| c.is_ascii_uppercase())
-                                            .unwrap_or(false)
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    matches!(&arg.kind, ExprKind::TypeExpr(_))
-                                }
-                            });
-                            let is_generic_type_call =
-                                has_explicit_type_args || all_args_are_type_like;
-                            if provided_args > total_params
-                                && !is_variadic
-                                && !self.in_unsafe_context
-                                && !is_generic_type_call
-                                && !self.stdlib_single_file_mode
-                            {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Function accepts at most {} argument{}, got {}",
-                                    total_params,
-                                    if total_params == 1 { "" } else { "s" },
-                                    provided_args
-                                ))));
-                            }
-
-                            // ============================================================
-                            // Context Satisfaction Check (ContextChecker integration)
-                            // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
-                            // ============================================================
-                            // When calling a function with context requirements, verify that
-                            // the current function's contexts satisfy those requirements.
-                            if let Some(ref callee_contexts) = contexts {
-                                // Build a ContextSet from the callee's requirements
-                                let mut callee_context_set = ContextSet::new();
-                                for ctx_ref in callee_contexts.iter() {
-                                    callee_context_set.add(ContextRequirement::new(
-                                        ctx_ref.name.clone(),
-                                        expr.span,
-                                    ));
-                                }
-
-                                // Get the current function's available contexts
-                                let caller_context_set =
-                                    self.current_function_contexts.clone().unwrap_or_default();
-
-                                // Use ContextChecker to validate satisfaction
-                                self.context_checker.check_context_satisfaction(
-                                    &callee_context_set,
-                                    &caller_context_set,
-                                    expr.span,
-                                )?;
-                            }
-
-                            // Check capability requirements if function has contexts
-                            // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-                            if let Some(ref req) = contexts {
-                                for context_ref in req.iter() {
-                                    let context_name = &context_ref.name;
-                                    // Check if the required context is available
-                                    match self
-                                        .capability_checker
-                                        .get_context_capabilities(context_name.as_str())
-                                    {
-                                        Maybe::Some(caps) => {
-                                            // Context is available - verify it has necessary capabilities
-                                            // Extract capability requirements from function name and signature
-                                            use crate::capability::{
-                                                CapabilityRequirement, TypeCapabilitySet,
-                                            };
-
-                                            // Extract function name for heuristic analysis
-                                            let func_name = if let ExprKind::Path(path) = &func.kind
-                                            {
-                                                path.segments
-                                                    .last()
-                                                    .and_then(|seg| match seg {
-                                                        verum_ast::ty::PathSegment::Name(id) => {
-                                                            Some(id.name.as_str())
-                                                        }
-                                                        _ => None,
-                                                    })
-                                                    .unwrap_or("function")
-                                            } else {
-                                                "function"
-                                            };
-
-                                            // Use the method capability mapper to extract requirements
-                                            // For function calls, we use the function name as a hint
-                                            let context_decl =
-                                                self.context_declarations.get(context_name);
-                                            let required_caps = self
-                                                .method_capability_mapper
-                                                .extract_method_capabilities(
-                                                    context_name,
-                                                    &verum_common::Text::from(func_name),
-                                                    context_decl,
-                                                );
-
-                                            let requirement = CapabilityRequirement::new(
-                                                context_name.clone(),
-                                                required_caps.clone(),
-                                                verum_common::Text::from(format!(
-                                                    "function call to {}",
-                                                    func_name
-                                                )),
-                                            );
-
-                                            if let Err(cap_err) = self
-                                                .capability_checker
-                                                .check_requirement(&requirement)
-                                            {
-                                                // E0306: Capability violation
-                                                use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
-
-                                                let func_name = if let ExprKind::Path(path) =
-                                                    &func.kind
-                                                {
-                                                    path.segments
-                                                        .iter()
-                                                        .filter_map(|seg| match seg {
-                                                            verum_ast::ty::PathSegment::Name(
-                                                                id,
-                                                            ) => Some(id.name.as_str()),
-                                                            _ => None,
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                        .join("::")
-                                                } else {
-                                                    "function".to_string()
-                                                };
-
-                                                let cap_names: Vec<String> = caps
-                                                    .capabilities
-                                                    .names()
-                                                    .iter()
-                                                    .map(|t| t.to_string())
-                                                    .collect();
-
-                                                let diagnostic = CapabilityViolationError::new(
-                                                    format!("{}::{}", context_name, "ReadOnly"),
-                                                    span_to_line_col(func.span),
-                                                )
-                                                .with_declared_capabilities(
-                                                    cap_names
-                                                        .iter()
-                                                        .map(|s| s.as_str().into())
-                                                        .collect(),
-                                                )
-                                                .with_function_name(func_name.as_str())
-                                                .build();
-
-                                                self.diagnostics.push(diagnostic);
-
-                                                return Err(TypeError::Other(cap_err.message()));
-                                            }
-                                        }
-                                        Maybe::None => {
-                                            // E0308: Required context not provided
-                                            use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
-
-                                            let func_name = if let ExprKind::Path(path) = &func.kind
-                                            {
-                                                path.segments
-                                                    .iter()
-                                                    .filter_map(|seg| match seg {
-                                                        verum_ast::ty::PathSegment::Name(id) => {
-                                                            Some(id.name.as_str())
-                                                        }
-                                                        _ => None,
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                    .join("::")
-                                            } else {
-                                                "function".to_string()
-                                            };
-
-                                            let diagnostic = CapabilityNotProvidedError::new(
-                                                context_name.as_str(),
-                                                span_to_line_col(func.span),
-                                            )
-                                            .with_function_name(func_name.as_str())
-                                            .build();
-
-                                            self.diagnostics.push(diagnostic);
-
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Function requires context '{}' which is not provided",
-                                                    context_name
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ============================================================
-                            // Function Parameter Borrow Checking
-                            // Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked — Aliasing Rules
-                            // ============================================================
-                            // Check for potential aliasing conflicts between function arguments:
-                            // - Multiple mutable references to the same data
-                            // - Mutable reference + immutable reference to overlapping data
-                            self.check_function_arg_aliasing(args, &params, expr.span)?;
-
-                            // Check each argument against parameter type with substitution
-                            // NLL: Set call argument context for proper borrow release
-                            let old_call_context = self.in_call_arg_context;
-                            self.in_call_arg_context = true;
-                            #[cfg(debug_assertions)]
-                            let is_assert_eq = func_name
-                                .as_ref()
-                                .map(|n| n.as_str() == "assert_eq")
-                                .unwrap_or(false);
-
-                            // ============================================================
-                            // Dependent refinement substitution (Phase A.5 activation)
-                            // ============================================================
-                            //
-
-                            // Look up the callee's parameter names so that refinement
-                            // predicates on later parameters can be specialised with the
-                            // concrete values of earlier arguments before being checked.
-                            // Without this, a signature like
-                            //
-
-                            //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
-                            //
-
-                            // would leave `len` as a free variable in the predicate on
-                            // `i` at call sites, silently admitting out-of-bounds calls
-                            // like `safe_get(5, 10)`. With this substitution, the
-                            // predicate becomes `10 >= 0 && 10 < 5` at the second
-                            // argument check, which the refinement checker correctly
-                            // rejects.
-                            //
-
-                            // `dep_param_names` is the list of parameter names in
-                            // declaration order; empty strings stand in for positions
-                            // where the parameter uses a non-identifier pattern (those
-                            // positions skip substitution but don't break the loop).
-                            //
-
-                            // Guarded by `callee_name.is_some()` so closures and
-                            // anonymous function values don't pay the lookup cost.
-                            let dep_param_names: List<Text> = callee_name
-                                .as_ref()
-                                .and_then(|name| self.function_param_names.get(name).cloned())
-                                .unwrap_or_default();
-
-                            for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                // Normalize TypeApp nodes (GAT/HKT type application)
-                                // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
-                                let resolved_param = if Self::contains_type_app(&resolved_param) {
-                                    self.normalize_type(&resolved_param)
-                                } else {
-                                    resolved_param
-                                };
-
-                                // Apply dependent refinement substitution: if this
-                                // parameter is `Type::Refined { base, predicate }`, and
-                                // we know the names of earlier parameters, substitute
-                                // each earlier argument into the predicate so that
-                                // references like `len` become the concrete constant
-                                // passed at the call site. Empty-string parameter
-                                // names (non-identifier patterns) are skipped.
-                                //
-
-                                // The base type and any wrapping refinement structure
-                                // is otherwise preserved, so this only ever tightens
-                                // the predicate with more information.
-                                let check_ty =
-                                    if let Type::Refined { base, predicate } = &resolved_param {
-                                        if !dep_param_names.is_empty() && i > 0 {
-                                            let mut subst_pred = predicate.clone();
-                                            for j in 0..i {
-                                                let earlier_name = match dep_param_names.get(j) {
-                                                    Some(n) if !n.as_str().is_empty() => n.clone(),
-                                                    _ => continue,
-                                                };
-                                                let arg_expr = match args.get(j) {
-                                                    Some(a) => a.clone(),
-                                                    None => continue,
-                                                };
-                                                subst_pred.predicate =
-                                                    self.refinement.substitute_in_expr(
-                                                        &subst_pred.predicate,
-                                                        &earlier_name,
-                                                        &arg_expr,
-                                                    );
-                                            }
-                                            // Constant-fold arithmetic that became pure after
-                                            // substitution. Without this, a predicate like
-                                            // `count <= src_len - offset` becomes
-                                            // `count <= 10 - 5` after substituting
-                                            // `src_len → 10, offset → 5`, and the syntactic
-                                            // refinement checker cannot decide it because it
-                                            // does not reduce `10 - 5` to `5`. Folding here
-                                            // produces `count <= 5`, which the checker can
-                                            // then decide against any concrete `count`.
-                                            subst_pred.predicate =
-                                                Self::const_fold_expr(&subst_pred.predicate);
-                                            Type::Refined {
-                                                base: base.clone(),
-                                                predicate: subst_pred,
-                                            }
-                                        } else {
-                                            resolved_param
-                                        }
-                                    } else {
-                                        resolved_param
-                                    };
-
-                                #[cfg(debug_assertions)]
-                                if is_assert_eq {
-                                    // eprintln!("[DEBUG assert_eq] arg[{}]: param_ty={}, resolved_param={}, arg.span={:?}",
-                                    // i, param_ty, resolved_param, arg.span);
-                                }
-                                self.check_expr(arg, &check_ty)?;
-                                #[cfg(debug_assertions)]
-                                if is_assert_eq {
-                                    let resolved_after = self.unifier.apply(param_ty);
-                                    // eprintln!("[DEBUG assert_eq] after check arg[{}]: resolved_param_after={}", i, resolved_after);
-                                }
-                            }
-                            self.in_call_arg_context = old_call_context;
-
-                            // Consume affine values passed by value
-                            self.consume_affine_call_args(args, &params)?;
-
-                            // ============================================================
-                            // Protocol Bound Checking at Call Sites
-                            // ============================================================
-                            // After argument unification, resolve type vars to concrete
-                            // types and verify protocol bounds are satisfied.
-                            for (type_var, bounds) in &pending_protocol_bounds {
-                                let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
-                                // Only check bounds when the type var resolved to a concrete type
-                                // (not still a type variable — those are checked at their own call sites)
-                                if !matches!(resolved_ty, Type::Var(_)) {
-                                    if let Err(_e) = self
-                                        .protocol_checker
-                                        .read()
-                                        .check_bounds(&resolved_ty, bounds)
-                                    {
-                                        // Emit diagnostic but don't hard-error — some stdlib impls
-                                        // may not yet be loaded depending on compilation order.
-                                        // The runtime will catch actual violations.
-                                        tracing::debug!("Protocol bound check warning: {}", _e);
-                                    }
-                                }
-                            }
-
-                            // ============================================================
-                            // Interprocedural Escape Analysis for &checked References
-                            // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail
-                            // ============================================================
-                            // When calling a function that returns a reference, check if any
-                            // argument is a &checked reference to a local variable.
-                            // Such references could escape through the function's return value,
-                            // violating the safety guarantee of &checked (0ns overhead, no runtime checks).
-                            let resolved_return = self.unifier.apply(&return_type);
-                            // Normalize TypeApp in return type (GAT/HKT)
-                            let resolved_return = if Self::contains_type_app(&resolved_return) {
-                                self.normalize_type(&resolved_return)
-                            } else {
-                                resolved_return
-                            };
-                            // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
-                            let resolved_return =
-                                if let Type::Generic { name, args } = &resolved_return {
-                                    if name.as_str().starts_with("::") && !args.is_empty() {
-                                        let assoc_name = &name.as_str()[2..];
-                                        let assoc_text: Text = assoc_name.into();
-                                        self.protocol_checker
-                                            .read()
-                                            .try_find_associated_type(&args[0], &assoc_text)
-                                            .unwrap_or(resolved_return)
-                                    } else {
-                                        resolved_return
-                                    }
-                                } else {
-                                    resolved_return
-                                };
-                            if self.is_reference_type(&resolved_return) {
-                                for arg in args.iter() {
-                                    // Check if the argument is a &checked reference to a local
-                                    if let Some(local_var) = self.get_checked_ref_to_local(arg) {
-                                        return Err(TypeError::CheckedRefEscape {
-                                            var: local_var,
-                                            span: arg.span,
-                                        });
-                                    }
-                                }
-                            }
-                            Ok(InferResult::new(resolved_return))
-                        }
-                        Type::Var(v) => {
-                            // Type variable being called as a function - instantiate it as a function type
-                            // Create fresh type variables for parameters based on argument count
-                            let mut param_types = List::new();
-                            for _ in args.iter() {
-                                param_types.push(Type::Var(TypeVar::fresh()));
-                            }
-
-                            let ret_ty = Type::Var(TypeVar::fresh());
-                            let func_ty_inst = Type::function(param_types.clone(), ret_ty.clone());
-
-                            // Unify the type variable with the function type
-                            self.unifier
-                                .unify(&Type::Var(v), &func_ty_inst, func.span)?;
-
-                            // Now check arguments against parameter types
-                            // NLL: Set call argument context for proper borrow release
-                            let old_call_context = self.in_call_arg_context;
-                            self.in_call_arg_context = true;
-                            for (arg, param_ty) in args.iter().zip(param_types.iter()) {
-                                self.check_expr(arg, param_ty)?;
-                            }
-                            self.in_call_arg_context = old_call_context;
-
-                            Ok(InferResult::new(ret_ty))
-                        }
-
-                        // ============================================================
-                        // Rank-2 Polymorphic Function Call (Forall instantiation)
-                        // Spec: grammar/verum.ebnf - rank2_function_type
-                        // ============================================================
-                        // When calling a rank-2 polymorphic function (∀R. fn(...) -> ...),
-                        // instantiate the quantified type variables with fresh inference
-                        // variables and then type-check as a normal function call.
-                        Type::Forall { ref vars, ref body } => {
-                            // Build substitution map: quantified var -> fresh TypeVar
-                            let mut subst: Map<TypeVar, Type> = Map::new();
-                            for qvar in vars.iter() {
-                                let fresh = TypeVar::fresh();
-                                subst.insert(*qvar, Type::Var(fresh));
-                            }
-
-                            // Apply substitution to the body to get the instantiated function type
-                            let instantiated_body = self.substitute_type_vars(body, &subst);
-
-                            // Now the body should be a Function type - extract and check
-                            match instantiated_body {
-                                Type::Function {
-                                    params,
-                                    return_type,
-                                    contexts,
-                                    ..
-                                } => {
-                                    // Check arity
-                                    if params.len().abs_diff(args.len()) > 1 {
-                                        return Err(TypeError::Other(verum_common::Text::from(
-                                            format!(
-                                                "Rank-2 function expects {} argument(s), got {}",
-                                                params.len(),
-                                                args.len()
-                                            ),
-                                        )));
-                                    }
-
-                                    // Context satisfaction check
-                                    if let Some(ref callee_contexts) = contexts {
-                                        let mut callee_context_set = ContextSet::new();
-                                        for ctx_ref in callee_contexts.iter() {
-                                            callee_context_set.add(ContextRequirement::new(
-                                                ctx_ref.name.clone(),
-                                                expr.span,
-                                            ));
-                                        }
-
-                                        let caller_context_set = self
-                                            .current_function_contexts
-                                            .clone()
-                                            .unwrap_or_default();
-
-                                        self.context_checker.check_context_satisfaction(
-                                            &callee_context_set,
-                                            &caller_context_set,
-                                            expr.span,
-                                        )?;
-                                    }
-
-                                    // Check each argument against parameter type
-                                    let old_call_context = self.in_call_arg_context;
-                                    self.in_call_arg_context = true;
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    self.in_call_arg_context = old_call_context;
-
-                                    let resolved_return = self.unifier.apply(&return_type);
-                                    Ok(InferResult::new(resolved_return))
-                                }
-                                _ => Err(TypeError::NotAFunction {
-                                    ty: func_ty.to_text(),
-                                    span: func.span,
-                                }),
-                            }
-                        }
-
-                        _ => Err(TypeError::NotAFunction {
-                            ty: func_ty.to_text(),
-                            span: func.span,
-                        }),
-                    }
-                }
+                Call { .. } => self.infer_expr_call(current_expr),
 
                 // Tuple expressions
-                Tuple(exprs) => {
-                    let mut types = List::new();
-                    for e in exprs {
-                        let result = self.synth_expr(e)?;
-                        types.push(result.ty);
-                    }
-                    Ok(InferResult::new(Type::tuple(types)))
-                }
+                Tuple(_) => self.infer_expr_tuple(current_expr),
 
                 // Range expressions: start..end or start..=end
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Range expressions
@@ -16123,997 +14891,20 @@ impl TypeChecker {
 
                 // Field access (including GAT access like Iterator.Item)
                 // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 - GAT syntax
-                Field { expr: obj, field } => {
-                    // Special case: Module namespace navigation
-                    // When obj is a module namespace (e.g., `api`), field access navigates into the module
-                    // This handles paths like `api.v2.func()` where parser creates Field expressions
-                    // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-                    if let ExprKind::Path(path) = &obj.kind
-                        && path.segments.len() == 1
-                        && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                    {
-                        let obj_name = ident.name.as_str();
-                        // Check if this is an inline module
-                        if self
-                            .inline_modules
-                            .contains_key(&verum_common::Text::from(obj_name))
-                        {
-                            // Create a two-segment path to resolve through inline module
-                            let module_path = verum_ast::ty::Path {
-                                segments: vec![
-                                    verum_ast::ty::PathSegment::Name(ident.clone()),
-                                    verum_ast::ty::PathSegment::Name(field.clone()),
-                                ]
-                                .into(),
-                                span: expr.span,
-                            };
-                            return self.resolve_inline_module_path(&module_path, expr.span);
-                        }
-                    }
-
-                    // Handle chained module access like `api.v2` -> `api.v2.func`
-                    // When obj itself is a field access on a module, we need to build up the full path
-                    if let ExprKind::Field {
-                        expr: inner_obj,
-                        field: inner_field,
-                    } = &obj.kind
-                    {
-                        if let ExprKind::Path(path) = &inner_obj.kind
-                            && path.segments.len() == 1
-                            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                            && self
-                                .inline_modules
-                                .contains_key(&verum_common::Text::from(ident.name.as_str()))
-                        {
-                            // Build a three-segment path: module.submodule.item
-                            let module_path = verum_ast::ty::Path {
-                                segments: vec![
-                                    verum_ast::ty::PathSegment::Name(ident.clone()),
-                                    verum_ast::ty::PathSegment::Name(inner_field.clone()),
-                                    verum_ast::ty::PathSegment::Name(field.clone()),
-                                ]
-                                .into(),
-                                span: expr.span,
-                            };
-                            return self.resolve_inline_module_path(&module_path, expr.span);
-                        }
-                    }
-
-                    // Special case: Type.Variant syntax for variant constructors
-                    // When obj is a single-segment Path (e.g., Color), try to resolve it as Type.Variant
-                    if let ExprKind::Path(path) = &obj.kind
-                        && path.segments.len() == 1
-                        && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                    {
-                        let type_name = ident.name.as_str();
-                        let field_name = field.name.as_str();
-                        let qualified_name = format!("{}.{}", type_name, field_name);
-
-                        // Strategy 1: Try to look up the qualified variant name in env
-                        if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
-                            let ty = scheme.instantiate();
-                            return Ok(InferResult::new(ty));
-                        }
-
-                        // Strategy 2: Look up type name and check if it's a Variant
-                        // This handles cross-file imported variant types like RegistryError
-                        if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)
-                            && let Type::Variant(variants) = &ty
-                            && let Some(payload_ty) = variants.get(field_name)
-                        {
-                            // Found variant constructor - return function type
-                            if matches!(payload_ty, Type::Unit) {
-                                // Nullary variant - return the variant type itself
-                                return Ok(InferResult::new(ty.clone()));
-                            } else {
-                                // Constructor function: fn(payload_ty) -> VariantType
-                                let params = match payload_ty {
-                                    Type::Tuple(tuple_types) => tuple_types.clone(),
-                                    _ => {
-                                        let mut p = List::new();
-                                        p.push(payload_ty.clone());
-                                        p
-                                    }
-                                };
-                                let constructor_ty = Type::function(params, ty.clone());
-                                return Ok(InferResult::new(constructor_ty));
-                            }
-                        }
-                    }
-
-                    // Handle lowercase type alias property access (e.g., i32.min, u64.max)
-                    if let ExprKind::Path(path) = &obj.kind
-                        && path.segments.len() == 1
-                        && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                    {
-                        let name = ident.name.as_str();
-                        let field_name = field.name.as_str();
-                        let is_lowercase_type_alias = matches!(
-                            name,
-                            "i8" | "i16"
-                                | "i32"
-                                | "i64"
-                                | "i128"
-                                | "isize"
-                                | "u8"
-                                | "u16"
-                                | "u32"
-                                | "u64"
-                                | "u128"
-                                | "usize"
-                                | "f32"
-                                | "f64"
-                        );
-                        if is_lowercase_type_alias
-                            && matches!(
-                                field_name,
-                                "min"
-                                    | "max"
-                                    | "bits"
-                                    | "size"
-                                    | "alignment"
-                                    | "stride"
-                                    | "name"
-                                    | "is_signed"
-                            )
-                        {
-                            let result_ty = match field_name {
-                                "name" => Type::text(),
-                                "is_signed" => Type::int(),
-                                _ => Type::int(),
-                            };
-                            return Ok(InferResult::new(result_ty));
-                        }
-                    }
-
-                    // =====================================================================
-                    // DEFINITE ASSIGNMENT: Check field initialization for partial struct access
-                    // Spec: L0-critical/memory-safety/uninitialized
-                    // When accessing obj.field, check if that specific field is initialized
-                    // =====================================================================
-                    // Track the variable name for affine tracking (if applicable)
-                    let var_name_for_affine = if let ExprKind::Path(path) = &obj.kind {
-                        if path.segments.len() == 1 {
-                            if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                                let var_name = verum_common::Text::from(id.name.as_str());
-                                let field_name_text = verum_common::Text::from(field.name.as_str());
-                                // Check if this specific field is initialized
-                                self.check_field_initialized(
-                                    &var_name,
-                                    &field_name_text,
-                                    expr.span,
-                                )?;
-
-                                // PARTIAL MOVE: Check if this field has already been moved
-                                // Spec: L0-critical/reference_system/value_transfer - Partial move tracking
-                                // If a field was moved out of a container, subsequent access should fail
-                                if !self
-                                    .affine_tracker
-                                    .can_access_field(id.name.as_str(), field.name.as_str())
-                                {
-                                    return Err(TypeError::PartiallyMovedValue {
-                                        name: var_name.clone(),
-                                        moved_field: field_name_text,
-                                        moved_at: expr.span,
-                                        used_at: expr.span,
-                                    });
-                                }
-
-                                Some(id.name.as_str().to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    let field_name_str = field.name.as_str().to_string();
-
-                    // Normal field access: synthesize the object type and access its field
-                    // Note: synth_expr will check full initialization for non-field access
-                    let obj_result = self.synth_expr_for_field_access(obj)?;
-
-                    // CRITICAL FIX: Apply unifier to resolve type variables before field access
-                    // When we have `Wrapper<τ59>` and τ59 was unified with Text, we need to
-                    // resolve to `Wrapper<Text>` so field access gets the correct field type.
-                    let resolved_ty = self.unifier.apply(&obj_result.ty);
-
-                    // CRITICAL FIX: Unwrap reference types before field access
-                    // When we have `&Point`, we need to dereference to get `Point` first
-                    // This handles &T, &checked T, &unsafe T, and nested references
-                    let dereferenced_ty = self.unwrap_reference_type(&resolved_ty);
-
-                    // CRITICAL FIX: Normalize type to resolve type aliases before field access
-                    // When we have a type alias like `type CreateTokenRequestDto is { name: Text, ... }`,
-                    // we need to resolve it to the underlying Record type before checking fields
-                    let normalized_ty = self.normalize_type(dereferenced_ty);
-
-                    // Never propagation: any field access on Never produces Never
-                    if matches!(normalized_ty, Type::Never) {
-                        return Ok(InferResult::new(Type::Never));
-                    }
-
-                    // Unwrap refined types to access base type for field access.
-                    // A refined record { x: Int, y: Int }{predicate} should allow .x and .y access.
-                    let normalized_ty = match &normalized_ty {
-                        Type::Refined { base, .. } => (**base).clone(),
-                        other => other.clone(),
-                    };
-
-                    match &normalized_ty {
-                        Type::Record(fields) => {
-                            // Regular record field access
-                            if let Some(field_ty) =
-                                fields.get(&verum_common::Text::from(field.name.as_str()))
-                            {
-                                // Track affine field access (partial move tracking)
-                                if let Some(ref var_name) = var_name_for_affine {
-                                    self.track_affine_field_access(
-                                        var_name,
-                                        &field_name_str,
-                                        field_ty,
-                                        expr.span,
-                                    )?;
-                                }
-                                Ok(InferResult::new(field_ty.clone()))
-                            } else {
-                                // Better error: include field list
-                                let available_fields: Vec<&str> =
-                                    fields.keys().map(|k| k.as_str()).collect();
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "field '{}' not found in type 'record'. Available fields: [{}]",
-                                    field.name,
-                                    available_fields.join(", ")
-                                ))))
-                            }
-                        }
-                        Type::Named { path, args } => {
-                            // For named record types, look up the struct fields
-                            let type_name = self.path_to_string(path);
-                            let struct_key = format!("__struct_fields_{}", type_name);
-                            let field_name = verum_common::Text::from(field.name.as_str());
-
-                            // Look up type parameters for this generic type
-                            // so we can substitute T -> Int in Pair<Int>
-                            let type_params_key = format!("__type_params_{}", type_name);
-                            let type_params: List<verum_common::Text> =
-                                match self.ctx.lookup_type(type_params_key.as_str()) {
-                                    Option::Some(Type::Record(params_map)) => {
-                                        params_map.keys().cloned().collect()
-                                    }
-                                    _ => List::new(),
-                                };
-
-                            // Build substitution map from type parameters to concrete args
-                            // e.g., for Pair<Int>: { T -> Int }
-                            let mut param_subst = indexmap::IndexMap::new();
-                            for (param_name, arg_ty) in type_params.iter().zip(args.iter()) {
-                                param_subst.insert(param_name.clone(), arg_ty.clone());
-                            }
-
-                            // First try to find the field in the struct definition
-                            if let Option::Some(Type::Record(fields)) =
-                                self.ctx.lookup_type(struct_key.as_str())
-                                && let Some(field_ty) = fields.get(&field_name)
-                            {
-                                // Apply type parameter substitution to get concrete field type
-                                let resolved_ty =
-                                    self.substitute_type_params(field_ty, &param_subst);
-                                // Track affine field access (partial move tracking)
-                                if let Some(ref var_name) = var_name_for_affine {
-                                    self.track_affine_field_access(
-                                        var_name,
-                                        &field_name_str,
-                                        &resolved_ty,
-                                        expr.span,
-                                    )?;
-                                }
-                                return Ok(InferResult::new(resolved_ty));
-                            }
-
-                            // Also try looking up the type directly (backward compat)
-                            if let Option::Some(Type::Record(fields)) =
-                                self.ctx.lookup_type(type_name.as_str())
-                                && let Some(field_ty) = fields.get(&field_name)
-                            {
-                                // Apply type parameter substitution to get concrete field type
-                                let resolved_ty =
-                                    self.substitute_type_params(field_ty, &param_subst);
-                                // Track affine field access (partial move tracking)
-                                if let Some(ref var_name) = var_name_for_affine {
-                                    self.track_affine_field_access(
-                                        var_name,
-                                        &field_name_str,
-                                        &resolved_ty,
-                                        expr.span,
-                                    )?;
-                                }
-                                return Ok(InferResult::new(resolved_ty));
-                            }
-
-                            // Not a record field - try GAT instantiation
-                            // (e.g., Iterator.Item for protocol access)
-                            match self.infer_gat_instantiation(
-                                path,
-                                &field_name,
-                                &List::new(), // No explicit args provided
-                                Maybe::None,  // No usage context yet
-                                expr.span,
-                            ) {
-                                Ok(gat_ty) => Ok(InferResult::new(gat_ty)),
-                                Err(_) => {
-                                    // Not a GAT - try associated constant lookup
-                                    // Look up as "TypeName.field" in the environment
-                                    let const_name = format!("{}.{}", type_name, field.name);
-                                    if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned()
-                                    {
-                                        let ty = scheme.instantiate();
-                                        return Ok(InferResult::new(ty));
-                                    }
-                                    // Check for built-in type properties (size, alignment, stride, etc.)
-                                    // These are valid for ALL types as compile-time metadata
-                                    match field.name.as_str() {
-                                        "size" | "align" | "alignment" | "stride" | "bits" => {
-                                            return Ok(InferResult::new(Type::int()));
-                                        }
-                                        "name" => {
-                                            return Ok(InferResult::new(Type::text()));
-                                        }
-                                        _ => {}
-                                    }
-                                    // Field not found - for Named types, the field may exist
-                                    // in the actual type definition but not be visible due to
-                                    // module resolution. Return a fresh type variable to allow
-                                    // type inference to continue.
-                                    if matches!(
-                                        &normalized_ty,
-                                        Type::Named { .. } | Type::Generic { .. }
-                                    ) {
-                                        let fresh = Type::Var(TypeVar::fresh());
-                                        return Ok(InferResult::new(fresh));
-                                    }
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "field '{}' not found in type '{}'",
-                                        field.name, normalized_ty
-                                    ))))
-                                }
-                            }
-                        }
-                        // Handle associated constants on primitive types
-                        // e.g., Float.INFINITY, Int.MAX, f64.MIN
-                        Type::Float | Type::Int => {
-                            // Check type properties first (size, align, alignment, stride, bits, name)
-                            match field.name.as_str() {
-                                "size" | "align" | "alignment" | "stride" | "bits" => {
-                                    return Ok(InferResult::new(Type::int()));
-                                }
-                                "name" => {
-                                    return Ok(InferResult::new(Type::text()));
-                                }
-                                _ => {}
-                            }
-                            // Look up as "Type.field" in the environment
-                            let const_name = format!("{}.{}", normalized_ty, field.name);
-                            if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
-                                let ty = scheme.instantiate();
-                                return Ok(InferResult::new(ty));
-                            }
-                            // Try with "Float" instead of variant display
-                            let type_name = match &normalized_ty {
-                                Type::Float => WKT::Float.as_str(),
-                                Type::Int => WKT::Int.as_str(),
-                                _ => "",
-                            };
-                            let const_name = format!("{}.{}", type_name, field.name);
-                            if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
-                                let ty = scheme.instantiate();
-                                return Ok(InferResult::new(ty));
-                            }
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Associated constant {} not found on type {}",
-                                field.name, normalized_ty
-                            ))))
-                        }
-                        // CRITICAL: Handle user-defined `Text` struct field access.
-                        // text.vr defines `public type Text is { ptr, len, cap }`. When the type
-                        // checker resolves `TypeKind::Text` to `Type::Text` (the primitive), direct
-                        // field accesses inside `implement Text` fail with E103. Check for
-                        // user-registered struct fields before emitting the error.
-                        Type::Text => {
-                            let struct_key = "__struct_fields_Text".to_string();
-                            if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
-                                let field_name_key = verum_common::Text::from(field.name.as_str());
-                                if let Some(field_ty) = fields.get(&field_name_key).cloned() {
-                                    return Ok(InferResult::new(field_ty));
-                                }
-                                // Field not found in user-defined struct
-                                let available: Vec<&str> =
-                                    fields.keys().map(|k| k.as_str()).collect();
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "field '{}' not found in Text struct. Available: [{}]",
-                                    field.name,
-                                    available.join(", ")
-                                ))));
-                            }
-                            // Fall through to default handling
-                            match field.name.as_str() {
-                                "size" | "align" | "alignment" | "stride" | "bits" => {
-                                    Ok(InferResult::new(Type::int()))
-                                }
-                                "name" => Ok(InferResult::new(Type::text())),
-                                _ => Err(TypeError::OtherWithCode {
-                                    code: verum_common::Text::from("E103"),
-                                    msg: verum_common::Text::from(format!(
-                                        "Cannot access field '{}' on non-record type: {}",
-                                        field.name, normalized_ty
-                                    )),
-                                }),
-                            }
-                        }
-                        // Handle type properties for ALL types: T.size, T.align, T.alignment, T.stride, T.bits
-                        // These are valid for any type as compile-time type metadata
-                        _ => {
-                            match field.name.as_str() {
-                                "size" | "align" | "alignment" | "stride" | "bits" => {
-                                    // Type properties return Int (the size/alignment value)
-                                    Ok(InferResult::new(Type::int()))
-                                }
-                                "name" => {
-                                    // Type name property returns Text
-                                    Ok(InferResult::new(Type::text()))
-                                }
-                                "min" | "max"
-                                    if {
-                                        let pc = self.protocol_checker.read();
-                                        pc.implements_protocol(&normalized_ty, "Numeric")
-                                    } || matches!(normalized_ty, Type::Int | Type::Float) =>
-                                {
-                                    // min/max return the type itself for Numeric types
-                                    Ok(InferResult::new(normalized_ty.clone()))
-                                }
-                                _ => {
-                                    // Try associated constant lookup via receiver Path
-                                    // This handles newtypes and other types where the receiver
-                                    // resolves to a function type (constructor) rather than Named
-                                    if let ExprKind::Path(path) = &obj.kind {
-                                        if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                            path.segments.last()
-                                        {
-                                            let const_name = format!("{}.{}", id.name, field.name);
-                                            if let Some(scheme) =
-                                                self.ctx.env.lookup(&const_name).cloned()
-                                            {
-                                                let ty = scheme.instantiate();
-                                                return Ok(InferResult::new(ty));
-                                            }
-                                            // Static-method dispatch fallback: when the
-                                            // receiver is a bare type-name path
-                                            // (`List.new`, `IndexedList.from_list`,
-                                            // …) and the field-name is not in env,
-                                            // search the inherent_methods bucket for
-                                            // `<TypeName>::<method_name>`.  Pre-fix
-                                            // every body-position `List.new()` /
-                                            // `IndexedList { items: List.new() }`
-                                            // failed E103 "Cannot access field 'new'
-                                            // on non-record type: List<_>" because
-                                            // the dispatch path didn't try the
-                                            // inherent-method bucket here — only the
-                                            // env-side associated-constant lookup
-                                            // above fired, and stdlib generic
-                                            // methods aren't in `env`, they're in
-                                            // `inherent_methods["List"]["new"]`.
-                                            //
-                                            // Also try the `$static$<method>` key
-                                            // that `register_inherent_methods_from_metadata`
-                                            // emits for static methods (no `self`
-                                            // receiver) — same convention as the
-                                            // AST-driven path.
-                                            //
-                                            // Stdlib-agnostic per CLAUDE.md: lookup
-                                            // is keyed by the user-written receiver
-                                            // name, no per-stdlib-type special case.
-                                            let type_name_str = id.name.as_str();
-                                            let methods_guard = self.inherent_methods.read();
-                                            if let Some(bucket) =
-                                                methods_guard.get(&Text::from(type_name_str))
-                                            {
-                                                let static_key: Text =
-                                                    format!("$static${}", field.name).into();
-                                                let bare_key: Text =
-                                                    field.name.as_str().into();
-                                                let scheme = bucket
-                                                    .get(&static_key)
-                                                    .or_else(|| bucket.get(&bare_key))
-                                                    .cloned();
-                                                drop(methods_guard);
-                                                if let Some(scheme) = scheme {
-                                                    return Ok(InferResult::new(
-                                                        scheme.instantiate(),
-                                                    ));
-                                                }
-                                            } else {
-                                                drop(methods_guard);
-                                            }
-                                        }
-                                    }
-                                    {
-                                        // For unresolved/unknown types and Variant types,
-                                        // allow field access with a fresh type variable
-                                        if matches!(
-                                            &normalized_ty,
-                                            Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
-                                        ) {
-                                            return Ok(InferResult::new(Type::Var(
-                                                TypeVar::fresh(),
-                                            )));
-                                        }
-                                        // For Variant types, the field may be on the inner record
-                                        if matches!(&normalized_ty, Type::Variant(_)) {
-                                            return Ok(InferResult::new(Type::Var(
-                                                TypeVar::fresh(),
-                                            )));
-                                        }
-                                        Err(TypeError::OtherWithCode {
-                                            code: verum_common::Text::from("E103"),
-                                            msg: verum_common::Text::from(format!(
-                                                "Cannot access field '{}' on non-record type: {}",
-                                                field.name, normalized_ty
-                                            )),
-                                        })
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                Field { .. } => self.infer_expr_field(current_expr),
 
                 // Index access
                 // Supports Array, Slice, List<T>, Text (returns Char), Map<K,V> (returns V)
                 // Also supports any type implementing the Index protocol or having an `index` method
-                Index { expr: arr, index } => {
-                    // =====================================================================
-                    // DEFINITE ASSIGNMENT: Check array element initialization
-                    // Spec: L0-critical/memory-safety/uninitialized
-                    // =====================================================================
-                    if let ExprKind::Path(path) = &arr.kind {
-                        if path.segments.len() == 1 {
-                            if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                                let var_name = verum_common::Text::from(id.name.as_str());
-                                // Try to get constant index for precise checking
-                                if let Some(idx) = self.try_extract_const_index(index) {
-                                    if idx >= 0 {
-                                        self.check_index_initialized(
-                                            &var_name,
-                                            idx as usize,
-                                            expr.span,
-                                            false,
-                                        )?;
-                                    }
-                                    // Negative indices are handled by bounds checking below
-                                } else {
-                                    // Non-constant index - check the whole array is initialized
-                                    self.check_variable_initialized(&var_name, expr.span)?;
-                                }
-                            }
-                        }
-                    }
-
-                    let arr_result = self.synth_expr_for_field_access(arr)?;
-                    let resolved_main = self.unifier.apply(&arr_result.ty);
-
-                    // Synthesize index type to determine if this is indexing or slicing
-                    let index_result = self.synth_expr(index)?;
-                    let index_ty = self.unifier.apply(&index_result.ty);
-
-                    // Check for negative literal index (compile-time error)
-                    // Spec: L0-critical/memory-safety/buffer_overflow/negative_index.vr
-                    if let ExprKind::Literal(lit) = &index.kind {
-                        if let verum_ast::literal::LiteralKind::Int(int_lit) = &lit.kind {
-                            if int_lit.value < 0 {
-                                return Err(TypeError::InvalidIndex {
-                                    message: verum_common::Text::from(format!(
-                                        "Invalid index: negative indices not allowed (found {})",
-                                        int_lit.value
-                                    )),
-                                    span: index.span,
-                                });
-                            }
-                        }
-                    }
-                    // Also check for unary negation of a literal: -1, -2, etc.
-                    if let ExprKind::Unary {
-                        op: verum_ast::expr::UnOp::Neg,
-                        expr: inner,
-                    } = &index.kind
-                    {
-                        if let ExprKind::Literal(lit) = &inner.kind {
-                            if let verum_ast::literal::LiteralKind::Int(int_lit) = &lit.kind {
-                                return Err(TypeError::InvalidIndex {
-                                    message: verum_common::Text::from(format!(
-                                        "Array index out of bounds: negative index -{}",
-                                        int_lit.value
-                                    )),
-                                    span: index.span,
-                                });
-                            }
-                        }
-                    }
-
-                    // =====================================================================
-                    // STATIC BOUNDS CHECKING: Verify index is within array bounds
-                    // Spec: L0-critical/memory-safety/bounds_checking/array_bounds_static.vr
-                    // =====================================================================
-                    // Skip upper-bound static bounds check for variable paths — mutable
-                    // arrays may have been resized via push/pop, making compile-time
-                    // size stale. Negative index checks always apply.
-                    let arr_is_mutable_variable = if let ExprKind::Path(path) = &arr.kind {
-                        if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
-                            self.mutable_bindings.contains(id.name.as_str())
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-                    // Get the array length if statically known
-                    let arr_ty = self.unifier.apply(&arr_result.ty);
-                    if let Some(array_size) = Self::get_array_size(&arr_ty) {
-                        // Get the constant index value if statically known
-                        if let Some(index_value) = self.try_extract_const_index(index) {
-                            if index_value < 0 {
-                                return Err(TypeError::InvalidIndex {
-                                    message: verum_common::Text::from(format!(
-                                        "Array index out of bounds: negative index {}",
-                                        index_value
-                                    )),
-                                    span: index.span,
-                                });
-                            }
-                            // Only check upper bound for non-variable paths (literals, etc.)
-                            // Variable paths may have been resized via push/pop
-                            if !arr_is_mutable_variable && index_value as u64 >= array_size {
-                                return Err(TypeError::InvalidIndex {
-                                    message: verum_common::Text::from(format!(
-                                        "Array index out of bounds: index {} exceeds array length {}",
-                                        index_value, array_size
-                                    )),
-                                    span: index.span,
-                                });
-                            }
-                        }
-                    }
-
-                    // Get expected index type via protocol resolution
-                    let expected_index_type = self
-                        .protocol_checker
-                        .read()
-                        .resolve_index_protocol(&arr_result.ty)
-                        .map(|r| r.key)
-                        .unwrap_or_else(Type::int);
-
-                    // Check if this is a Range type (slicing) or the expected index type (indexing)
-                    let is_range = match &index_ty {
-                        Type::Generic { name, args }
-                            if WKT::Range.matches(name.as_str()) && args.len() == 1 =>
-                        {
-                            // Ensure the range is over Int
-                            self.unifier.unify(&args[0], &Type::int(), index.span)?;
-                            true
-                        }
-                        Type::Named { path, args } if !args.is_empty() => {
-                            if let Some(last) = path.segments.last()
-                                && let verum_ast::ty::PathSegment::Name(id) = last
-                                && WKT::Range.matches(id.name.as_str())
-                            {
-                                self.unifier.unify(&args[0], &Type::int(), index.span)?;
-                                true
-                            } else {
-                                self.unifier
-                                    .unify(&index_ty, &expected_index_type, index.span)?;
-                                false
-                            }
-                        }
-                        _ => {
-                            self.unifier
-                                .unify(&index_ty, &expected_index_type, index.span)?;
-                            false
-                        }
-                    };
-
-                    // If slicing with Range, return array/slice type instead of element type
-                    if is_range {
-                        // For slicing, return the same collection type (or a slice)
-                        return match &arr_result.ty {
-                            Type::Array { element, .. } => Ok(InferResult::new(Type::Array {
-                                element: element.clone(),
-                                size: None, // Dynamic size after slicing
-                            })),
-                            Type::Slice { element } => Ok(InferResult::new(Type::Slice {
-                                element: element.clone(),
-                            })),
-                            // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable collection types
-                            // Any type that implements Index protocol can be sliced (returns slice of element type)
-                            ty if self
-                                .protocol_checker
-                                .read()
-                                .resolve_index_protocol(ty)
-                                .is_some() =>
-                            {
-                                // Return the original collection type for slicing operations
-                                Ok(InferResult::new(ty.clone()))
-                            }
-                            Type::Text => Ok(InferResult::new(Type::Text)),
-                            Type::Reference { inner, .. }
-                            | Type::CheckedReference { inner, .. }
-                            | Type::UnsafeReference { inner, .. } => {
-                                // Recursively handle referenced types
-                                match inner.as_ref() {
-                                    Type::Array { element, .. } => {
-                                        Ok(InferResult::new(Type::Array {
-                                            element: element.clone(),
-                                            size: None,
-                                        }))
-                                    }
-                                    // Handle &[T] slice reference - slicing returns a slice
-                                    Type::Slice { element } => Ok(InferResult::new(Type::Slice {
-                                        element: element.clone(),
-                                    })),
-                                    Type::Text => Ok(InferResult::new(Type::Text)),
-                                    // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable types
-                                    // Any type that implements Index yields a slice of its element type
-                                    inner_ty
-                                        if self
-                                            .protocol_checker
-                                            .read()
-                                            .resolve_index_protocol(inner_ty)
-                                            .is_some() =>
-                                    {
-                                        let index_res = self
-                                            .protocol_checker
-                                            .read()
-                                            .resolve_index_protocol(inner_ty);
-                                        if let Some(res) = index_res {
-                                            Ok(InferResult::new(Type::Slice {
-                                                element: Box::new(res.output),
-                                            }))
-                                        } else {
-                                            Err(TypeError::Other(verum_common::Text::from(
-                                                format!("Cannot slice type: {}", arr_result.ty),
-                                            )))
-                                        }
-                                    }
-                                    // Named/Generic types behind references may be sliceable
-                                    // (e.g., &Bytes, &List<T>) - assume they support slicing
-                                    Type::Named { .. } | Type::Generic { .. } => {
-                                        Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                                    }
-                                    _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Cannot slice type: {}",
-                                        arr_result.ty
-                                    )))),
-                                }
-                            }
-                            // Named/Generic types may support slicing through Index protocol
-                            Type::Named { .. } | Type::Generic { .. } => {
-                                Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                            }
-                            _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot slice type: {}",
-                                arr_result.ty
-                            )))),
-                        };
-                    }
-
-                    // Try compile-time evaluation of the index for tuple access
-                    let const_index: Option<usize> = {
-                        use crate::const_eval::ConstEvaluator;
-                        let mut const_eval = ConstEvaluator::new();
-                        match const_eval.eval(index) {
-                            Ok(val) => val.as_u128().map(|n| n as usize),
-                            Err(_) => None,
-                        }
-                    };
-
-                    // First, try tuple indexing with compile-time constant index
-                    if let Type::Tuple(elements) = &arr_result.ty {
-                        let elem_ty = if let Some(i) = const_index {
-                            if i < elements.len() {
-                                elements[i].clone()
-                            } else if !elements.is_empty() {
-                                elements[0].clone() // error recovery
-                            } else {
-                                return Err(TypeError::Other("Cannot index empty tuple".into()));
-                            }
-                        } else if !elements.is_empty() {
-                            let first_ty = &elements[0];
-                            if elements.iter().all(|ty| ty == first_ty) {
-                                first_ty.clone()
-                            } else {
-                                Type::Var(TypeVar::fresh()) // heterogeneous tuple
-                            }
-                        } else {
-                            return Err(TypeError::Other("Cannot index empty tuple".into()));
-                        };
-                        return Ok(InferResult::new(elem_ty));
-                    }
-
-                    // Try protocol-based index resolution
-                    let resolved_for_index = self.unifier.apply(&arr_result.ty);
-                    if let Some(resolution) = self
-                        .protocol_checker
-                        .read()
-                        .resolve_index_protocol(&resolved_for_index)
-                    {
-                        return Ok(InferResult::new(resolution.output));
-                    }
-
-                    // If we have a reference to a type, check the inner type
-                    // This handles cases like &List<T>, &mut List<T>, &checked List<T>, &Heap<T>, etc.
-                    // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
-                    let inner_ty = match &arr_result.ty {
-                        Type::Reference { inner, .. } => Some(inner.as_ref()),
-                        Type::CheckedReference { inner, .. } => Some(inner.as_ref()),
-                        Type::UnsafeReference { inner, .. } => Some(inner.as_ref()),
-                        Type::Ownership { inner, .. } => Some(inner.as_ref()),
-                        // Heap<T> auto-deref to T for indexing
-                        Type::Generic { name, args }
-                            if WKT::Heap.matches(name.as_str()) && !args.is_empty() =>
-                        {
-                            Some(&args[0])
-                        }
-                        // Ref<T>, RefMut<T> auto-deref to T for indexing (RefCell guard types)
-                        Type::Generic { name, args }
-                            if (name.as_str() == "Ref" || name.as_str() == "RefMut")
-                                && !args.is_empty() =>
-                        {
-                            Some(&args[0])
-                        }
-                        _ => None,
-                    };
-
-                    // Handle nested references like &Heap<T> -> deref twice
-                    let inner_ty = inner_ty.map(|inner| match inner {
-                        Type::Generic { name, args }
-                            if WKT::Heap.matches(name.as_str()) && !args.is_empty() =>
-                        {
-                            &args[0]
-                        }
-                        other => other,
-                    });
-
-                    // Try protocol-based resolution on inner type (for references)
-                    if let Some(inner) = inner_ty {
-                        // Handle tuple inside reference
-                        if let Type::Tuple(elements) = inner {
-                            let elem_ty = if let Some(i) = const_index {
-                                if i < elements.len() {
-                                    elements[i].clone()
-                                } else if !elements.is_empty() {
-                                    elements[0].clone()
-                                } else {
-                                    return Err(TypeError::Other(
-                                        "Cannot index empty tuple".into(),
-                                    ));
-                                }
-                            } else if !elements.is_empty() {
-                                let first_ty = &elements[0];
-                                if elements.iter().all(|ty| ty == first_ty) {
-                                    first_ty.clone()
-                                } else {
-                                    Type::Var(TypeVar::fresh())
-                                }
-                            } else {
-                                return Err(TypeError::Other("Cannot index empty tuple".into()));
-                            };
-                            return Ok(InferResult::new(elem_ty));
-                        }
-                        // Try protocol resolution on inner type
-                        if let Some(resolution) =
-                            self.protocol_checker.read().resolve_index_protocol(inner)
-                        {
-                            return Ok(InferResult::new(resolution.output));
-                        }
-                    }
-
-                    // If no indexing support found, check if it's a Named/Generic/Unknown type
-                    // that may implement Index via protocol implementations
-                    match &arr_result.ty {
-                        Type::Named { .. }
-                        | Type::Generic { .. }
-                        | Type::Unknown
-                        | Type::Var(_) => {
-                            // Custom named type or unresolved type: assume it implements
-                            // Index protocol. Use a fresh element type.
-                            Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                        }
-                        // Refined types (e.g., List<Int>{predicate}) - index the base type
-                        Type::Refined { base, .. } => match base.as_ref() {
-                            Type::Named { .. } | Type::Generic { .. } | Type::Array { .. } => {
-                                Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                            }
-                            _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot index non-indexable type: {}",
-                                arr_result.ty
-                            )))),
-                        },
-                        _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Cannot index non-indexable type: {}",
-                            arr_result.ty
-                        )))),
-                    }
-                }
+                Index { .. } => self.infer_expr_index(current_expr),
 
                 // Pipeline operator: x |> f (desugars to f(x))
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Pipeline operator
-                Pipeline { left, right } => {
-                    // Infer the type of the value being piped
-                    let left_result = self.synth_expr(left)?;
-                    let left_ty = left_result.ty;
-
-                    // Infer the type of the function/callable
-                    let right_result = self.synth_expr(right)?;
-
-                    match &right_result.ty {
-                        Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        } => {
-                            // Check that the function accepts at least one argument
-                            if params.is_empty() {
-                                return Err(TypeError::Other(verum_common::Text::from(
-                                    "Pipeline target function must accept at least one argument",
-                                )));
-                            }
-
-                            // Check that left type is compatible with first parameter
-                            if !self.subtyping.is_subtype(&left_ty, &params[0]) {
-                                self.unifier.unify(&left_ty, &params[0], left.span)?;
-                            }
-
-                            // Return the function's return type
-                            Ok(InferResult::new((**return_type).clone()))
-                        }
-                        _ => {
-                            // Try to treat the right side as a callable (could be a closure or other callable)
-                            // For simplicity, we'll try unification
-                            let ret_ty = Type::Var(TypeVar::fresh());
-                            let expected_fn = Type::Function {
-                                params: vec![left_ty].into(),
-                                return_type: Box::new(ret_ty.clone()),
-                                properties: None,
-                                contexts: None,
-                                type_params: vec![].into(),
-                            };
-                            self.unifier
-                                .unify(&right_result.ty, &expected_fn, right.span)?;
-                            Ok(InferResult::new(ret_ty))
-                        }
-                    }
-                }
+                Pipeline { .. } => self.infer_expr_pipeline(current_expr),
 
                 // Return expression - returns Never type (diverging control flow)
                 // Return reference validation: ensuring returned references do not outlive their referents via escape analysis — Return lifetime validation
-                Return(val) => {
-                    if let Some(v) = val {
-                        // Type check the return value (for error messages)
-                        let val_result = self.synth_expr(v)?;
-
-                        // ============================================================
-                        // Return Value Lifetime Validation
-                        // Return reference validation: ensuring returned references do not outlive their referents via escape analysis — Dangling references
-                        // ============================================================
-                        // Check if we're returning a reference to a local variable.
-                        // This would create a dangling reference when the function returns.
-                        if self.is_reference_type(&val_result.ty) {
-                            self.check_return_lifetime(v, expr.span)?;
-                        }
-                    }
-                    // Return has Never type - unifies with any type
-                    Ok(InferResult::new(Type::never()))
-                }
+                Return(_) => self.infer_expr_return_expr(current_expr),
 
                 // Match expressions
                 // Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Dependent Pattern Matching
@@ -17322,65 +15113,10 @@ impl TypeChecker {
                 }
 
                 // Array expressions
-                Array(arr_expr) => {
-                    match arr_expr {
-                        verum_ast::expr::ArrayExpr::List(exprs) => {
-                            if exprs.is_empty() {
-                                // Empty array: [T; 0] - element type needs annotation
-                                let elem_ty = TypeVar::fresh();
-                                // Spec: Fixed-size arrays [T; N] have known size at compile time
-                                Ok(InferResult::new(Type::array(Type::Var(elem_ty), Some(0))))
-                            } else {
-                                let first_result = self.synth_expr(&exprs[0])?;
-                                let elem_ty = first_result.ty;
-
-                                for expr in exprs.iter().skip(1) {
-                                    self.check_expr(expr, &elem_ty)?;
-                                }
-
-                                // Array literal has known size at compile time.
-                                // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .5.1 - Meta Parameters
-                                // Fixed-size arrays [T; N] are stack-allocated with size known at compile time.
-                                // For dynamic/resizable arrays, use List<T> instead.
-                                Ok(InferResult::new(Type::array(elem_ty, Some(exprs.len()))))
-                            }
-                        }
-                        verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                            let elem_result = self.synth_expr(value)?;
-                            let count_result = self.synth_expr(count)?;
-
-                            // Count must be Int
-                            self.unifier
-                                .unify(&count_result.ty, &Type::int(), count.span)?;
-
-                            // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Evaluate count at compile time for size
-                            let array_size = match self.const_eval.eval(count) {
-                                Ok(const_val) => {
-                                    // Successfully evaluated to constant
-                                    const_val.as_u128().map(|n| n as usize)
-                                }
-                                Err(_) => {
-                                    // Not a compile-time constant, size remains None
-                                    None
-                                }
-                            };
-
-                            Ok(InferResult::new(Type::array(elem_result.ty, array_size)))
-                        }
-                    }
-                }
+                Array(_) => self.infer_expr_array(current_expr),
 
                 // Cast expressions
-                Cast { expr: e, ty } => {
-                    let expr_result = self.synth_expr(e)?;
-                    let target_ty = self.ast_to_type(ty)?;
-
-                    // Type casts are checked for compatibility
-                    // Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — (Integer Hierarchy), Section 6 (Reference Safety)
-                    self.check_cast(&expr_result.ty, &target_ty, expr.span)?;
-
-                    Ok(InferResult::new(target_ty))
-                }
+                Cast { .. } => self.infer_expr_cast(current_expr),
 
                 // Try operator (? operator) for error propagation
                 // Try operator type checking: ? operator desugars to match with From conversion, requires Result/Maybe return type — Error propagation with ?
@@ -17857,1116 +15593,37 @@ impl TypeChecker {
 
                 // Yield expressions
                 // Generator functions: fn* syntax yields values lazily, producing Iterator<Item=T> types
-                Yield(val) => {
-                    let val_result = self.synth_expr(val)?;
-
-                    // Check if we're in a generator context
-                    match &self.generator_context {
-                        Maybe::Some(gen_ctx) => {
-                            // Verify yielded type matches expected yield type
-                            self.unifier
-                                .unify(&val_result.ty, &gen_ctx.yield_ty, expr.span)?;
-                            // Yield expressions evaluate to unit
-                            Ok(InferResult::new(Type::unit()))
-                        }
-                        Maybe::None => {
-                            // Yield outside of generator context - error
-                            Err(TypeError::Other(
-                                "yield expression can only be used inside generator functions"
-                                    .into(),
-                            ))
-                        }
-                    }
-                }
+                Yield(_) => self.infer_expr_yield_expr(current_expr),
 
                 // Record construction OR Variant constructor with record data
                 // Record types: "type T is { field: Type, ... }" with named fields, structural matching
-                Record { path, fields, base } => {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG] infer_expr_inner: Record at {:?}, path={:?}", current_expr.span, path);
-
-                    // First check if this is a variant constructor (Type.Variant { ... })
-                    if path.segments.len() == 2
-                        && let (
-                            verum_ast::ty::PathSegment::Name(type_ident),
-                            verum_ast::ty::PathSegment::Name(variant_ident),
-                        ) = (&path.segments[0], &path.segments[1])
-                    {
-                        let type_name = type_ident.name.as_str();
-                        let variant_name = variant_ident.name.as_str();
-
-                        // Look up the type to see if it's a variant type
-                        if let Option::Some(ty) = self.ctx.lookup_type(type_name).cloned()
-                            && let Type::Variant(variants) = &ty
-                        {
-                            // It's a variant type! Look up the specific variant
-                            if let Some(variant_payload_ty) = variants.get(variant_name) {
-                                // Verify the payload is a record type
-                                if let Type::Record(expected_field_types) = variant_payload_ty {
-                                    // Clone to avoid borrowing issues
-                                    let expected_field_types = expected_field_types.clone();
-                                    // Type check the record fields
-                                    let mut provided_fields: indexmap::IndexMap<
-                                        verum_common::Text,
-                                        Type,
-                                    > = indexmap::IndexMap::new();
-
-                                    for field_init in fields {
-                                        let field_name = field_init.name.name.as_str();
-
-                                        let expected_field_ty =
-                                            match expected_field_types.get(field_name) {
-                                                Some(ty) => ty,
-                                                None => {
-                                                    return Err(TypeError::Other(
-                                                        verum_common::Text::from(format!(
-                                                            "field '{}' not found in type '{}::{}'",
-                                                            field_name, type_name, variant_name
-                                                        )),
-                                                    ));
-                                                }
-                                            };
-
-                                        // Handle shorthand syntax
-                                        let field_ty =
-                                            if let Some(ref value_expr) = field_init.value {
-                                                self.check_expr(value_expr, expected_field_ty)?;
-                                                expected_field_ty.clone()
-                                            } else {
-                                                match self.ctx.env.lookup(field_name) {
-                                                    Some(scheme) => {
-                                                        let var_ty = scheme.instantiate();
-                                                        self.unifier.unify(
-                                                            &var_ty,
-                                                            expected_field_ty,
-                                                            field_init.span,
-                                                        )?;
-                                                        expected_field_ty.clone()
-                                                    }
-                                                    None => {
-                                                        return Err(TypeError::UnboundVariable {
-                                                            name: field_name.to_text(),
-                                                            span: field_init.span,
-                                                        });
-                                                    }
-                                                }
-                                            };
-
-                                        provided_fields.insert(field_name.into(), field_ty);
-                                    }
-
-                                    // Validate all required fields are present
-                                    for (expected_name, expected_ty) in expected_field_types.iter()
-                                    {
-                                        if !provided_fields.contains_key(expected_name) {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Missing required field '{}' of type {} in variant {}::{} construction",
-                                                    expected_name,
-                                                    expected_ty,
-                                                    type_name,
-                                                    variant_name
-                                                )),
-                                            ));
-                                        }
-                                    }
-
-                                    // Return the variant type (the whole Color type, not just the Rgba variant)
-                                    return Ok(InferResult::new(ty));
-                                }
-                            }
-                        }
-                    }
-
-                    // SINGLE-SEGMENT VARIANT CONSTRUCTOR CHECK
-                    // For paths like `Node { ... }` (without `Tree::` prefix),
-                    // check if Node is a variant constructor by looking it up in the environment
-                    if path.segments.len() == 1
-                        && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                    {
-                        let variant_name = ident.name.as_str();
-
-                        // (is_variant_ctor check removed — a local record type with
-                        // matching fields takes precedence over a cross-module variant
-                        // constructor of the same name; see the has_matching_struct
-                        // comment below.)
-
-                        // PRIORITY CHECK: If a struct type exists with matching fields,
-                        // prefer struct construction over variant construction.
-                        //
-
-                        // Per the architectural rule in crates/verum_types/src/CLAUDE.md —
-                        // "user-defined variant names must freely override built-in
-                        // convenience aliases"; symmetrically, a user module's record
-                        // type must override a cross-module variant of the same name
-                        // when the provided field names match the record's fields.
-                        //
-
-                        // Record variants also register `__struct_fields_<Variant>`
-                        // (so pattern matching sees their fields), so the struct-key
-                        // lookup alone can't tell a user record from a variant payload.
-                        // Distinguish by checking whether `variant_name` is itself a
-                        // registered top-level *type*: only a user-defined standalone
-                        // record like `type Box<T> is { content: T }` will have
-                        // `lookup_type(variant_name)` return a concrete type. Record
-                        // variants don't register their name as a standalone type —
-                        // the parent (e.g. `Expr`) does — so the variant path stays
-                        // available for `Binary { op, lhs, rhs }` inside
-                        // `type Expr is IntLit(_) | … | Binary({op, lhs, rhs}) | …`.
-                        // Variant record payloads and standalone records register
-                        // similar metadata (`__struct_fields_<Name>`, a Record in
-                        // `type_defs`). Distinguish by checking BOTH halves and
-                        // letting the *exact field-set match* on the struct_fields
-                        // table win when (and only when) the provided fields cover
-                        // the standalone record exactly:
-                        //  - Variant constructor with fn-type in env → is a variant.
-                        //  - Separate `__struct_fields_<Name>` with exact-match
-                        //  field coverage → is the user's standalone record.
-                        //  - Both present + exact match on record fields → record
-                        //  wins (e.g. `Box { content: T.default() }` in
-                        //  `type Box<T> is { content: T }` overrides a stdlib
-                        //  `Box { inner: … }` variant).
-                        //  - Variant present but fields don't cover exactly → fall
-                        //  through to variant constructor.
-                        let struct_key = format!("__struct_fields_{}", variant_name);
-                        let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
-                            self.ctx.lookup_type(struct_key.as_str())
-                        {
-                            let all_provided_valid = fields
-                                .iter()
-                                .all(|f| struct_fields.contains_key(f.name.name.as_str()));
-                            let covers_all_required = struct_fields.keys().all(|required| {
-                                fields
-                                    .iter()
-                                    .any(|f| f.name.name.as_str() == required.as_str())
-                            });
-                            let exact_match = all_provided_valid && covers_all_required;
-
-                            if !exact_match {
-                                false
-                            } else {
-                                // Fields match exactly — do we also have a variant
-                                // constructor for this name? When only the record
-                                // exists, trivially route to record. When the
-                                // variant also exists AND its payload record
-                                // matches the provided fields by name, route to
-                                // variant (that's the local variant case like
-                                // `Binary { op, lhs, rhs }` inside `type Expr is ... |
-                                // Binary { op, lhs, rhs }`). Only when the variant's
-                                // *payload* disagrees with the field set do we keep
-                                // the record path, which is the cross-module
-                                // `Box { content: ... }` override case.
-                                let variant_ctor_info = self
-                                    .ctx
-                                    .env
-                                    .lookup(variant_name)
-                                    .map(|scheme| scheme.instantiate());
-                                match variant_ctor_info {
-                                    Some(Type::Function { params, .. }) => {
-                                        // Variant constructor: inspect its payload.
-                                        let variant_record_fields: Option<
-                                            indexmap::IndexMap<verum_common::Text, Type>,
-                                        > = params.first().and_then(|p| match p {
-                                            Type::Record(m) => Some(m.clone()),
-                                            _ => None,
-                                        });
-                                        if let Some(vrf) = variant_record_fields {
-                                            let variant_matches = fields
-                                                .iter()
-                                                .all(|f| vrf.contains_key(f.name.name.as_str()))
-                                                && vrf.keys().all(|required| {
-                                                    fields.iter().any(|f| {
-                                                        f.name.name.as_str() == required.as_str()
-                                                    })
-                                                });
-                                            // Variant's payload also matches: prefer
-                                            // variant (same-module case). Record
-                                            // wins only when the variant's payload
-                                            // shape *differs* from the provided
-                                            // fields (cross-module collision case).
-                                            !variant_matches
-                                        } else {
-                                            // Variant has non-record payload (tuple,
-                                            // unit). Record wins.
-                                            true
-                                        }
-                                    }
-                                    _ => true, // No variant constructor in env — record wins.
-                                }
-                            }
-                        } else {
-                            false
-                        };
-
-                        // Look up the variant constructor in the environment
-                        // Variant constructors are registered with type Constructor -> VariantType
-                        if !has_matching_struct
-                            && let Some(scheme) = self.ctx.env.lookup(variant_name)
-                        {
-                            let ty = scheme.instantiate();
-
-                            // Check if this value has a Named type (unit variant like Leaf)
-                            // or if it's a function returning a Named type (payload variant like Node)
-                            let return_type_opt = match &ty {
-                                Type::Named { .. } => Some(ty.clone()),
-                                Type::Function {
-                                    return_type,
-                                    params,
-                                    ..
-                                } => {
-                                    // Check if return type is a variant type (Named or inline Variant)
-                                    // Named types are used for imported variants, Variant for local definitions
-                                    if matches!(
-                                        return_type.as_ref(),
-                                        Type::Named { .. } | Type::Variant(_)
-                                    ) {
-                                        // This is a variant constructor function!
-                                        // The params should be a single Record type
-                                        if params.len() == 1
-                                            && let Type::Record(expected_field_types) = &params[0]
-                                        {
-                                            // Type check the record fields
-                                            let expected_field_types = expected_field_types.clone();
-                                            let mut provided_fields: indexmap::IndexMap<
-                                                Text,
-                                                Type,
-                                            > = indexmap::IndexMap::new();
-
-                                            for field_init in fields {
-                                                let field_name = field_init.name.name.as_str();
-
-                                                let unknown_fallback = Type::Unknown;
-                                                let expected_field_ty = match expected_field_types
-                                                    .get(field_name)
-                                                {
-                                                    Some(ty) => ty,
-                                                    None => {
-                                                        // In lenient mode (stdlib files), accept
-                                                        // unknown fields with Unknown type — the
-                                                        // struct definition may reference types
-                                                        // from unloaded sibling modules.
-                                                        if self.stdlib_single_file_mode {
-                                                            &unknown_fallback
-                                                        } else {
-                                                            return Err(TypeError::Other(
-                                                                verum_common::Text::from(format!(
-                                                                    "field '{}' not found in type '{}' variant construction",
-                                                                    field_name, variant_name
-                                                                )),
-                                                            ));
-                                                        }
-                                                    }
-                                                };
-
-                                                // Handle shorthand syntax
-                                                let field_ty = if let Some(ref value_expr) =
-                                                    field_init.value
-                                                {
-                                                    self.check_expr(value_expr, expected_field_ty)?;
-                                                    expected_field_ty.clone()
-                                                } else {
-                                                    match self.ctx.env.lookup(field_name) {
-                                                        Some(var_scheme) => {
-                                                            let var_ty = var_scheme.instantiate();
-                                                            self.unifier.unify(
-                                                                &var_ty,
-                                                                expected_field_ty,
-                                                                field_init.span,
-                                                            )?;
-                                                            expected_field_ty.clone()
-                                                        }
-                                                        None => {
-                                                            return Err(
-                                                                TypeError::UnboundVariable {
-                                                                    name: field_name.to_text(),
-                                                                    span: field_init.span,
-                                                                },
-                                                            );
-                                                        }
-                                                    }
-                                                };
-
-                                                provided_fields.insert(field_name.into(), field_ty);
-                                            }
-
-                                            // Validate all required fields are present
-                                            for (expected_name, expected_ty) in
-                                                expected_field_types.iter()
-                                            {
-                                                if !provided_fields.contains_key(expected_name)
-                                                    && !self.stdlib_single_file_mode
-                                                {
-                                                    return Err(TypeError::Other(
-                                                        verum_common::Text::from(format!(
-                                                            "Missing required field '{}' of type {} in variant {} construction",
-                                                            expected_name,
-                                                            expected_ty,
-                                                            variant_name
-                                                        )),
-                                                    ));
-                                                }
-                                            }
-
-                                            // Return the Named type
-                                            return Ok(InferResult::new(
-                                                return_type.as_ref().clone(),
-                                            ));
-                                        }
-                                        Some(return_type.as_ref().clone())
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            };
-
-                            if return_type_opt.is_some() {
-                                // This path is a variant constructor, handled above
-                                // If we reach here without returning, something went wrong
-                            }
-                        }
-                    }
-
-                    // Not a variant constructor, proceed with regular record type handling
-                    // Step 1: Lookup record type definition from path
-                    let record_ty = self.lookup_record_type(path, expr.span)?;
-
-                    // Step 2: Extract expected field types from record definition
-                    // Clone to avoid borrow issues
-                    let expected_fields: indexmap::IndexMap<verum_common::Text, Type> =
-                        match &record_ty {
-                            Type::Record(field_types) => field_types.clone(),
-                            Type::Named {
-                                path: type_path, ..
-                            } => {
-                                // Try to resolve named type to record structure
-                                let name = self.path_to_string(type_path);
-
-                                // First try to look up the struct fields under __struct_fields_Name
-                                // This is where record type definitions store their field info
-                                let struct_key = format!("__struct_fields_{}", name);
-                                match self.ctx.lookup_type(struct_key.as_str()) {
-                                    Option::Some(Type::Record(field_types)) => field_types.clone(),
-                                    _ => {
-                                        // Try variant record fields from side map
-                                        if let Some(vf) = self
-                                            .variant_record_fields
-                                            .get(&verum_common::Text::from(name.as_str()))
-                                        {
-                                            vf.clone()
-                                        } else {
-                                            // Fall back to looking up the type directly
-                                            match self.ctx.lookup_type(name.as_str()) {
-                                                Option::Some(Type::Record(field_types)) => {
-                                                    field_types.clone()
-                                                }
-                                                Option::Some(Type::Named { .. }) => {
-                                                    // Type is nominal - infer fields structurally but return Named type
-                                                    // This handles types defined in other modules where __struct_fields_ isn't registered
-                                                    let base_maybe = base
-                                                        .as_ref()
-                                                        .map(|b| Heap::new((**b).clone()));
-                                                    let _inferred = self.infer_structural_record(
-                                                        fields,
-                                                        &base_maybe,
-                                                        expr.span,
-                                                    )?;
-                                                    // Return the Named type (nominal) instead of the structural record
-                                                    return Ok(InferResult::new(record_ty.clone()));
-                                                }
-                                                Option::Some(other_ty) => {
-                                                    return Err(TypeError::Other(
-                                                        verum_common::Text::from(format!(
-                                                            "Expected record type, found: {}",
-                                                            other_ty
-                                                        )),
-                                                    ));
-                                                }
-                                                Option::None => {
-                                                    // Not a pre-defined type but path has a type name
-                                                    // Infer fields structurally but return Named type (nominal)
-                                                    let base_maybe = base
-                                                        .as_ref()
-                                                        .map(|b| Heap::new((**b).clone()));
-                                                    let _inferred = self.infer_structural_record(
-                                                        fields,
-                                                        &base_maybe,
-                                                        expr.span,
-                                                    )?;
-                                                    // Return Named type to preserve nominal type identity
-                                                    return Ok(InferResult::new(record_ty.clone()));
-                                                }
-                                            }
-                                        } // close else block for variant_fields
-                                    }
-                                }
-                            }
-                            _ => {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Expected record type, found: {}",
-                                    record_ty
-                                ))));
-                            }
-                        };
-
-                    // Step 2.5: Instantiate type parameters with fresh type variables
-                    // For generic types like Wrapper<T>, we need to:
-                    // 1. Look up the type parameters (e.g., [T])
-                    // 2. Create fresh type variables for each
-                    // 3. Substitute them in the field types
-                    // This enables bidirectional type inference for generic struct instantiation
-                    // NOTE: Use resolved type name (handles Self -> actual type)
-                    let type_name = if let Type::Named {
-                        path: resolved_path,
-                        ..
-                    } = &record_ty
-                    {
-                        self.path_to_string(resolved_path)
-                    } else {
-                        self.path_to_string(path)
-                    };
-
-                    // Try to look up type parameters - first try full path, then try simple name
-                    let type_params_key = format!("__type_params_{}", type_name);
-                    let type_params_lookup =
-                        self.ctx.lookup_type(type_params_key.as_str()).or_else(|| {
-                            // CRITICAL FIX: If full path lookup fails, try simple name (last segment)
-                            // Type parameters are registered under simple names, but paths may be qualified
-                            let simple_name = if let Some(last_dot) = type_name.as_str().rfind('.')
-                            {
-                                &type_name.as_str()[last_dot + 1..]
-                            } else {
-                                type_name.as_str()
-                            };
-                            let simple_key = format!("__type_params_{}", simple_name);
-                            self.ctx.lookup_type(simple_key.as_str())
-                        });
-
-                    let (expected_fields, type_param_vars): (
-                        indexmap::IndexMap<verum_common::Text, Type>,
-                        List<Type>,
-                    ) = if let Option::Some(Type::Record(params_map)) = type_params_lookup {
-                        // This type has type parameters - instantiate with fresh variables
-                        let type_params: List<verum_common::Text> =
-                            params_map.keys().cloned().collect();
-                        if !type_params.is_empty() {
-                            // Create fresh type variables for each parameter
-                            let mut param_subst = indexmap::IndexMap::new();
-                            let mut fresh_vars = List::new();
-                            for param_name in type_params.iter() {
-                                let fresh_var = Type::Var(TypeVar::fresh());
-                                fresh_vars.push(fresh_var.clone());
-                                param_subst.insert(param_name.clone(), fresh_var);
-                            }
-                            // Apply substitution to all field types
-                            let mut resolved_fields = indexmap::IndexMap::new();
-                            for (fname, fty) in expected_fields.iter() {
-                                let resolved_ty = self.substitute_type_params(fty, &param_subst);
-                                // CRITICAL FIX: Also resolve any placeholder types (forward references)
-                                let resolved_ty = self.substitute_placeholders(&resolved_ty);
-                                resolved_fields.insert(fname.clone(), resolved_ty);
-                            }
-                            (resolved_fields, fresh_vars)
-                        } else {
-                            // Non-generic type: still need to resolve placeholders
-                            let mut resolved_fields = indexmap::IndexMap::new();
-                            for (fname, fty) in expected_fields.iter() {
-                                let resolved_ty = self.substitute_placeholders(fty);
-                                resolved_fields.insert(fname.clone(), resolved_ty);
-                            }
-                            (resolved_fields, List::new())
-                        }
-                    } else {
-                        // No type parameters: still need to resolve placeholders
-                        let mut resolved_fields = indexmap::IndexMap::new();
-                        for (fname, fty) in expected_fields.iter() {
-                            let resolved_ty = self.substitute_placeholders(fty);
-                            resolved_fields.insert(fname.clone(), resolved_ty);
-                        }
-                        (resolved_fields, List::new())
-                    };
-
-                    // Step 3: Handle base record spread (...base syntax)
-                    let mut provided_fields = indexmap::IndexMap::new();
-
-                    if let Some(base_expr) = base {
-                        // Type check base expression
-                        let base_result = self.synth_expr(base_expr)?;
-
-                        // Base must be a record type (or a named type that resolves to a record)
-                        // Try to extract record fields from the base type
-                        let base_fields = self.extract_record_fields(&base_result.ty)?;
-                        for (name, ty) in base_fields.iter() {
-                            provided_fields.insert(name.clone(), ty.clone());
-                        }
-                    }
-
-                    // Step 4: Type check each provided field and validate against expected
-                    for field_init in fields {
-                        let field_name = field_init.name.name.as_str();
-
-                        // Check if field exists in expected type
-                        let expected_field_ty = match expected_fields.get(field_name) {
-                            Some(ty) => ty,
-                            None => {
-                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "field '{}' not found in type '{}'",
-                                    field_name,
-                                    self.path_to_string(path)
-                                ))));
-                            }
-                        };
-
-                        // Handle shorthand syntax: { x } means { x: x }
-                        let field_ty = if let Some(ref value_expr) = field_init.value {
-                            // Explicit value provided: check against expected type
-                            self.check_expr(value_expr, expected_field_ty)?;
-                            expected_field_ty.clone()
-                        } else {
-                            // Shorthand: lookup variable in environment
-                            match self.ctx.env.lookup(field_name) {
-                                Some(scheme) => {
-                                    let var_ty = scheme.instantiate();
-                                    // Check if variable type matches expected field type
-                                    self.unifier.unify(
-                                        &var_ty,
-                                        expected_field_ty,
-                                        field_init.span,
-                                    )?;
-                                    expected_field_ty.clone()
-                                }
-                                None => {
-                                    return Err(TypeError::UnboundVariable {
-                                        name: field_name.to_text(),
-                                        span: field_init.span,
-                                    });
-                                }
-                            }
-                        };
-
-                        // Add to provided fields (overriding base if present)
-                        provided_fields.insert(field_name.into(), field_ty);
-                    }
-
-                    // Step 5: Validate all required fields are present
-                    for (expected_name, expected_ty) in expected_fields.iter() {
-                        if !provided_fields.contains_key(expected_name) {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Missing required field '{}' of type {} in record construction",
-                                expected_name, expected_ty
-                            ))));
-                        }
-                    }
-
-                    // Step 6: Check for extra fields (not allowed in nominal records)
-                    for provided_name in provided_fields.keys() {
-                        if !expected_fields.contains_key(provided_name) {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Extra field '{}' not present in record type {}",
-                                provided_name,
-                                self.path_to_string(path)
-                            ))));
-                        }
-                    }
-
-                    // Return the record type with resolved type arguments
-                    // Apply unifier to get the final resolved types for type parameters
-                    let final_type = if !type_param_vars.is_empty() {
-                        // This is a generic type - resolve type parameters
-                        let resolved_args: List<Type> = type_param_vars
-                            .iter()
-                            .map(|tv| self.unifier.apply(tv))
-                            .collect();
-                        // Resolve Self to actual type path if needed
-                        let resolved_path = if path.segments.len() == 1
-                            && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
-                        {
-                            // Get path from self type
-                            if let Maybe::Some(Type::Named {
-                                path: self_path, ..
-                            }) = &self.current_self_type
-                            {
-                                self_path.clone()
-                            } else {
-                                path.clone()
-                            }
-                        } else {
-                            path.clone()
-                        };
-                        Type::Named {
-                            path: resolved_path,
-                            args: resolved_args,
-                        }
-                    } else {
-                        record_ty
-                    };
-                    Ok(InferResult::new(final_type))
-                }
+                Record { .. } => self.infer_expr_record(current_expr),
 
                 // Tuple index
-                TupleIndex { expr: tup, index } => {
-                    // =====================================================================
-                    // DEFINITE ASSIGNMENT: Check tuple element initialization
-                    // Spec: L0-critical/memory-safety/uninitialized
-                    // =====================================================================
-                    let idx = *index as usize;
-                    let var_name_opt = if let ExprKind::Path(path) = &tup.kind {
-                        if path.segments.len() == 1 {
-                            if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                                let var_name = verum_common::Text::from(id.name.as_str());
-                                self.check_index_initialized(&var_name, idx, expr.span, true)?;
-                                Some((var_name, id.name.as_str().to_string()))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let tup_result = self.synth_expr_for_field_access(tup)?;
-                    // Apply unifier to fully resolve type variables.
-                    // This is critical for closure parameters where the type may be
-                    // unified after binding but before body synthesis.
-                    let resolved_tup_ty = self.unifier.apply(&tup_result.ty);
-                    match &resolved_tup_ty {
-                        Type::Tuple(types) => {
-                            if idx < types.len() {
-                                let element_ty = types[idx].clone();
-
-                                // =====================================================================
-                                // AFFINE TUPLE ELEMENT TRACKING: Partial move for tuple elements
-                                // When accessing a tuple element that is affine or contains affine,
-                                // mark it as moved to prevent whole-tuple use.
-                                // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
-                                // =====================================================================
-                                if let Some((var_name, var_name_str)) = var_name_opt {
-                                    // Check if this index was already moved
-                                    if !self.affine_tracker.can_access_index(&var_name_str, idx) {
-                                        return Err(TypeError::MovedValueUsed {
-                                            name: format!("{}.{}", var_name_str, idx).to_text(),
-                                            moved_at: expr.span,
-                                            used_at: expr.span,
-                                        });
-                                    }
-
-                                    // Track affine element access (marks index as moved)
-                                    if self.affine_tracker.is_type_affine(&element_ty)
-                                        || self.type_contains_affine(&element_ty)
-                                    {
-                                        self.affine_tracker.use_index_value(
-                                            &var_name_str,
-                                            idx,
-                                            expr.span,
-                                        )?;
-                                    }
-                                }
-
-                                Ok(InferResult::new(element_ty))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Tuple index {} out of bounds (tuple has {} elements)",
-                                    index,
-                                    types.len()
-                                ))))
-                            }
-                        }
-                        // Handle named tuple structs and newtypes
-                        Type::Named { path, .. } => {
-                            let type_name = self.path_to_string(path);
-                            let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
-
-                            // Try tuple struct first (__tuple_fields_)
-                            let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                            let tuple_fields_simple_key = format!("__tuple_fields_{}", simple_name);
-
-                            let found_tuple = self
-                                .ctx
-                                .lookup_type(tuple_fields_key.as_str())
-                                .or_else(|| self.ctx.lookup_type(tuple_fields_simple_key.as_str()));
-
-                            if let Option::Some(Type::Tuple(types)) = found_tuple {
-                                if idx < types.len() {
-                                    let element_ty = types[idx].clone();
-
-                                    // Track affine element access for tuple structs
-                                    if let Some((var_name, var_name_str)) = var_name_opt {
-                                        if !self.affine_tracker.can_access_index(&var_name_str, idx)
-                                        {
-                                            return Err(TypeError::MovedValueUsed {
-                                                name: format!("{}.{}", var_name_str, idx).to_text(),
-                                                moved_at: expr.span,
-                                                used_at: expr.span,
-                                            });
-                                        }
-                                        if self.affine_tracker.is_type_affine(&element_ty)
-                                            || self.type_contains_affine(&element_ty)
-                                        {
-                                            self.affine_tracker.use_index_value(
-                                                &var_name_str,
-                                                idx,
-                                                expr.span,
-                                            )?;
-                                        }
-                                    }
-
-                                    Ok(InferResult::new(element_ty))
-                                } else {
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Tuple struct index {} out of bounds (has {} fields)",
-                                        index,
-                                        types.len()
-                                    ))))
-                                }
-                            }
-                            // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
-                            else {
-                                let newtype_inner_key = format!("__newtype_inner_{}", type_name);
-                                let newtype_simple_key = format!("__newtype_inner_{}", simple_name);
-
-                                let found_inner = self
-                                    .ctx
-                                    .lookup_type(newtype_inner_key.as_str())
-                                    .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()));
-
-                                if let Option::Some(inner_ty) = found_inner {
-                                    if idx == 0 {
-                                        Ok(InferResult::new(inner_ty.clone()))
-                                    } else {
-                                        Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Newtype {} only has index 0, not {}",
-                                            type_name, index
-                                        ))))
-                                    }
-                                } else {
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                        resolved_tup_ty
-                                    ))))
-                                }
-                            }
-                        }
-                        // Handle references to named tuple structs: &UserId where UserId is (Int)
-                        // Auto-dereference and index the underlying type
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. } => {
-                            if let Type::Named { path, .. } = inner.as_ref() {
-                                let type_name = self.path_to_string(path);
-                                let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
-
-                                // Try tuple struct first (__tuple_fields_)
-                                let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                                let tuple_fields_simple_key =
-                                    format!("__tuple_fields_{}", simple_name);
-
-                                let found_tuple =
-                                    self.ctx.lookup_type(tuple_fields_key.as_str()).or_else(|| {
-                                        self.ctx.lookup_type(tuple_fields_simple_key.as_str())
-                                    });
-
-                                if let Option::Some(Type::Tuple(types)) = found_tuple {
-                                    if idx < types.len() {
-                                        let element_ty = types[idx].clone();
-                                        Ok(InferResult::new(element_ty))
-                                    } else {
-                                        Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Tuple struct index {} out of bounds (has {} fields)",
-                                            index,
-                                            types.len()
-                                        ))))
-                                    }
-                                }
-                                // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
-                                else {
-                                    let newtype_inner_key =
-                                        format!("__newtype_inner_{}", type_name);
-                                    let newtype_simple_key =
-                                        format!("__newtype_inner_{}", simple_name);
-
-                                    let found_inner =
-                                        self.ctx.lookup_type(newtype_inner_key.as_str()).or_else(
-                                            || self.ctx.lookup_type(newtype_simple_key.as_str()),
-                                        );
-
-                                    if let Option::Some(inner_ty) = found_inner {
-                                        if idx == 0 {
-                                            Ok(InferResult::new(inner_ty.clone()))
-                                        } else {
-                                            Err(TypeError::Other(verum_common::Text::from(
-                                                format!(
-                                                    "Newtype {} only has index 0, not {}",
-                                                    type_name, index
-                                                ),
-                                            )))
-                                        }
-                                    } else {
-                                        Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                            tup_result.ty
-                                        ))))
-                                    }
-                                }
-                            } else if let Type::Tuple(types) = inner.as_ref() {
-                                // Also handle reference to bare tuple
-                                if idx < types.len() {
-                                    let element_ty = types[idx].clone();
-                                    Ok(InferResult::new(element_ty))
-                                } else {
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Tuple index {} out of bounds",
-                                        index
-                                    ))))
-                                }
-                            } else if matches!(inner.as_ref(), Type::Var(_)) {
-                                // Reference to unresolved type variable - create fresh var
-                                let elem_var = TypeVar::fresh();
-                                Ok(InferResult::new(Type::Var(elem_var)))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                    resolved_tup_ty
-                                ))))
-                            }
-                        }
-                        // Handle unresolved type variables (common in closure parameters).
-                        // When a closure parameter's type hasn't been unified yet (e.g.,
-                        // in `items.iter().map(|pair| pair.0)`), the receiver type is still
-                        // a TypeVar. We create a fresh TypeVar for the result element.
-                        // The actual constraint will be established when the receiver's
-                        // type is resolved via unification.
-                        Type::Var(_) => {
-                            let elem_var = TypeVar::fresh();
-                            Ok(InferResult::new(Type::Var(elem_var)))
-                        }
-                        _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                            "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                            resolved_tup_ty
-                        )))),
-                    }
-                }
+                TupleIndex { .. } => self.infer_expr_tuple_index(current_expr),
 
                 // Await expression: value.await or await value
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async/await syntax
-                Await(inner_expr) => {
-                    // ============================================================
-                    // Async Boundary Aliasing Check
-                    // Context checking: verifying all required contexts are provided at call sites — Async lifetime bounds
-                    // ============================================================
-                    // Check that any borrows crossing this await point are Send.
-                    // Non-Send borrows cannot be held across await points because
-                    // the future may be polled on different threads.
-
-                    // Mark that we're in an await expression
-                    self.borrow_tracker.enter_await();
-
-                    // Check await safety for all active borrows
-                    self.borrow_tracker.check_await_safety()?;
-
-                    let inner_result = self.synth_expr(inner_expr)?;
-
-                    // Exit await context
-                    self.borrow_tracker.exit_await();
-
-                    // =========================================================================
-                    // Protocol-based Future resolution
-                    // Await desugaring: ".await" desugars to polling Future protocol until completion
-                    // =========================================================================
-                    // Also handle JoinHandle<T> as a special awaitable type
-                    if let Type::Generic { name, args } = &inner_result.ty {
-                        if name.as_str() == "JoinHandle" && args.len() == 1 {
-                            return Ok(InferResult::new(args[0].clone()));
-                        }
-                    }
-
-                    match self
-                        .protocol_checker
-                        .read()
-                        .resolve_future_protocol(&inner_result.ty)
-                    {
-                        Some(resolution) => {
-                            // `.await` is only valid inside an async context
-                            // (async fn body, async {} block, or async
-                            // closure). `main` is special: the runtime wraps
-                            // it in an implicit executor `block_on`, so a
-                            // plain `fn main() { run().await }` is a valid
-                            // top-level entry point.
-                            let in_main_entry = matches!(
-                                self.current_function_name.as_ref(),
-                                Maybe::Some(n) if n.as_str() == "main"
-                            );
-                            if !self.in_async_context && !in_main_entry {
-                                return Err(TypeError::AsyncPropertyViolation {
-                                    message: verum_common::Text::from(
-                                        "`.await` can only be used inside an async context \
-                                         (async fn, async block, or async closure)",
-                                    ),
-                                    span: inner_expr.span,
-                                });
-                            }
-                            Ok(InferResult::new(resolution.output))
-                        }
-                        None => {
-                            // If the inner expression is inside a spawn block, the await
-                            // may have been parsed as spawn({ expr }.await) rather than
-                            // (spawn { expr }).await. In async context, treat as identity
-                            // (the value is already "ready"). Also handles user types
-                            // that may implement Future but aren't registered yet.
-                            if self.in_async_context {
-                                Ok(InferResult::new(inner_result.ty))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Cannot await non-future type: {}. Type must implement Future.",
-                                    inner_result.ty
-                                ))))
-                            }
-                        }
-                    }
-                }
+                Await(_) => self.infer_expr_await_expr(current_expr),
 
                 // Spawn expression: spawn expr
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Task spawning
                 // Context type system integration: context requirements tracked in function types, checked at call sites — Context propagation to spawned tasks
                 // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety (Send/Sync)
-                Spawn { expr, contexts } => {
-                    // Validate contexts exist in scope and expand groups
-                    if !contexts.is_empty()
-                        && let Err(err) = self
-                            .context_resolver
-                            .resolve_requirement(contexts, expr.span)
-                    {
-                        let ctx_names: Vec<String> =
-                            contexts.iter().map(|c| format!("{}", c.path)).collect();
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Invalid spawn contexts [{}]: {}",
-                            ctx_names.join(", "),
-                            err
-                        ))));
-                    }
-
-                    // ============================================================
-                    // Spawn Thread Safety Check
-                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety
-                    // ============================================================
-                    // Spawned tasks run on a separate thread, so all captured
-                    // variables must be Send. If it's a closure, analyze its captures.
-                    if let ExprKind::Closure {
-                        params,
-                        body,
-                        move_: is_move,
-                        ..
-                    } = &expr.kind
-                    {
-                        // Analyze what the closure captures
-                        let captures = self.analyze_closure_captures(body, params, *is_move);
-
-                        // Check that all captured variables are Send
-                        for (var_name, _field_path, capture_mode, capture_span) in &captures {
-                            // Look up the variable's type
-                            if let Some(var_scheme) = self.ctx.env.lookup(var_name) {
-                                let var_ty = var_scheme.instantiate();
-                                let resolved_ty = self.unifier.apply(&var_ty);
-
-                                // Check if the type is Send
-                                if self.is_non_send_type(&resolved_ty) {
-                                    return Err(TypeError::Other(verum_common::Text::from(
-                                        format!(
-                                            "Cannot spawn task that captures `{}`: type `{}` is not Send \
-                                         and cannot be transferred to another thread",
-                                            var_name, resolved_ty
-                                        ),
-                                    )));
-                                }
-
-                                // For non-move closures, references must also be checked
-                                // Borrow captures require the type to be Sync (shareable)
-                                if !is_move
-                                    && matches!(capture_mode, crate::aliasing::CaptureMode::Borrow)
-                                {
-                                    if self.is_non_sync_type(&resolved_ty) {
-                                        return Err(TypeError::Other(verum_common::Text::from(
-                                            format!(
-                                                "Cannot spawn task that borrows `{}`: type `{}` is not Sync \
-                                             and cannot be shared between threads. Consider using `move` closure.",
-                                                var_name, resolved_ty
-                                            ),
-                                        )));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Spawn runs its body as an async task on the executor,
-                    // so the body is an async context regardless of whether
-                    // the enclosing function is async. This lets
-                    //  spawn { sleep(d).await; limiter.refill() }
-                    // typecheck inside a non-async helper.
-                    let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
-                    let inner_result = self.synth_expr(expr);
-                    self.in_async_context = prev_async_context;
-                    let inner_result = inner_result?;
-
-                    // If expr is a Future<T>, result is JoinHandle<T>
-                    // Otherwise, wrap the result type in JoinHandle
-                    let output_ty = match &inner_result.ty {
-                        Type::Future { output } => *output.clone(),
-                        Type::Generic { name, args }
-                            if name.as_str() == "Future" && args.len() == 1 =>
-                        {
-                            args[0].clone()
-                        }
-                        _ => inner_result.ty.clone(),
-                    };
-
-                    // JoinHandle represented as Generic type
-                    Ok(InferResult::new(Type::Generic {
-                        name: verum_common::Text::from("JoinHandle"),
-                        args: vec![output_ty].into(),
-                    }))
-                }
+                Spawn { .. } => self.infer_expr_spawn(current_expr),
 
                 // Async block: async { ... }
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async blocks
                 // Async blocks create an async context for their body
                 // This enables select expressions and await within the block
                 // Select expressions require async context: "select { ... }" only valid in async functions — Async context tracking
-                Async(block) => {
-                    // Set async context for the block body
-                    let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
-                    let block_result = self.infer_block(block)?;
-                    self.in_async_context = prev_async_context;
-
-                    Ok(InferResult::new(Type::Future {
-                        output: Box::new(block_result.ty),
-                    }))
-                }
+                Async(_) => self.infer_expr_async_expr(current_expr),
 
                 // Unsafe block: unsafe { ... }
                 // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — Three-tier reference system
                 // An unsafe block allows manual memory safety proofs (Tier 2 references)
                 // The block type is the type of its last expression (or Unit if none)
-                Unsafe(block) => {
-                    // Enter a new scope for the unsafe block
-                    self.ctx.enter_scope();
-
-                    // Track unsafe context for Tier 2 reference creation
-                    // Spec: L0-critical/reference_system/reference_tiers/unsafe_without_block
-                    let prev_unsafe_context = self.in_unsafe_context;
-                    self.in_unsafe_context = true;
-
-                    // Infer the block's type from its body
-                    let block_result = self.infer_block(block)?;
-
-                    // Restore unsafe context and exit scope
-                    self.in_unsafe_context = prev_unsafe_context;
-                    self.ctx.exit_scope();
-
-                    // Return the block's type directly (unsafe doesn't wrap the type)
-                    Ok(block_result)
-                }
+                Unsafe(_) => self.infer_expr_unsafe_expr(current_expr),
 
                 // Yield expression: yield value
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Generator yield
@@ -19017,223 +15674,11 @@ impl TypeChecker {
 
                 // List comprehension: [x * 2 for x in list if x > 0]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .10 - Comprehension expressions
-                Comprehension { expr, clauses } => {
-                    self.ctx.enter_scope();
-
-                    // Process each clause to introduce bindings
-                    for clause in clauses.iter() {
-                        use verum_ast::expr::ComprehensionClauseKind;
-                        match &clause.kind {
-                            ComprehensionClauseKind::For { pattern, iter } => {
-                                // Infer the iterator type
-                                let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution
-                                let resolved_comprehension_iter =
-                                    self.unifier.apply(&iter_result.ty);
-                                let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&resolved_comprehension_iter)
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback: Try Iterator protocol's Item associated type
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_comprehension_iter,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over type in comprehension: {}",
-                                                    resolved_comprehension_iter
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                };
-
-                                // Bind pattern to element type
-                                let elem_scheme = TypeScheme::mono(elem_ty);
-                                self.bind_pattern_scheme(pattern, elem_scheme)?;
-                            }
-                            ComprehensionClauseKind::If(condition) => {
-                                // Type check condition, must be Bool
-                                let cond_result = self.synth_expr(condition)?;
-                                self.unifier
-                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
-                            }
-                            ComprehensionClauseKind::Let { pattern, ty, value } => {
-                                // Type check the value
-                                let value_result = self.synth_expr(value)?;
-
-                                // If type annotation provided, unify
-                                let binding_ty = if let Some(ty_ast) = ty {
-                                    let annotated_ty = self.ast_to_type(ty_ast)?;
-                                    self.unifier.unify(
-                                        &value_result.ty,
-                                        &annotated_ty,
-                                        value.span,
-                                    )?;
-                                    annotated_ty
-                                } else {
-                                    value_result.ty
-                                };
-
-                                // Bind pattern
-                                let binding_scheme = TypeScheme::mono(binding_ty);
-                                self.bind_pattern_scheme(pattern, binding_scheme)?;
-                            }
-                        }
-                    }
-
-                    // Type check the output expression
-                    let elem_result = self.synth_expr(expr)?;
-
-                    self.ctx.exit_scope();
-
-                    // Result is a List<T> where T is the type of the output expression
-                    Ok(InferResult::new(Type::list(elem_result.ty)))
-                }
+                Comprehension { .. } => self.infer_expr_comprehension(current_expr),
 
                 // Stream comprehension: stream[x * 2 for x in source]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .11 - Stream processing syntax
-                StreamComprehension { expr, clauses } => {
-                    self.ctx.enter_scope();
-
-                    // Set up a temporary generator context so that `yield` expressions
-                    // inside stream comprehensions are accepted. Stream comprehensions
-                    // use `stream[yield x for x in source]` syntax where `yield` is
-                    // syntactic sugar for producing stream elements.
-                    let yield_ty_var = Type::Var(TypeVar::fresh());
-                    let prev_generator_context = self.generator_context.replace(GeneratorContext {
-                        yield_ty: yield_ty_var.clone(),
-                        return_ty: Type::unit(),
-                    });
-
-                    // Process each clause (same as list comprehension)
-                    for clause in clauses.iter() {
-                        use verum_ast::expr::ComprehensionClauseKind;
-                        match &clause.kind {
-                            ComprehensionClauseKind::For { pattern, iter } => {
-                                let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution for streams
-                                let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&iter_result.ty)
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback 1: Try Iterator protocol's Item associated type
-                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_iter_ty,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            // Fallback 2: allow iterating over Stream<T> directly
-                                            match &resolved_iter_ty {
-                                                Type::Generic { name, args }
-                                                    if name.as_str() == "Stream"
-                                                        && args.len() == 1 =>
-                                                {
-                                                    args[0].clone()
-                                                }
-                                                Type::Named { path, args } if args.len() == 1 => {
-                                                    let is_stream = path
-                                                        .as_ident()
-                                                        .map(|id| id.name.as_str() == "Stream")
-                                                        .unwrap_or(false);
-                                                    if is_stream {
-                                                        args[0].clone()
-                                                    } else {
-                                                        // Also try with unresolved type vars — fresh type var
-                                                        Type::Var(TypeVar::fresh())
-                                                    }
-                                                }
-                                                // For unresolved type vars, allow iteration with fresh element type
-                                                Type::Var(_) => Type::Var(TypeVar::fresh()),
-                                                _ => {
-                                                    return Err(TypeError::Other(
-                                                        verum_common::Text::from(format!(
-                                                            "Cannot stream over type: {}",
-                                                            resolved_iter_ty
-                                                        )),
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                };
-
-                                let elem_scheme = TypeScheme::mono(elem_ty);
-                                self.bind_pattern_scheme(pattern, elem_scheme)?;
-                            }
-                            ComprehensionClauseKind::If(condition) => {
-                                let cond_result = self.synth_expr(condition)?;
-                                self.unifier
-                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
-                            }
-                            ComprehensionClauseKind::Let { pattern, ty, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                let binding_ty = if let Some(ty_ast) = ty {
-                                    let annotated_ty = self.ast_to_type(ty_ast)?;
-                                    self.unifier.unify(
-                                        &value_result.ty,
-                                        &annotated_ty,
-                                        value.span,
-                                    )?;
-                                    annotated_ty
-                                } else {
-                                    value_result.ty
-                                };
-                                let binding_scheme = TypeScheme::mono(binding_ty);
-                                self.bind_pattern_scheme(pattern, binding_scheme)?;
-                            }
-                        }
-                    }
-
-                    // Infer the element expression type.
-                    // If the expression is a `yield val`, the type checker now accepts it
-                    // via the generator context above.
-                    let elem_result = self.synth_expr(expr)?;
-
-                    // Restore previous generator context
-                    self.generator_context = prev_generator_context;
-
-                    self.ctx.exit_scope();
-
-                    // Determine element type: if yield was used, the yield_ty_var
-                    // was unified with the yielded value's type. The Yield expr itself
-                    // evaluates to Unit. Use the yield type in that case.
-                    let resolved_yield_ty = self.unifier.apply(&yield_ty_var);
-                    let elem_ty = if matches!(&expr.kind, ExprKind::Yield(_)) {
-                        resolved_yield_ty
-                    } else {
-                        elem_result.ty
-                    };
-
-                    // Result is a Stream<T>
-                    let result_ty = Type::Generic {
-                        name: verum_common::Text::from("Stream"),
-                        args: vec![elem_ty].into(),
-                    };
-
-                    Ok(InferResult::new(result_ty))
-                }
+                StreamComprehension { .. } => self.infer_expr_stream_comprehension(current_expr),
 
                 // Map comprehension: {k: v for (k, v) in pairs if condition}
                 // Async generator expressions: "async fn*" combining async iteration with yield
@@ -19324,206 +15769,19 @@ impl TypeChecker {
 
                 // Set comprehension: set{x for x in items if condition}
                 // Generator pipeline operations: composing generators with map/filter/take combinators
-                SetComprehension { expr, clauses } => {
-                    self.ctx.enter_scope();
-
-                    // Process each clause (same as list comprehension)
-                    for clause in clauses.iter() {
-                        use verum_ast::expr::ComprehensionClauseKind;
-                        match &clause.kind {
-                            ComprehensionClauseKind::For { pattern, iter } => {
-                                let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution
-                                let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&iter_result.ty)
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback: Try Iterator protocol's Item associated type
-                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_iter_ty,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over type in set comprehension: {}",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                };
-
-                                let elem_scheme = TypeScheme::mono(elem_ty);
-                                self.bind_pattern_scheme(pattern, elem_scheme)?;
-                            }
-                            ComprehensionClauseKind::If(condition) => {
-                                let cond_result = self.synth_expr(condition)?;
-                                self.unifier
-                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
-                            }
-                            ComprehensionClauseKind::Let { pattern, ty, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                let binding_ty = if let Some(ty_ast) = ty {
-                                    let annotated_ty = self.ast_to_type(ty_ast)?;
-                                    self.unifier.unify(
-                                        &value_result.ty,
-                                        &annotated_ty,
-                                        value.span,
-                                    )?;
-                                    annotated_ty
-                                } else {
-                                    value_result.ty
-                                };
-                                let binding_scheme = TypeScheme::mono(binding_ty);
-                                self.bind_pattern_scheme(pattern, binding_scheme)?;
-                            }
-                        }
-                    }
-
-                    let elem_result = self.synth_expr(expr)?;
-
-                    self.ctx.exit_scope();
-
-                    // Result is a Set<T>
-                    let result_ty = Type::Generic {
-                        name: verum_common::Text::from(WKT::Set.as_str()),
-                        args: vec![elem_result.ty].into(),
-                    };
-
-                    Ok(InferResult::new(result_ty))
-                }
+                SetComprehension { .. } => self.infer_expr_set_comprehension(current_expr),
 
                 // Generator expression: gen{x for x in items if condition}
                 // Recursive generators: generators that yield from sub-generators via yield* delegation
                 // Generators are lazy iterators that yield values on demand
-                GeneratorComprehension { expr, clauses } => {
-                    self.ctx.enter_scope();
-
-                    // Process each clause (same as list comprehension)
-                    for clause in clauses.iter() {
-                        use verum_ast::expr::ComprehensionClauseKind;
-                        match &clause.kind {
-                            ComprehensionClauseKind::For { pattern, iter } => {
-                                let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution
-                                let elem_ty = match self
-                                    .protocol_checker
-                                    .read()
-                                    .resolve_into_iterator_protocol(&iter_result.ty)
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback: Try Iterator protocol's Item associated type
-                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_iter_ty,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over type in generator: {}",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                };
-
-                                let elem_scheme = TypeScheme::mono(elem_ty);
-                                self.bind_pattern_scheme(pattern, elem_scheme)?;
-                            }
-                            ComprehensionClauseKind::If(condition) => {
-                                let cond_result = self.synth_expr(condition)?;
-                                self.unifier
-                                    .unify(&cond_result.ty, &Type::Bool, condition.span)?;
-                            }
-                            ComprehensionClauseKind::Let { pattern, ty, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                let binding_ty = if let Some(ty_ast) = ty {
-                                    let annotated_ty = self.ast_to_type(ty_ast)?;
-                                    self.unifier.unify(
-                                        &value_result.ty,
-                                        &annotated_ty,
-                                        value.span,
-                                    )?;
-                                    annotated_ty
-                                } else {
-                                    value_result.ty
-                                };
-                                let binding_scheme = TypeScheme::mono(binding_ty);
-                                self.bind_pattern_scheme(pattern, binding_scheme)?;
-                            }
-                        }
-                    }
-
-                    let elem_result = self.synth_expr(expr)?;
-
-                    self.ctx.exit_scope();
-
-                    // Result is a Generator<T> (lazy iterator)
-                    let result_ty = Type::Generic {
-                        name: verum_common::Text::from("Generator"),
-                        args: vec![elem_result.ty].into(),
-                    };
-
-                    Ok(InferResult::new(result_ty))
-                }
+                GeneratorComprehension { .. } => self.infer_expr_generator_comprehension(current_expr),
 
                 // Await expression: expr.await
                 // Async/await integration: async functions return Future<T>, await extracts T, select for multi-future - Async/Await Integration
 
                 // Try-recover: try { ... } recover { ... }
                 // Executes try block, if it fails, executes recover block
-                TryRecover { try_block, recover } => {
-                    // Extract error type from ? operators inside try block before type checking
-                    // This ensures we have a concrete error type for pattern binding
-                    let error_type = self.extract_try_block_error_type(try_block)?;
-
-                    // Track that we're inside a try/recover block so throw is allowed
-                    self.try_recover_depth += 1;
-
-                    // Temporarily set function return type to Result<T, E> so that
-                    // the ? operator inside the try block passes type checking.
-                    // Without this, ? checks the enclosing function's return type
-                    // (which may be non-Result like Int) and rejects it.
-                    let saved_return_type = self.current_function_return_type.clone();
-                    let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-                    self.current_function_return_type =
-                        Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-
-                    // Infer type of try block
-                    let try_result = self.synth_expr(try_block)?;
-
-                    // Restore original function return type
-                    self.current_function_return_type = saved_return_type;
-                    self.try_recover_depth -= 1;
-
-                    // Infer type of recovery body with error type for pattern binding
-                    let recover_ty = self.infer_recover_body(recover, &error_type)?;
-
-                    // Recovery body must have the same type as try block
-                    self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;
-
-                    Ok(InferResult::new(try_result.ty))
-                }
+                TryRecover { .. } => self.infer_expr_try_recover(current_expr),
 
                 // Try-finally: try { ... } finally { ... }
                 // Executes try block, then always executes finally block
@@ -19633,136 +15891,20 @@ impl TypeChecker {
                 // Null coalescing: x ?? default
                 // Extracts T from Maybe<T> or returns T if already not Maybe
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Null coalescing operator
-                NullCoalesce { left, right } => {
-                    let left_result = self.synth_expr(left)?;
-                    let right_result = self.synth_expr(right)?;
-
-                    // =========================================================================
-                    // Protocol-based Maybe resolution for ?? operator
-                    // Maybe operator resolution: ? on Maybe<T> desugars to match with None -> return None propagation
-                    // =========================================================================
-                    match self
-                        .protocol_checker
-                        .read()
-                        .resolve_maybe_protocol(&left_result.ty)
-                    {
-                        Some(resolution) => {
-                            // Maybe<T> ?? T -> T
-                            self.unifier
-                                .unify(&right_result.ty, &resolution.inner, right.span)?;
-                            Ok(InferResult::new(resolution.inner))
-                        }
-                        None => {
-                            // If left is not Maybe<T>, just return its type
-                            // This allows x ?? default to work when x is already T (not Maybe<T>)
-                            self.unifier
-                                .unify(&right_result.ty, &left_result.ty, right.span)?;
-                            Ok(InferResult::new(left_result.ty))
-                        }
-                    }
-                }
+                NullCoalesce { .. } => self.infer_expr_null_coalesce(current_expr),
 
                 // Optional chaining: obj?.field
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Optional chaining operator
                 // Uses Maybe protocol resolution for type extraction
-                OptionalChain { expr: obj, field } => {
-                    let obj_result = self.synth_expr(obj)?;
-
-                    // Inside try-recover blocks, `?.` on a Try-compatible type (Result<T,E>)
-                    // means "unwrap with ? then access field" — the lexer tokenizes `expr?.field`
-                    // as OptionalChain rather than Field(Try(expr), field).
-                    if self.try_recover_depth > 0 {
-                        if let Some(try_resolution) = self
-                            .protocol_checker
-                            .read()
-                            .resolve_try_protocol(&obj_result.ty)
-                        {
-                            // This is `result?.field` inside try-recover — unwrap to success type
-                            let success_ty = try_resolution.output;
-                            let dereferenced_ty = self.unwrap_reference_type(&success_ty);
-                            let field_ty = self
-                                .lookup_field_type(dereferenced_ty, field.name.as_str())
-                                .ok_or_else(|| {
-                                    TypeError::Other(verum_common::Text::from(format!(
-                                        "field '{}' not found in type '{}'",
-                                        field.name, dereferenced_ty
-                                    )))
-                                })?;
-                            return Ok(InferResult::new(field_ty));
-                        }
-                    }
-
-                    // Use protocol-based Maybe resolution
-                    let inner_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_maybe_protocol(&obj_result.ty)
-                    {
-                        Some(resolution) => resolution.inner,
-                        None => obj_result.ty.clone(),
-                    };
-
-                    // Unwrap reference types before field access (Maybe<&Point>?.field)
-                    let dereferenced_ty = self.unwrap_reference_type(&inner_ty);
-
-                    // Look up field on the inner type
-                    let field_ty = self
-                        .lookup_field_type(dereferenced_ty, field.name.as_str())
-                        .ok_or_else(|| {
-                            TypeError::Other(verum_common::Text::from(format!(
-                                "field '{}' not found in type '{}'",
-                                field.name, dereferenced_ty
-                            )))
-                        })?;
-
-                    // Monadic flattening: if field is already Maybe, don't double-wrap
-                    let result_ty = if self
-                        .protocol_checker
-                        .read()
-                        .resolve_maybe_protocol(&field_ty)
-                        .is_some()
-                    {
-                        field_ty
-                    } else {
-                        Type::maybe(field_ty)
-                    };
-                    Ok(InferResult::new(result_ty))
-                }
+                OptionalChain { .. } => self.infer_expr_optional_chain(current_expr),
 
                 // Map literal: { key: value, ... }
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Map expression syntax
-                MapLiteral { entries } => {
-                    let (key_ty, val_ty) = if entries.is_empty() {
-                        (Type::Var(TypeVar::fresh()), Type::Var(TypeVar::fresh()))
-                    } else {
-                        let first_key = self.synth_expr(&entries[0].0)?;
-                        let first_val = self.synth_expr(&entries[0].1)?;
-                        for (key, val) in entries.iter().skip(1) {
-                            let k = self.synth_expr(key)?;
-                            let v = self.synth_expr(val)?;
-                            self.unifier.unify(&k.ty, &first_key.ty, key.span)?;
-                            self.unifier.unify(&v.ty, &first_val.ty, val.span)?;
-                        }
-                        (first_key.ty, first_val.ty)
-                    };
-                    Ok(InferResult::new(Type::map(key_ty, val_ty)))
-                }
+                MapLiteral { .. } => self.infer_expr_map_literal(current_expr),
 
                 // Set literal: { elem1, elem2, ... }
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Set expression syntax
-                SetLiteral { elements } => {
-                    let elem_ty = if elements.is_empty() {
-                        Type::Var(TypeVar::fresh())
-                    } else {
-                        let first = self.synth_expr(&elements[0])?;
-                        for elem in elements.iter().skip(1) {
-                            let e = self.synth_expr(elem)?;
-                            self.unifier.unify(&e.ty, &first.ty, elem.span)?;
-                        }
-                        first.ty
-                    };
-                    Ok(InferResult::new(Type::set(elem_ty)))
-                }
+                SetLiteral { .. } => self.infer_expr_set_literal(current_expr),
 
                 // Context usage: using Context with handler { body }
                 // Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context usage expressions
@@ -19948,67 +16090,7 @@ impl TypeChecker {
                 // Throw expression: throw error_value
                 // Spec: grammar/verum.ebnf - throw_expr production
                 // Throws an error in functions with a `throws` clause
-                Throw(error_expr) => {
-                    // Type check the error expression
-                    let error_result = self.synth_expr(error_expr)?;
-
-                    // Validate throw context (warnings only — throw uses longjmp at runtime
-                    // so it always works, but we want to catch misuse at compile time).
-                    if self.try_recover_depth == 0 {
-                        // Not inside a try/recover block — check throws clause
-                        match &self.current_function_throws {
-                            Maybe::Some(declared_error_types)
-                                if !declared_error_types.is_empty() =>
-                            {
-                                // Function has throws(E1 | E2 | ...) — check error type matches
-                                let mut matched = false;
-                                for declared_ty in declared_error_types.iter() {
-                                    if self
-                                        .unifier
-                                        .unify(&error_result.ty, declared_ty, error_expr.span)
-                                        .is_ok()
-                                    {
-                                        matched = true;
-                                        break;
-                                    }
-                                }
-                                if !matched {
-                                    let declared_names: List<Text> = declared_error_types
-                                        .iter()
-                                        .map(|t| verum_common::Text::from(format!("{}", t)))
-                                        .collect();
-                                    self.emit_diagnostic(
-                                        DiagnosticBuilder::warning()
-                                            .message(format!(
-                                                "thrown type `{}` does not match declared throws clause ({})\n  \
-                                                 help: the function declares `throws({})` — ensure the thrown value matches",
-                                                error_result.ty,
-                                                declared_names.join(", "),
-                                                declared_names.join(" | "),
-                                            ))
-                                            .build()
-                                    );
-                                }
-                            }
-                            _ => {
-                                // No throws clause and not in try/recover — warn
-                                self.emit_diagnostic(
-                                    DiagnosticBuilder::warning()
-                                        .message(
-                                            "throw expression outside of `try/recover` block in function without `throws` clause\n  \
-                                             help: add `throws(ErrorType)` to the function signature, or wrap in `try { ... } recover { ... }`"
-                                                .to_string()
-                                        )
-                                        .build()
-                                );
-                            }
-                        }
-                    }
-                    // Inside try/recover: throw is always valid (caught by handler)
-
-                    // Throw has Never type (diverging control flow)
-                    Ok(InferResult::new(Type::never()))
-                }
+                Throw(_) => self.infer_expr_throw_expr(current_expr),
 
                 // Select expression: select { arm1, arm2, ... }
                 // Select expressions require async context: "select { ... }" only valid in async functions — Select Expression Syntax
@@ -20347,554 +16429,28 @@ impl TypeChecker {
                 // Meta block: meta { ... }
                 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Compile-time evaluation
                 // Executes code at compile time, returns the block's computed type
-                Meta(block) => {
-                    // Meta blocks are evaluated at compile time
-                    // The type is the type of the block's return value
-                    self.ctx.enter_scope();
-                    let block_result = self.infer_block(block)?;
-                    self.ctx.exit_scope();
-
-                    // The meta block's type is its computed result type
-                    // In full implementation, this would delegate to const_eval
-                    Ok(block_result)
-                }
+                Meta(_) => self.infer_expr_meta(current_expr),
 
                 // Macro invocation: path!(args)
                 // Spec: grammar/verum.ebnf - meta_call production
                 // Macros should be expanded before type checking
-                MacroCall { path, args: _ } => {
-                    // Handle known builtin macros that haven't been expanded yet
-                    let macro_name = path
-                        .segments
-                        .iter()
-                        .filter_map(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("::");
-
-                    match macro_name.as_str() {
-                        "list_with_capacity" => {
-                            // @list_with_capacity(N) returns List<T> where T is inferred from context
-                            let elem_ty = Type::Var(TypeVar::fresh());
-                            Ok(InferResult::new(Type::list(elem_ty)))
-                        }
-                        "unwrap" => {
-                            // @unwrap(expr) returns T where expr: Maybe<T>
-                            Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                        }
-                        "min" | "max" | "clamp" | "abs" => {
-                            // @min/@max/@clamp/@abs are numeric builtins that return
-                            // the same numeric type as their arguments (Int or Float).
-                            // Return Int by default; Float args will unify through context.
-                            Ok(InferResult::new(Type::int()))
-                        }
-                        _ => {
-                            // Unknown macro — return fresh type variable to avoid blocking compilation
-                            Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                        }
-                    }
-                }
+                MacroCall { .. } => self.infer_expr_macro_call(current_expr),
 
                 // Universal quantifier: forall x: T. predicate(x)
                 // Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Type-Level Computation
                 // Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements — Quantifiers in Proof Terms
                 // Quantifier expressions: "forall x in collection: predicate" and "exists x in collection: predicate" as boolean expressions
-                Forall { bindings, body } => {
-                    // Enter scope for all quantified variables
-                    self.ctx.enter_scope();
-
-                    // Process each binding
-                    for binding in bindings {
-                        // Determine the type for this binding
-                        let var_ty = if let verum_common::Maybe::Some(ty) = &binding.ty {
-                            // Explicit type annotation
-                            self.ast_to_type(ty)?
-                        } else if let verum_common::Maybe::Some(domain) = &binding.domain {
-                            // Infer type from domain's element type
-                            let domain_ty = self.infer_expr(domain, mode)?.ty;
-                            self.element_type_of(&domain_ty).unwrap_or_else(Type::int)
-                        } else {
-                            return Err(TypeError::Other(verum_common::Text::from(
-                                "quantifier binding requires type annotation or domain".to_string(),
-                            )));
-                        };
-
-                        // Bind the pattern to its type
-                        self.bind_pattern(&binding.pattern, &var_ty)?;
-
-                        // If there's a domain, infer its type (should be iterable)
-                        if let verum_common::Maybe::Some(domain) = &binding.domain {
-                            let _ = self.infer_expr(domain, mode)?;
-                        }
-
-                        // If there's a guard, check it's Bool type
-                        if let verum_common::Maybe::Some(guard) = &binding.guard {
-                            self.check_expr(guard, &Type::bool())?;
-                        }
-                    }
-
-                    // Check that the body expression has type Bool
-                    self.check_expr(body, &Type::bool())?;
-
-                    // Exit scope
-                    self.ctx.exit_scope();
-
-                    // Forall expressions always return Bool
-                    Ok(InferResult::new(Type::bool()))
-                }
+                Forall { .. } => self.infer_expr_forall(current_expr),
 
                 // Existential quantifier: exists x: T. predicate(x)
                 // Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Type-Level Computation
                 // Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements — Quantifiers in Proof Terms
                 // Quantifier expressions: "forall x in collection: predicate" and "exists x in collection: predicate" as boolean expressions
-                Exists { bindings, body } => {
-                    // Enter scope for all quantified variables
-                    self.ctx.enter_scope();
-
-                    // Process each binding
-                    for binding in bindings {
-                        // Determine the type for this binding
-                        let var_ty = if let verum_common::Maybe::Some(ty) = &binding.ty {
-                            // Explicit type annotation
-                            self.ast_to_type(ty)?
-                        } else if let verum_common::Maybe::Some(domain) = &binding.domain {
-                            // Infer type from domain's element type
-                            let domain_ty = self.infer_expr(domain, mode)?.ty;
-                            self.element_type_of(&domain_ty).unwrap_or_else(Type::int)
-                        } else {
-                            return Err(TypeError::Other(verum_common::Text::from(
-                                "quantifier binding requires type annotation or domain".to_string(),
-                            )));
-                        };
-
-                        // Bind the pattern to its type
-                        self.bind_pattern(&binding.pattern, &var_ty)?;
-
-                        // If there's a domain, infer its type (should be iterable)
-                        if let verum_common::Maybe::Some(domain) = &binding.domain {
-                            let _ = self.infer_expr(domain, mode)?;
-                        }
-
-                        // If there's a guard, check it's Bool type
-                        if let verum_common::Maybe::Some(guard) = &binding.guard {
-                            self.check_expr(guard, &Type::bool())?;
-                        }
-                    }
-
-                    // Check that the body expression has type Bool
-                    self.check_expr(body, &Type::bool())?;
-
-                    // Exit scope
-                    self.ctx.exit_scope();
-
-                    // Exists expressions always return Bool
-                    Ok(InferResult::new(Type::bool()))
-                }
+                Exists { .. } => self.infer_expr_exists(current_expr),
 
                 // Meta-function expression: @file, @line, @cfg, @const, etc.
                 // Spec: grammar/verum.ebnf Section 2.20.6 - Meta-Level Functions
-                MetaFunction { name, args } => {
-                    // Infer type based on the meta-function name
-                    let result_type = match name.name.as_str() {
-                        // Source location functions return Text or Int
-                        "file" | "module" | "function" => Type::text(),
-                        "line" | "column" => Type::int(),
-
-                        // Configuration check returns Bool
-                        "cfg" => Type::bool(),
-
-                        // Compile-time evaluation: type is the type of the argument
-                        "const" => {
-                            if let Some(arg) = args.first() {
-                                return self.infer_expr(arg, mode);
-                            }
-                            Type::unit()
-                        }
-
-                        // String operations return Text
-                        "concat" | "stringify" => Type::text(),
-
-                        // Diagnostics return Unit
-                        "warning" | "error" => Type::unit(),
-
-                        // Compiler intrinsics - type is inferred from expected type
-                        // or from the last argument's type if applicable
-                        // @intrinsic("name", args...) - type depends on intrinsic
-                        "intrinsic" => {
-                            // For intrinsics, we need to infer the type from context.
-                            // If we're in checking mode (expected type is known), use that.
-                            // Otherwise, try to infer from the intrinsic name.
-                            if let Some(first_arg) = args.first() {
-                                // First arg should be a string literal with intrinsic name
-                                if let ExprKind::Literal(lit) = &first_arg.kind {
-                                    if let verum_ast::LiteralKind::Text(name_lit) = &lit.kind {
-                                        let intrinsic_name = name_lit.as_str();
-                                        match intrinsic_name {
-                                            // Memory intrinsics
-                                            "compare_exchange" | "compare_exchange_weak" => {
-                                                Type::bool()
-                                            }
-                                            "atomic_load" | "atomic_store" | "atomic_swap" => {
-                                                // Type depends on the pointer type being operated on
-                                                // Use last arg (the value being stored) to infer
-                                                if args.len() >= 3 {
-                                                    if let Ok(val_ty) = self.infer_expr(
-                                                        &args[args.len() - 1],
-                                                        InferMode::Synth,
-                                                    ) {
-                                                        val_ty.ty
-                                                    } else {
-                                                        Type::Var(TypeVar::fresh())
-                                                    }
-                                                } else {
-                                                    Type::Var(TypeVar::fresh())
-                                                }
-                                            }
-                                            "fetch_add" | "fetch_sub" | "fetch_and"
-                                            | "fetch_or" | "fetch_xor" | "fetch_nand"
-                                            | "fetch_max" | "fetch_min" => Type::int(),
-                                            "atomic_fence" => Type::unit(),
-                                            // Memory allocation
-                                            "alloc" | "alloc_zeroed" | "realloc" => {
-                                                Type::Reference {
-                                                    inner: Box::new(Type::Var(TypeVar::fresh())),
-                                                    mutable: false,
-                                                }
-                                            }
-                                            "dealloc" => Type::unit(),
-                                            // Pointer operations
-                                            "ptr_read" | "ptr_read_volatile" => {
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                            "ptr_write"
-                                            | "ptr_write_volatile"
-                                            | "ptr_copy"
-                                            | "ptr_copy_nonoverlapping"
-                                            | "ptr_swap" => Type::unit(),
-                                            "offset" => Type::Reference {
-                                                inner: Box::new(Type::Var(TypeVar::fresh())),
-                                                mutable: false,
-                                            },
-                                            // Type intrinsics
-                                            "size_of" | "align_of" | "min_align_of" | "type_id" => {
-                                                Type::int()
-                                            }
-                                            "type_name" => Type::text(),
-                                            // Control flow
-                                            "unreachable" | "panic" | "abort" => Type::never(),
-                                            // Catch unwind
-                                            "catch_unwind" => {
-                                                // Returns Result<T, PanicInfo>
-                                                Type::Named {
-                                                    path: verum_ast::ty::Path::single(
-                                                        verum_ast::Ident::new(
-                                                            WKT::Result.as_str(),
-                                                            expr.span,
-                                                        ),
-                                                    ),
-                                                    args: List::from_iter([
-                                                        Type::Var(TypeVar::fresh()),
-                                                        Type::Named {
-                                                            path: verum_ast::ty::Path::single(
-                                                                verum_ast::Ident::new(
-                                                                    "PanicInfo",
-                                                                    expr.span,
-                                                                ),
-                                                            ),
-                                                            args: List::new(),
-                                                        },
-                                                    ]),
-                                                }
-                                            }
-                                            // Slice intrinsics - return reference to slice
-                                            "slice_from_raw_parts" => Type::Reference {
-                                                inner: Box::new(Type::Slice {
-                                                    element: Box::new(Type::Var(TypeVar::fresh())),
-                                                }),
-                                                mutable: false,
-                                            },
-                                            "slice_from_raw_parts_mut" => Type::Reference {
-                                                inner: Box::new(Type::Slice {
-                                                    element: Box::new(Type::Var(TypeVar::fresh())),
-                                                }),
-                                                mutable: true,
-                                            },
-                                            // Output intrinsic (for async)
-                                            "output" => Type::Named {
-                                                path: verum_ast::ty::Path::single(
-                                                    verum_ast::Ident::new("Output", expr.span),
-                                                ),
-                                                args: List::from_iter([
-                                                    Type::Var(TypeVar::fresh()),
-                                                ]),
-                                            },
-                                            // Text parsing intrinsics - return Result<T, ParseError>
-                                            "text_parse_int" => Type::Named {
-                                                path: verum_ast::ty::Path::single(
-                                                    verum_ast::Ident::new(
-                                                        WKT::Result.as_str(),
-                                                        expr.span,
-                                                    ),
-                                                ),
-                                                args: List::from_iter([
-                                                    Type::int(),
-                                                    Type::Named {
-                                                        path: verum_ast::ty::Path::single(
-                                                            verum_ast::Ident::new(
-                                                                "ParseError",
-                                                                expr.span,
-                                                            ),
-                                                        ),
-                                                        args: List::new(),
-                                                    },
-                                                ]),
-                                            },
-                                            "text_parse_float" => Type::Named {
-                                                path: verum_ast::ty::Path::single(
-                                                    verum_ast::Ident::new(
-                                                        WKT::Result.as_str(),
-                                                        expr.span,
-                                                    ),
-                                                ),
-                                                args: List::from_iter([
-                                                    Type::float(),
-                                                    Type::Named {
-                                                        path: verum_ast::ty::Path::single(
-                                                            verum_ast::Ident::new(
-                                                                "ParseError",
-                                                                expr.span,
-                                                            ),
-                                                        ),
-                                                        args: List::new(),
-                                                    },
-                                                ]),
-                                            },
-                                            "text_parse_bool" => Type::Named {
-                                                path: verum_ast::ty::Path::single(
-                                                    verum_ast::Ident::new(
-                                                        WKT::Result.as_str(),
-                                                        expr.span,
-                                                    ),
-                                                ),
-                                                args: List::from_iter([
-                                                    Type::bool(),
-                                                    Type::Named {
-                                                        path: verum_ast::ty::Path::single(
-                                                            verum_ast::Ident::new(
-                                                                "ParseError",
-                                                                expr.span,
-                                                            ),
-                                                        ),
-                                                        args: List::new(),
-                                                    },
-                                                ]),
-                                            },
-                                            // Default for unknown intrinsics - use fresh type var
-                                            _ => Type::Var(TypeVar::fresh()),
-                                        }
-                                    } else {
-                                        // First arg literal but not Text kind
-                                        Type::Var(TypeVar::fresh())
-                                    }
-                                } else {
-                                    // First arg not a literal
-                                    Type::Var(TypeVar::fresh())
-                                }
-                            } else {
-                                // No args
-                                Type::Var(TypeVar::fresh())
-                            }
-                        }
-
-                        // ============================================================
-                        // Type introspection intrinsics
-                        // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 15 - Compile-Time Reflection
-                        // ============================================================
-
-                        // @type_name(T) -> Text - Returns the name of a type
-                        "type_name" => Type::text(),
-
-                        // @type_fields(T) / @fields_of(T) -> List<(Text, Type)>
-                        // Returns field names and types for a struct type
-                        "type_fields" | "fields_of" => {
-                            // Returns a list of (field_name: Text, field_type: Type) tuples
-                            Type::Named {
-                                path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                    WKT::List.as_str(),
-                                    expr.span,
-                                )),
-                                args: List::from_iter([Type::Tuple(List::from_iter([
-                                    Type::text(),
-                                    Type::Named {
-                                        path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                            "Type", expr.span,
-                                        )),
-                                        args: List::new(),
-                                    },
-                                ]))]),
-                            }
-                        }
-
-                        // @variants_of(T) -> List<(Text, Type)>
-                        // Returns variant names and payload types for an enum type
-                        "variants_of" => Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                WKT::List.as_str(),
-                                expr.span,
-                            )),
-                            args: List::from_iter([Type::Tuple(List::from_iter([
-                                Type::text(),
-                                Type::Named {
-                                    path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                        "Type", expr.span,
-                                    )),
-                                    args: List::new(),
-                                },
-                            ]))]),
-                        },
-
-                        // @type_of(expr) -> Type - Returns the compile-time type of an expression
-                        "type_of" => Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                "Type", expr.span,
-                            )),
-                            args: List::new(),
-                        },
-
-                        // @field_access(value, field_name: Text) -> T
-                        // Accesses a field by name at compile-time. Returns fresh type var.
-                        "field_access" => Type::Var(TypeVar::fresh()),
-
-                        // @is_struct(T) -> Bool - Checks if type is a struct
-                        "is_struct" => Type::bool(),
-
-                        // @is_enum(T) -> Bool - Checks if type is an enum
-                        "is_enum" => Type::bool(),
-
-                        // @is_tuple(T) -> Bool - Checks if type is a tuple
-                        "is_tuple" => Type::bool(),
-
-                        // @implements(T, Protocol) -> Bool - Checks if type implements protocol
-                        "implements" => Type::bool(),
-
-                        // @size_of(T) -> Int - Returns the size of a type in bytes
-                        "size_of" => Type::int(),
-
-                        // @align_of(T) -> Int - Returns the alignment of a type in bytes
-                        "align_of" => Type::int(),
-
-                        // @type_id(T) -> Int - Returns unique type identifier
-                        "type_id" => Type::int(),
-
-                        // @get_tag(variant) -> Int - Returns the tag index of a variant value
-                        "get_tag" => Type::int(),
-
-                        // @list_with_capacity(N) -> List<T> where T is inferred from context
-                        "list_with_capacity" => Type::list(Type::Var(TypeVar::fresh())),
-
-                        // @unwrap(expr) -> T where expr: Maybe<T>
-                        "unwrap" => {
-                            if let Some(arg) = args.first() {
-                                let arg_result = self.synth_expr(arg)?;
-                                let arg_ty = arg_result.ty;
-                                match &arg_ty {
-                                    Type::Generic {
-                                        name: n,
-                                        args: type_args,
-                                    } if WKT::Maybe.matches(n.as_str()) => {
-                                        if let Some(inner) = type_args.first() {
-                                            inner.clone()
-                                        } else {
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    }
-                                    Type::Variant(variants) => {
-                                        // Extract inner type from first data-carrying variant
-                                        // (e.g., Some(T) in Maybe, Ok(T) in Result, or any user-defined variant)
-                                        variants
-                                            .values()
-                                            .find(|ty| !matches!(ty, Type::Unit))
-                                            .cloned()
-                                            .unwrap_or_else(|| Type::Var(TypeVar::fresh()))
-                                    }
-                                    Type::Var(_) => {
-                                        // Unresolved - return fresh var
-                                        Type::Var(TypeVar::fresh())
-                                    }
-                                    _ => Type::Var(TypeVar::fresh()),
-                                }
-                            } else {
-                                Type::Var(TypeVar::fresh())
-                            }
-                        }
-
-                        // @vbc/@asm/@llvm - low-level intrinsics, type is inferred from context.
-                        // Synthesize all argument expressions so that context
-                        // method calls like `ComputeDevice.device()` inside
-                        // @vbc(...) args are properly resolved through the
-                        // type checker (enabling context type lookup, method
-                        // resolution, etc.). Errors from arg synthesis are
-                        // non-fatal: @vbc is a codegen-level intrinsic and
-                        // argument types don't constrain its return type.
-                        "vbc" | "asm" | "llvm" | "llvm_only" => {
-                            for arg in args.iter().skip(1) {
-                                // Skip first arg (opcode name) — it's an ident.
-                                let _ = self.synth_expr(arg);
-                            }
-                            Type::Var(TypeVar::fresh())
-                        }
-
-                        // -----------------------------------------------------------------
-                        // Generic opaque-intrinsic rule for `@builtin_*`.
-                        //
-
-                        // Any meta-function whose name begins with `builtin_` is a
-                        // compiler-level intrinsic whose semantics — and whose
-                        // return type — are attached to the *declaration site* in
-                        // stdlib code, not embedded in a table inside the
-                        // compiler. Examples (see core/math/hott.vr,
-                        // core/math/cubical.vr, core/math/epistemic.vr):
-                        //
-
-                        //  public let i0: I = @builtin_i0;
-                        //  public let i1: I = @builtin_i1;
-                        //  public fn refl<A>(x: A) -> Path<A>(x, x) { @builtin_refl(x) }
-                        //  public fn hcomp<A>(phi, walls, base) -> A { @builtin_hcomp(...) }
-                        //  public fn join(i: I, j: I) -> I { @builtin_interval_join(i, j) }
-                        //
-
-                        // The use-site already carries the intended return type
-                        // via the surrounding let-annotation / fn-signature. We
-                        // therefore return a fresh type variable; bidirectional
-                        // checking unifies it against the declared type via
-                        // `synth_and_check`, and synthesis-mode callers receive a
-                        // generalizable variable instead of a wrong concrete
-                        // Unit.
-                        //
-
-                        // This keeps the compiler free of per-intrinsic name
-                        // tables — the only special-casing is the `builtin_`
-                        // prefix, which is the declared namespace for
-                        // compiler-bound meta-symbols (mirrored on the codegen
-                        // side in verum_vbc/src/codegen/expressions.rs §4077+).
-                        // Argument expressions are still synthesised for their
-                        // side-effects on the checker state (diagnostic
-                        // accumulation, constraint generation).
-                        n if n.starts_with("builtin_") => {
-                            for arg in args.iter() {
-                                let _ = self.synth_expr(arg);
-                            }
-                            Type::Var(TypeVar::fresh())
-                        }
-
-                        // Unknown meta-function - default to unit
-                        _ => Type::unit(),
-                    };
-
-                    Ok(InferResult::new(result_type))
-                }
+                MetaFunction { .. } => self.infer_expr_meta_function(current_expr),
 
                 // Quote expression: quote { ... } or quote(N) { ... }
                 // Spec: grammar/verum.ebnf - quote_expr production
@@ -20935,37 +16491,16 @@ impl TypeChecker {
 
                 // Lift expression: lift expr
                 // Lifts a compile-time value to the next stage
-                Lift { expr: inner } => {
-                    // The lift expression evaluates to the type of the inner expression
-                    self.synth_expr(inner)
-                }
+                Lift { .. } => self.infer_expr_lift(current_expr),
 
                 // Type expression: Wrapper<Person>, List<Int>, etc.
                 // These are used for static method calls like Wrapper<Person>.default()
                 // The type expression itself has the "type" kind (like metatypes in other languages)
                 // Type expressions for generic instantiation: "Type<A, B>" syntax for supplying type arguments
-                ExprKind::TypeExpr(ty) => {
-                    // Convert AST type to internal Type representation
-                    let resolved_ty = self.ast_to_type(ty)?;
-                    // Return the resolved type - this enables static method calls
-                    // like Wrapper<Person>.default() where we need Person as the type argument
-                    Ok(InferResult::new(resolved_ty))
-                }
+                ExprKind::TypeExpr(_) => self.infer_expr_type_expr(current_expr),
 
                 // typeof(expr) → returns a type-info record with `.name: Text`
-                ExprKind::Typeof(inner) => {
-                    // Infer the inner expression type (for compile-time validation)
-                    let _ = self.synth_expr(inner)?;
-                    // typeof() returns a structural record { name: Text, ... }
-                    // Spec: docs/improvements.md Section 13.2 — reflection on
-                    // the runtime type yields an info record whose canonical
-                    // field is `name`. Other fields (`size`, `alignment`) can
-                    // be added later without breaking field access.
-                    let mut fields: indexmap::IndexMap<verum_common::Text, Type> =
-                        indexmap::IndexMap::new();
-                    fields.insert(verum_common::Text::from("name"), Type::text());
-                    Ok(InferResult::new(Type::Record(fields)))
-                }
+                ExprKind::Typeof(_) => self.infer_expr_typeof_expr(current_expr),
 
                 // Inline assembly expression: @asm("template", operands..., options)
                 // Low-level type operations: raw pointer casting, transmute, memory layout control
@@ -21043,58 +16578,14 @@ impl TypeChecker {
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Destructuring assignment expressions
                 // Unified destructuring: consistent pattern syntax for let bindings, match arms, and function parameters
                 // =========================================================================
-                DestructuringAssign { pattern, op, value } => {
-                    // 1. Type-check the value expression
-                    let value_result = self.synth_expr(value)?;
-
-                    if *op == verum_ast::BinOp::Assign {
-                        // Simple destructuring assignment: (a, b) = expr
-                        // Bind pattern variables to the value type
-                        // This performs structural type matching:
-                        // - Tuple pattern (a, b): value must be tuple type (T, U)
-                        // - Array pattern [x, y]: value must be array/slice type [T; N] or [T]
-                        // - Record pattern P { x, y }: value must be struct type P with fields x, y
-                        self.bind_pattern(pattern, &value_result.ty)?;
-
-                        // Track definite assignment for each bound variable in the pattern
-                        self.track_pattern_assignment(pattern, current_expr.span);
-                    } else {
-                        // Compound destructuring assignment: (x, y) += (dx, dy)
-                        // All pattern variables must already exist and be mutable.
-                        // For each element: read current value, apply op, write back.
-                        self.check_compound_destructuring_pattern(
-                            pattern,
-                            &value_result.ty,
-                            op,
-                            current_expr.span,
-                        )?;
-                    }
-
-                    // Destructuring assignment returns unit (like regular assignment)
-                    Ok(InferResult::new(Type::unit()))
-                }
+                DestructuringAssign { .. } => self.infer_expr_destructuring_assign(current_expr),
 
                 // Calc blocks are proof constructs - they evaluate to unit
                 CalcBlock(_) => Ok(InferResult::new(Type::unit())),
 
                 // Inject expression: `inject TypeName`
                 // Level 1 static DI - resolves a type from the context/DI container
-                Inject { type_path } => {
-                    // Resolve the type being injected from the path
-                    let type_name = self.path_to_string(type_path);
-                    let injected_ty =
-                        match self.resolve_type_name(type_name.as_str(), current_expr.span) {
-                            Ok(ty) => ty,
-                            Err(_) => {
-                                // If type not found, create a Named type placeholder
-                                Type::Named {
-                                    path: type_path.clone(),
-                                    args: List::new(),
-                                }
-                            }
-                        };
-                    Ok(InferResult::new(injected_ty))
-                }
+                Inject { .. } => self.infer_expr_inject(current_expr),
 
                 // All other expression kinds are handled above.
                 // This fallback is kept for safety - if a new variant is added to ExprKind
@@ -21108,6 +16599,4655 @@ impl TypeChecker {
             },
         }
     }
+    fn infer_expr_path(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Path(path) = &expr.kind else { unreachable!() };
+        if path.segments.len() == 1 {
+            // Single segment - simple variable lookup
+            let name = if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
+                id.name.as_str()
+            } else {
+                // Handle self/super/crate keywords
+                match &path.segments[0] {
+                    verum_ast::ty::PathSegment::SelfValue => {
+                        // Check if we're in a method context (implement block)
+                        if let Maybe::Some(ref self_ty) = self.current_self_type {
+                            // Look up 'self' in the environment
+                            if let Some(scheme) = self.ctx.env.lookup("self") {
+                                let ty = scheme.instantiate();
+                                return Ok(InferResult::new(ty));
+                            }
+                        }
+                        return Err(TypeError::Other(
+                            "self keyword requires method context".into(),
+                        ));
+                    }
+                    verum_ast::ty::PathSegment::Super => {
+                        // super as a standalone path is used as a base for
+                        // field access chains like super.module.function().
+                        return Ok(InferResult::new(Type::Never));
+                    }
+                    verum_ast::ty::PathSegment::Cog => {
+                        // cog as a standalone path is used as a base for qualified access
+                        return Ok(InferResult::new(Type::Never));
+                    }
+                    _ => return Err(TypeError::Other("Invalid path".into())),
+                }
+            };
+
+            // =====================================================================
+            // Special built-in identifiers: null
+            // Interop/FFI: foreign function interface for calling C/system code, marshalling rules — FFI null pointer handling
+            // =====================================================================
+            if name == "null" {
+                // null is a polymorphic null pointer that can be any pointer type
+                // It unifies with *T, *mut T, *const T, etc.
+                let inner_var = Type::Var(TypeVar::fresh());
+                return Ok(InferResult::new(Type::Pointer {
+                    mutable: true,
+                    inner: Box::new(inner_var),
+                }));
+            }
+
+            // COMPLETE module-level lookup: Try local env first, then module context
+            match self.ctx.env.lookup(name) {
+                Some(scheme) => {
+                    // =====================================================================
+                    // DEFINITE ASSIGNMENT: Check variable is initialized before use
+                    // Spec: L0-critical/memory-safety/uninitialized
+                    // =====================================================================
+                    let var_name = verum_common::Text::from(name);
+                    self.check_variable_initialized(&var_name, expr.span)?;
+
+                    let ty = scheme.instantiate();
+                    // CRITICAL: Apply unifier to resolve type variables
+                    // When we have e.g. `wrapper: Wrapper<τ59>` and τ59 was unified with Text,
+                    // we need to return `Wrapper<Text>` so field access works correctly.
+                    let resolved_ty = self.unifier.apply(&ty);
+                    Ok(InferResult::new(resolved_ty))
+                }
+                None => {
+                    // Try module-level function lookup for cross-function inference
+                    if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
+                        let ty = scheme.instantiate();
+                        let resolved_ty = self.unifier.apply(&ty);
+                        Ok(InferResult::new(resolved_ty))
+                    } else {
+                        Err(TypeError::UnboundVariable {
+                            name: name.to_text(),
+                            span: expr.span,
+                        })
+                    }
+                }
+            }
+        } else {
+            // Multi-segment path: module::Type::path::to::item
+            // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Qualified path resolution
+            self.resolve_multi_segment_path(path, expr.span)
+        }
+    }
+
+    fn infer_expr_call(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Call { func, args, type_args } = &expr.kind else { unreachable!() };
+        // ============================================================
+        // Optional Chaining Method Call: obj?.method(args)
+        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Optional chaining with method calls
+        // ============================================================
+        // When the callee is OptionalChain { expr, field: method_name }, this is
+        // actually an optional method call: obj?.method(args)
+        // Semantics: If obj is None, return None. If Some(inner), call inner.method(args)
+        // and wrap the result in Maybe<ReturnType>.
+        if let ExprKind::OptionalChain {
+            expr: obj,
+            field: method,
+        } = &func.kind
+        {
+            let obj_result = self.synth_expr(obj)?;
+
+            // Use protocol-based Maybe resolution to extract inner type
+            let maybe_resolution = self
+                .protocol_checker
+                .read()
+                .resolve_maybe_protocol(&obj_result.ty);
+            let inner_ty = match &maybe_resolution {
+                Some(resolution) => resolution.inner.clone(),
+                None => {
+                    // If not a Maybe type, the ?. is a no-op on the receiver
+                    // but we still need to handle it gracefully
+                    obj_result.ty.clone()
+                }
+            };
+
+            // Delegate to the method call handler with the inner type.
+            // This reuses all the existing method resolution logic (protocol methods,
+            // inherent methods, borrow tracking, etc.)
+            let method_result = self.infer_method_call_with_recv_type(
+                inner_ty, obj, method, type_args, args, expr.span,
+            )?;
+
+            // Wrap result in Maybe if it isn't already
+            // Monadic flattening: if return type is already Maybe, don't double wrap
+            let result_ty = if maybe_resolution.is_some() {
+                // Original was Maybe, wrap result in Maybe
+                if self
+                    .protocol_checker
+                    .read()
+                    .resolve_maybe_protocol(&method_result.ty)
+                    .is_some()
+                {
+                    // Return type is already Maybe - don't double wrap
+                    method_result.ty
+                } else {
+                    Type::maybe(method_result.ty)
+                }
+            } else {
+                method_result.ty
+            };
+
+            return Ok(InferResult::new(result_ty));
+        }
+
+        // ============================================================
+        // Call Graph Building for Negative Context Verification
+        // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
+        // ============================================================
+        // Extract function name and record call site for transitive checking
+        let callee_name: Option<Text> = match &func.kind {
+            ExprKind::Path(path) => path.segments.last().and_then(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
+                _ => None,
+            }),
+            _ => None,
+        };
+
+        // Record call site for call graph building
+        if let Some(ref name) = callee_name {
+            self.record_call_site(name.clone(), expr.span);
+
+            // Check for immediate negative context violations
+            // This catches violations before deep analysis
+            self.check_negative_context_violation(name.as_str(), expr.span)?;
+
+            // ============================================================
+            // Cross-Stage Call Validation for N-level Staged Metaprogramming
+            // Stage coherence: runtime code cannot depend on meta-only values, meta code cannot observe runtime state — Stage Coherence Rule
+            // ============================================================
+            // Validate cross-stage calls when inside a meta function
+            if self.current_function_stage > 0 {
+                // Look up the callee's stage from the stage checker
+                // If the callee is registered (i.e., it's a meta function), validate
+                if let Some(callee_info) = self.stage_checker.get_function_info(name) {
+                    let callee_stage = callee_info.stage;
+                    if let Err(stage_err) =
+                        self.stage_checker.check_call(name, callee_stage, expr.span)
+                    {
+                        return Err(Self::stage_error_to_type_error(stage_err));
+                    }
+                }
+                // Note: If callee is not registered, it's either:
+                // - A runtime function (stage 0) - which is valid if we're generating code via quote
+                // - A function not yet registered - will be caught in staged_pipeline
+            }
+        }
+
+        // ============================================================
+        // Arity-Aware Variant Constructor Disambiguation (#11)
+        // ============================================================
+        // When two registered types share a variant simple name
+        // (canonical collision: `Result.Ok(T)` is a 1-arg tuple
+        // variant, `ExitCode.Ok` is a unit variant — both live
+        // in the stdlib so neither can claim "user override"
+        // priority), the bare-name resolver in `synth_path`
+        // picks the FIRST registered parent.  At call sites
+        // like `Ok(())` the user's intent is clearly the
+        // 1-arg ctor, but the resolver may pick the unit
+        // variant — failing with "not a function: <Variant
+        // | union>".  Disambiguate at the Call expression
+        // BEFORE resolving the callee: pick by arity match
+        // when the variant name resolves to multiple
+        // candidates.  Only fires when the callee is a
+        // single-segment Path (bare-name call).  Stdlib-
+        // agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // the disambiguation key is the constructor's
+        // payload count from its own registration, never a
+        // hardcoded list of variant names.
+        if let Some(ref name) = callee_name {
+            // Only when the call is a single-segment Path
+            // (bare-name `Ok(())`, not qualified
+            // `ExitCode.Ok(...)`).
+            let is_bare_path = matches!(
+                &func.kind,
+                ExprKind::Path(p) if p.segments.len() == 1
+            );
+            if is_bare_path
+                && let Some(parents) =
+                    self.variant_constructor_parents.get(name)
+                && parents.len() > 1
+                && let Some(ctor_ty) = self
+                    .try_resolve_variant_constructor_with_arity(
+                        name.as_str(),
+                        Some(args.len()),
+                    )
+            {
+                // Re-enter the call type-check with the
+                // disambiguated function type instead of
+                // re-running synth_expr (which would loop
+                // through the arity-blind path).  We
+                // simulate the rest of the Call inference
+                // body locally for this fast path.
+                let func_ty = ctor_ty;
+                if let Type::Function {
+                    params,
+                    return_type,
+                    ..
+                } = func_ty
+                {
+                    if params.len() != args.len() {
+                        return Err(TypeError::Other(
+                            verum_common::Text::from(format!(
+                                "{} expects {} argument(s), got {}",
+                                name.as_str(),
+                                params.len(),
+                                args.len()
+                            )),
+                        ));
+                    }
+                    let old_call_context = self.in_call_arg_context;
+                    self.in_call_arg_context = true;
+                    for (arg, param_ty) in
+                        args.iter().zip(params.iter())
+                    {
+                        let resolved_param =
+                            self.unifier.apply(param_ty);
+                        let resolved_param = if Self::contains_type_app(
+                            &resolved_param,
+                        ) {
+                            self.normalize_type(&resolved_param)
+                        } else {
+                            resolved_param
+                        };
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    self.in_call_arg_context = old_call_context;
+                    self.consume_affine_call_args(args, &params)?;
+                    let resolved_return =
+                        self.unifier.apply(&return_type);
+                    let resolved_return = if Self::contains_type_app(
+                        &resolved_return,
+                    ) {
+                        self.normalize_type(&resolved_return)
+                    } else {
+                        resolved_return
+                    };
+                    return Ok(InferResult::new(resolved_return));
+                }
+            }
+        }
+
+        // ============================================================
+        // Type Constructor Call Handling (Heap, Shared)
+        // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — Heap allocation
+        // ============================================================
+        // Handle type constructors like Heap(value) and Shared(value)
+        // These are syntactic sugar for Heap.new(value) and Shared.new(value)
+        if let Some(ref name) = callee_name {
+            let name_str = name.as_str();
+            if WKT::is_smart_pointer_name(name_str) {
+                // Redirect to Type.new
+                let new_func_name =
+                    verum_common::Text::from(format!("{}.new", name_str));
+                if let Some(scheme) =
+                    self.ctx.env.lookup(new_func_name.as_str()).cloned()
+                {
+                    let func_ty = scheme.instantiate();
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = func_ty
+                    {
+                        // Check arity
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::Other(verum_common::Text::from(
+                                format!(
+                                    "{} expects {} argument(s), got {}",
+                                    name_str,
+                                    params.len(),
+                                    args.len()
+                                ),
+                            )));
+                        }
+                        // Check arguments
+                        // NLL: Set call argument context for proper borrow release
+                        let old_call_context = self.in_call_arg_context;
+                        self.in_call_arg_context = true;
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            // Normalize TypeApp projections (GAT/HKT) now that
+                            // type vars may be resolved from explicit type args.
+                            let resolved_param =
+                                if Self::contains_type_app(&resolved_param) {
+                                    self.normalize_type(&resolved_param)
+                                } else {
+                                    resolved_param
+                                };
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        self.in_call_arg_context = old_call_context;
+                        // Consume affine values passed by value
+                        self.consume_affine_call_args(args, &params)?;
+                        let resolved_return = self.unifier.apply(&return_type);
+                        // Also normalize TypeApp in return type for GAT/HKT
+                        let resolved_return =
+                            if Self::contains_type_app(&resolved_return) {
+                                self.normalize_type(&resolved_return)
+                            } else {
+                                resolved_return
+                            };
+                        return Ok(InferResult::new(resolved_return));
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // offset_of Special Form
+        // Spec: offset_of(Type, field) returns byte offset of field
+        // ============================================================
+        // offset_of is special: the second argument is a field name
+        // identifier, NOT a variable expression. We must not resolve
+        // it as a variable.
+        if let Some(ref name) = callee_name {
+            if name.as_str() == "offset_of" {
+                if args.len() != 2 {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        "offset_of expects exactly 2 arguments (type, field_name)",
+                    )));
+                }
+                // First arg: type expression - synthesize normally
+                let _type_result = self.synth_expr(&args[0])?;
+                // Second arg: field name - do NOT resolve as a variable
+                // Just verify it's a valid identifier
+                match &args[1].kind {
+                    ExprKind::Path(path) if path.segments.len() == 1 => {
+                        // Valid field name identifier - OK
+                    }
+                    ExprKind::Literal(_) => {
+                        // String literal for field name - OK
+                    }
+                    _ => {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            "offset_of second argument must be a field name identifier",
+                        )));
+                    }
+                }
+                // offset_of always returns Int
+                return Ok(InferResult::new(Type::Int));
+            }
+
+            // ============================================================
+            // Async join() Builtin
+            // join(future1, future2, ...) -> Future<(T1, T2, ...)>
+            // Awaiting the result yields a tuple of the awaited types
+            // Only use this fallback if join is NOT defined in env (stdlib).
+            // When the stdlib defines join() with a proper return type
+            // (e.g., Join2<Fut1, Fut2>), we should use that instead.
+            // ============================================================
+            if name.as_str() == "join"
+                && args.len() >= 2
+                && self.ctx.env.lookup("join").is_none()
+            {
+                let mut awaited_types: List<Type> = List::new();
+                for arg in args.iter() {
+                    let arg_result = self.synth_expr(arg)?;
+                    // Extract the awaited type from Future<T>
+                    let resolved = self.unifier.apply(&arg_result.ty);
+                    let awaited = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_future_protocol(&resolved)
+                    {
+                        Some(resolution) => resolution.output,
+                        None => resolved,
+                    };
+                    awaited_types.push(awaited);
+                }
+                let tuple_ty = Type::Tuple(awaited_types);
+                return Ok(InferResult::new(Type::Future {
+                    output: Box::new(tuple_ty),
+                }));
+            }
+        }
+
+        // ============================================================
+        // Variadic Builtin Function Handling
+        // Spec: grammar/verum.ebnf Section 2.20.1 - builtin_assertion
+        // ============================================================
+        // Handle builtin functions that can take optional message arguments.
+        // Redirect calls like assert(cond, "msg") to assert_msg internally.
+        let effective_func_name: Option<Text> = if let Some(ref name) = callee_name {
+            let name_str = name.as_str();
+            match (name_str, args.len()) {
+                // assert(cond, msg) -> assert_msg(cond, msg)
+                ("assert", 2) => Some(verum_common::Text::from("assert_msg")),
+                // debug_assert(cond, msg) -> debug_assert_msg(cond, msg)
+                ("debug_assert", 2) => {
+                    Some(verum_common::Text::from("debug_assert_msg"))
+                }
+                // assert_eq(a, b, msg) -> assert_eq_msg(a, b, msg)
+                ("assert_eq", 3) => Some(verum_common::Text::from("assert_eq_msg")),
+                // assert_ne(a, b, msg) -> assert_ne_msg(a, b, msg)
+                ("assert_ne", 3) => Some(verum_common::Text::from("assert_ne_msg")),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        // Synthesize function type - use redirected name for builtins if needed
+        // CRITICAL: Handle explicit type arguments like get_default<Person>()
+        // Track protocol bounds from generic type params for call-site verification.
+        // These map fresh type vars -> protocol bounds that must be satisfied
+        // after argument unification resolves the fresh vars to concrete types.
+        let mut pending_protocol_bounds: Map<
+            TypeVar,
+            List<crate::protocol::ProtocolBound>,
+        > = Map::new();
+
+        let func_result = if let Some(ref redirected_name) = effective_func_name {
+            // Look up the redirected function name
+            if let Some(scheme) = self.ctx.env.lookup(redirected_name.as_str()).cloned()
+            {
+                let (ty, _fresh_vars, proto_bounds) =
+                    scheme.instantiate_with_protocol_bounds();
+                pending_protocol_bounds = proto_bounds;
+                InferResult::new(ty)
+            } else {
+                self.synth_expr(func)?
+            }
+        } else if !type_args.is_empty() {
+            // Explicit type arguments: func<T, U>(args)
+            // Need to instantiate with the provided types instead of fresh vars
+            // Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
+            //
+
+            // IMPORTANT: Explicit type args should only bind to EXPLICIT params.
+            // Implicit parameters (marked with {T}) are inferred from context.
+            if let Some(ref name) = callee_name {
+                if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
+                    let (ty, fresh_vars, implicit_vars) =
+                        scheme.instantiate_with_implicit_info();
+                    // Also get protocol bounds mapped to fresh vars
+                    if !scheme.var_protocol_bounds.is_empty() {
+                        let mut old_to_fresh_map: Map<TypeVar, TypeVar> = Map::new();
+                        for (orig, fresh) in scheme.vars.iter().zip(fresh_vars.iter()) {
+                            old_to_fresh_map.insert(*orig, *fresh);
+                        }
+                        for (old_var, bounds) in &scheme.var_protocol_bounds {
+                            if let Some(fresh_var) = old_to_fresh_map.get(old_var) {
+                                pending_protocol_bounds
+                                    .insert(*fresh_var, bounds.clone());
+                            }
+                        }
+                    }
+
+                    // Convert type_args to Types and unify with explicit fresh vars only
+                    // Skip implicit vars - they will be inferred from argument types
+                    let mut explicit_var_index = 0;
+                    for fresh_var in fresh_vars.iter() {
+                        // Skip implicit vars - they don't consume explicit type args
+                        if implicit_vars.contains(fresh_var) {
+                            continue;
+                        }
+
+                        // Bind explicit type arg to this explicit var
+                        if let Some(type_arg) = type_args.get(explicit_var_index) {
+                            if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
+                                let provided_ty = self.ast_to_type(ast_ty)?;
+                                // Unify the fresh var with the provided type
+                                self.unifier.unify(
+                                    &Type::Var(*fresh_var),
+                                    &provided_ty,
+                                    expr.span,
+                                )?;
+                            }
+                        }
+                        explicit_var_index += 1;
+                    }
+
+                    // Check that we don't have too many explicit type args
+                    let expected_explicit = fresh_vars.len() - implicit_vars.len();
+                    if type_args.len() > expected_explicit {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            format!(
+                                "Function `{}` expects {} explicit type argument{}, got {}",
+                                name,
+                                expected_explicit,
+                                if expected_explicit == 1 { "" } else { "s" },
+                                type_args.len()
+                            ),
+                        )));
+                    }
+
+                    InferResult::new(ty)
+                } else {
+                    self.synth_expr(func)?
+                }
+            } else {
+                self.synth_expr(func)?
+            }
+        } else {
+            // Default path: look up scheme for protocol bounds, then synth_expr for type
+            if let Some(ref name) = callee_name {
+                if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
+                    if !scheme.var_protocol_bounds.is_empty() {
+                        let (ty, _fresh_vars, proto_bounds) =
+                            scheme.instantiate_with_protocol_bounds();
+                        pending_protocol_bounds = proto_bounds;
+                        InferResult::new(ty)
+                    } else {
+                        self.synth_expr(func)?
+                    }
+                } else {
+                    self.synth_expr(func)?
+                }
+            } else {
+                self.synth_expr(func)?
+            }
+        };
+        let func_ty_raw = func_result.ty;
+
+        // CRITICAL: Expand type aliases for function types
+        // When a function call target is typed with a type alias like
+        // `type Processor is fn(Int) -> Int;`, we need to resolve the
+        // alias to the underlying function type before checking callability.
+        // Without this, `let f: Processor = |x| x*2; f(21)` fails with
+        // "not a function: Processor".
+        let func_ty = match &func_ty_raw {
+            Type::Named { .. } | Type::Generic { .. } => {
+                self.expand_type_alias(&func_ty_raw).unwrap_or(func_ty_raw)
+            }
+            // Auto-deref references to functions: &fn(T) -> U becomes fn(T) -> U
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. }
+                if matches!(**inner, Type::Function { .. }) =>
+            {
+                *inner.clone()
+            }
+            _ => func_ty_raw,
+        };
+
+        match func_ty {
+            // Unknown propagation: in stdlib single-file mode,
+            // unresolvable callees return Unknown — skip all
+            // argument checking and return Unknown.
+            Type::Unknown if self.stdlib_single_file_mode => {
+                Ok(InferResult::new(Type::Unknown))
+            }
+
+            // Var propagation: unresolved type variables from
+            // lenient-resolved generic functions skip checking.
+            Type::Var(_) if self.stdlib_single_file_mode => {
+                Ok(InferResult::new(Type::Unknown))
+            }
+
+            // Never propagation: calling Never returns Never
+            Type::Never => Ok(InferResult::new(Type::Never)),
+
+            // Pi type application: beta reduction for dependent functions
+            // Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-level computation
+            Type::Pi {
+                param_name,
+                param_type,
+                return_type,
+            } => {
+                if args.len() != 1 {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Pi type expects exactly 1 argument, got {}",
+                        args.len()
+                    ))));
+                }
+
+                // Check the argument against parameter type
+                self.check_expr(&args[0], &param_type)?;
+
+                // Beta reduction: substitute argument into return type
+                // Convert argument expression to EqTerm for substitution
+                let arg_term = self.expr_to_eq_term(&args[0])?;
+                let result_ty =
+                    self.substitute_term_in_type(&return_type, &param_name, &arg_term);
+
+                Ok(InferResult::new(result_ty))
+            }
+
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                ..
+            } => {
+                // Support default parameter values
+                // Spec: Grammar default_value in function_param
+                //
+
+                // Get minimum required params for this function (if registered)
+                let func_name = if let ExprKind::Path(path) = &func.kind {
+                    path.segments.last().and_then(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+
+                // Variadic functions can accept any number of args (including zero).
+                // This includes: format, print, println, panic, assert, assert_eq
+                let is_variadic = func_name
+                    .as_ref()
+                    .map(|name| {
+                        matches!(
+                            name.as_str(),
+                            "format" | "print" | "println" | "panic" |
+                            "unreachable" | "todo" |
+                            "assert" | "assert_eq" | "assert_ne" |
+                            "List.of" | "Set.of" | "min" | "max" |
+                            "join" | "concat" |
+                            // Meta reflection builtins accept variable args
+                            // (e.g. type_name(Int, Text) for tuple type)
+                            "type_name" | "type_id" | "size_of" | "align_of" |
+                            "text_concat" | "compile_error" | "compile_warning" |
+                            // Meta code generation builtins are variadic
+                            "concat_idents" | "format_ident" | "quote" |
+                            "unquote" | "stringify" | "gensym" |
+                            // Meta context builtins
+                            "emit_diagnostic" | "emit_warning" | "emit_error"
+                        )
+                    })
+                    .unwrap_or(false);
+
+                let required_params = {
+                    let from_registry = func_name
+                        .as_ref()
+                        .and_then(|name| {
+                            self.function_required_params.get(name).copied()
+                        })
+                        .unwrap_or(params.len());
+                    let capped = from_registry.min(params.len());
+                    // Variadic functions accept 0 or more args
+                    if is_variadic { 0 } else { capped }
+                };
+
+                let total_params = params.len();
+                let provided_args = args.len();
+
+                let has_explicit_type_args = !type_args.is_empty();
+                if provided_args < required_params
+                    && !has_explicit_type_args
+                    && !self.stdlib_single_file_mode
+                {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: verum_common::Text::from("E102"),
+                        msg: verum_common::Text::from(format!(
+                            "Function requires at least {} argument{}, got {}{}",
+                            required_params,
+                            if required_params == 1 { "" } else { "s" },
+                            provided_args,
+                            func_name
+                                .as_ref()
+                                .map(|n| format!(" (calling `{}`)", n))
+                                .unwrap_or_default()
+                        )),
+                        span: expr.span,
+                    });
+                }
+
+                // In unsafe contexts, arity mismatches are often caused by
+                // FFI function name collisions (e.g., extern `read` vs method `read`).
+                // Allow extra args in unsafe contexts to avoid false positives.
+                //
+
+                // Also allow extra args when the function is generic and arguments
+                // look like type names (PascalCase). This handles meta intrinsics
+                // like `stride_of(U8)` where the stdlib declares `stride_of<T>()`
+                // but the call passes the type as a regular arg.
+                let all_args_are_type_like = args.iter().all(|arg| {
+                    if let ExprKind::Path(path) = &arg.kind {
+                        if let Some(ident) = path.as_ident() {
+                            let name = ident.as_str();
+                            name.chars()
+                                .next()
+                                .map(|c| c.is_ascii_uppercase())
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        }
+                    } else {
+                        matches!(&arg.kind, ExprKind::TypeExpr(_))
+                    }
+                });
+                let is_generic_type_call =
+                    has_explicit_type_args || all_args_are_type_like;
+                if provided_args > total_params
+                    && !is_variadic
+                    && !self.in_unsafe_context
+                    && !is_generic_type_call
+                    && !self.stdlib_single_file_mode
+                {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Function accepts at most {} argument{}, got {}",
+                        total_params,
+                        if total_params == 1 { "" } else { "s" },
+                        provided_args
+                    ))));
+                }
+
+                // ============================================================
+                // Context Satisfaction Check (ContextChecker integration)
+                // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
+                // ============================================================
+                // When calling a function with context requirements, verify that
+                // the current function's contexts satisfy those requirements.
+                if let Some(ref callee_contexts) = contexts {
+                    // Build a ContextSet from the callee's requirements
+                    let mut callee_context_set = ContextSet::new();
+                    for ctx_ref in callee_contexts.iter() {
+                        callee_context_set.add(ContextRequirement::new(
+                            ctx_ref.name.clone(),
+                            expr.span,
+                        ));
+                    }
+
+                    // Get the current function's available contexts
+                    let caller_context_set =
+                        self.current_function_contexts.clone().unwrap_or_default();
+
+                    // Use ContextChecker to validate satisfaction
+                    self.context_checker.check_context_satisfaction(
+                        &callee_context_set,
+                        &caller_context_set,
+                        expr.span,
+                    )?;
+                }
+
+                // Check capability requirements if function has contexts
+                // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
+                if let Some(ref req) = contexts {
+                    for context_ref in req.iter() {
+                        let context_name = &context_ref.name;
+                        // Check if the required context is available
+                        match self
+                            .capability_checker
+                            .get_context_capabilities(context_name.as_str())
+                        {
+                            Maybe::Some(caps) => {
+                                // Context is available - verify it has necessary capabilities
+                                // Extract capability requirements from function name and signature
+                                use crate::capability::{
+                                    CapabilityRequirement, TypeCapabilitySet,
+                                };
+
+                                // Extract function name for heuristic analysis
+                                let func_name = if let ExprKind::Path(path) = &func.kind
+                                {
+                                    path.segments
+                                        .last()
+                                        .and_then(|seg| match seg {
+                                            verum_ast::ty::PathSegment::Name(id) => {
+                                                Some(id.name.as_str())
+                                            }
+                                            _ => None,
+                                        })
+                                        .unwrap_or("function")
+                                } else {
+                                    "function"
+                                };
+
+                                // Use the method capability mapper to extract requirements
+                                // For function calls, we use the function name as a hint
+                                let context_decl =
+                                    self.context_declarations.get(context_name);
+                                let required_caps = self
+                                    .method_capability_mapper
+                                    .extract_method_capabilities(
+                                        context_name,
+                                        &verum_common::Text::from(func_name),
+                                        context_decl,
+                                    );
+
+                                let requirement = CapabilityRequirement::new(
+                                    context_name.clone(),
+                                    required_caps.clone(),
+                                    verum_common::Text::from(format!(
+                                        "function call to {}",
+                                        func_name
+                                    )),
+                                );
+
+                                if let Err(cap_err) = self
+                                    .capability_checker
+                                    .check_requirement(&requirement)
+                                {
+                                    // E0306: Capability violation
+                                    use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
+
+                                    let func_name = if let ExprKind::Path(path) =
+                                        &func.kind
+                                    {
+                                        path.segments
+                                            .iter()
+                                            .filter_map(|seg| match seg {
+                                                verum_ast::ty::PathSegment::Name(
+                                                    id,
+                                                ) => Some(id.name.as_str()),
+                                                _ => None,
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("::")
+                                    } else {
+                                        "function".to_string()
+                                    };
+
+                                    let cap_names: Vec<String> = caps
+                                        .capabilities
+                                        .names()
+                                        .iter()
+                                        .map(|t| t.to_string())
+                                        .collect();
+
+                                    let diagnostic = CapabilityViolationError::new(
+                                        format!("{}::{}", context_name, "ReadOnly"),
+                                        span_to_line_col(func.span),
+                                    )
+                                    .with_declared_capabilities(
+                                        cap_names
+                                            .iter()
+                                            .map(|s| s.as_str().into())
+                                            .collect(),
+                                    )
+                                    .with_function_name(func_name.as_str())
+                                    .build();
+
+                                    self.diagnostics.push(diagnostic);
+
+                                    return Err(TypeError::Other(cap_err.message()));
+                                }
+                            }
+                            Maybe::None => {
+                                // E0308: Required context not provided
+                                use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
+
+                                let func_name = if let ExprKind::Path(path) = &func.kind
+                                {
+                                    path.segments
+                                        .iter()
+                                        .filter_map(|seg| match seg {
+                                            verum_ast::ty::PathSegment::Name(id) => {
+                                                Some(id.name.as_str())
+                                            }
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("::")
+                                } else {
+                                    "function".to_string()
+                                };
+
+                                let diagnostic = CapabilityNotProvidedError::new(
+                                    context_name.as_str(),
+                                    span_to_line_col(func.span),
+                                )
+                                .with_function_name(func_name.as_str())
+                                .build();
+
+                                self.diagnostics.push(diagnostic);
+
+                                return Err(TypeError::Other(
+                                    verum_common::Text::from(format!(
+                                        "Function requires context '{}' which is not provided",
+                                        context_name
+                                    )),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // ============================================================
+                // Function Parameter Borrow Checking
+                // Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked — Aliasing Rules
+                // ============================================================
+                // Check for potential aliasing conflicts between function arguments:
+                // - Multiple mutable references to the same data
+                // - Mutable reference + immutable reference to overlapping data
+                self.check_function_arg_aliasing(args, &params, expr.span)?;
+
+                // Check each argument against parameter type with substitution
+                // NLL: Set call argument context for proper borrow release
+                let old_call_context = self.in_call_arg_context;
+                self.in_call_arg_context = true;
+                #[cfg(debug_assertions)]
+                let is_assert_eq = func_name
+                    .as_ref()
+                    .map(|n| n.as_str() == "assert_eq")
+                    .unwrap_or(false);
+
+                // ============================================================
+                // Dependent refinement substitution (Phase A.5 activation)
+                // ============================================================
+                //
+
+                // Look up the callee's parameter names so that refinement
+                // predicates on later parameters can be specialised with the
+                // concrete values of earlier arguments before being checked.
+                // Without this, a signature like
+                //
+
+                //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
+                //
+
+                // would leave `len` as a free variable in the predicate on
+                // `i` at call sites, silently admitting out-of-bounds calls
+                // like `safe_get(5, 10)`. With this substitution, the
+                // predicate becomes `10 >= 0 && 10 < 5` at the second
+                // argument check, which the refinement checker correctly
+                // rejects.
+                //
+
+                // `dep_param_names` is the list of parameter names in
+                // declaration order; empty strings stand in for positions
+                // where the parameter uses a non-identifier pattern (those
+                // positions skip substitution but don't break the loop).
+                //
+
+                // Guarded by `callee_name.is_some()` so closures and
+                // anonymous function values don't pay the lookup cost.
+                let dep_param_names: List<Text> = callee_name
+                    .as_ref()
+                    .and_then(|name| self.function_param_names.get(name).cloned())
+                    .unwrap_or_default();
+
+                for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
+                    let resolved_param = self.unifier.apply(param_ty);
+                    // Normalize TypeApp nodes (GAT/HKT type application)
+                    // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
+                    let resolved_param = if Self::contains_type_app(&resolved_param) {
+                        self.normalize_type(&resolved_param)
+                    } else {
+                        resolved_param
+                    };
+
+                    // Apply dependent refinement substitution: if this
+                    // parameter is `Type::Refined { base, predicate }`, and
+                    // we know the names of earlier parameters, substitute
+                    // each earlier argument into the predicate so that
+                    // references like `len` become the concrete constant
+                    // passed at the call site. Empty-string parameter
+                    // names (non-identifier patterns) are skipped.
+                    //
+
+                    // The base type and any wrapping refinement structure
+                    // is otherwise preserved, so this only ever tightens
+                    // the predicate with more information.
+                    let check_ty =
+                        if let Type::Refined { base, predicate } = &resolved_param {
+                            if !dep_param_names.is_empty() && i > 0 {
+                                let mut subst_pred = predicate.clone();
+                                for j in 0..i {
+                                    let earlier_name = match dep_param_names.get(j) {
+                                        Some(n) if !n.as_str().is_empty() => n.clone(),
+                                        _ => continue,
+                                    };
+                                    let arg_expr = match args.get(j) {
+                                        Some(a) => a.clone(),
+                                        None => continue,
+                                    };
+                                    subst_pred.predicate =
+                                        self.refinement.substitute_in_expr(
+                                            &subst_pred.predicate,
+                                            &earlier_name,
+                                            &arg_expr,
+                                        );
+                                }
+                                // Constant-fold arithmetic that became pure after
+                                // substitution. Without this, a predicate like
+                                // `count <= src_len - offset` becomes
+                                // `count <= 10 - 5` after substituting
+                                // `src_len → 10, offset → 5`, and the syntactic
+                                // refinement checker cannot decide it because it
+                                // does not reduce `10 - 5` to `5`. Folding here
+                                // produces `count <= 5`, which the checker can
+                                // then decide against any concrete `count`.
+                                subst_pred.predicate =
+                                    Self::const_fold_expr(&subst_pred.predicate);
+                                Type::Refined {
+                                    base: base.clone(),
+                                    predicate: subst_pred,
+                                }
+                            } else {
+                                resolved_param
+                            }
+                        } else {
+                            resolved_param
+                        };
+
+                    #[cfg(debug_assertions)]
+                    if is_assert_eq {
+                        // eprintln!("[DEBUG assert_eq] arg[{}]: param_ty={}, resolved_param={}, arg.span={:?}",
+                        // i, param_ty, resolved_param, arg.span);
+                    }
+                    self.check_expr(arg, &check_ty)?;
+                    #[cfg(debug_assertions)]
+                    if is_assert_eq {
+                        let resolved_after = self.unifier.apply(param_ty);
+                        // eprintln!("[DEBUG assert_eq] after check arg[{}]: resolved_param_after={}", i, resolved_after);
+                    }
+                }
+                self.in_call_arg_context = old_call_context;
+
+                // Consume affine values passed by value
+                self.consume_affine_call_args(args, &params)?;
+
+                // ============================================================
+                // Protocol Bound Checking at Call Sites
+                // ============================================================
+                // After argument unification, resolve type vars to concrete
+                // types and verify protocol bounds are satisfied.
+                for (type_var, bounds) in &pending_protocol_bounds {
+                    let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
+                    // Only check bounds when the type var resolved to a concrete type
+                    // (not still a type variable — those are checked at their own call sites)
+                    if !matches!(resolved_ty, Type::Var(_)) {
+                        if let Err(_e) = self
+                            .protocol_checker
+                            .read()
+                            .check_bounds(&resolved_ty, bounds)
+                        {
+                            // Emit diagnostic but don't hard-error — some stdlib impls
+                            // may not yet be loaded depending on compilation order.
+                            // The runtime will catch actual violations.
+                            tracing::debug!("Protocol bound check warning: {}", _e);
+                        }
+                    }
+                }
+
+                // ============================================================
+                // Interprocedural Escape Analysis for &checked References
+                // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail
+                // ============================================================
+                // When calling a function that returns a reference, check if any
+                // argument is a &checked reference to a local variable.
+                // Such references could escape through the function's return value,
+                // violating the safety guarantee of &checked (0ns overhead, no runtime checks).
+                let resolved_return = self.unifier.apply(&return_type);
+                // Normalize TypeApp in return type (GAT/HKT)
+                let resolved_return = if Self::contains_type_app(&resolved_return) {
+                    self.normalize_type(&resolved_return)
+                } else {
+                    resolved_return
+                };
+                // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
+                let resolved_return =
+                    if let Type::Generic { name, args } = &resolved_return {
+                        if name.as_str().starts_with("::") && !args.is_empty() {
+                            let assoc_name = &name.as_str()[2..];
+                            let assoc_text: Text = assoc_name.into();
+                            self.protocol_checker
+                                .read()
+                                .try_find_associated_type(&args[0], &assoc_text)
+                                .unwrap_or(resolved_return)
+                        } else {
+                            resolved_return
+                        }
+                    } else {
+                        resolved_return
+                    };
+                if self.is_reference_type(&resolved_return) {
+                    for arg in args.iter() {
+                        // Check if the argument is a &checked reference to a local
+                        if let Some(local_var) = self.get_checked_ref_to_local(arg) {
+                            return Err(TypeError::CheckedRefEscape {
+                                var: local_var,
+                                span: arg.span,
+                            });
+                        }
+                    }
+                }
+                Ok(InferResult::new(resolved_return))
+            }
+            Type::Var(v) => {
+                // Type variable being called as a function - instantiate it as a function type
+                // Create fresh type variables for parameters based on argument count
+                let mut param_types = List::new();
+                for _ in args.iter() {
+                    param_types.push(Type::Var(TypeVar::fresh()));
+                }
+
+                let ret_ty = Type::Var(TypeVar::fresh());
+                let func_ty_inst = Type::function(param_types.clone(), ret_ty.clone());
+
+                // Unify the type variable with the function type
+                self.unifier
+                    .unify(&Type::Var(v), &func_ty_inst, func.span)?;
+
+                // Now check arguments against parameter types
+                // NLL: Set call argument context for proper borrow release
+                let old_call_context = self.in_call_arg_context;
+                self.in_call_arg_context = true;
+                for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+                    self.check_expr(arg, param_ty)?;
+                }
+                self.in_call_arg_context = old_call_context;
+
+                Ok(InferResult::new(ret_ty))
+            }
+
+            // ============================================================
+            // Rank-2 Polymorphic Function Call (Forall instantiation)
+            // Spec: grammar/verum.ebnf - rank2_function_type
+            // ============================================================
+            // When calling a rank-2 polymorphic function (∀R. fn(...) -> ...),
+            // instantiate the quantified type variables with fresh inference
+            // variables and then type-check as a normal function call.
+            Type::Forall { ref vars, ref body } => {
+                // Build substitution map: quantified var -> fresh TypeVar
+                let mut subst: Map<TypeVar, Type> = Map::new();
+                for qvar in vars.iter() {
+                    let fresh = TypeVar::fresh();
+                    subst.insert(*qvar, Type::Var(fresh));
+                }
+
+                // Apply substitution to the body to get the instantiated function type
+                let instantiated_body = self.substitute_type_vars(body, &subst);
+
+                // Now the body should be a Function type - extract and check
+                match instantiated_body {
+                    Type::Function {
+                        params,
+                        return_type,
+                        contexts,
+                        ..
+                    } => {
+                        // Check arity
+                        if params.len().abs_diff(args.len()) > 1 {
+                            return Err(TypeError::Other(verum_common::Text::from(
+                                format!(
+                                    "Rank-2 function expects {} argument(s), got {}",
+                                    params.len(),
+                                    args.len()
+                                ),
+                            )));
+                        }
+
+                        // Context satisfaction check
+                        if let Some(ref callee_contexts) = contexts {
+                            let mut callee_context_set = ContextSet::new();
+                            for ctx_ref in callee_contexts.iter() {
+                                callee_context_set.add(ContextRequirement::new(
+                                    ctx_ref.name.clone(),
+                                    expr.span,
+                                ));
+                            }
+
+                            let caller_context_set = self
+                                .current_function_contexts
+                                .clone()
+                                .unwrap_or_default();
+
+                            self.context_checker.check_context_satisfaction(
+                                &callee_context_set,
+                                &caller_context_set,
+                                expr.span,
+                            )?;
+                        }
+
+                        // Check each argument against parameter type
+                        let old_call_context = self.in_call_arg_context;
+                        self.in_call_arg_context = true;
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        self.in_call_arg_context = old_call_context;
+
+                        let resolved_return = self.unifier.apply(&return_type);
+                        Ok(InferResult::new(resolved_return))
+                    }
+                    _ => Err(TypeError::NotAFunction {
+                        ty: func_ty.to_text(),
+                        span: func.span,
+                    }),
+                }
+            }
+
+            _ => Err(TypeError::NotAFunction {
+                ty: func_ty.to_text(),
+                span: func.span,
+            }),
+        }
+    }
+
+    fn infer_expr_tuple(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Tuple(exprs) = &expr.kind else { unreachable!() };
+        let mut types = List::new();
+        for e in exprs {
+            let result = self.synth_expr(e)?;
+            types.push(result.ty);
+        }
+        Ok(InferResult::new(Type::tuple(types)))
+    }
+
+    fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
+        // Special case: Module namespace navigation
+        // When obj is a module namespace (e.g., `api`), field access navigates into the module
+        // This handles paths like `api.v2.func()` where parser creates Field expressions
+        // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
+        if let ExprKind::Path(path) = &obj.kind
+            && path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+        {
+            let obj_name = ident.name.as_str();
+            // Check if this is an inline module
+            if self
+                .inline_modules
+                .contains_key(&verum_common::Text::from(obj_name))
+            {
+                // Create a two-segment path to resolve through inline module
+                let module_path = verum_ast::ty::Path {
+                    segments: vec![
+                        verum_ast::ty::PathSegment::Name(ident.clone()),
+                        verum_ast::ty::PathSegment::Name(field.clone()),
+                    ]
+                    .into(),
+                    span: expr.span,
+                };
+                return self.resolve_inline_module_path(&module_path, expr.span);
+            }
+        }
+
+        // Handle chained module access like `api.v2` -> `api.v2.func`
+        // When obj itself is a field access on a module, we need to build up the full path
+        if let ExprKind::Field {
+            expr: inner_obj,
+            field: inner_field,
+        } = &obj.kind
+        {
+            if let ExprKind::Path(path) = &inner_obj.kind
+                && path.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                && self
+                    .inline_modules
+                    .contains_key(&verum_common::Text::from(ident.name.as_str()))
+            {
+                // Build a three-segment path: module.submodule.item
+                let module_path = verum_ast::ty::Path {
+                    segments: vec![
+                        verum_ast::ty::PathSegment::Name(ident.clone()),
+                        verum_ast::ty::PathSegment::Name(inner_field.clone()),
+                        verum_ast::ty::PathSegment::Name(field.clone()),
+                    ]
+                    .into(),
+                    span: expr.span,
+                };
+                return self.resolve_inline_module_path(&module_path, expr.span);
+            }
+        }
+
+        // Special case: Type.Variant syntax for variant constructors
+        // When obj is a single-segment Path (e.g., Color), try to resolve it as Type.Variant
+        if let ExprKind::Path(path) = &obj.kind
+            && path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+        {
+            let type_name = ident.name.as_str();
+            let field_name = field.name.as_str();
+            let qualified_name = format!("{}.{}", type_name, field_name);
+
+            // Strategy 1: Try to look up the qualified variant name in env
+            if let Some(scheme) = self.ctx.env.lookup(&qualified_name) {
+                let ty = scheme.instantiate();
+                return Ok(InferResult::new(ty));
+            }
+
+            // Strategy 2: Look up type name and check if it's a Variant
+            // This handles cross-file imported variant types like RegistryError
+            if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)
+                && let Type::Variant(variants) = &ty
+                && let Some(payload_ty) = variants.get(field_name)
+            {
+                // Found variant constructor - return function type
+                if matches!(payload_ty, Type::Unit) {
+                    // Nullary variant - return the variant type itself
+                    return Ok(InferResult::new(ty.clone()));
+                } else {
+                    // Constructor function: fn(payload_ty) -> VariantType
+                    let params = match payload_ty {
+                        Type::Tuple(tuple_types) => tuple_types.clone(),
+                        _ => {
+                            let mut p = List::new();
+                            p.push(payload_ty.clone());
+                            p
+                        }
+                    };
+                    let constructor_ty = Type::function(params, ty.clone());
+                    return Ok(InferResult::new(constructor_ty));
+                }
+            }
+        }
+
+        // Handle lowercase type alias property access (e.g., i32.min, u64.max)
+        if let ExprKind::Path(path) = &obj.kind
+            && path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+        {
+            let name = ident.name.as_str();
+            let field_name = field.name.as_str();
+            let is_lowercase_type_alias = matches!(
+                name,
+                "i8" | "i16"
+                    | "i32"
+                    | "i64"
+                    | "i128"
+                    | "isize"
+                    | "u8"
+                    | "u16"
+                    | "u32"
+                    | "u64"
+                    | "u128"
+                    | "usize"
+                    | "f32"
+                    | "f64"
+            );
+            if is_lowercase_type_alias
+                && matches!(
+                    field_name,
+                    "min"
+                        | "max"
+                        | "bits"
+                        | "size"
+                        | "alignment"
+                        | "stride"
+                        | "name"
+                        | "is_signed"
+                )
+            {
+                let result_ty = match field_name {
+                    "name" => Type::text(),
+                    "is_signed" => Type::int(),
+                    _ => Type::int(),
+                };
+                return Ok(InferResult::new(result_ty));
+            }
+        }
+
+        // =====================================================================
+        // DEFINITE ASSIGNMENT: Check field initialization for partial struct access
+        // Spec: L0-critical/memory-safety/uninitialized
+        // When accessing obj.field, check if that specific field is initialized
+        // =====================================================================
+        // Track the variable name for affine tracking (if applicable)
+        let var_name_for_affine = if let ExprKind::Path(path) = &obj.kind {
+            if path.segments.len() == 1 {
+                if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
+                    let var_name = verum_common::Text::from(id.name.as_str());
+                    let field_name_text = verum_common::Text::from(field.name.as_str());
+                    // Check if this specific field is initialized
+                    self.check_field_initialized(
+                        &var_name,
+                        &field_name_text,
+                        expr.span,
+                    )?;
+
+                    // PARTIAL MOVE: Check if this field has already been moved
+                    // Spec: L0-critical/reference_system/value_transfer - Partial move tracking
+                    // If a field was moved out of a container, subsequent access should fail
+                    if !self
+                        .affine_tracker
+                        .can_access_field(id.name.as_str(), field.name.as_str())
+                    {
+                        return Err(TypeError::PartiallyMovedValue {
+                            name: var_name.clone(),
+                            moved_field: field_name_text,
+                            moved_at: expr.span,
+                            used_at: expr.span,
+                        });
+                    }
+
+                    Some(id.name.as_str().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let field_name_str = field.name.as_str().to_string();
+
+        // Normal field access: synthesize the object type and access its field
+        // Note: synth_expr will check full initialization for non-field access
+        let obj_result = self.synth_expr_for_field_access(obj)?;
+
+        // CRITICAL FIX: Apply unifier to resolve type variables before field access
+        // When we have `Wrapper<τ59>` and τ59 was unified with Text, we need to
+        // resolve to `Wrapper<Text>` so field access gets the correct field type.
+        let resolved_ty = self.unifier.apply(&obj_result.ty);
+
+        // CRITICAL FIX: Unwrap reference types before field access
+        // When we have `&Point`, we need to dereference to get `Point` first
+        // This handles &T, &checked T, &unsafe T, and nested references
+        let dereferenced_ty = self.unwrap_reference_type(&resolved_ty);
+
+        // CRITICAL FIX: Normalize type to resolve type aliases before field access
+        // When we have a type alias like `type CreateTokenRequestDto is { name: Text, ... }`,
+        // we need to resolve it to the underlying Record type before checking fields
+        let normalized_ty = self.normalize_type(dereferenced_ty);
+
+        // Never propagation: any field access on Never produces Never
+        if matches!(normalized_ty, Type::Never) {
+            return Ok(InferResult::new(Type::Never));
+        }
+
+        // Unwrap refined types to access base type for field access.
+        // A refined record { x: Int, y: Int }{predicate} should allow .x and .y access.
+        let normalized_ty = match &normalized_ty {
+            Type::Refined { base, .. } => (**base).clone(),
+            other => other.clone(),
+        };
+
+        match &normalized_ty {
+            Type::Record(fields) => {
+                // Regular record field access
+                if let Some(field_ty) =
+                    fields.get(&verum_common::Text::from(field.name.as_str()))
+                {
+                    // Track affine field access (partial move tracking)
+                    if let Some(ref var_name) = var_name_for_affine {
+                        self.track_affine_field_access(
+                            var_name,
+                            &field_name_str,
+                            field_ty,
+                            expr.span,
+                        )?;
+                    }
+                    Ok(InferResult::new(field_ty.clone()))
+                } else {
+                    // Better error: include field list
+                    let available_fields: Vec<&str> =
+                        fields.keys().map(|k| k.as_str()).collect();
+                    Err(TypeError::Other(verum_common::Text::from(format!(
+                        "field '{}' not found in type 'record'. Available fields: [{}]",
+                        field.name,
+                        available_fields.join(", ")
+                    ))))
+                }
+            }
+            Type::Named { path, args } => {
+                // For named record types, look up the struct fields
+                let type_name = self.path_to_string(path);
+                let struct_key = format!("__struct_fields_{}", type_name);
+                let field_name = verum_common::Text::from(field.name.as_str());
+
+                // Look up type parameters for this generic type
+                // so we can substitute T -> Int in Pair<Int>
+                let type_params_key = format!("__type_params_{}", type_name);
+                let type_params: List<verum_common::Text> =
+                    match self.ctx.lookup_type(type_params_key.as_str()) {
+                        Option::Some(Type::Record(params_map)) => {
+                            params_map.keys().cloned().collect()
+                        }
+                        _ => List::new(),
+                    };
+
+                // Build substitution map from type parameters to concrete args
+                // e.g., for Pair<Int>: { T -> Int }
+                let mut param_subst = indexmap::IndexMap::new();
+                for (param_name, arg_ty) in type_params.iter().zip(args.iter()) {
+                    param_subst.insert(param_name.clone(), arg_ty.clone());
+                }
+
+                // First try to find the field in the struct definition
+                if let Option::Some(Type::Record(fields)) =
+                    self.ctx.lookup_type(struct_key.as_str())
+                    && let Some(field_ty) = fields.get(&field_name)
+                {
+                    // Apply type parameter substitution to get concrete field type
+                    let resolved_ty =
+                        self.substitute_type_params(field_ty, &param_subst);
+                    // Track affine field access (partial move tracking)
+                    if let Some(ref var_name) = var_name_for_affine {
+                        self.track_affine_field_access(
+                            var_name,
+                            &field_name_str,
+                            &resolved_ty,
+                            expr.span,
+                        )?;
+                    }
+                    return Ok(InferResult::new(resolved_ty));
+                }
+
+                // Also try looking up the type directly (backward compat)
+                if let Option::Some(Type::Record(fields)) =
+                    self.ctx.lookup_type(type_name.as_str())
+                    && let Some(field_ty) = fields.get(&field_name)
+                {
+                    // Apply type parameter substitution to get concrete field type
+                    let resolved_ty =
+                        self.substitute_type_params(field_ty, &param_subst);
+                    // Track affine field access (partial move tracking)
+                    if let Some(ref var_name) = var_name_for_affine {
+                        self.track_affine_field_access(
+                            var_name,
+                            &field_name_str,
+                            &resolved_ty,
+                            expr.span,
+                        )?;
+                    }
+                    return Ok(InferResult::new(resolved_ty));
+                }
+
+                // Not a record field - try GAT instantiation
+                // (e.g., Iterator.Item for protocol access)
+                match self.infer_gat_instantiation(
+                    path,
+                    &field_name,
+                    &List::new(), // No explicit args provided
+                    Maybe::None,  // No usage context yet
+                    expr.span,
+                ) {
+                    Ok(gat_ty) => Ok(InferResult::new(gat_ty)),
+                    Err(_) => {
+                        // Not a GAT - try associated constant lookup
+                        // Look up as "TypeName.field" in the environment
+                        let const_name = format!("{}.{}", type_name, field.name);
+                        if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned()
+                        {
+                            let ty = scheme.instantiate();
+                            return Ok(InferResult::new(ty));
+                        }
+                        // Check for built-in type properties (size, alignment, stride, etc.)
+                        // These are valid for ALL types as compile-time metadata
+                        match field.name.as_str() {
+                            "size" | "align" | "alignment" | "stride" | "bits" => {
+                                return Ok(InferResult::new(Type::int()));
+                            }
+                            "name" => {
+                                return Ok(InferResult::new(Type::text()));
+                            }
+                            _ => {}
+                        }
+                        // Field not found - for Named types, the field may exist
+                        // in the actual type definition but not be visible due to
+                        // module resolution. Return a fresh type variable to allow
+                        // type inference to continue.
+                        if matches!(
+                            &normalized_ty,
+                            Type::Named { .. } | Type::Generic { .. }
+                        ) {
+                            let fresh = Type::Var(TypeVar::fresh());
+                            return Ok(InferResult::new(fresh));
+                        }
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "field '{}' not found in type '{}'",
+                            field.name, normalized_ty
+                        ))))
+                    }
+                }
+            }
+            // Handle associated constants on primitive types
+            // e.g., Float.INFINITY, Int.MAX, f64.MIN
+            Type::Float | Type::Int => {
+                // Check type properties first (size, align, alignment, stride, bits, name)
+                match field.name.as_str() {
+                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                        return Ok(InferResult::new(Type::int()));
+                    }
+                    "name" => {
+                        return Ok(InferResult::new(Type::text()));
+                    }
+                    _ => {}
+                }
+                // Look up as "Type.field" in the environment
+                let const_name = format!("{}.{}", normalized_ty, field.name);
+                if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
+                    let ty = scheme.instantiate();
+                    return Ok(InferResult::new(ty));
+                }
+                // Try with "Float" instead of variant display
+                let type_name = match &normalized_ty {
+                    Type::Float => WKT::Float.as_str(),
+                    Type::Int => WKT::Int.as_str(),
+                    _ => "",
+                };
+                let const_name = format!("{}.{}", type_name, field.name);
+                if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
+                    let ty = scheme.instantiate();
+                    return Ok(InferResult::new(ty));
+                }
+                Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Associated constant {} not found on type {}",
+                    field.name, normalized_ty
+                ))))
+            }
+            // CRITICAL: Handle user-defined `Text` struct field access.
+            // text.vr defines `public type Text is { ptr, len, cap }`. When the type
+            // checker resolves `TypeKind::Text` to `Type::Text` (the primitive), direct
+            // field accesses inside `implement Text` fail with E103. Check for
+            // user-registered struct fields before emitting the error.
+            Type::Text => {
+                let struct_key = "__struct_fields_Text".to_string();
+                if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
+                    let field_name_key = verum_common::Text::from(field.name.as_str());
+                    if let Some(field_ty) = fields.get(&field_name_key).cloned() {
+                        return Ok(InferResult::new(field_ty));
+                    }
+                    // Field not found in user-defined struct
+                    let available: Vec<&str> =
+                        fields.keys().map(|k| k.as_str()).collect();
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "field '{}' not found in Text struct. Available: [{}]",
+                        field.name,
+                        available.join(", ")
+                    ))));
+                }
+                // Fall through to default handling
+                match field.name.as_str() {
+                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                        Ok(InferResult::new(Type::int()))
+                    }
+                    "name" => Ok(InferResult::new(Type::text())),
+                    _ => Err(TypeError::OtherWithCode {
+                        code: verum_common::Text::from("E103"),
+                        msg: verum_common::Text::from(format!(
+                            "Cannot access field '{}' on non-record type: {}",
+                            field.name, normalized_ty
+                        )),
+                    }),
+                }
+            }
+            // Handle type properties for ALL types: T.size, T.align, T.alignment, T.stride, T.bits
+            // These are valid for any type as compile-time type metadata
+            _ => {
+                match field.name.as_str() {
+                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                        // Type properties return Int (the size/alignment value)
+                        Ok(InferResult::new(Type::int()))
+                    }
+                    "name" => {
+                        // Type name property returns Text
+                        Ok(InferResult::new(Type::text()))
+                    }
+                    "min" | "max"
+                        if {
+                            let pc = self.protocol_checker.read();
+                            pc.implements_protocol(&normalized_ty, "Numeric")
+                        } || matches!(normalized_ty, Type::Int | Type::Float) =>
+                    {
+                        // min/max return the type itself for Numeric types
+                        Ok(InferResult::new(normalized_ty.clone()))
+                    }
+                    _ => {
+                        // Try associated constant lookup via receiver Path
+                        // This handles newtypes and other types where the receiver
+                        // resolves to a function type (constructor) rather than Named
+                        if let ExprKind::Path(path) = &obj.kind {
+                            if let Some(verum_ast::ty::PathSegment::Name(id)) =
+                                path.segments.last()
+                            {
+                                let const_name = format!("{}.{}", id.name, field.name);
+                                if let Some(scheme) =
+                                    self.ctx.env.lookup(&const_name).cloned()
+                                {
+                                    let ty = scheme.instantiate();
+                                    return Ok(InferResult::new(ty));
+                                }
+                                // Static-method dispatch fallback: when the
+                                // receiver is a bare type-name path
+                                // (`List.new`, `IndexedList.from_list`,
+                                // …) and the field-name is not in env,
+                                // search the inherent_methods bucket for
+                                // `<TypeName>::<method_name>`.  Pre-fix
+                                // every body-position `List.new()` /
+                                // `IndexedList { items: List.new() }`
+                                // failed E103 "Cannot access field 'new'
+                                // on non-record type: List<_>" because
+                                // the dispatch path didn't try the
+                                // inherent-method bucket here — only the
+                                // env-side associated-constant lookup
+                                // above fired, and stdlib generic
+                                // methods aren't in `env`, they're in
+                                // `inherent_methods["List"]["new"]`.
+                                //
+                                // Also try the `$static$<method>` key
+                                // that `register_inherent_methods_from_metadata`
+                                // emits for static methods (no `self`
+                                // receiver) — same convention as the
+                                // AST-driven path.
+                                //
+                                // Stdlib-agnostic per CLAUDE.md: lookup
+                                // is keyed by the user-written receiver
+                                // name, no per-stdlib-type special case.
+                                let type_name_str = id.name.as_str();
+                                let methods_guard = self.inherent_methods.read();
+                                if let Some(bucket) =
+                                    methods_guard.get(&Text::from(type_name_str))
+                                {
+                                    let static_key: Text =
+                                        format!("$static${}", field.name).into();
+                                    let bare_key: Text =
+                                        field.name.as_str().into();
+                                    let scheme = bucket
+                                        .get(&static_key)
+                                        .or_else(|| bucket.get(&bare_key))
+                                        .cloned();
+                                    drop(methods_guard);
+                                    if let Some(scheme) = scheme {
+                                        return Ok(InferResult::new(
+                                            scheme.instantiate(),
+                                        ));
+                                    }
+                                } else {
+                                    drop(methods_guard);
+                                }
+                            }
+                        }
+                        {
+                            // For unresolved/unknown types and Variant types,
+                            // allow field access with a fresh type variable
+                            if matches!(
+                                &normalized_ty,
+                                Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
+                            ) {
+                                return Ok(InferResult::new(Type::Var(
+                                    TypeVar::fresh(),
+                                )));
+                            }
+                            // For Variant types, the field may be on the inner record
+                            if matches!(&normalized_ty, Type::Variant(_)) {
+                                return Ok(InferResult::new(Type::Var(
+                                    TypeVar::fresh(),
+                                )));
+                            }
+                            Err(TypeError::OtherWithCode {
+                                code: verum_common::Text::from("E103"),
+                                msg: verum_common::Text::from(format!(
+                                    "Cannot access field '{}' on non-record type: {}",
+                                    field.name, normalized_ty
+                                )),
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn infer_expr_index(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Index { expr: arr, index } = &expr.kind else { unreachable!() };
+        // =====================================================================
+        // DEFINITE ASSIGNMENT: Check array element initialization
+        // Spec: L0-critical/memory-safety/uninitialized
+        // =====================================================================
+        if let ExprKind::Path(path) = &arr.kind {
+            if path.segments.len() == 1 {
+                if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
+                    let var_name = verum_common::Text::from(id.name.as_str());
+                    // Try to get constant index for precise checking
+                    if let Some(idx) = self.try_extract_const_index(index) {
+                        if idx >= 0 {
+                            self.check_index_initialized(
+                                &var_name,
+                                idx as usize,
+                                expr.span,
+                                false,
+                            )?;
+                        }
+                        // Negative indices are handled by bounds checking below
+                    } else {
+                        // Non-constant index - check the whole array is initialized
+                        self.check_variable_initialized(&var_name, expr.span)?;
+                    }
+                }
+            }
+        }
+
+        let arr_result = self.synth_expr_for_field_access(arr)?;
+        let resolved_main = self.unifier.apply(&arr_result.ty);
+
+        // Synthesize index type to determine if this is indexing or slicing
+        let index_result = self.synth_expr(index)?;
+        let index_ty = self.unifier.apply(&index_result.ty);
+
+        // Check for negative literal index (compile-time error)
+        // Spec: L0-critical/memory-safety/buffer_overflow/negative_index.vr
+        if let ExprKind::Literal(lit) = &index.kind {
+            if let verum_ast::literal::LiteralKind::Int(int_lit) = &lit.kind {
+                if int_lit.value < 0 {
+                    return Err(TypeError::InvalidIndex {
+                        message: verum_common::Text::from(format!(
+                            "Invalid index: negative indices not allowed (found {})",
+                            int_lit.value
+                        )),
+                        span: index.span,
+                    });
+                }
+            }
+        }
+        // Also check for unary negation of a literal: -1, -2, etc.
+        if let ExprKind::Unary {
+            op: verum_ast::expr::UnOp::Neg,
+            expr: inner,
+        } = &index.kind
+        {
+            if let ExprKind::Literal(lit) = &inner.kind {
+                if let verum_ast::literal::LiteralKind::Int(int_lit) = &lit.kind {
+                    return Err(TypeError::InvalidIndex {
+                        message: verum_common::Text::from(format!(
+                            "Array index out of bounds: negative index -{}",
+                            int_lit.value
+                        )),
+                        span: index.span,
+                    });
+                }
+            }
+        }
+
+        // =====================================================================
+        // STATIC BOUNDS CHECKING: Verify index is within array bounds
+        // Spec: L0-critical/memory-safety/bounds_checking/array_bounds_static.vr
+        // =====================================================================
+        // Skip upper-bound static bounds check for variable paths — mutable
+        // arrays may have been resized via push/pop, making compile-time
+        // size stale. Negative index checks always apply.
+        let arr_is_mutable_variable = if let ExprKind::Path(path) = &arr.kind {
+            if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
+                self.mutable_bindings.contains(id.name.as_str())
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        // Get the array length if statically known
+        let arr_ty = self.unifier.apply(&arr_result.ty);
+        if let Some(array_size) = Self::get_array_size(&arr_ty) {
+            // Get the constant index value if statically known
+            if let Some(index_value) = self.try_extract_const_index(index) {
+                if index_value < 0 {
+                    return Err(TypeError::InvalidIndex {
+                        message: verum_common::Text::from(format!(
+                            "Array index out of bounds: negative index {}",
+                            index_value
+                        )),
+                        span: index.span,
+                    });
+                }
+                // Only check upper bound for non-variable paths (literals, etc.)
+                // Variable paths may have been resized via push/pop
+                if !arr_is_mutable_variable && index_value as u64 >= array_size {
+                    return Err(TypeError::InvalidIndex {
+                        message: verum_common::Text::from(format!(
+                            "Array index out of bounds: index {} exceeds array length {}",
+                            index_value, array_size
+                        )),
+                        span: index.span,
+                    });
+                }
+            }
+        }
+
+        // Get expected index type via protocol resolution
+        let expected_index_type = self
+            .protocol_checker
+            .read()
+            .resolve_index_protocol(&arr_result.ty)
+            .map(|r| r.key)
+            .unwrap_or_else(Type::int);
+
+        // Check if this is a Range type (slicing) or the expected index type (indexing)
+        let is_range = match &index_ty {
+            Type::Generic { name, args }
+                if WKT::Range.matches(name.as_str()) && args.len() == 1 =>
+            {
+                // Ensure the range is over Int
+                self.unifier.unify(&args[0], &Type::int(), index.span)?;
+                true
+            }
+            Type::Named { path, args } if !args.is_empty() => {
+                if let Some(last) = path.segments.last()
+                    && let verum_ast::ty::PathSegment::Name(id) = last
+                    && WKT::Range.matches(id.name.as_str())
+                {
+                    self.unifier.unify(&args[0], &Type::int(), index.span)?;
+                    true
+                } else {
+                    self.unifier
+                        .unify(&index_ty, &expected_index_type, index.span)?;
+                    false
+                }
+            }
+            _ => {
+                self.unifier
+                    .unify(&index_ty, &expected_index_type, index.span)?;
+                false
+            }
+        };
+
+        // If slicing with Range, return array/slice type instead of element type
+        if is_range {
+            // For slicing, return the same collection type (or a slice)
+            return match &arr_result.ty {
+                Type::Array { element, .. } => Ok(InferResult::new(Type::Array {
+                    element: element.clone(),
+                    size: None, // Dynamic size after slicing
+                })),
+                Type::Slice { element } => Ok(InferResult::new(Type::Slice {
+                    element: element.clone(),
+                })),
+                // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable collection types
+                // Any type that implements Index protocol can be sliced (returns slice of element type)
+                ty if self
+                    .protocol_checker
+                    .read()
+                    .resolve_index_protocol(ty)
+                    .is_some() =>
+                {
+                    // Return the original collection type for slicing operations
+                    Ok(InferResult::new(ty.clone()))
+                }
+                Type::Text => Ok(InferResult::new(Type::Text)),
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } => {
+                    // Recursively handle referenced types
+                    match inner.as_ref() {
+                        Type::Array { element, .. } => {
+                            Ok(InferResult::new(Type::Array {
+                                element: element.clone(),
+                                size: None,
+                            }))
+                        }
+                        // Handle &[T] slice reference - slicing returns a slice
+                        Type::Slice { element } => Ok(InferResult::new(Type::Slice {
+                            element: element.clone(),
+                        })),
+                        Type::Text => Ok(InferResult::new(Type::Text)),
+                        // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable types
+                        // Any type that implements Index yields a slice of its element type
+                        inner_ty
+                            if self
+                                .protocol_checker
+                                .read()
+                                .resolve_index_protocol(inner_ty)
+                                .is_some() =>
+                        {
+                            let index_res = self
+                                .protocol_checker
+                                .read()
+                                .resolve_index_protocol(inner_ty);
+                            if let Some(res) = index_res {
+                                Ok(InferResult::new(Type::Slice {
+                                    element: Box::new(res.output),
+                                }))
+                            } else {
+                                Err(TypeError::Other(verum_common::Text::from(
+                                    format!("Cannot slice type: {}", arr_result.ty),
+                                )))
+                            }
+                        }
+                        // Named/Generic types behind references may be sliceable
+                        // (e.g., &Bytes, &List<T>) - assume they support slicing
+                        Type::Named { .. } | Type::Generic { .. } => {
+                            Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+                        }
+                        _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Cannot slice type: {}",
+                            arr_result.ty
+                        )))),
+                    }
+                }
+                // Named/Generic types may support slicing through Index protocol
+                Type::Named { .. } | Type::Generic { .. } => {
+                    Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+                }
+                _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Cannot slice type: {}",
+                    arr_result.ty
+                )))),
+            };
+        }
+
+        // Try compile-time evaluation of the index for tuple access
+        let const_index: Option<usize> = {
+            use crate::const_eval::ConstEvaluator;
+            let mut const_eval = ConstEvaluator::new();
+            match const_eval.eval(index) {
+                Ok(val) => val.as_u128().map(|n| n as usize),
+                Err(_) => None,
+            }
+        };
+
+        // First, try tuple indexing with compile-time constant index
+        if let Type::Tuple(elements) = &arr_result.ty {
+            let elem_ty = if let Some(i) = const_index {
+                if i < elements.len() {
+                    elements[i].clone()
+                } else if !elements.is_empty() {
+                    elements[0].clone() // error recovery
+                } else {
+                    return Err(TypeError::Other("Cannot index empty tuple".into()));
+                }
+            } else if !elements.is_empty() {
+                let first_ty = &elements[0];
+                if elements.iter().all(|ty| ty == first_ty) {
+                    first_ty.clone()
+                } else {
+                    Type::Var(TypeVar::fresh()) // heterogeneous tuple
+                }
+            } else {
+                return Err(TypeError::Other("Cannot index empty tuple".into()));
+            };
+            return Ok(InferResult::new(elem_ty));
+        }
+
+        // Try protocol-based index resolution
+        let resolved_for_index = self.unifier.apply(&arr_result.ty);
+        if let Some(resolution) = self
+            .protocol_checker
+            .read()
+            .resolve_index_protocol(&resolved_for_index)
+        {
+            return Ok(InferResult::new(resolution.output));
+        }
+
+        // If we have a reference to a type, check the inner type
+        // This handles cases like &List<T>, &mut List<T>, &checked List<T>, &Heap<T>, etc.
+        // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
+        let inner_ty = match &arr_result.ty {
+            Type::Reference { inner, .. } => Some(inner.as_ref()),
+            Type::CheckedReference { inner, .. } => Some(inner.as_ref()),
+            Type::UnsafeReference { inner, .. } => Some(inner.as_ref()),
+            Type::Ownership { inner, .. } => Some(inner.as_ref()),
+            // Heap<T> auto-deref to T for indexing
+            Type::Generic { name, args }
+                if WKT::Heap.matches(name.as_str()) && !args.is_empty() =>
+            {
+                Some(&args[0])
+            }
+            // Ref<T>, RefMut<T> auto-deref to T for indexing (RefCell guard types)
+            Type::Generic { name, args }
+                if (name.as_str() == "Ref" || name.as_str() == "RefMut")
+                    && !args.is_empty() =>
+            {
+                Some(&args[0])
+            }
+            _ => None,
+        };
+
+        // Handle nested references like &Heap<T> -> deref twice
+        let inner_ty = inner_ty.map(|inner| match inner {
+            Type::Generic { name, args }
+                if WKT::Heap.matches(name.as_str()) && !args.is_empty() =>
+            {
+                &args[0]
+            }
+            other => other,
+        });
+
+        // Try protocol-based resolution on inner type (for references)
+        if let Some(inner) = inner_ty {
+            // Handle tuple inside reference
+            if let Type::Tuple(elements) = inner {
+                let elem_ty = if let Some(i) = const_index {
+                    if i < elements.len() {
+                        elements[i].clone()
+                    } else if !elements.is_empty() {
+                        elements[0].clone()
+                    } else {
+                        return Err(TypeError::Other(
+                            "Cannot index empty tuple".into(),
+                        ));
+                    }
+                } else if !elements.is_empty() {
+                    let first_ty = &elements[0];
+                    if elements.iter().all(|ty| ty == first_ty) {
+                        first_ty.clone()
+                    } else {
+                        Type::Var(TypeVar::fresh())
+                    }
+                } else {
+                    return Err(TypeError::Other("Cannot index empty tuple".into()));
+                };
+                return Ok(InferResult::new(elem_ty));
+            }
+            // Try protocol resolution on inner type
+            if let Some(resolution) =
+                self.protocol_checker.read().resolve_index_protocol(inner)
+            {
+                return Ok(InferResult::new(resolution.output));
+            }
+        }
+
+        // If no indexing support found, check if it's a Named/Generic/Unknown type
+        // that may implement Index via protocol implementations
+        match &arr_result.ty {
+            Type::Named { .. }
+            | Type::Generic { .. }
+            | Type::Unknown
+            | Type::Var(_) => {
+                // Custom named type or unresolved type: assume it implements
+                // Index protocol. Use a fresh element type.
+                Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+            }
+            // Refined types (e.g., List<Int>{predicate}) - index the base type
+            Type::Refined { base, .. } => match base.as_ref() {
+                Type::Named { .. } | Type::Generic { .. } | Type::Array { .. } => {
+                    Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+                }
+                _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Cannot index non-indexable type: {}",
+                    arr_result.ty
+                )))),
+            },
+            _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                "Cannot index non-indexable type: {}",
+                arr_result.ty
+            )))),
+        }
+    }
+
+    fn infer_expr_pipeline(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Pipeline { left, right } = &expr.kind else { unreachable!() };
+        // Infer the type of the value being piped
+        let left_result = self.synth_expr(left)?;
+        let left_ty = left_result.ty;
+
+        // Infer the type of the function/callable
+        let right_result = self.synth_expr(right)?;
+
+        match &right_result.ty {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                // Check that the function accepts at least one argument
+                if params.is_empty() {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        "Pipeline target function must accept at least one argument",
+                    )));
+                }
+
+                // Check that left type is compatible with first parameter
+                if !self.subtyping.is_subtype(&left_ty, &params[0]) {
+                    self.unifier.unify(&left_ty, &params[0], left.span)?;
+                }
+
+                // Return the function's return type
+                Ok(InferResult::new((**return_type).clone()))
+            }
+            _ => {
+                // Try to treat the right side as a callable (could be a closure or other callable)
+                // For simplicity, we'll try unification
+                let ret_ty = Type::Var(TypeVar::fresh());
+                let expected_fn = Type::Function {
+                    params: vec![left_ty].into(),
+                    return_type: Box::new(ret_ty.clone()),
+                    properties: None,
+                    contexts: None,
+                    type_params: vec![].into(),
+                };
+                self.unifier
+                    .unify(&right_result.ty, &expected_fn, right.span)?;
+                Ok(InferResult::new(ret_ty))
+            }
+        }
+    }
+
+    fn infer_expr_return_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Return(val) = &expr.kind else { unreachable!() };
+        if let Some(v) = val {
+            // Type check the return value (for error messages)
+            let val_result = self.synth_expr(v)?;
+
+            // ============================================================
+            // Return Value Lifetime Validation
+            // Return reference validation: ensuring returned references do not outlive their referents via escape analysis — Dangling references
+            // ============================================================
+            // Check if we're returning a reference to a local variable.
+            // This would create a dangling reference when the function returns.
+            if self.is_reference_type(&val_result.ty) {
+                self.check_return_lifetime(v, expr.span)?;
+            }
+        }
+        // Return has Never type - unifies with any type
+        Ok(InferResult::new(Type::never()))
+    }
+
+    fn infer_expr_array(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Array(arr_expr) = &expr.kind else { unreachable!() };
+        match arr_expr {
+            verum_ast::expr::ArrayExpr::List(exprs) => {
+                if exprs.is_empty() {
+                    // Empty array: [T; 0] - element type needs annotation
+                    let elem_ty = TypeVar::fresh();
+                    // Spec: Fixed-size arrays [T; N] have known size at compile time
+                    Ok(InferResult::new(Type::array(Type::Var(elem_ty), Some(0))))
+                } else {
+                    let first_result = self.synth_expr(&exprs[0])?;
+                    let elem_ty = first_result.ty;
+
+                    for expr in exprs.iter().skip(1) {
+                        self.check_expr(expr, &elem_ty)?;
+                    }
+
+                    // Array literal has known size at compile time.
+                    // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .5.1 - Meta Parameters
+                    // Fixed-size arrays [T; N] are stack-allocated with size known at compile time.
+                    // For dynamic/resizable arrays, use List<T> instead.
+                    Ok(InferResult::new(Type::array(elem_ty, Some(exprs.len()))))
+                }
+            }
+            verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                let elem_result = self.synth_expr(value)?;
+                let count_result = self.synth_expr(count)?;
+
+                // Count must be Int
+                self.unifier
+                    .unify(&count_result.ty, &Type::int(), count.span)?;
+
+                // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Evaluate count at compile time for size
+                let array_size = match self.const_eval.eval(count) {
+                    Ok(const_val) => {
+                        // Successfully evaluated to constant
+                        const_val.as_u128().map(|n| n as usize)
+                    }
+                    Err(_) => {
+                        // Not a compile-time constant, size remains None
+                        None
+                    }
+                };
+
+                Ok(InferResult::new(Type::array(elem_result.ty, array_size)))
+            }
+        }
+    }
+
+    fn infer_expr_cast(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Cast { expr: e, ty } = &expr.kind else { unreachable!() };
+        let expr_result = self.synth_expr(e)?;
+        let target_ty = self.ast_to_type(ty)?;
+
+        // Type casts are checked for compatibility
+        // Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — (Integer Hierarchy), Section 6 (Reference Safety)
+        self.check_cast(&expr_result.ty, &target_ty, expr.span)?;
+
+        Ok(InferResult::new(target_ty))
+    }
+
+    fn infer_expr_yield_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Yield(val) = &expr.kind else { unreachable!() };
+        let val_result = self.synth_expr(val)?;
+
+        // Check if we're in a generator context
+        match &self.generator_context {
+            Maybe::Some(gen_ctx) => {
+                // Verify yielded type matches expected yield type
+                self.unifier
+                    .unify(&val_result.ty, &gen_ctx.yield_ty, expr.span)?;
+                // Yield expressions evaluate to unit
+                Ok(InferResult::new(Type::unit()))
+            }
+            Maybe::None => {
+                // Yield outside of generator context - error
+                Err(TypeError::Other(
+                    "yield expression can only be used inside generator functions"
+                        .into(),
+                ))
+            }
+        }
+    }
+
+    fn infer_expr_record(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Record { path, fields, base } = &expr.kind else { unreachable!() };
+        // #[cfg(debug_assertions)]
+        // eprintln!("[DEBUG] infer_expr_inner: Record at {:?}, path={:?}", current_expr.span, path);
+
+        // First check if this is a variant constructor (Type.Variant { ... })
+        if path.segments.len() == 2
+            && let (
+                verum_ast::ty::PathSegment::Name(type_ident),
+                verum_ast::ty::PathSegment::Name(variant_ident),
+            ) = (&path.segments[0], &path.segments[1])
+        {
+            let type_name = type_ident.name.as_str();
+            let variant_name = variant_ident.name.as_str();
+
+            // Look up the type to see if it's a variant type
+            if let Option::Some(ty) = self.ctx.lookup_type(type_name).cloned()
+                && let Type::Variant(variants) = &ty
+            {
+                // It's a variant type! Look up the specific variant
+                if let Some(variant_payload_ty) = variants.get(variant_name) {
+                    // Verify the payload is a record type
+                    if let Type::Record(expected_field_types) = variant_payload_ty {
+                        // Clone to avoid borrowing issues
+                        let expected_field_types = expected_field_types.clone();
+                        // Type check the record fields
+                        let mut provided_fields: indexmap::IndexMap<
+                            verum_common::Text,
+                            Type,
+                        > = indexmap::IndexMap::new();
+
+                        for field_init in fields {
+                            let field_name = field_init.name.name.as_str();
+
+                            let expected_field_ty =
+                                match expected_field_types.get(field_name) {
+                                    Some(ty) => ty,
+                                    None => {
+                                        return Err(TypeError::Other(
+                                            verum_common::Text::from(format!(
+                                                "field '{}' not found in type '{}::{}'",
+                                                field_name, type_name, variant_name
+                                            )),
+                                        ));
+                                    }
+                                };
+
+                            // Handle shorthand syntax
+                            let field_ty =
+                                if let Some(ref value_expr) = field_init.value {
+                                    self.check_expr(value_expr, expected_field_ty)?;
+                                    expected_field_ty.clone()
+                                } else {
+                                    match self.ctx.env.lookup(field_name) {
+                                        Some(scheme) => {
+                                            let var_ty = scheme.instantiate();
+                                            self.unifier.unify(
+                                                &var_ty,
+                                                expected_field_ty,
+                                                field_init.span,
+                                            )?;
+                                            expected_field_ty.clone()
+                                        }
+                                        None => {
+                                            return Err(TypeError::UnboundVariable {
+                                                name: field_name.to_text(),
+                                                span: field_init.span,
+                                            });
+                                        }
+                                    }
+                                };
+
+                            provided_fields.insert(field_name.into(), field_ty);
+                        }
+
+                        // Validate all required fields are present
+                        for (expected_name, expected_ty) in expected_field_types.iter()
+                        {
+                            if !provided_fields.contains_key(expected_name) {
+                                return Err(TypeError::Other(
+                                    verum_common::Text::from(format!(
+                                        "Missing required field '{}' of type {} in variant {}::{} construction",
+                                        expected_name,
+                                        expected_ty,
+                                        type_name,
+                                        variant_name
+                                    )),
+                                ));
+                            }
+                        }
+
+                        // Return the variant type (the whole Color type, not just the Rgba variant)
+                        return Ok(InferResult::new(ty));
+                    }
+                }
+            }
+        }
+
+        // SINGLE-SEGMENT VARIANT CONSTRUCTOR CHECK
+        // For paths like `Node { ... }` (without `Tree::` prefix),
+        // check if Node is a variant constructor by looking it up in the environment
+        if path.segments.len() == 1
+            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+        {
+            let variant_name = ident.name.as_str();
+
+            // (is_variant_ctor check removed — a local record type with
+            // matching fields takes precedence over a cross-module variant
+            // constructor of the same name; see the has_matching_struct
+            // comment below.)
+
+            // PRIORITY CHECK: If a struct type exists with matching fields,
+            // prefer struct construction over variant construction.
+            //
+
+            // Per the architectural rule in crates/verum_types/src/CLAUDE.md —
+            // "user-defined variant names must freely override built-in
+            // convenience aliases"; symmetrically, a user module's record
+            // type must override a cross-module variant of the same name
+            // when the provided field names match the record's fields.
+            //
+
+            // Record variants also register `__struct_fields_<Variant>`
+            // (so pattern matching sees their fields), so the struct-key
+            // lookup alone can't tell a user record from a variant payload.
+            // Distinguish by checking whether `variant_name` is itself a
+            // registered top-level *type*: only a user-defined standalone
+            // record like `type Box<T> is { content: T }` will have
+            // `lookup_type(variant_name)` return a concrete type. Record
+            // variants don't register their name as a standalone type —
+            // the parent (e.g. `Expr`) does — so the variant path stays
+            // available for `Binary { op, lhs, rhs }` inside
+            // `type Expr is IntLit(_) | … | Binary({op, lhs, rhs}) | …`.
+            // Variant record payloads and standalone records register
+            // similar metadata (`__struct_fields_<Name>`, a Record in
+            // `type_defs`). Distinguish by checking BOTH halves and
+            // letting the *exact field-set match* on the struct_fields
+            // table win when (and only when) the provided fields cover
+            // the standalone record exactly:
+            //  - Variant constructor with fn-type in env → is a variant.
+            //  - Separate `__struct_fields_<Name>` with exact-match
+            //  field coverage → is the user's standalone record.
+            //  - Both present + exact match on record fields → record
+            //  wins (e.g. `Box { content: T.default() }` in
+            //  `type Box<T> is { content: T }` overrides a stdlib
+            //  `Box { inner: … }` variant).
+            //  - Variant present but fields don't cover exactly → fall
+            //  through to variant constructor.
+            let struct_key = format!("__struct_fields_{}", variant_name);
+            let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
+                self.ctx.lookup_type(struct_key.as_str())
+            {
+                let all_provided_valid = fields
+                    .iter()
+                    .all(|f| struct_fields.contains_key(f.name.name.as_str()));
+                let covers_all_required = struct_fields.keys().all(|required| {
+                    fields
+                        .iter()
+                        .any(|f| f.name.name.as_str() == required.as_str())
+                });
+                let exact_match = all_provided_valid && covers_all_required;
+
+                if !exact_match {
+                    false
+                } else {
+                    // Fields match exactly — do we also have a variant
+                    // constructor for this name? When only the record
+                    // exists, trivially route to record. When the
+                    // variant also exists AND its payload record
+                    // matches the provided fields by name, route to
+                    // variant (that's the local variant case like
+                    // `Binary { op, lhs, rhs }` inside `type Expr is ... |
+                    // Binary { op, lhs, rhs }`). Only when the variant's
+                    // *payload* disagrees with the field set do we keep
+                    // the record path, which is the cross-module
+                    // `Box { content: ... }` override case.
+                    let variant_ctor_info = self
+                        .ctx
+                        .env
+                        .lookup(variant_name)
+                        .map(|scheme| scheme.instantiate());
+                    match variant_ctor_info {
+                        Some(Type::Function { params, .. }) => {
+                            // Variant constructor: inspect its payload.
+                            let variant_record_fields: Option<
+                                indexmap::IndexMap<verum_common::Text, Type>,
+                            > = params.first().and_then(|p| match p {
+                                Type::Record(m) => Some(m.clone()),
+                                _ => None,
+                            });
+                            if let Some(vrf) = variant_record_fields {
+                                let variant_matches = fields
+                                    .iter()
+                                    .all(|f| vrf.contains_key(f.name.name.as_str()))
+                                    && vrf.keys().all(|required| {
+                                        fields.iter().any(|f| {
+                                            f.name.name.as_str() == required.as_str()
+                                        })
+                                    });
+                                // Variant's payload also matches: prefer
+                                // variant (same-module case). Record
+                                // wins only when the variant's payload
+                                // shape *differs* from the provided
+                                // fields (cross-module collision case).
+                                !variant_matches
+                            } else {
+                                // Variant has non-record payload (tuple,
+                                // unit). Record wins.
+                                true
+                            }
+                        }
+                        _ => true, // No variant constructor in env — record wins.
+                    }
+                }
+            } else {
+                false
+            };
+
+            // Look up the variant constructor in the environment
+            // Variant constructors are registered with type Constructor -> VariantType
+            if !has_matching_struct
+                && let Some(scheme) = self.ctx.env.lookup(variant_name)
+            {
+                let ty = scheme.instantiate();
+
+                // Check if this value has a Named type (unit variant like Leaf)
+                // or if it's a function returning a Named type (payload variant like Node)
+                let return_type_opt = match &ty {
+                    Type::Named { .. } => Some(ty.clone()),
+                    Type::Function {
+                        return_type,
+                        params,
+                        ..
+                    } => {
+                        // Check if return type is a variant type (Named or inline Variant)
+                        // Named types are used for imported variants, Variant for local definitions
+                        if matches!(
+                            return_type.as_ref(),
+                            Type::Named { .. } | Type::Variant(_)
+                        ) {
+                            // This is a variant constructor function!
+                            // The params should be a single Record type
+                            if params.len() == 1
+                                && let Type::Record(expected_field_types) = &params[0]
+                            {
+                                // Type check the record fields
+                                let expected_field_types = expected_field_types.clone();
+                                let mut provided_fields: indexmap::IndexMap<
+                                    Text,
+                                    Type,
+                                > = indexmap::IndexMap::new();
+
+                                for field_init in fields {
+                                    let field_name = field_init.name.name.as_str();
+
+                                    let unknown_fallback = Type::Unknown;
+                                    let expected_field_ty = match expected_field_types
+                                        .get(field_name)
+                                    {
+                                        Some(ty) => ty,
+                                        None => {
+                                            // In lenient mode (stdlib files), accept
+                                            // unknown fields with Unknown type — the
+                                            // struct definition may reference types
+                                            // from unloaded sibling modules.
+                                            if self.stdlib_single_file_mode {
+                                                &unknown_fallback
+                                            } else {
+                                                return Err(TypeError::Other(
+                                                    verum_common::Text::from(format!(
+                                                        "field '{}' not found in type '{}' variant construction",
+                                                        field_name, variant_name
+                                                    )),
+                                                ));
+                                            }
+                                        }
+                                    };
+
+                                    // Handle shorthand syntax
+                                    let field_ty = if let Some(ref value_expr) =
+                                        field_init.value
+                                    {
+                                        self.check_expr(value_expr, expected_field_ty)?;
+                                        expected_field_ty.clone()
+                                    } else {
+                                        match self.ctx.env.lookup(field_name) {
+                                            Some(var_scheme) => {
+                                                let var_ty = var_scheme.instantiate();
+                                                self.unifier.unify(
+                                                    &var_ty,
+                                                    expected_field_ty,
+                                                    field_init.span,
+                                                )?;
+                                                expected_field_ty.clone()
+                                            }
+                                            None => {
+                                                return Err(
+                                                    TypeError::UnboundVariable {
+                                                        name: field_name.to_text(),
+                                                        span: field_init.span,
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    };
+
+                                    provided_fields.insert(field_name.into(), field_ty);
+                                }
+
+                                // Validate all required fields are present
+                                for (expected_name, expected_ty) in
+                                    expected_field_types.iter()
+                                {
+                                    if !provided_fields.contains_key(expected_name)
+                                        && !self.stdlib_single_file_mode
+                                    {
+                                        return Err(TypeError::Other(
+                                            verum_common::Text::from(format!(
+                                                "Missing required field '{}' of type {} in variant {} construction",
+                                                expected_name,
+                                                expected_ty,
+                                                variant_name
+                                            )),
+                                        ));
+                                    }
+                                }
+
+                                // Return the Named type
+                                return Ok(InferResult::new(
+                                    return_type.as_ref().clone(),
+                                ));
+                            }
+                            Some(return_type.as_ref().clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if return_type_opt.is_some() {
+                    // This path is a variant constructor, handled above
+                    // If we reach here without returning, something went wrong
+                }
+            }
+        }
+
+        // Not a variant constructor, proceed with regular record type handling
+        // Step 1: Lookup record type definition from path
+        let record_ty = self.lookup_record_type(path, expr.span)?;
+
+        // Step 2: Extract expected field types from record definition
+        // Clone to avoid borrow issues
+        let expected_fields: indexmap::IndexMap<verum_common::Text, Type> =
+            match &record_ty {
+                Type::Record(field_types) => field_types.clone(),
+                Type::Named {
+                    path: type_path, ..
+                } => {
+                    // Try to resolve named type to record structure
+                    let name = self.path_to_string(type_path);
+
+                    // First try to look up the struct fields under __struct_fields_Name
+                    // This is where record type definitions store their field info
+                    let struct_key = format!("__struct_fields_{}", name);
+                    match self.ctx.lookup_type(struct_key.as_str()) {
+                        Option::Some(Type::Record(field_types)) => field_types.clone(),
+                        _ => {
+                            // Try variant record fields from side map
+                            if let Some(vf) = self
+                                .variant_record_fields
+                                .get(&verum_common::Text::from(name.as_str()))
+                            {
+                                vf.clone()
+                            } else {
+                                // Fall back to looking up the type directly
+                                match self.ctx.lookup_type(name.as_str()) {
+                                    Option::Some(Type::Record(field_types)) => {
+                                        field_types.clone()
+                                    }
+                                    Option::Some(Type::Named { .. }) => {
+                                        // Type is nominal - infer fields structurally but return Named type
+                                        // This handles types defined in other modules where __struct_fields_ isn't registered
+                                        let base_maybe = base
+                                            .as_ref()
+                                            .map(|b| Heap::new((**b).clone()));
+                                        let _inferred = self.infer_structural_record(
+                                            fields,
+                                            &base_maybe,
+                                            expr.span,
+                                        )?;
+                                        // Return the Named type (nominal) instead of the structural record
+                                        return Ok(InferResult::new(record_ty.clone()));
+                                    }
+                                    Option::Some(other_ty) => {
+                                        return Err(TypeError::Other(
+                                            verum_common::Text::from(format!(
+                                                "Expected record type, found: {}",
+                                                other_ty
+                                            )),
+                                        ));
+                                    }
+                                    Option::None => {
+                                        // Not a pre-defined type but path has a type name
+                                        // Infer fields structurally but return Named type (nominal)
+                                        let base_maybe = base
+                                            .as_ref()
+                                            .map(|b| Heap::new((**b).clone()));
+                                        let _inferred = self.infer_structural_record(
+                                            fields,
+                                            &base_maybe,
+                                            expr.span,
+                                        )?;
+                                        // Return Named type to preserve nominal type identity
+                                        return Ok(InferResult::new(record_ty.clone()));
+                                    }
+                                }
+                            } // close else block for variant_fields
+                        }
+                    }
+                }
+                _ => {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Expected record type, found: {}",
+                        record_ty
+                    ))));
+                }
+            };
+
+        // Step 2.5: Instantiate type parameters with fresh type variables
+        // For generic types like Wrapper<T>, we need to:
+        // 1. Look up the type parameters (e.g., [T])
+        // 2. Create fresh type variables for each
+        // 3. Substitute them in the field types
+        // This enables bidirectional type inference for generic struct instantiation
+        // NOTE: Use resolved type name (handles Self -> actual type)
+        let type_name = if let Type::Named {
+            path: resolved_path,
+            ..
+        } = &record_ty
+        {
+            self.path_to_string(resolved_path)
+        } else {
+            self.path_to_string(path)
+        };
+
+        // Try to look up type parameters - first try full path, then try simple name
+        let type_params_key = format!("__type_params_{}", type_name);
+        let type_params_lookup =
+            self.ctx.lookup_type(type_params_key.as_str()).or_else(|| {
+                // CRITICAL FIX: If full path lookup fails, try simple name (last segment)
+                // Type parameters are registered under simple names, but paths may be qualified
+                let simple_name = if let Some(last_dot) = type_name.as_str().rfind('.')
+                {
+                    &type_name.as_str()[last_dot + 1..]
+                } else {
+                    type_name.as_str()
+                };
+                let simple_key = format!("__type_params_{}", simple_name);
+                self.ctx.lookup_type(simple_key.as_str())
+            });
+
+        let (expected_fields, type_param_vars): (
+            indexmap::IndexMap<verum_common::Text, Type>,
+            List<Type>,
+        ) = if let Option::Some(Type::Record(params_map)) = type_params_lookup {
+            // This type has type parameters - instantiate with fresh variables
+            let type_params: List<verum_common::Text> =
+                params_map.keys().cloned().collect();
+            if !type_params.is_empty() {
+                // Create fresh type variables for each parameter
+                let mut param_subst = indexmap::IndexMap::new();
+                let mut fresh_vars = List::new();
+                for param_name in type_params.iter() {
+                    let fresh_var = Type::Var(TypeVar::fresh());
+                    fresh_vars.push(fresh_var.clone());
+                    param_subst.insert(param_name.clone(), fresh_var);
+                }
+                // Apply substitution to all field types
+                let mut resolved_fields = indexmap::IndexMap::new();
+                for (fname, fty) in expected_fields.iter() {
+                    let resolved_ty = self.substitute_type_params(fty, &param_subst);
+                    // CRITICAL FIX: Also resolve any placeholder types (forward references)
+                    let resolved_ty = self.substitute_placeholders(&resolved_ty);
+                    resolved_fields.insert(fname.clone(), resolved_ty);
+                }
+                (resolved_fields, fresh_vars)
+            } else {
+                // Non-generic type: still need to resolve placeholders
+                let mut resolved_fields = indexmap::IndexMap::new();
+                for (fname, fty) in expected_fields.iter() {
+                    let resolved_ty = self.substitute_placeholders(fty);
+                    resolved_fields.insert(fname.clone(), resolved_ty);
+                }
+                (resolved_fields, List::new())
+            }
+        } else {
+            // No type parameters: still need to resolve placeholders
+            let mut resolved_fields = indexmap::IndexMap::new();
+            for (fname, fty) in expected_fields.iter() {
+                let resolved_ty = self.substitute_placeholders(fty);
+                resolved_fields.insert(fname.clone(), resolved_ty);
+            }
+            (resolved_fields, List::new())
+        };
+
+        // Step 3: Handle base record spread (...base syntax)
+        let mut provided_fields = indexmap::IndexMap::new();
+
+        if let Some(base_expr) = base {
+            // Type check base expression
+            let base_result = self.synth_expr(base_expr)?;
+
+            // Base must be a record type (or a named type that resolves to a record)
+            // Try to extract record fields from the base type
+            let base_fields = self.extract_record_fields(&base_result.ty)?;
+            for (name, ty) in base_fields.iter() {
+                provided_fields.insert(name.clone(), ty.clone());
+            }
+        }
+
+        // Step 4: Type check each provided field and validate against expected
+        for field_init in fields {
+            let field_name = field_init.name.name.as_str();
+
+            // Check if field exists in expected type
+            let expected_field_ty = match expected_fields.get(field_name) {
+                Some(ty) => ty,
+                None => {
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "field '{}' not found in type '{}'",
+                        field_name,
+                        self.path_to_string(path)
+                    ))));
+                }
+            };
+
+            // Handle shorthand syntax: { x } means { x: x }
+            let field_ty = if let Some(ref value_expr) = field_init.value {
+                // Explicit value provided: check against expected type
+                self.check_expr(value_expr, expected_field_ty)?;
+                expected_field_ty.clone()
+            } else {
+                // Shorthand: lookup variable in environment
+                match self.ctx.env.lookup(field_name) {
+                    Some(scheme) => {
+                        let var_ty = scheme.instantiate();
+                        // Check if variable type matches expected field type
+                        self.unifier.unify(
+                            &var_ty,
+                            expected_field_ty,
+                            field_init.span,
+                        )?;
+                        expected_field_ty.clone()
+                    }
+                    None => {
+                        return Err(TypeError::UnboundVariable {
+                            name: field_name.to_text(),
+                            span: field_init.span,
+                        });
+                    }
+                }
+            };
+
+            // Add to provided fields (overriding base if present)
+            provided_fields.insert(field_name.into(), field_ty);
+        }
+
+        // Step 5: Validate all required fields are present
+        for (expected_name, expected_ty) in expected_fields.iter() {
+            if !provided_fields.contains_key(expected_name) {
+                return Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Missing required field '{}' of type {} in record construction",
+                    expected_name, expected_ty
+                ))));
+            }
+        }
+
+        // Step 6: Check for extra fields (not allowed in nominal records)
+        for provided_name in provided_fields.keys() {
+            if !expected_fields.contains_key(provided_name) {
+                return Err(TypeError::Other(verum_common::Text::from(format!(
+                    "Extra field '{}' not present in record type {}",
+                    provided_name,
+                    self.path_to_string(path)
+                ))));
+            }
+        }
+
+        // Return the record type with resolved type arguments
+        // Apply unifier to get the final resolved types for type parameters
+        let final_type = if !type_param_vars.is_empty() {
+            // This is a generic type - resolve type parameters
+            let resolved_args: List<Type> = type_param_vars
+                .iter()
+                .map(|tv| self.unifier.apply(tv))
+                .collect();
+            // Resolve Self to actual type path if needed
+            let resolved_path = if path.segments.len() == 1
+                && matches!(path.segments[0], verum_ast::ty::PathSegment::SelfValue)
+            {
+                // Get path from self type
+                if let Maybe::Some(Type::Named {
+                    path: self_path, ..
+                }) = &self.current_self_type
+                {
+                    self_path.clone()
+                } else {
+                    path.clone()
+                }
+            } else {
+                path.clone()
+            };
+            Type::Named {
+                path: resolved_path,
+                args: resolved_args,
+            }
+        } else {
+            record_ty
+        };
+        Ok(InferResult::new(final_type))
+    }
+
+    fn infer_expr_tuple_index(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::TupleIndex { expr: tup, index } = &expr.kind else { unreachable!() };
+        // =====================================================================
+        // DEFINITE ASSIGNMENT: Check tuple element initialization
+        // Spec: L0-critical/memory-safety/uninitialized
+        // =====================================================================
+        let idx = *index as usize;
+        let var_name_opt = if let ExprKind::Path(path) = &tup.kind {
+            if path.segments.len() == 1 {
+                if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
+                    let var_name = verum_common::Text::from(id.name.as_str());
+                    self.check_index_initialized(&var_name, idx, expr.span, true)?;
+                    Some((var_name, id.name.as_str().to_string()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let tup_result = self.synth_expr_for_field_access(tup)?;
+        // Apply unifier to fully resolve type variables.
+        // This is critical for closure parameters where the type may be
+        // unified after binding but before body synthesis.
+        let resolved_tup_ty = self.unifier.apply(&tup_result.ty);
+        match &resolved_tup_ty {
+            Type::Tuple(types) => {
+                if idx < types.len() {
+                    let element_ty = types[idx].clone();
+
+                    // =====================================================================
+                    // AFFINE TUPLE ELEMENT TRACKING: Partial move for tuple elements
+                    // When accessing a tuple element that is affine or contains affine,
+                    // mark it as moved to prevent whole-tuple use.
+                    // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
+                    // =====================================================================
+                    if let Some((var_name, var_name_str)) = var_name_opt {
+                        // Check if this index was already moved
+                        if !self.affine_tracker.can_access_index(&var_name_str, idx) {
+                            return Err(TypeError::MovedValueUsed {
+                                name: format!("{}.{}", var_name_str, idx).to_text(),
+                                moved_at: expr.span,
+                                used_at: expr.span,
+                            });
+                        }
+
+                        // Track affine element access (marks index as moved)
+                        if self.affine_tracker.is_type_affine(&element_ty)
+                            || self.type_contains_affine(&element_ty)
+                        {
+                            self.affine_tracker.use_index_value(
+                                &var_name_str,
+                                idx,
+                                expr.span,
+                            )?;
+                        }
+                    }
+
+                    Ok(InferResult::new(element_ty))
+                } else {
+                    Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Tuple index {} out of bounds (tuple has {} elements)",
+                        index,
+                        types.len()
+                    ))))
+                }
+            }
+            // Handle named tuple structs and newtypes
+            Type::Named { path, .. } => {
+                let type_name = self.path_to_string(path);
+                let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
+
+                // Try tuple struct first (__tuple_fields_)
+                let tuple_fields_key = format!("__tuple_fields_{}", type_name);
+                let tuple_fields_simple_key = format!("__tuple_fields_{}", simple_name);
+
+                let found_tuple = self
+                    .ctx
+                    .lookup_type(tuple_fields_key.as_str())
+                    .or_else(|| self.ctx.lookup_type(tuple_fields_simple_key.as_str()));
+
+                if let Option::Some(Type::Tuple(types)) = found_tuple {
+                    if idx < types.len() {
+                        let element_ty = types[idx].clone();
+
+                        // Track affine element access for tuple structs
+                        if let Some((var_name, var_name_str)) = var_name_opt {
+                            if !self.affine_tracker.can_access_index(&var_name_str, idx)
+                            {
+                                return Err(TypeError::MovedValueUsed {
+                                    name: format!("{}.{}", var_name_str, idx).to_text(),
+                                    moved_at: expr.span,
+                                    used_at: expr.span,
+                                });
+                            }
+                            if self.affine_tracker.is_type_affine(&element_ty)
+                                || self.type_contains_affine(&element_ty)
+                            {
+                                self.affine_tracker.use_index_value(
+                                    &var_name_str,
+                                    idx,
+                                    expr.span,
+                                )?;
+                            }
+                        }
+
+                        Ok(InferResult::new(element_ty))
+                    } else {
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Tuple struct index {} out of bounds (has {} fields)",
+                            index,
+                            types.len()
+                        ))))
+                    }
+                }
+                // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
+                else {
+                    let newtype_inner_key = format!("__newtype_inner_{}", type_name);
+                    let newtype_simple_key = format!("__newtype_inner_{}", simple_name);
+
+                    let found_inner = self
+                        .ctx
+                        .lookup_type(newtype_inner_key.as_str())
+                        .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()));
+
+                    if let Option::Some(inner_ty) = found_inner {
+                        if idx == 0 {
+                            Ok(InferResult::new(inner_ty.clone()))
+                        } else {
+                            Err(TypeError::Other(verum_common::Text::from(format!(
+                                "Newtype {} only has index 0, not {}",
+                                type_name, index
+                            ))))
+                        }
+                    } else {
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "cannot index type '{}' — only tuple types support .0, .1, etc.",
+                            resolved_tup_ty
+                        ))))
+                    }
+                }
+            }
+            // Handle references to named tuple structs: &UserId where UserId is (Int)
+            // Auto-dereference and index the underlying type
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
+                if let Type::Named { path, .. } = inner.as_ref() {
+                    let type_name = self.path_to_string(path);
+                    let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
+
+                    // Try tuple struct first (__tuple_fields_)
+                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
+                    let tuple_fields_simple_key =
+                        format!("__tuple_fields_{}", simple_name);
+
+                    let found_tuple =
+                        self.ctx.lookup_type(tuple_fields_key.as_str()).or_else(|| {
+                            self.ctx.lookup_type(tuple_fields_simple_key.as_str())
+                        });
+
+                    if let Option::Some(Type::Tuple(types)) = found_tuple {
+                        if idx < types.len() {
+                            let element_ty = types[idx].clone();
+                            Ok(InferResult::new(element_ty))
+                        } else {
+                            Err(TypeError::Other(verum_common::Text::from(format!(
+                                "Tuple struct index {} out of bounds (has {} fields)",
+                                index,
+                                types.len()
+                            ))))
+                        }
+                    }
+                    // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
+                    else {
+                        let newtype_inner_key =
+                            format!("__newtype_inner_{}", type_name);
+                        let newtype_simple_key =
+                            format!("__newtype_inner_{}", simple_name);
+
+                        let found_inner =
+                            self.ctx.lookup_type(newtype_inner_key.as_str()).or_else(
+                                || self.ctx.lookup_type(newtype_simple_key.as_str()),
+                            );
+
+                        if let Option::Some(inner_ty) = found_inner {
+                            if idx == 0 {
+                                Ok(InferResult::new(inner_ty.clone()))
+                            } else {
+                                Err(TypeError::Other(verum_common::Text::from(
+                                    format!(
+                                        "Newtype {} only has index 0, not {}",
+                                        type_name, index
+                                    ),
+                                )))
+                            }
+                        } else {
+                            Err(TypeError::Other(verum_common::Text::from(format!(
+                                "cannot index type '{}' — only tuple types support .0, .1, etc.",
+                                tup_result.ty
+                            ))))
+                        }
+                    }
+                } else if let Type::Tuple(types) = inner.as_ref() {
+                    // Also handle reference to bare tuple
+                    if idx < types.len() {
+                        let element_ty = types[idx].clone();
+                        Ok(InferResult::new(element_ty))
+                    } else {
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Tuple index {} out of bounds",
+                            index
+                        ))))
+                    }
+                } else if matches!(inner.as_ref(), Type::Var(_)) {
+                    // Reference to unresolved type variable - create fresh var
+                    let elem_var = TypeVar::fresh();
+                    Ok(InferResult::new(Type::Var(elem_var)))
+                } else {
+                    Err(TypeError::Other(verum_common::Text::from(format!(
+                        "cannot index type '{}' — only tuple types support .0, .1, etc.",
+                        resolved_tup_ty
+                    ))))
+                }
+            }
+            // Handle unresolved type variables (common in closure parameters).
+            // When a closure parameter's type hasn't been unified yet (e.g.,
+            // in `items.iter().map(|pair| pair.0)`), the receiver type is still
+            // a TypeVar. We create a fresh TypeVar for the result element.
+            // The actual constraint will be established when the receiver's
+            // type is resolved via unification.
+            Type::Var(_) => {
+                let elem_var = TypeVar::fresh();
+                Ok(InferResult::new(Type::Var(elem_var)))
+            }
+            _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                "cannot index type '{}' — only tuple types support .0, .1, etc.",
+                resolved_tup_ty
+            )))),
+        }
+    }
+
+    fn infer_expr_await_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Await(inner_expr) = &expr.kind else { unreachable!() };
+        // ============================================================
+        // Async Boundary Aliasing Check
+        // Context checking: verifying all required contexts are provided at call sites — Async lifetime bounds
+        // ============================================================
+        // Check that any borrows crossing this await point are Send.
+        // Non-Send borrows cannot be held across await points because
+        // the future may be polled on different threads.
+
+        // Mark that we're in an await expression
+        self.borrow_tracker.enter_await();
+
+        // Check await safety for all active borrows
+        self.borrow_tracker.check_await_safety()?;
+
+        let inner_result = self.synth_expr(inner_expr)?;
+
+        // Exit await context
+        self.borrow_tracker.exit_await();
+
+        // =========================================================================
+        // Protocol-based Future resolution
+        // Await desugaring: ".await" desugars to polling Future protocol until completion
+        // =========================================================================
+        // Also handle JoinHandle<T> as a special awaitable type
+        if let Type::Generic { name, args } = &inner_result.ty {
+            if name.as_str() == "JoinHandle" && args.len() == 1 {
+                return Ok(InferResult::new(args[0].clone()));
+            }
+        }
+
+        match self
+            .protocol_checker
+            .read()
+            .resolve_future_protocol(&inner_result.ty)
+        {
+            Some(resolution) => {
+                // `.await` is only valid inside an async context
+                // (async fn body, async {} block, or async
+                // closure). `main` is special: the runtime wraps
+                // it in an implicit executor `block_on`, so a
+                // plain `fn main() { run().await }` is a valid
+                // top-level entry point.
+                let in_main_entry = matches!(
+                    self.current_function_name.as_ref(),
+                    Maybe::Some(n) if n.as_str() == "main"
+                );
+                if !self.in_async_context && !in_main_entry {
+                    return Err(TypeError::AsyncPropertyViolation {
+                        message: verum_common::Text::from(
+                            "`.await` can only be used inside an async context \
+                             (async fn, async block, or async closure)",
+                        ),
+                        span: inner_expr.span,
+                    });
+                }
+                Ok(InferResult::new(resolution.output))
+            }
+            None => {
+                // If the inner expression is inside a spawn block, the await
+                // may have been parsed as spawn({ expr }.await) rather than
+                // (spawn { expr }).await. In async context, treat as identity
+                // (the value is already "ready"). Also handles user types
+                // that may implement Future but aren't registered yet.
+                if self.in_async_context {
+                    Ok(InferResult::new(inner_result.ty))
+                } else {
+                    Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Cannot await non-future type: {}. Type must implement Future.",
+                        inner_result.ty
+                    ))))
+                }
+            }
+        }
+    }
+
+    fn infer_expr_spawn(&mut self, current_expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Spawn { expr, contexts } = &current_expr.kind else { unreachable!() };
+        // Validate contexts exist in scope and expand groups
+        if !contexts.is_empty()
+            && let Err(err) = self
+                .context_resolver
+                .resolve_requirement(contexts, expr.span)
+        {
+            let ctx_names: Vec<String> =
+                contexts.iter().map(|c| format!("{}", c.path)).collect();
+            return Err(TypeError::Other(verum_common::Text::from(format!(
+                "Invalid spawn contexts [{}]: {}",
+                ctx_names.join(", "),
+                err
+            ))));
+        }
+
+        // ============================================================
+        // Spawn Thread Safety Check
+        // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety
+        // ============================================================
+        // Spawned tasks run on a separate thread, so all captured
+        // variables must be Send. If it's a closure, analyze its captures.
+        if let ExprKind::Closure {
+            params,
+            body,
+            move_: is_move,
+            ..
+        } = &expr.kind
+        {
+            // Analyze what the closure captures
+            let captures = self.analyze_closure_captures(body, params, *is_move);
+
+            // Check that all captured variables are Send
+            for (var_name, _field_path, capture_mode, capture_span) in &captures {
+                // Look up the variable's type
+                if let Some(var_scheme) = self.ctx.env.lookup(var_name) {
+                    let var_ty = var_scheme.instantiate();
+                    let resolved_ty = self.unifier.apply(&var_ty);
+
+                    // Check if the type is Send
+                    if self.is_non_send_type(&resolved_ty) {
+                        return Err(TypeError::Other(verum_common::Text::from(
+                            format!(
+                                "Cannot spawn task that captures `{}`: type `{}` is not Send \
+                             and cannot be transferred to another thread",
+                                var_name, resolved_ty
+                            ),
+                        )));
+                    }
+
+                    // For non-move closures, references must also be checked
+                    // Borrow captures require the type to be Sync (shareable)
+                    if !is_move
+                        && matches!(capture_mode, crate::aliasing::CaptureMode::Borrow)
+                    {
+                        if self.is_non_sync_type(&resolved_ty) {
+                            return Err(TypeError::Other(verum_common::Text::from(
+                                format!(
+                                    "Cannot spawn task that borrows `{}`: type `{}` is not Sync \
+                                 and cannot be shared between threads. Consider using `move` closure.",
+                                    var_name, resolved_ty
+                                ),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Spawn runs its body as an async task on the executor,
+        // so the body is an async context regardless of whether
+        // the enclosing function is async. This lets
+        //  spawn { sleep(d).await; limiter.refill() }
+        // typecheck inside a non-async helper.
+        let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
+        let inner_result = self.synth_expr(expr);
+        self.in_async_context = prev_async_context;
+        let inner_result = inner_result?;
+
+        // If expr is a Future<T>, result is JoinHandle<T>
+        // Otherwise, wrap the result type in JoinHandle
+        let output_ty = match &inner_result.ty {
+            Type::Future { output } => *output.clone(),
+            Type::Generic { name, args }
+                if name.as_str() == "Future" && args.len() == 1 =>
+            {
+                args[0].clone()
+            }
+            _ => inner_result.ty.clone(),
+        };
+
+        // JoinHandle represented as Generic type
+        Ok(InferResult::new(Type::Generic {
+            name: verum_common::Text::from("JoinHandle"),
+            args: vec![output_ty].into(),
+        }))
+    }
+
+    fn infer_expr_async_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Async(block) = &expr.kind else { unreachable!() };
+        // Set async context for the block body
+        let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
+        let block_result = self.infer_block(block)?;
+        self.in_async_context = prev_async_context;
+
+        Ok(InferResult::new(Type::Future {
+            output: Box::new(block_result.ty),
+        }))
+    }
+
+    fn infer_expr_unsafe_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Unsafe(block) = &expr.kind else { unreachable!() };
+        // Enter a new scope for the unsafe block
+        self.ctx.enter_scope();
+
+        // Track unsafe context for Tier 2 reference creation
+        // Spec: L0-critical/reference_system/reference_tiers/unsafe_without_block
+        let prev_unsafe_context = self.in_unsafe_context;
+        self.in_unsafe_context = true;
+
+        // Infer the block's type from its body
+        let block_result = self.infer_block(block)?;
+
+        // Restore unsafe context and exit scope
+        self.in_unsafe_context = prev_unsafe_context;
+        self.ctx.exit_scope();
+
+        // Return the block's type directly (unsafe doesn't wrap the type)
+        Ok(block_result)
+    }
+
+    fn infer_expr_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Comprehension { expr, clauses } = &current_expr.kind else { unreachable!() };
+        self.ctx.enter_scope();
+
+        // Process each clause to introduce bindings
+        for clause in clauses.iter() {
+            use verum_ast::expr::ComprehensionClauseKind;
+            match &clause.kind {
+                ComprehensionClauseKind::For { pattern, iter } => {
+                    // Infer the iterator type
+                    let iter_result = self.synth_expr(iter)?;
+
+                    // Protocol-based IntoIterator resolution
+                    let resolved_comprehension_iter =
+                        self.unifier.apply(&iter_result.ty);
+                    let elem_ty = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_into_iterator_protocol(&resolved_comprehension_iter)
+                    {
+                        Some(resolution) => resolution.item,
+                        None => {
+                            // Fallback: Try Iterator protocol's Item associated type
+                            let iter_item =
+                                self.protocol_checker.read().try_find_associated_type(
+                                    &resolved_comprehension_iter,
+                                    &verum_common::Text::from("Item"),
+                                );
+                            if let Some(item_ty) = iter_item {
+                                self.protocol_checker
+                                    .read()
+                                    .normalize_projection_type(&item_ty)
+                            } else {
+                                return Err(TypeError::Other(
+                                    verum_common::Text::from(format!(
+                                        "Cannot iterate over type in comprehension: {}",
+                                        resolved_comprehension_iter
+                                    )),
+                                ));
+                            }
+                        }
+                    };
+
+                    // Bind pattern to element type
+                    let elem_scheme = TypeScheme::mono(elem_ty);
+                    self.bind_pattern_scheme(pattern, elem_scheme)?;
+                }
+                ComprehensionClauseKind::If(condition) => {
+                    // Type check condition, must be Bool
+                    let cond_result = self.synth_expr(condition)?;
+                    self.unifier
+                        .unify(&cond_result.ty, &Type::Bool, condition.span)?;
+                }
+                ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    // Type check the value
+                    let value_result = self.synth_expr(value)?;
+
+                    // If type annotation provided, unify
+                    let binding_ty = if let Some(ty_ast) = ty {
+                        let annotated_ty = self.ast_to_type(ty_ast)?;
+                        self.unifier.unify(
+                            &value_result.ty,
+                            &annotated_ty,
+                            value.span,
+                        )?;
+                        annotated_ty
+                    } else {
+                        value_result.ty
+                    };
+
+                    // Bind pattern
+                    let binding_scheme = TypeScheme::mono(binding_ty);
+                    self.bind_pattern_scheme(pattern, binding_scheme)?;
+                }
+            }
+        }
+
+        // Type check the output expression
+        let elem_result = self.synth_expr(expr)?;
+
+        self.ctx.exit_scope();
+
+        // Result is a List<T> where T is the type of the output expression
+        Ok(InferResult::new(Type::list(elem_result.ty)))
+    }
+
+    fn infer_expr_stream_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::StreamComprehension { expr, clauses } = &current_expr.kind else { unreachable!() };
+        self.ctx.enter_scope();
+
+        // Set up a temporary generator context so that `yield` expressions
+        // inside stream comprehensions are accepted. Stream comprehensions
+        // use `stream[yield x for x in source]` syntax where `yield` is
+        // syntactic sugar for producing stream elements.
+        let yield_ty_var = Type::Var(TypeVar::fresh());
+        let prev_generator_context = self.generator_context.replace(GeneratorContext {
+            yield_ty: yield_ty_var.clone(),
+            return_ty: Type::unit(),
+        });
+
+        // Process each clause (same as list comprehension)
+        for clause in clauses.iter() {
+            use verum_ast::expr::ComprehensionClauseKind;
+            match &clause.kind {
+                ComprehensionClauseKind::For { pattern, iter } => {
+                    let iter_result = self.synth_expr(iter)?;
+
+                    // Protocol-based IntoIterator resolution for streams
+                    let elem_ty = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_into_iterator_protocol(&iter_result.ty)
+                    {
+                        Some(resolution) => resolution.item,
+                        None => {
+                            // Fallback 1: Try Iterator protocol's Item associated type
+                            let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
+                            let iter_item =
+                                self.protocol_checker.read().try_find_associated_type(
+                                    &resolved_iter_ty,
+                                    &verum_common::Text::from("Item"),
+                                );
+                            if let Some(item_ty) = iter_item {
+                                self.protocol_checker
+                                    .read()
+                                    .normalize_projection_type(&item_ty)
+                            } else {
+                                // Fallback 2: allow iterating over Stream<T> directly
+                                match &resolved_iter_ty {
+                                    Type::Generic { name, args }
+                                        if name.as_str() == "Stream"
+                                            && args.len() == 1 =>
+                                    {
+                                        args[0].clone()
+                                    }
+                                    Type::Named { path, args } if args.len() == 1 => {
+                                        let is_stream = path
+                                            .as_ident()
+                                            .map(|id| id.name.as_str() == "Stream")
+                                            .unwrap_or(false);
+                                        if is_stream {
+                                            args[0].clone()
+                                        } else {
+                                            // Also try with unresolved type vars — fresh type var
+                                            Type::Var(TypeVar::fresh())
+                                        }
+                                    }
+                                    // For unresolved type vars, allow iteration with fresh element type
+                                    Type::Var(_) => Type::Var(TypeVar::fresh()),
+                                    _ => {
+                                        return Err(TypeError::Other(
+                                            verum_common::Text::from(format!(
+                                                "Cannot stream over type: {}",
+                                                resolved_iter_ty
+                                            )),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    let elem_scheme = TypeScheme::mono(elem_ty);
+                    self.bind_pattern_scheme(pattern, elem_scheme)?;
+                }
+                ComprehensionClauseKind::If(condition) => {
+                    let cond_result = self.synth_expr(condition)?;
+                    self.unifier
+                        .unify(&cond_result.ty, &Type::Bool, condition.span)?;
+                }
+                ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    let value_result = self.synth_expr(value)?;
+                    let binding_ty = if let Some(ty_ast) = ty {
+                        let annotated_ty = self.ast_to_type(ty_ast)?;
+                        self.unifier.unify(
+                            &value_result.ty,
+                            &annotated_ty,
+                            value.span,
+                        )?;
+                        annotated_ty
+                    } else {
+                        value_result.ty
+                    };
+                    let binding_scheme = TypeScheme::mono(binding_ty);
+                    self.bind_pattern_scheme(pattern, binding_scheme)?;
+                }
+            }
+        }
+
+        // Infer the element expression type.
+        // If the expression is a `yield val`, the type checker now accepts it
+        // via the generator context above.
+        let elem_result = self.synth_expr(expr)?;
+
+        // Restore previous generator context
+        self.generator_context = prev_generator_context;
+
+        self.ctx.exit_scope();
+
+        // Determine element type: if yield was used, the yield_ty_var
+        // was unified with the yielded value's type. The Yield expr itself
+        // evaluates to Unit. Use the yield type in that case.
+        let resolved_yield_ty = self.unifier.apply(&yield_ty_var);
+        let elem_ty = if matches!(&expr.kind, ExprKind::Yield(_)) {
+            resolved_yield_ty
+        } else {
+            elem_result.ty
+        };
+
+        // Result is a Stream<T>
+        let result_ty = Type::Generic {
+            name: verum_common::Text::from("Stream"),
+            args: vec![elem_ty].into(),
+        };
+
+        Ok(InferResult::new(result_ty))
+    }
+
+    fn infer_expr_set_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::SetComprehension { expr, clauses } = &current_expr.kind else { unreachable!() };
+        self.ctx.enter_scope();
+
+        // Process each clause (same as list comprehension)
+        for clause in clauses.iter() {
+            use verum_ast::expr::ComprehensionClauseKind;
+            match &clause.kind {
+                ComprehensionClauseKind::For { pattern, iter } => {
+                    let iter_result = self.synth_expr(iter)?;
+
+                    // Protocol-based IntoIterator resolution
+                    let elem_ty = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_into_iterator_protocol(&iter_result.ty)
+                    {
+                        Some(resolution) => resolution.item,
+                        None => {
+                            // Fallback: Try Iterator protocol's Item associated type
+                            let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
+                            let iter_item =
+                                self.protocol_checker.read().try_find_associated_type(
+                                    &resolved_iter_ty,
+                                    &verum_common::Text::from("Item"),
+                                );
+                            if let Some(item_ty) = iter_item {
+                                self.protocol_checker
+                                    .read()
+                                    .normalize_projection_type(&item_ty)
+                            } else {
+                                return Err(TypeError::Other(
+                                    verum_common::Text::from(format!(
+                                        "Cannot iterate over type in set comprehension: {}",
+                                        resolved_iter_ty
+                                    )),
+                                ));
+                            }
+                        }
+                    };
+
+                    let elem_scheme = TypeScheme::mono(elem_ty);
+                    self.bind_pattern_scheme(pattern, elem_scheme)?;
+                }
+                ComprehensionClauseKind::If(condition) => {
+                    let cond_result = self.synth_expr(condition)?;
+                    self.unifier
+                        .unify(&cond_result.ty, &Type::Bool, condition.span)?;
+                }
+                ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    let value_result = self.synth_expr(value)?;
+                    let binding_ty = if let Some(ty_ast) = ty {
+                        let annotated_ty = self.ast_to_type(ty_ast)?;
+                        self.unifier.unify(
+                            &value_result.ty,
+                            &annotated_ty,
+                            value.span,
+                        )?;
+                        annotated_ty
+                    } else {
+                        value_result.ty
+                    };
+                    let binding_scheme = TypeScheme::mono(binding_ty);
+                    self.bind_pattern_scheme(pattern, binding_scheme)?;
+                }
+            }
+        }
+
+        let elem_result = self.synth_expr(expr)?;
+
+        self.ctx.exit_scope();
+
+        // Result is a Set<T>
+        let result_ty = Type::Generic {
+            name: verum_common::Text::from(WKT::Set.as_str()),
+            args: vec![elem_result.ty].into(),
+        };
+
+        Ok(InferResult::new(result_ty))
+    }
+
+    fn infer_expr_generator_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::GeneratorComprehension { expr, clauses } = &current_expr.kind else { unreachable!() };
+        self.ctx.enter_scope();
+
+        // Process each clause (same as list comprehension)
+        for clause in clauses.iter() {
+            use verum_ast::expr::ComprehensionClauseKind;
+            match &clause.kind {
+                ComprehensionClauseKind::For { pattern, iter } => {
+                    let iter_result = self.synth_expr(iter)?;
+
+                    // Protocol-based IntoIterator resolution
+                    let elem_ty = match self
+                        .protocol_checker
+                        .read()
+                        .resolve_into_iterator_protocol(&iter_result.ty)
+                    {
+                        Some(resolution) => resolution.item,
+                        None => {
+                            // Fallback: Try Iterator protocol's Item associated type
+                            let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
+                            let iter_item =
+                                self.protocol_checker.read().try_find_associated_type(
+                                    &resolved_iter_ty,
+                                    &verum_common::Text::from("Item"),
+                                );
+                            if let Some(item_ty) = iter_item {
+                                self.protocol_checker
+                                    .read()
+                                    .normalize_projection_type(&item_ty)
+                            } else {
+                                return Err(TypeError::Other(
+                                    verum_common::Text::from(format!(
+                                        "Cannot iterate over type in generator: {}",
+                                        resolved_iter_ty
+                                    )),
+                                ));
+                            }
+                        }
+                    };
+
+                    let elem_scheme = TypeScheme::mono(elem_ty);
+                    self.bind_pattern_scheme(pattern, elem_scheme)?;
+                }
+                ComprehensionClauseKind::If(condition) => {
+                    let cond_result = self.synth_expr(condition)?;
+                    self.unifier
+                        .unify(&cond_result.ty, &Type::Bool, condition.span)?;
+                }
+                ComprehensionClauseKind::Let { pattern, ty, value } => {
+                    let value_result = self.synth_expr(value)?;
+                    let binding_ty = if let Some(ty_ast) = ty {
+                        let annotated_ty = self.ast_to_type(ty_ast)?;
+                        self.unifier.unify(
+                            &value_result.ty,
+                            &annotated_ty,
+                            value.span,
+                        )?;
+                        annotated_ty
+                    } else {
+                        value_result.ty
+                    };
+                    let binding_scheme = TypeScheme::mono(binding_ty);
+                    self.bind_pattern_scheme(pattern, binding_scheme)?;
+                }
+            }
+        }
+
+        let elem_result = self.synth_expr(expr)?;
+
+        self.ctx.exit_scope();
+
+        // Result is a Generator<T> (lazy iterator)
+        let result_ty = Type::Generic {
+            name: verum_common::Text::from("Generator"),
+            args: vec![elem_result.ty].into(),
+        };
+
+        Ok(InferResult::new(result_ty))
+    }
+
+    fn infer_expr_try_recover(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::TryRecover { try_block, recover } = &expr.kind else { unreachable!() };
+        // Extract error type from ? operators inside try block before type checking
+        // This ensures we have a concrete error type for pattern binding
+        let error_type = self.extract_try_block_error_type(try_block)?;
+
+        // Track that we're inside a try/recover block so throw is allowed
+        self.try_recover_depth += 1;
+
+        // Temporarily set function return type to Result<T, E> so that
+        // the ? operator inside the try block passes type checking.
+        // Without this, ? checks the enclosing function's return type
+        // (which may be non-Result like Int) and rejects it.
+        let saved_return_type = self.current_function_return_type.clone();
+        let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
+        self.current_function_return_type =
+            Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
+
+        // Infer type of try block
+        let try_result = self.synth_expr(try_block)?;
+
+        // Restore original function return type
+        self.current_function_return_type = saved_return_type;
+        self.try_recover_depth -= 1;
+
+        // Infer type of recovery body with error type for pattern binding
+        let recover_ty = self.infer_recover_body(recover, &error_type)?;
+
+        // Recovery body must have the same type as try block
+        self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;
+
+        Ok(InferResult::new(try_result.ty))
+    }
+
+    fn infer_expr_null_coalesce(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::NullCoalesce { left, right } = &expr.kind else { unreachable!() };
+        let left_result = self.synth_expr(left)?;
+        let right_result = self.synth_expr(right)?;
+
+        // =========================================================================
+        // Protocol-based Maybe resolution for ?? operator
+        // Maybe operator resolution: ? on Maybe<T> desugars to match with None -> return None propagation
+        // =========================================================================
+        match self
+            .protocol_checker
+            .read()
+            .resolve_maybe_protocol(&left_result.ty)
+        {
+            Some(resolution) => {
+                // Maybe<T> ?? T -> T
+                self.unifier
+                    .unify(&right_result.ty, &resolution.inner, right.span)?;
+                Ok(InferResult::new(resolution.inner))
+            }
+            None => {
+                // If left is not Maybe<T>, just return its type
+                // This allows x ?? default to work when x is already T (not Maybe<T>)
+                self.unifier
+                    .unify(&right_result.ty, &left_result.ty, right.span)?;
+                Ok(InferResult::new(left_result.ty))
+            }
+        }
+    }
+
+    fn infer_expr_optional_chain(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::OptionalChain { expr: obj, field } = &expr.kind else { unreachable!() };
+        let obj_result = self.synth_expr(obj)?;
+
+        // Inside try-recover blocks, `?.` on a Try-compatible type (Result<T,E>)
+        // means "unwrap with ? then access field" — the lexer tokenizes `expr?.field`
+        // as OptionalChain rather than Field(Try(expr), field).
+        if self.try_recover_depth > 0 {
+            if let Some(try_resolution) = self
+                .protocol_checker
+                .read()
+                .resolve_try_protocol(&obj_result.ty)
+            {
+                // This is `result?.field` inside try-recover — unwrap to success type
+                let success_ty = try_resolution.output;
+                let dereferenced_ty = self.unwrap_reference_type(&success_ty);
+                let field_ty = self
+                    .lookup_field_type(dereferenced_ty, field.name.as_str())
+                    .ok_or_else(|| {
+                        TypeError::Other(verum_common::Text::from(format!(
+                            "field '{}' not found in type '{}'",
+                            field.name, dereferenced_ty
+                        )))
+                    })?;
+                return Ok(InferResult::new(field_ty));
+            }
+        }
+
+        // Use protocol-based Maybe resolution
+        let inner_ty = match self
+            .protocol_checker
+            .read()
+            .resolve_maybe_protocol(&obj_result.ty)
+        {
+            Some(resolution) => resolution.inner,
+            None => obj_result.ty.clone(),
+        };
+
+        // Unwrap reference types before field access (Maybe<&Point>?.field)
+        let dereferenced_ty = self.unwrap_reference_type(&inner_ty);
+
+        // Look up field on the inner type
+        let field_ty = self
+            .lookup_field_type(dereferenced_ty, field.name.as_str())
+            .ok_or_else(|| {
+                TypeError::Other(verum_common::Text::from(format!(
+                    "field '{}' not found in type '{}'",
+                    field.name, dereferenced_ty
+                )))
+            })?;
+
+        // Monadic flattening: if field is already Maybe, don't double-wrap
+        let result_ty = if self
+            .protocol_checker
+            .read()
+            .resolve_maybe_protocol(&field_ty)
+            .is_some()
+        {
+            field_ty
+        } else {
+            Type::maybe(field_ty)
+        };
+        Ok(InferResult::new(result_ty))
+    }
+
+    fn infer_expr_map_literal(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::MapLiteral { entries } = &expr.kind else { unreachable!() };
+        let (key_ty, val_ty) = if entries.is_empty() {
+            (Type::Var(TypeVar::fresh()), Type::Var(TypeVar::fresh()))
+        } else {
+            let first_key = self.synth_expr(&entries[0].0)?;
+            let first_val = self.synth_expr(&entries[0].1)?;
+            for (key, val) in entries.iter().skip(1) {
+                let k = self.synth_expr(key)?;
+                let v = self.synth_expr(val)?;
+                self.unifier.unify(&k.ty, &first_key.ty, key.span)?;
+                self.unifier.unify(&v.ty, &first_val.ty, val.span)?;
+            }
+            (first_key.ty, first_val.ty)
+        };
+        Ok(InferResult::new(Type::map(key_ty, val_ty)))
+    }
+
+    fn infer_expr_set_literal(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::SetLiteral { elements } = &expr.kind else { unreachable!() };
+        let elem_ty = if elements.is_empty() {
+            Type::Var(TypeVar::fresh())
+        } else {
+            let first = self.synth_expr(&elements[0])?;
+            for elem in elements.iter().skip(1) {
+                let e = self.synth_expr(elem)?;
+                self.unifier.unify(&e.ty, &first.ty, elem.span)?;
+            }
+            first.ty
+        };
+        Ok(InferResult::new(Type::set(elem_ty)))
+    }
+
+    fn infer_expr_throw_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Throw(error_expr) = &expr.kind else { unreachable!() };
+        // Type check the error expression
+        let error_result = self.synth_expr(error_expr)?;
+
+        // Validate throw context (warnings only — throw uses longjmp at runtime
+        // so it always works, but we want to catch misuse at compile time).
+        if self.try_recover_depth == 0 {
+            // Not inside a try/recover block — check throws clause
+            match &self.current_function_throws {
+                Maybe::Some(declared_error_types)
+                    if !declared_error_types.is_empty() =>
+                {
+                    // Function has throws(E1 | E2 | ...) — check error type matches
+                    let mut matched = false;
+                    for declared_ty in declared_error_types.iter() {
+                        if self
+                            .unifier
+                            .unify(&error_result.ty, declared_ty, error_expr.span)
+                            .is_ok()
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if !matched {
+                        let declared_names: List<Text> = declared_error_types
+                            .iter()
+                            .map(|t| verum_common::Text::from(format!("{}", t)))
+                            .collect();
+                        self.emit_diagnostic(
+                            DiagnosticBuilder::warning()
+                                .message(format!(
+                                    "thrown type `{}` does not match declared throws clause ({})\n  \
+                                     help: the function declares `throws({})` — ensure the thrown value matches",
+                                    error_result.ty,
+                                    declared_names.join(", "),
+                                    declared_names.join(" | "),
+                                ))
+                                .build()
+                        );
+                    }
+                }
+                _ => {
+                    // No throws clause and not in try/recover — warn
+                    self.emit_diagnostic(
+                        DiagnosticBuilder::warning()
+                            .message(
+                                "throw expression outside of `try/recover` block in function without `throws` clause\n  \
+                                 help: add `throws(ErrorType)` to the function signature, or wrap in `try { ... } recover { ... }`"
+                                    .to_string()
+                            )
+                            .build()
+                    );
+                }
+            }
+        }
+        // Inside try/recover: throw is always valid (caught by handler)
+
+        // Throw has Never type (diverging control flow)
+        Ok(InferResult::new(Type::never()))
+    }
+
+    fn infer_expr_meta(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Meta(block) = &expr.kind else { unreachable!() };
+        // Meta blocks are evaluated at compile time
+        // The type is the type of the block's return value
+        self.ctx.enter_scope();
+        let block_result = self.infer_block(block)?;
+        self.ctx.exit_scope();
+
+        // The meta block's type is its computed result type
+        // In full implementation, this would delegate to const_eval
+        Ok(block_result)
+    }
+
+    fn infer_expr_macro_call(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::MacroCall { path, args } = &expr.kind else { unreachable!() };
+        // Handle known builtin macros that haven't been expanded yet
+        let macro_name = path
+            .segments
+            .iter()
+            .filter_map(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("::");
+
+        match macro_name.as_str() {
+            "list_with_capacity" => {
+                // @list_with_capacity(N) returns List<T> where T is inferred from context
+                let elem_ty = Type::Var(TypeVar::fresh());
+                Ok(InferResult::new(Type::list(elem_ty)))
+            }
+            "unwrap" => {
+                // @unwrap(expr) returns T where expr: Maybe<T>
+                Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+            }
+            "min" | "max" | "clamp" | "abs" => {
+                // @min/@max/@clamp/@abs are numeric builtins that return
+                // the same numeric type as their arguments (Int or Float).
+                // Return Int by default; Float args will unify through context.
+                Ok(InferResult::new(Type::int()))
+            }
+            _ => {
+                // Unknown macro — return fresh type variable to avoid blocking compilation
+                Ok(InferResult::new(Type::Var(TypeVar::fresh())))
+            }
+        }
+    }
+
+    fn infer_expr_forall(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Forall { bindings, body } = &expr.kind else { unreachable!() };
+        // Enter scope for all quantified variables
+        self.ctx.enter_scope();
+
+        // Process each binding
+        for binding in bindings {
+            // Determine the type for this binding
+            let var_ty = if let verum_common::Maybe::Some(ty) = &binding.ty {
+                // Explicit type annotation
+                self.ast_to_type(ty)?
+            } else if let verum_common::Maybe::Some(domain) = &binding.domain {
+                // Infer type from domain's element type
+                let domain_ty = self.synth_expr(domain)?.ty;
+                self.element_type_of(&domain_ty).unwrap_or_else(Type::int)
+            } else {
+                return Err(TypeError::Other(verum_common::Text::from(
+                    "quantifier binding requires type annotation or domain".to_string(),
+                )));
+            };
+
+            // Bind the pattern to its type
+            self.bind_pattern(&binding.pattern, &var_ty)?;
+
+            // If there's a domain, infer its type (should be iterable)
+            if let verum_common::Maybe::Some(domain) = &binding.domain {
+                let _ = self.synth_expr(domain)?;
+            }
+
+            // If there's a guard, check it's Bool type
+            if let verum_common::Maybe::Some(guard) = &binding.guard {
+                self.check_expr(guard, &Type::bool())?;
+            }
+        }
+
+        // Check that the body expression has type Bool
+        self.check_expr(body, &Type::bool())?;
+
+        // Exit scope
+        self.ctx.exit_scope();
+
+        // Forall expressions always return Bool
+        Ok(InferResult::new(Type::bool()))
+    }
+
+    fn infer_expr_exists(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Exists { bindings, body } = &expr.kind else { unreachable!() };
+        // Enter scope for all quantified variables
+        self.ctx.enter_scope();
+
+        // Process each binding
+        for binding in bindings {
+            // Determine the type for this binding
+            let var_ty = if let verum_common::Maybe::Some(ty) = &binding.ty {
+                // Explicit type annotation
+                self.ast_to_type(ty)?
+            } else if let verum_common::Maybe::Some(domain) = &binding.domain {
+                // Infer type from domain's element type
+                let domain_ty = self.synth_expr(domain)?.ty;
+                self.element_type_of(&domain_ty).unwrap_or_else(Type::int)
+            } else {
+                return Err(TypeError::Other(verum_common::Text::from(
+                    "quantifier binding requires type annotation or domain".to_string(),
+                )));
+            };
+
+            // Bind the pattern to its type
+            self.bind_pattern(&binding.pattern, &var_ty)?;
+
+            // If there's a domain, infer its type (should be iterable)
+            if let verum_common::Maybe::Some(domain) = &binding.domain {
+                let _ = self.synth_expr(domain)?;
+            }
+
+            // If there's a guard, check it's Bool type
+            if let verum_common::Maybe::Some(guard) = &binding.guard {
+                self.check_expr(guard, &Type::bool())?;
+            }
+        }
+
+        // Check that the body expression has type Bool
+        self.check_expr(body, &Type::bool())?;
+
+        // Exit scope
+        self.ctx.exit_scope();
+
+        // Exists expressions always return Bool
+        Ok(InferResult::new(Type::bool()))
+    }
+
+    fn infer_expr_meta_function(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::MetaFunction { name, args } = &expr.kind else { unreachable!() };
+        // Infer type based on the meta-function name
+        let result_type = match name.name.as_str() {
+            // Source location functions return Text or Int
+            "file" | "module" | "function" => Type::text(),
+            "line" | "column" => Type::int(),
+
+            // Configuration check returns Bool
+            "cfg" => Type::bool(),
+
+            // Compile-time evaluation: type is the type of the argument
+            "const" => {
+                if let Some(arg) = args.first() {
+                    return self.synth_expr(arg);
+                }
+                Type::unit()
+            }
+
+            // String operations return Text
+            "concat" | "stringify" => Type::text(),
+
+            // Diagnostics return Unit
+            "warning" | "error" => Type::unit(),
+
+            // Compiler intrinsics - type is inferred from expected type
+            // or from the last argument's type if applicable
+            // @intrinsic("name", args...) - type depends on intrinsic
+            "intrinsic" => {
+                // For intrinsics, we need to infer the type from context.
+                // If we're in checking mode (expected type is known), use that.
+                // Otherwise, try to infer from the intrinsic name.
+                if let Some(first_arg) = args.first() {
+                    // First arg should be a string literal with intrinsic name
+                    if let ExprKind::Literal(lit) = &first_arg.kind {
+                        if let verum_ast::LiteralKind::Text(name_lit) = &lit.kind {
+                            let intrinsic_name = name_lit.as_str();
+                            match intrinsic_name {
+                                // Memory intrinsics
+                                "compare_exchange" | "compare_exchange_weak" => {
+                                    Type::bool()
+                                }
+                                "atomic_load" | "atomic_store" | "atomic_swap" => {
+                                    // Type depends on the pointer type being operated on
+                                    // Use last arg (the value being stored) to infer
+                                    if args.len() >= 3 {
+                                        if let Ok(val_ty) = self.infer_expr(
+                                            &args[args.len() - 1],
+                                            InferMode::Synth,
+                                        ) {
+                                            val_ty.ty
+                                        } else {
+                                            Type::Var(TypeVar::fresh())
+                                        }
+                                    } else {
+                                        Type::Var(TypeVar::fresh())
+                                    }
+                                }
+                                "fetch_add" | "fetch_sub" | "fetch_and"
+                                | "fetch_or" | "fetch_xor" | "fetch_nand"
+                                | "fetch_max" | "fetch_min" => Type::int(),
+                                "atomic_fence" => Type::unit(),
+                                // Memory allocation
+                                "alloc" | "alloc_zeroed" | "realloc" => {
+                                    Type::Reference {
+                                        inner: Box::new(Type::Var(TypeVar::fresh())),
+                                        mutable: false,
+                                    }
+                                }
+                                "dealloc" => Type::unit(),
+                                // Pointer operations
+                                "ptr_read" | "ptr_read_volatile" => {
+                                    Type::Var(TypeVar::fresh())
+                                }
+                                "ptr_write"
+                                | "ptr_write_volatile"
+                                | "ptr_copy"
+                                | "ptr_copy_nonoverlapping"
+                                | "ptr_swap" => Type::unit(),
+                                "offset" => Type::Reference {
+                                    inner: Box::new(Type::Var(TypeVar::fresh())),
+                                    mutable: false,
+                                },
+                                // Type intrinsics
+                                "size_of" | "align_of" | "min_align_of" | "type_id" => {
+                                    Type::int()
+                                }
+                                "type_name" => Type::text(),
+                                // Control flow
+                                "unreachable" | "panic" | "abort" => Type::never(),
+                                // Catch unwind
+                                "catch_unwind" => {
+                                    // Returns Result<T, PanicInfo>
+                                    Type::Named {
+                                        path: verum_ast::ty::Path::single(
+                                            verum_ast::Ident::new(
+                                                WKT::Result.as_str(),
+                                                expr.span,
+                                            ),
+                                        ),
+                                        args: List::from_iter([
+                                            Type::Var(TypeVar::fresh()),
+                                            Type::Named {
+                                                path: verum_ast::ty::Path::single(
+                                                    verum_ast::Ident::new(
+                                                        "PanicInfo",
+                                                        expr.span,
+                                                    ),
+                                                ),
+                                                args: List::new(),
+                                            },
+                                        ]),
+                                    }
+                                }
+                                // Slice intrinsics - return reference to slice
+                                "slice_from_raw_parts" => Type::Reference {
+                                    inner: Box::new(Type::Slice {
+                                        element: Box::new(Type::Var(TypeVar::fresh())),
+                                    }),
+                                    mutable: false,
+                                },
+                                "slice_from_raw_parts_mut" => Type::Reference {
+                                    inner: Box::new(Type::Slice {
+                                        element: Box::new(Type::Var(TypeVar::fresh())),
+                                    }),
+                                    mutable: true,
+                                },
+                                // Output intrinsic (for async)
+                                "output" => Type::Named {
+                                    path: verum_ast::ty::Path::single(
+                                        verum_ast::Ident::new("Output", expr.span),
+                                    ),
+                                    args: List::from_iter([
+                                        Type::Var(TypeVar::fresh()),
+                                    ]),
+                                },
+                                // Text parsing intrinsics - return Result<T, ParseError>
+                                "text_parse_int" => Type::Named {
+                                    path: verum_ast::ty::Path::single(
+                                        verum_ast::Ident::new(
+                                            WKT::Result.as_str(),
+                                            expr.span,
+                                        ),
+                                    ),
+                                    args: List::from_iter([
+                                        Type::int(),
+                                        Type::Named {
+                                            path: verum_ast::ty::Path::single(
+                                                verum_ast::Ident::new(
+                                                    "ParseError",
+                                                    expr.span,
+                                                ),
+                                            ),
+                                            args: List::new(),
+                                        },
+                                    ]),
+                                },
+                                "text_parse_float" => Type::Named {
+                                    path: verum_ast::ty::Path::single(
+                                        verum_ast::Ident::new(
+                                            WKT::Result.as_str(),
+                                            expr.span,
+                                        ),
+                                    ),
+                                    args: List::from_iter([
+                                        Type::float(),
+                                        Type::Named {
+                                            path: verum_ast::ty::Path::single(
+                                                verum_ast::Ident::new(
+                                                    "ParseError",
+                                                    expr.span,
+                                                ),
+                                            ),
+                                            args: List::new(),
+                                        },
+                                    ]),
+                                },
+                                "text_parse_bool" => Type::Named {
+                                    path: verum_ast::ty::Path::single(
+                                        verum_ast::Ident::new(
+                                            WKT::Result.as_str(),
+                                            expr.span,
+                                        ),
+                                    ),
+                                    args: List::from_iter([
+                                        Type::bool(),
+                                        Type::Named {
+                                            path: verum_ast::ty::Path::single(
+                                                verum_ast::Ident::new(
+                                                    "ParseError",
+                                                    expr.span,
+                                                ),
+                                            ),
+                                            args: List::new(),
+                                        },
+                                    ]),
+                                },
+                                // Default for unknown intrinsics - use fresh type var
+                                _ => Type::Var(TypeVar::fresh()),
+                            }
+                        } else {
+                            // First arg literal but not Text kind
+                            Type::Var(TypeVar::fresh())
+                        }
+                    } else {
+                        // First arg not a literal
+                        Type::Var(TypeVar::fresh())
+                    }
+                } else {
+                    // No args
+                    Type::Var(TypeVar::fresh())
+                }
+            }
+
+            // ============================================================
+            // Type introspection intrinsics
+            // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 15 - Compile-Time Reflection
+            // ============================================================
+
+            // @type_name(T) -> Text - Returns the name of a type
+            "type_name" => Type::text(),
+
+            // @type_fields(T) / @fields_of(T) -> List<(Text, Type)>
+            // Returns field names and types for a struct type
+            "type_fields" | "fields_of" => {
+                // Returns a list of (field_name: Text, field_type: Type) tuples
+                Type::Named {
+                    path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                        WKT::List.as_str(),
+                        expr.span,
+                    )),
+                    args: List::from_iter([Type::Tuple(List::from_iter([
+                        Type::text(),
+                        Type::Named {
+                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                                "Type", expr.span,
+                            )),
+                            args: List::new(),
+                        },
+                    ]))]),
+                }
+            }
+
+            // @variants_of(T) -> List<(Text, Type)>
+            // Returns variant names and payload types for an enum type
+            "variants_of" => Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                    WKT::List.as_str(),
+                    expr.span,
+                )),
+                args: List::from_iter([Type::Tuple(List::from_iter([
+                    Type::text(),
+                    Type::Named {
+                        path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                            "Type", expr.span,
+                        )),
+                        args: List::new(),
+                    },
+                ]))]),
+            },
+
+            // @type_of(expr) -> Type - Returns the compile-time type of an expression
+            "type_of" => Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                    "Type", expr.span,
+                )),
+                args: List::new(),
+            },
+
+            // @field_access(value, field_name: Text) -> T
+            // Accesses a field by name at compile-time. Returns fresh type var.
+            "field_access" => Type::Var(TypeVar::fresh()),
+
+            // @is_struct(T) -> Bool - Checks if type is a struct
+            "is_struct" => Type::bool(),
+
+            // @is_enum(T) -> Bool - Checks if type is an enum
+            "is_enum" => Type::bool(),
+
+            // @is_tuple(T) -> Bool - Checks if type is a tuple
+            "is_tuple" => Type::bool(),
+
+            // @implements(T, Protocol) -> Bool - Checks if type implements protocol
+            "implements" => Type::bool(),
+
+            // @size_of(T) -> Int - Returns the size of a type in bytes
+            "size_of" => Type::int(),
+
+            // @align_of(T) -> Int - Returns the alignment of a type in bytes
+            "align_of" => Type::int(),
+
+            // @type_id(T) -> Int - Returns unique type identifier
+            "type_id" => Type::int(),
+
+            // @get_tag(variant) -> Int - Returns the tag index of a variant value
+            "get_tag" => Type::int(),
+
+            // @list_with_capacity(N) -> List<T> where T is inferred from context
+            "list_with_capacity" => Type::list(Type::Var(TypeVar::fresh())),
+
+            // @unwrap(expr) -> T where expr: Maybe<T>
+            "unwrap" => {
+                if let Some(arg) = args.first() {
+                    let arg_result = self.synth_expr(arg)?;
+                    let arg_ty = arg_result.ty;
+                    match &arg_ty {
+                        Type::Generic {
+                            name: n,
+                            args: type_args,
+                        } if WKT::Maybe.matches(n.as_str()) => {
+                            if let Some(inner) = type_args.first() {
+                                inner.clone()
+                            } else {
+                                Type::Var(TypeVar::fresh())
+                            }
+                        }
+                        Type::Variant(variants) => {
+                            // Extract inner type from first data-carrying variant
+                            // (e.g., Some(T) in Maybe, Ok(T) in Result, or any user-defined variant)
+                            variants
+                                .values()
+                                .find(|ty| !matches!(ty, Type::Unit))
+                                .cloned()
+                                .unwrap_or_else(|| Type::Var(TypeVar::fresh()))
+                        }
+                        Type::Var(_) => {
+                            // Unresolved - return fresh var
+                            Type::Var(TypeVar::fresh())
+                        }
+                        _ => Type::Var(TypeVar::fresh()),
+                    }
+                } else {
+                    Type::Var(TypeVar::fresh())
+                }
+            }
+
+            // @vbc/@asm/@llvm - low-level intrinsics, type is inferred from context.
+            // Synthesize all argument expressions so that context
+            // method calls like `ComputeDevice.device()` inside
+            // @vbc(...) args are properly resolved through the
+            // type checker (enabling context type lookup, method
+            // resolution, etc.). Errors from arg synthesis are
+            // non-fatal: @vbc is a codegen-level intrinsic and
+            // argument types don't constrain its return type.
+            "vbc" | "asm" | "llvm" | "llvm_only" => {
+                for arg in args.iter().skip(1) {
+                    // Skip first arg (opcode name) — it's an ident.
+                    let _ = self.synth_expr(arg);
+                }
+                Type::Var(TypeVar::fresh())
+            }
+
+            // -----------------------------------------------------------------
+            // Generic opaque-intrinsic rule for `@builtin_*`.
+            //
+
+            // Any meta-function whose name begins with `builtin_` is a
+            // compiler-level intrinsic whose semantics — and whose
+            // return type — are attached to the *declaration site* in
+            // stdlib code, not embedded in a table inside the
+            // compiler. Examples (see core/math/hott.vr,
+            // core/math/cubical.vr, core/math/epistemic.vr):
+            //
+
+            //  public let i0: I = @builtin_i0;
+            //  public let i1: I = @builtin_i1;
+            //  public fn refl<A>(x: A) -> Path<A>(x, x) { @builtin_refl(x) }
+            //  public fn hcomp<A>(phi, walls, base) -> A { @builtin_hcomp(...) }
+            //  public fn join(i: I, j: I) -> I { @builtin_interval_join(i, j) }
+            //
+
+            // The use-site already carries the intended return type
+            // via the surrounding let-annotation / fn-signature. We
+            // therefore return a fresh type variable; bidirectional
+            // checking unifies it against the declared type via
+            // `synth_and_check`, and synthesis-mode callers receive a
+            // generalizable variable instead of a wrong concrete
+            // Unit.
+            //
+
+            // This keeps the compiler free of per-intrinsic name
+            // tables — the only special-casing is the `builtin_`
+            // prefix, which is the declared namespace for
+            // compiler-bound meta-symbols (mirrored on the codegen
+            // side in verum_vbc/src/codegen/expressions.rs §4077+).
+            // Argument expressions are still synthesised for their
+            // side-effects on the checker state (diagnostic
+            // accumulation, constraint generation).
+            n if n.starts_with("builtin_") => {
+                for arg in args.iter() {
+                    let _ = self.synth_expr(arg);
+                }
+                Type::Var(TypeVar::fresh())
+            }
+
+            // Unknown meta-function - default to unit
+            _ => Type::unit(),
+        };
+
+        Ok(InferResult::new(result_type))
+    }
+
+    fn infer_expr_lift(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Lift { expr: inner } = &expr.kind else { unreachable!() };
+        // The lift expression evaluates to the type of the inner expression
+        self.synth_expr(inner)
+    }
+
+    fn infer_expr_type_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::TypeExpr(ty) = &expr.kind else { unreachable!() };
+        // Convert AST type to internal Type representation
+        let resolved_ty = self.ast_to_type(ty)?;
+        // Return the resolved type - this enables static method calls
+        // like Wrapper<Person>.default() where we need Person as the type argument
+        Ok(InferResult::new(resolved_ty))
+    }
+
+    fn infer_expr_typeof_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Typeof(inner) = &expr.kind else { unreachable!() };
+        // Infer the inner expression type (for compile-time validation)
+        let _ = self.synth_expr(inner)?;
+        // typeof() returns a structural record { name: Text, ... }
+        // Spec: docs/improvements.md Section 13.2 — reflection on
+        // the runtime type yields an info record whose canonical
+        // field is `name`. Other fields (`size`, `alignment`) can
+        // be added later without breaking field access.
+        let mut fields: indexmap::IndexMap<verum_common::Text, Type> =
+            indexmap::IndexMap::new();
+        fields.insert(verum_common::Text::from("name"), Type::text());
+        Ok(InferResult::new(Type::Record(fields)))
+    }
+
+    fn infer_expr_destructuring_assign(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::DestructuringAssign { pattern, op, value } = &expr.kind else { unreachable!() };
+        // 1. Type-check the value expression
+        let value_result = self.synth_expr(value)?;
+
+        if *op == verum_ast::BinOp::Assign {
+            // Simple destructuring assignment: (a, b) = expr
+            // Bind pattern variables to the value type
+            // This performs structural type matching:
+            // - Tuple pattern (a, b): value must be tuple type (T, U)
+            // - Array pattern [x, y]: value must be array/slice type [T; N] or [T]
+            // - Record pattern P { x, y }: value must be struct type P with fields x, y
+            self.bind_pattern(pattern, &value_result.ty)?;
+
+            // Track definite assignment for each bound variable in the pattern
+            self.track_pattern_assignment(pattern, expr.span);
+        } else {
+            // Compound destructuring assignment: (x, y) += (dx, dy)
+            // All pattern variables must already exist and be mutable.
+            // For each element: read current value, apply op, write back.
+            self.check_compound_destructuring_pattern(
+                pattern,
+                &value_result.ty,
+                op,
+                expr.span,
+            )?;
+        }
+
+        // Destructuring assignment returns unit (like regular assignment)
+        Ok(InferResult::new(Type::unit()))
+    }
+
+    fn infer_expr_inject(&mut self, expr: &Expr) -> Result<InferResult> {
+        use ExprKind::*;
+        let ExprKind::Inject { type_path } = &expr.kind else { unreachable!() };
+        // Resolve the type being injected from the path
+        let type_name = self.path_to_string(type_path);
+        let injected_ty =
+            match self.resolve_type_name(type_name.as_str(), expr.span) {
+                Ok(ty) => ty,
+                Err(_) => {
+                    // If type not found, create a Named type placeholder
+                    Type::Named {
+                        path: type_path.clone(),
+                        args: List::new(),
+                    }
+                }
+            };
+        Ok(InferResult::new(injected_ty))
+    }
+
 
     /// Check quote hygiene for splice expressions.
     ///
