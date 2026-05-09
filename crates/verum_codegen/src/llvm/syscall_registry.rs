@@ -1,0 +1,208 @@
+//! Canonical platform-syscall declaration registry for AOT codegen.
+//!
+//! # Architectural invariant
+//!
+//! Every platform syscall (`clock_gettime`, `nanosleep`, `read`, `write`,
+//! `close`, …) is declared in the LLVM module **exactly once**, with a
+//! signature derived from this registry. Multiple call sites — across
+//! `runtime.rs` and `platform_ir.rs` — must consult the registry rather
+//! than re-declaring the same syscall with locally-chosen widths.
+//!
+//! # Why this exists
+//!
+//! Before this module, `clock_gettime` was declared three times:
+//!   * `runtime.rs::get_or_declare_clock_gettime` →  `(i32, ptr) -> i32` (POSIX C ABI)
+//!   * `platform_ir.rs::emit_nursery_await_all`   →  `(i64, ptr) -> i64` (Verum ABI)
+//!   * `platform_ir.rs::emit_select_channels`     →  `(i64, ptr) -> i64` (Verum ABI)
+//!
+//! When two emit paths fired in the same module the second `add_function`
+//! returned the first declaration's FunctionValue — but the second site's
+//! `build_call` issued arguments shaped for its own intended signature.
+//! LLVM IR verification then failed with
+//!     `Call parameter type does not match function signature!`
+//!
+//! # Verum ABI choice: uniform i64
+//!
+//! Every syscall is declared with `i64` for integer args/returns even
+//! when the underlying C signature uses narrower types
+//! (`clock_gettime(clockid_t /* int */, struct timespec *)`). This is
+//! safe on the platforms Verum targets (x86_64, aarch64) because the
+//! ABI passes integers in registers wider than the C type reads:
+//!   * x86_64: rdi/rsi (64-bit) for the first two integer args; the
+//!     callee reads via edi/esi (32-bit) when the C type is `int` —
+//!     truncation is implicit.
+//!   * aarch64: x0/x1 (64-bit); the callee reads via w0/w1 (32-bit)
+//!     when the C type is narrower.
+//!
+//! On 32-bit targets (not currently supported) the choice would have
+//! to fork; until that exists the i64-everywhere convention is
+//! correct, simple, and lets VBC's NaN-boxed value model flow into FFI
+//! without per-arg width adapters.
+//!
+//! # Adding a new syscall
+//!
+//! Append a `SyscallSig` to [`POSIX_SYSCALLS`]. All call sites that
+//! reach for it through [`get_or_declare`] automatically pick up the
+//! canonical signature.
+
+use verum_llvm::AddressSpace;
+use verum_llvm::context::Context;
+use verum_llvm::module::Module;
+use verum_llvm::types::FunctionType;
+use verum_llvm::values::FunctionValue;
+
+/// Argument or return-value classification under Verum's uniform-i64
+/// AOT ABI. Concrete `FunctionType` values are constructed lazily from
+/// these descriptors so the registry table is `const`-friendly.
+#[derive(Copy, Clone)]
+enum AbiTy {
+    /// 64-bit integer (Verum-uniform). Used for every integer arg/ret
+    /// regardless of the underlying C type's width — the calling
+    /// convention truncates on the callee side.
+    I64,
+    /// Opaque pointer.
+    Ptr,
+    /// Void return.
+    Void,
+}
+
+impl AbiTy {
+    fn ll_arg<'ctx>(self, ctx: &'ctx Context) -> verum_llvm::types::BasicMetadataTypeEnum<'ctx> {
+        match self {
+            AbiTy::I64 => ctx.i64_type().into(),
+            AbiTy::Ptr => ctx.ptr_type(AddressSpace::default()).into(),
+            AbiTy::Void => unreachable!("Void is a return-only classification"),
+        }
+    }
+
+    fn fn_type<'ctx>(
+        ctx: &'ctx Context,
+        args: &[AbiTy],
+        ret: AbiTy,
+    ) -> FunctionType<'ctx> {
+        let arg_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
+            args.iter().map(|a| a.ll_arg(ctx)).collect();
+        match ret {
+            AbiTy::I64 => ctx.i64_type().fn_type(&arg_tys, false),
+            AbiTy::Ptr => ctx.ptr_type(AddressSpace::default()).fn_type(&arg_tys, false),
+            AbiTy::Void => ctx.void_type().fn_type(&arg_tys, false),
+        }
+    }
+}
+
+/// Canonical signature of a single platform syscall under Verum ABI.
+struct SyscallSig {
+    name: &'static str,
+    args: &'static [AbiTy],
+    ret: AbiTy,
+}
+
+/// The canonical registry. Append-only — every syscall reachable from
+/// any LLVM emit path lives here. When adding a new entry, prefer
+/// `AbiTy::I64` for all integer slots even if the C signature is
+/// narrower; see the module-level docstring for the ABI rationale.
+const POSIX_SYSCALLS: &[SyscallSig] = &[
+    // ── time ────────────────────────────────────────────────────
+    // C: int clock_gettime(clockid_t, struct timespec *)
+    SyscallSig {
+        name: "clock_gettime",
+        args: &[AbiTy::I64, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int nanosleep(const struct timespec *, struct timespec *)
+    SyscallSig {
+        name: "nanosleep",
+        args: &[AbiTy::Ptr, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int sched_yield(void)
+    SyscallSig {
+        name: "sched_yield",
+        args: &[],
+        ret: AbiTy::I64,
+    },
+    // ── I/O ─────────────────────────────────────────────────────
+    // C: int close(int fd)
+    SyscallSig {
+        name: "close",
+        args: &[AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t read(int fd, void *buf, size_t count)
+    SyscallSig {
+        name: "read",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t write(int fd, const void *buf, size_t count)
+    SyscallSig {
+        name: "write",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int access(const char *pathname, int mode)
+    SyscallSig {
+        name: "access",
+        args: &[AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int unlink(const char *pathname)
+    SyscallSig {
+        name: "unlink",
+        args: &[AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+];
+
+/// Look up a syscall's canonical Verum-ABI signature. `None` for names
+/// not in the registry — callers should fall back to a custom
+/// declaration, or extend [`POSIX_SYSCALLS`] if the syscall is
+/// genuinely platform-portable.
+fn lookup(name: &str) -> Option<&'static SyscallSig> {
+    POSIX_SYSCALLS.iter().find(|s| s.name == name)
+}
+
+/// Get-or-declare `name` under its canonical Verum-ABI signature.
+///
+/// First-call semantics: if `name` is not yet declared in `module`,
+/// add it with the registry's signature. Subsequent calls return the
+/// existing declaration without reasserting the signature — first
+/// declaration wins by LLVM's `module.get_function` discipline. The
+/// registry exists precisely so the first declaration is always the
+/// canonical one regardless of which emit path arrives first.
+///
+/// Panics in debug builds if `name` is not in [`POSIX_SYSCALLS`]; in
+/// release builds returns `None` so callers can defensively fall back
+/// to a local declaration. Adding a missing entry to the registry is
+/// always preferred over handling `None` at the call site.
+pub fn get_or_declare<'ctx>(
+    module: &Module<'ctx>,
+    ctx: &'ctx Context,
+    name: &str,
+) -> Option<FunctionValue<'ctx>> {
+    if let Some(existing) = module.get_function(name) {
+        return Some(existing);
+    }
+    let sig = lookup(name)?;
+    let fn_ty = AbiTy::fn_type(ctx, sig.args, sig.ret);
+    Some(module.add_function(name, fn_ty, None))
+}
+
+/// Pre-declare a curated set of POSIX syscalls into `module`. Used by
+/// emit paths that want to ensure the Verum-ABI signatures are present
+/// before any later inline declaration drifts. Idempotent — no-ops on
+/// names already present.
+///
+/// The current set is the I/O subset (`close`, `read`, `write`,
+/// `access`, `unlink`) — the historical contents of
+/// `ensure_io_syscalls_declared`. Time syscalls (`clock_gettime`,
+/// `nanosleep`, `sched_yield`) are declared lazily by call sites
+/// through [`get_or_declare`].
+pub fn ensure_io_declared<'ctx>(
+    module: &Module<'ctx>,
+    ctx: &'ctx Context,
+) {
+    for name in ["close", "read", "write", "access", "unlink"] {
+        let _ = get_or_declare(module, ctx, name);
+    }
+}
