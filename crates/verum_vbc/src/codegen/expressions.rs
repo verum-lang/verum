@@ -7372,8 +7372,21 @@ impl VbcCodegen {
                 return Ok(Some(Some(result)));
             }
 
-            // For generic type parameters (like T.default()), emit a type method call.
-            // Resolved during monomorphization when T is replaced with a concrete type.
+            // For generic type parameters (like T.default()), emit a virtual
+            // dispatch call that monomorphisation resolves later.  This path
+            // is REJECTED for concrete known types (Duration, Uuid, ...): a
+            // concrete type whose method is missing from the registry is a
+            // legitimate compile error, not a silent fallthrough that emits
+            // `dyn:Type.method` CallM with the wrong receiver kind and
+            // produces Unit at runtime.  Surface the failure here so the
+            // user sees `unresolved static method 'X.Y'` instead of a
+            // confusing `method not found on receiver of runtime kind ...`
+            // panic three layers down.
+            if known_type {
+                return Err(CodegenError::undefined_function(
+                    format!("{}.{}", type_name, method.name),
+                ));
+            }
             return Ok(Some(
                 self.compile_type_param_method_call(&type_name, method, args)?,
             ));
