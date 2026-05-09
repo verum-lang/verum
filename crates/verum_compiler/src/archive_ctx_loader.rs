@@ -774,13 +774,38 @@ impl ArchiveCtxCache {
         // modules they belong to are the only Verum-wide hardcode and
         // mirror the layout constants `MAYBE_VARIANT_LAYOUT` /
         // `RESULT_VARIANT_LAYOUT`.
+        // Expansion is two-staged: (1) add the variant-carrier
+        // archive modules to `wanted_module_prefixes` so type imports
+        // fire; (2) add the carrier TYPE NAMES (`Maybe`, `Result`) to
+        // `wanted` itself so the function-side filter at
+        // `register_module_filtered` (`is_method_of_wanted_type`)
+        // accepts the impl methods (`Maybe.eq`, `Maybe.cmp`,
+        // `Result.eq`, …).  Without (2), user code that uses
+        // `Some(5) == Some(5)` finds `Some` registered but the
+        // operator-method dispatcher fails to find `Maybe.eq` —
+        // codegen demotes to a primitive `CmpI` that compares
+        // distinct heap allocations bit-for-bit and returns false.
+        let mut to_add: Vec<&'static str> = Vec::new();
         for name in &wanted {
             if verum_common::well_known_types::variant_tags::is_maybe_constructor(name) {
+                // Both the canonical archive entry for `Maybe`
+                // (`core.base.maybe` when source declares `module
+                // maybe;`) AND the grandparent-bundled form
+                // (`core.base` when the precompiler bundles
+                // `core/base/maybe.vr`'s impl methods under the
+                // parent module's archive entry).
                 wanted_module_prefixes.insert("core.base.maybe".to_string());
+                wanted_module_prefixes.insert("core.base".to_string());
+                to_add.push("Maybe");
             }
             if verum_common::well_known_types::variant_tags::is_result_constructor(name) {
                 wanted_module_prefixes.insert("core.base.result".to_string());
+                wanted_module_prefixes.insert("core.base".to_string());
+                to_add.push("Result");
             }
+        }
+        for name in to_add {
+            wanted.insert(name.to_string());
         }
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;

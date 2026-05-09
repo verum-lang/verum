@@ -188,6 +188,19 @@ pub struct CodegenContext {
     /// we store it here so pattern binding can use the qualified variant name.
     pub match_scrutinee_type: Option<String>,
 
+    /// When the match scrutinee is a tuple expression `(a, b, c)`, this holds
+    /// the per-element type names so that the tuple-pattern destructure path
+    /// in `compile_pattern_bind` can set [`Self::match_scrutinee_type`]
+    /// per-element before recursing into each sub-pattern.  Without this,
+    /// `match (self, other) { (Some(a), Some(b)) => a == b }` inside a
+    /// protocol impl would lose `Maybe<T>` context for the inner element
+    /// pattern; payload-type inference in `Some(a)` would then fail to
+    /// register `a`'s type, falling through to a primitive `CmpI` on the
+    /// Maybe wrapper instead of dispatching `a == b` correctly.  Set in
+    /// `compile_match` when the scrutinee is `ExprKind::Tuple(_)`; cleared
+    /// to `None` for non-tuple scrutinees.
+    pub match_tuple_element_types: Option<Vec<Option<String>>>,
+
     /// Registers that contain raw FFI pointers (not CBGR references).
     ///
 
@@ -965,6 +978,7 @@ impl CodegenContext {
             variable_type_names: HashMap::new(),
             last_function_variable_types: HashMap::new(),
             match_scrutinee_type: None,
+            match_tuple_element_types: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             const_generic_params: HashSet::new(),
