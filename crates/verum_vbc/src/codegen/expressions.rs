@@ -5306,9 +5306,18 @@ impl VbcCodegen {
     /// FALLBACK for AST nodes built by paths that bypass the
     /// typechecker (lenient/runtime-only modes, parser-only paths,
     /// etc.).  Every path that DID go through inference lands here.
-    fn compile_resolved_call_target(
+    /// Emit bytecode for a typechecker-resolved dispatch target.
+    ///
+    /// `receiver` is `Some(_)` when this is the fast path of a
+    /// method-call site (`recv.method(args)`); the receiver is
+    /// prepended to `args` before the static-method arity check so
+    /// `b.is_none()` correctly maps to `Maybe.is_none(b)`.  `None`
+    /// for non-method dispatch sites that already supply self in
+    /// `args` directly (UFCS / free-fn-style call expressions).
+    fn compile_resolved_call_target_with_receiver(
         &mut self,
         target: &verum_ast::expr::ResolvedCallTarget,
+        receiver: Option<&Expr>,
         args: &verum_common::List<Expr>,
         method: &verum_ast::Ident,
     ) -> CodegenResult<Option<Reg>> {
@@ -5329,6 +5338,30 @@ impl VbcCodegen {
                     .ok_or_else(|| {
                         CodegenError::undefined_function(qualified_name.to_string())
                     })?;
+                // For instance-method dispatch (`recv.method(args)`)
+                // the typechecker resolves to a static fn whose first
+                // formal is `self` — the call-site `args` list does NOT
+                // include the receiver.  Prepend it here so the
+                // arity check in `compile_static_method_call` matches
+                // the resolved fn's `param_count`.  Without this fix,
+                // `b.is_none()` panicked with "wrong number of
+                // arguments for static method: expected 1, found 0"
+                // because the receiver `b` was silently dropped on
+                // the way to codegen.
+                //
+                // Some pre-resolved StaticCall sites (e.g. UFCS
+                // `Maybe.is_none(b)` syntax) already supply self in
+                // `args` — those go through `compile_resolved_call_target`
+                // (no receiver) and skip this prepending.
+                if let Some(recv) = receiver {
+                    let mut prepended: Vec<Expr> = Vec::with_capacity(args.len() + 1);
+                    prepended.push((*recv).clone());
+                    for a in args.iter() {
+                        prepended.push(a.clone());
+                    }
+                    let prepended_list: verum_common::List<Expr> = prepended.into();
+                    return self.compile_static_method_call(&info, &prepended_list);
+                }
                 self.compile_static_method_call(&info, args)
             }
             ResolvedCallTarget::VariantCtor { tag, parent_type_name } => {
@@ -5535,7 +5568,12 @@ impl VbcCodegen {
         // Phase 1: Pre-resolved fast path.
         // ──────────────────────────────────────────────────────────
         if let Some(target) = resolved_target {
-            return self.compile_resolved_call_target(target, args, method);
+            return self.compile_resolved_call_target_with_receiver(
+                target,
+                Some(receiver),
+                args,
+                method,
+            );
         }
 
         // Resolve the receiver as a static type name when the user wrote either
