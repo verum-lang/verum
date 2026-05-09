@@ -71,6 +71,7 @@ mount encoding.cbor.CborValue;
 mount security.hash.sha256.{Sha256, digest as sha256_digest};
 mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount security.x509.spki.{Spki};
 mount security.sig.rsa.{
     RsaPublicKey as RsaVerifyKey, RsaHash,
     verify_pkcs1_v15_prehashed, verify_pss_prehashed,
@@ -377,7 +378,7 @@ fn verify_signature_against_spki(
     alg:          Int,
     sig:          &List<Byte>,
     signed_input: &List<Byte>,
-    spki:         &security.x509.spki.Spki,
+    spki:         &Spki,
 ) -> Result<(), WebAuthnError> {
     match (&spki.public_key, alg) {
         (security.x509.spki.SubjectPublicKey.Ed25519(ed), COSE_ALG_EDDSA) => {

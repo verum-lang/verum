@@ -49,6 +49,9 @@ mount core.verify.kernel_soundness.theorems.{
     LemmaStatus, lemma_status, lemma_is_proved, lemma_admit_reason, lemma_name,
 };
 
+// Generic pair used by admitted_lemma_iou_list to return (rule_name, reason) pairs.
+public type Tuple2<A, B> is { first: A, second: B };
+
 // =============================================================================
 // CorpusReport — one row per kernel rule, surfaced to the audit gate
 // =============================================================================

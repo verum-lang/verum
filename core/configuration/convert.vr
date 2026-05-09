@@ -366,11 +366,11 @@ fn encode_base64(bytes: &List<Byte>) -> Text {
     encoding.base64.encode(bytes)
 }
 
-fn rfc3339_to_text(t: &time.rfc3339.Rfc3339Time) -> Text {
+fn rfc3339_to_text(t: &Rfc3339Time) -> Text {
     time.rfc3339.format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes)
 }
 
-fn duration_to_text(d: &time.duration.Duration) -> Text {
+fn duration_to_text(d: &Duration) -> Text {
     // Compact representation: "Xms" / "Xs" / "Xm" / "Xh".
     let nanos = d.as_nanos();
     if nanos == 0 { return "0s".to_text(); }

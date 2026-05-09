@@ -33,7 +33,7 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.dst.op.{
     DbOp, OpInsert, OpUpdate, OpDelete, OpCommit, OpRollback,
-    OpStream, is_mutation,
+    DstDstOpStream, is_mutation,
 };
 
 // -----------------------------------------------------------------------------
@@ -54,7 +54,7 @@ public type Oracle is { rows: List<ExpectedRow> }
 
 public fn oracle_empty() -> Oracle { Oracle { rows: List.new() } }
 
-public fn oracle_replay(stream: &OpStream, committed_until: Int) -> Oracle {
+public fn oracle_replay(stream: &DstOpStream, committed_until: Int) -> Oracle {
     let mut o = oracle_empty();
     let mut tx_buf: List<DbOp> = List.new();
     let mut in_tx = false;

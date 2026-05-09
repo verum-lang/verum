@@ -77,8 +77,10 @@ mount security.jwt.{
     decode_header_only,
 };
 mount encoding.json.{
-    JsonValue, JsonObject, json_encode, decode as json_decode,
+    JsonValue, json_encode, decode as json_decode,
 };
+// JsonObject is Map<Text, JsonValue> — the inner map of a JsonValue.JsonObject(map) match arm.
+type JsonObject is Map<Text, JsonValue>;
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
 mount sync.rwlock.{RwLock};
 mount time.rfc3339.{Rfc3339Time};
