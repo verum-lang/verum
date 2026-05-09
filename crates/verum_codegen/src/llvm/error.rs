@@ -168,9 +168,6 @@ pub trait OptionExt<T> {
 
     /// Convert None into a missing function error.
     fn or_missing_fn(self, name: &str) -> Result<T>;
-
-    /// Convert None into a missing block error.
-    fn or_missing_block(self, name: &str) -> Result<T>;
 }
 
 impl<T> OptionExt<T> for Option<T> {
@@ -183,18 +180,9 @@ impl<T> OptionExt<T> for Option<T> {
     fn or_missing_fn(self, name: &str) -> Result<T> {
         self.ok_or_else(|| LlvmLoweringError::MissingFunction(name.into()))
     }
-
-    #[inline]
-    fn or_missing_block(self, name: &str) -> Result<T> {
-        self.ok_or_else(|| LlvmLoweringError::MissingBlock(name.into()))
-    }
 }
 
 impl LlvmLoweringError {
-    /// Create an unsupported instruction error.
-    pub fn unsupported_instruction(name: impl Into<Text>) -> Self {
-        LlvmLoweringError::UnsupportedInstruction(name.into())
-    }
 
     /// Create a type lowering error.
     pub fn type_lowering(msg: impl Into<Text>) -> Self {
