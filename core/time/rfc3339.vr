@@ -220,6 +220,12 @@ public fn format_with_offset(unix_seconds: Int, nanos: Int, offset_minutes: Int)
     format_impl(unix_seconds, nanos, offset_minutes, nanos > 0)
 }
 
+/// Convenience: format an `Rfc3339Time` value back to its canonical text
+/// representation, preserving the original offset.  Mirror of `parse(...)`.
+public fn format_rfc3339(t: &Rfc3339Time) -> Text {
+    format_with_offset(t.unix_seconds, t.nanos, t.offset_minutes)
+}
+
 fn format_impl(unix: Int, nanos: Int, offset_minutes: Int, with_nanos: Bool) -> Text {
     // Shift to the requested zone for display.
     let local = unix + offset_minutes * 60;
