@@ -1,15 +1,22 @@
 //! Isabelle/HOL backend for kernel-soundness cross-export.
 //!
 //! Produces `KernelSoundness.thy` — full real-Typing shape across all
-//! 38 kernel rules, mirroring `lean.rs` and `coq.rs` exactly.  The 17
-//! with-IOU rules are captured as `axiomatization <Rule>_iou ...`
-//! declarations; discharging an IOU = replacing the `axiomatization`
-//! with a `definition`.
+//! 38 kernel rules.  The 9 structural rules (Var / Universe / Pi / Lam
+//! / App / Sigma / Pair / Fst / Snd) live in a single `inductive
+//! Typing` declaration; the remaining 29 (cubical / refinement /
+//! quotient / inductive / SMT / framework-axiom / Diakrisis / modal /
+//! cohesive) are emitted as **independent** per-rule
+//! `axiomatization where T_<n>: "..."` blocks — one per rule, no
+//! `and`-chaining.  Per-rule axiomatization avoids Isabelle's
+//! cross-rule type-inference blowup at 29+ universe-polymorphic
+//! free variables.  IOU axioms are captured as `axiomatization
+//! <Rule>_iou ...` declarations; discharging an IOU = replacing the
+//! `axiomatization` with a `definition`.
 //!
 //! `isabelle build -d . -v KernelSoundness` re-checks Verum's claim
 //! independently.
 
-use super::{LemmaStatus, RuleSpec, SoundnessBackend};
+use super::{LemmaStatus, RuleCategory, RuleSpec, SoundnessBackend};
 
 /// Isabelle/HOL emitter — implements [`SoundnessBackend`] for
 /// Isabelle 2025-2.
@@ -135,7 +142,7 @@ impl SoundnessBackend for IsabelleBackend {
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_ISA);
         out.push_str("\n\n");
-        out.push_str(TYPING_AXIOMATIZATION_ISA);
+        out.push_str(&render_kernel_rule_axiomatizations(rules));
         out
     }
 
@@ -351,50 +358,146 @@ where\n\
 | T_snd:    \"\\<Gamma> \\<turnstile> p : Sigma x A B \\<Longrightarrow> \\<Gamma> \\<turnstile> Snd p : subst x (Fst p) B\"";
 
 // ============================================================================
-// The non-structural-fragment axioms — 29 introduction rules emitted as
-// `axiomatization` rather than inductive constructors.  Together with
-// `TYPING_INDUCTIVE_ISA` above, the two blocks declare exactly the same
-// 38 `T_<name>` facts the per-rule lemmas reference; the only difference
-// is that these 29 are non-inductive, which avoids the strong-induction-
-// principle elaboration blowup Isabelle exhibits at 38 mutually-tangled
-// constructors.
+// Non-structural-fragment axioms — 29 introduction rules emitted as
+// independent per-rule `axiomatization` blocks.
+//
+// Each rule lives in its own `axiomatization where T_<n>: "..."` block —
+// no `and` chaining.  Two architectural reasons:
+//
+//   (1) Isabelle's `axiomatization where T_a: ... and T_b: ... and T_c: ...`
+//       form unifies the type-inference scope across every entry in the
+//       chain, which scales catastrophically (memory blowup >30 GB,
+//       non-converging) at 29 rules with universe-polymorphic free
+//       variables.  Per-rule blocks give each rule its own independent
+//       elaboration, dropping the cost to O(1)-per-rule.
+//
+//   (2) The mega-block was a 30-line const that DUPLICATED the
+//       `assumes`/`shows` content already present in
+//       `rule_signature_isabelle` for every rule's lemma signature.
+//       Data-driven derivation eliminates the duplication: the axiom
+//       statement is *derived* from the lemma's `assumes`/`shows`
+//       block (single source of truth), with a tiny `\<And>(...)` type-
+//       ascription overlay for rules whose free variables don't have
+//       enough constraints for type inference.
 // ============================================================================
 
-const TYPING_AXIOMATIZATION_ISA: &str = "\
-(* Cubical / Refinement / Quotient / Inductive / SmtAxiom / Diakrisis    *)\n\
-(* / Modal / Cohesive — 29 introduction rules emitted as bare axioms,   *)\n\
-(* not inductive constructors.  Per-rule lemmas discharge them via      *)\n\
-(* `apply (rule T_<name>)` exactly as for the inductive fragment.       *)\n\
-axiomatization where\n\
-  T_path_ty:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> a : A; \\<Gamma> \\<turnstile> b : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathTy A a b : Universe i\"\n\
-and T_refl:       \"\\<Gamma> \\<turnstile> a : A \\<Longrightarrow> \\<Gamma> \\<turnstile> Refl a : PathTy A a a\"\n\
-and T_path_over:  \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; \\<Gamma> \\<turnstile> motive : Pi x A (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> PathOver motive p a b : Universe i\"\n\
-and T_hcomp:      \"\\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i; \\<Gamma> \\<turnstile> base : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> HComp phi walls base : T\"\n\
-and T_transp:     \"\\<Gamma> \\<turnstile> target : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Transp path regular value : target\"\n\
-and T_glue:       \"\\<Gamma> \\<turnstile> carrier : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Glue carrier phi fiber equivP : Universe i\"\n\
-and T_refine_erase: \"\\<Gamma> \\<turnstile> a : Refine base x predicate \\<Longrightarrow> \\<Gamma> \\<turnstile> a : base\"\n\
-and T_refine:       \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-and T_refine_omega: \"\\<lbrakk>\\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n\
-and T_refine_intro: \"\\<lbrakk>\\<Gamma> \\<turnstile> a : base; \\<Gamma> \\<turnstile> base : Universe i; \\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> a : Refine base x predicate\"\n\
-and T_quot_form:    \"\\<Gamma> \\<turnstile> base : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> Quotient base equivP : Universe i\"\n\
-and T_quot_intro:   \"\\<Gamma> \\<turnstile> value : base \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotIntro value base equivP : Quotient base equivP\"\n\
-and T_quot_elim:    \"\\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : Quotient base equivP; \\<Gamma> \\<turnstile> motive : Pi ''x'' base (Universe i); \\<Gamma> \\<turnstile> case_fn : Pi ''x'' base (App motive (Var ''x''))\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> QuotElim scrutinee motive case_fn : App motive scrutinee\"\n\
-and T_inductive:    \"\\<And>(path :: string) (args :: CoreTerm list). \\<Gamma> \\<turnstile> InductiveT path args : Universe i\"\n\
-and T_pos:          \"\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T\"\n\
-and T_elim:         \"\\<And>(cases :: CoreTerm list). \\<lbrakk>\\<Gamma> \\<turnstile> scrutinee : scrutinee_ty; \\<Gamma> \\<turnstile> motive : Pi ''x'' scrutinee_ty (Universe i)\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Elim scrutinee motive cases : App motive scrutinee\"\n\
-and T_smt:          \"\\<And>(solver_tag :: string). \\<lbrakk>\\<Gamma> \\<turnstile> T : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> SmtProof solver_tag : T\"\n\
-and T_fwax:         \"\\<And>(name :: string) (framework :: string). \\<Gamma> \\<turnstile> AxiomT name ty framework : ty\"\n\
-and T_eps_mu:       \"\\<Gamma> \\<turnstile> enactment : ty \\<Longrightarrow> \\<Gamma> \\<turnstile> articulation : ty\"\n\
-and T_universe_ascent: \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
-and T_round_trip:   \"\\<Gamma> \\<turnstile> recovered : Universe i \\<Longrightarrow> \\<Gamma> \\<turnstile> term : recovered\"\n\
-and T_epsilon_of:   \"\\<Gamma> \\<turnstile> articulation : result \\<Longrightarrow> \\<Gamma> \\<turnstile> EpsilonOf articulation : result\"\n\
-and T_alpha_of:     \"\\<Gamma> \\<turnstile> enactment : result \\<Longrightarrow> \\<Gamma> \\<turnstile> AlphaOf enactment : result\"\n\
-and T_modal_box:    \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalBox inner : T\"\n\
-and T_modal_diamond:\"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> ModalDiamond inner : T\"\n\
-and T_modal_big_and:\"\\<And>(components :: CoreTerm list). \\<Gamma> \\<turnstile> ModalBigAnd components : result\"\n\
-and T_shape:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Shape inner : T\"\n\
-and T_flat:         \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Flat inner : T\"\n\
-and T_sharp:        \"\\<Gamma> \\<turnstile> inner : T \\<Longrightarrow> \\<Gamma> \\<turnstile> Sharp inner : T\"";
+/// Build the `\<lbrakk>asms\<rbrakk> \<Longrightarrow> shows` (or bare `shows`
+/// when there are no premises) axiom statement from the rule's existing
+/// lemma signature.  Prepends meta-quantifier annotations for rules
+/// where free variables would otherwise be ambiguous.
+fn axiom_statement_isabelle(rule_name: &str) -> Option<String> {
+    if let Some(body) = axiom_override_isabelle(rule_name) {
+        return Some(body.to_string());
+    }
+    let sig = rule_signature_isabelle(rule_name)?;
+    let (asms, shows) = isa_split_assumes_shows(&sig)?;
+    let prefix = isabelle_metaforall_annotations(rule_name).unwrap_or("");
+    let body = if asms.is_empty() {
+        shows
+    } else {
+        format!(
+            "\\<lbrakk>{}\\<rbrakk> \\<Longrightarrow> {}",
+            asms.join("; "),
+            shows,
+        )
+    };
+    Some(format!("{}{}", prefix, body))
+}
+
+/// Hand-authored axioms where the lemma signature uses a placeholder
+/// shape that doesn't reflect the rule's actual content.
+///
+/// `K_Pos`: lemma is `side_conditions_hold \<longrightarrow> True`
+/// (placeholder — soundness reduces to the oracle), but the axiom
+/// must declare the real positivity rule shape.
+fn axiom_override_isabelle(rule_name: &str) -> Option<&'static str> {
+    match rule_name {
+        "K_Pos" => Some(
+            "\\<lbrakk>side_conditions_hold; \\<Gamma> \\<turnstile> t : T\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> t : T",
+        ),
+        _ => None,
+    }
+}
+
+/// Meta-quantifier prefix `\<And>(name :: type) ... .` for rules whose
+/// free variables would otherwise be untypable in a per-rule
+/// independent axiomatization scope.  These mirror the pre-split
+/// hand-maintained annotations from the original `TYPING_AXIOMATIZATION_ISA`
+/// constant.
+fn isabelle_metaforall_annotations(rule_name: &str) -> Option<&'static str> {
+    Some(match rule_name {
+        "K_Inductive" => "\\<And>(path :: string) (args :: CoreTerm list). ",
+        "K_Elim" => "\\<And>(cases :: CoreTerm list). ",
+        "K_Smt" => "\\<And>(solver_tag :: string). ",
+        "K_FwAx" => "\\<And>(name :: string) (framework :: string). ",
+        "K_Modal_Big_And" => "\\<And>(components :: CoreTerm list). ",
+        _ => return None,
+    })
+}
+
+/// Extract the `T_<name>` axiom-name token from a rule's proof tactic
+/// (`[using assms] by (rule T_<name>)`).  This is the canonical link
+/// between the lemma signature and its underlying axiomatization fact —
+/// no parallel hand-maintained mapping is needed.
+///
+/// Falls back to a hand-authored override for rules whose lemma uses
+/// a placeholder proof tactic that doesn't reference the axiom by
+/// name (e.g. `K_Pos` discharges its placeholder lemma via `simp`,
+/// but the `T_pos` axiom still needs to be declared).
+fn axiom_t_name_isabelle(rule_name: &str) -> Option<String> {
+    if let Some(name) = axiom_t_name_override_isabelle(rule_name) {
+        return Some(name.to_string());
+    }
+    let sig = rule_signature_isabelle(rule_name)?;
+    let needle = "by (rule ";
+    let start = sig.find(needle)? + needle.len();
+    let rest = &sig[start..];
+    let end = rest.find(')')?;
+    Some(rest[..end].trim().to_string())
+}
+
+/// Hand-authored axiom-name overrides for rules whose lemma proof
+/// tactic doesn't reference `T_<n>` directly.
+fn axiom_t_name_override_isabelle(rule_name: &str) -> Option<&'static str> {
+    match rule_name {
+        "K_Pos" => Some("T_pos"),
+        _ => None,
+    }
+}
+
+/// Render the 29 non-structural rules as independent
+/// `axiomatization where T_<n>: "..."` blocks (one per rule).
+///
+/// This is the architectural fix for Isabelle's `inductive` / shared-
+/// scope `axiomatization` elaboration blowup at 38+ mutually-tangled
+/// constructors.  See the module-level comment above.
+pub(crate) fn render_kernel_rule_axiomatizations(rules: &[RuleSpec]) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "(* Cubical / Refinement / Quotient / Inductive / SmtAxiom / Diakrisis     *)\n\
+         (* / Modal / Cohesive — 29 introduction rules emitted as INDEPENDENT       *)\n\
+         (* per-rule axiomatization blocks (no `and`-chaining) so each rule's       *)\n\
+         (* type-inference scope is bounded; mega-blocks blow up Isabelle's         *)\n\
+         (* unifier at 29+ rules with universe-polymorphic free variables.          *)\n\
+         (* Per-rule lemmas discharge each via `apply (rule T_<n>)` uniformly.      *)\n\n",
+    );
+    for r in rules {
+        if matches!(r.category, RuleCategory::Structural) {
+            continue;
+        }
+        let (Some(t_name), Some(stmt)) = (
+            axiom_t_name_isabelle(&r.rule_name),
+            axiom_statement_isabelle(&r.rule_name),
+        ) else {
+            continue;
+        };
+        out.push_str(&format!(
+            "axiomatization where {}: \"{}\"\n\n",
+            t_name, stmt,
+        ));
+    }
+    out
+}
 
 // ============================================================================
 // Per-rule lemma signature lookup — dispatches all 38 rules.
