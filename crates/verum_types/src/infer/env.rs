@@ -46,11 +46,19 @@ use super::{
     resolve_builtin_meta_type, type_kind_description,
     read_param_classification, expr_kind_description,
     collect_inline_mount_reexports_recursive, mount_tree_exports_name,
+    levenshtein_distance, has_declassify_attr_on_function,
+    TypeResolutionCycleGuard,
 };
+#[allow(unused_imports)]
+use std::cell::Cell;
 #[allow(unused_imports)]
 use std::time::Instant;
 #[allow(unused_imports)]
 use verum_ast::{BinOp, Block, Expr, ExprKind, LiteralKind, Stmt, StmtKind, TokenTree, UnOp, Item};
+#[allow(unused_imports)]
+use verum_ast::expr::TypeProperty;
+#[allow(unused_imports)]
+use verum_ast::literal::Literal;
 #[allow(unused_imports)]
 use verum_ast::decl::{
     FunctionBody, FunctionDecl, FunctionParamKind, ImplDecl, RecordField, TypeDecl, TypeDeclBody,
@@ -620,7 +628,7 @@ impl TypeChecker {
     /// Set current_self_type and synchronize with the unifier's self_type.
     /// This ensures that both ast_to_type resolution and unification properly
     /// handle the Self type within implement blocks.
-    fn set_current_self_type(&mut self, self_type: Maybe<Type>) {
+    pub(super) fn set_current_self_type(&mut self, self_type: Maybe<Type>) {
         match &self_type {
             Maybe::Some(ty) => self.unifier.set_self_type(Some(ty.clone())),
             Maybe::None => self.unifier.set_self_type(None),
@@ -985,7 +993,7 @@ impl TypeChecker {
 
     /// Check if a variable can be used (is fully initialized).
     /// Returns an error if the variable is uninitialized or partially initialized.
-    fn check_variable_initialized(&self, var_name: &Text, span: Span) -> Result<()> {
+    pub(super) fn check_variable_initialized(&self, var_name: &Text, span: Span) -> Result<()> {
         use crate::context::InitState;
 
         match self.init_tracker.get_state(var_name) {
@@ -1027,7 +1035,7 @@ impl TypeChecker {
     }
 
     /// Check if a specific field of a variable is initialized.
-    fn check_field_initialized(&self, var_name: &Text, field: &Text, span: Span) -> Result<()> {
+    pub(super) fn check_field_initialized(&self, var_name: &Text, field: &Text, span: Span) -> Result<()> {
         if !self.init_tracker.is_field_initialized(var_name, field) {
             Err(TypeError::UninitializedField {
                 var: var_name.clone(),
@@ -1045,7 +1053,7 @@ impl TypeChecker {
     /// When accessing a field that has an affine type, this marks the field as moved.
     /// After a field is moved, the parent struct cannot be used as a whole.
     /// Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
-    fn track_affine_field_access(
+    pub(super) fn track_affine_field_access(
         &mut self,
         var_name: &str,
         field_name: &str,
@@ -1062,7 +1070,7 @@ impl TypeChecker {
     }
 
     /// Check if a specific index of a variable (tuple or array) is initialized.
-    fn check_index_initialized(
+    pub(super) fn check_index_initialized(
         &self,
         var_name: &Text,
         index: usize,
@@ -1175,7 +1183,7 @@ impl TypeChecker {
     ///
 
     /// Spec: L0-critical/memory-safety/uninitialized
-    fn track_pattern_assignment(
+    pub(super) fn track_pattern_assignment(
         &mut self,
         pattern: &verum_ast::pattern::Pattern,
         _span: verum_ast::span::Span,
@@ -1405,7 +1413,7 @@ impl TypeChecker {
     }
 
     /// Try to extract a constant index from an expression.
-    fn try_extract_const_index(&mut self, expr: &Expr) -> Option<i64> {
+    pub(super) fn try_extract_const_index(&mut self, expr: &Expr) -> Option<i64> {
         use verum_ast::expr::ExprKind;
         use verum_ast::literal::LiteralKind;
 
@@ -1447,7 +1455,7 @@ impl TypeChecker {
 
     /// Get the static size of an array type if known.
     /// Returns None for dynamically-sized arrays, slices, or non-array types.
-    fn get_array_size(ty: &Type) -> Option<u64> {
+    pub(super) fn get_array_size(ty: &Type) -> Option<u64> {
         match ty {
             Type::Array {
                 size: Some(size), ..
@@ -1465,7 +1473,7 @@ impl TypeChecker {
 
     /// This is like synth_expr but skips the full initialization check for simple paths,
     /// since field/index access checks the specific field/index instead.
-    fn synth_expr_for_field_access(&mut self, expr: &Expr) -> Result<InferResult> {
+    pub(super) fn synth_expr_for_field_access(&mut self, expr: &Expr) -> Result<InferResult> {
         use verum_ast::expr::ExprKind;
 
         // For simple paths, skip the full initialization check - the caller handles field-specific checks
@@ -1526,7 +1534,7 @@ impl TypeChecker {
     /// cascade MUST NOT unwrap `Mutex<T>` to `T` when the user
     /// actually called `mutex.lock()`, so we stop the chain as soon
     /// as `ty` itself owns the method.
-    fn type_or_dyn_has_method(&self, ty: &Type, method_name: &Text) -> bool {
+    pub(super) fn type_or_dyn_has_method(&self, ty: &Type, method_name: &Text) -> bool {
         // Peel a single reference layer so `&dyn Tracer` and `&T` are
         // treated as their underlying type for the purposes of method
         // lookup. This keeps the auto-deref cascade halt-condition in
@@ -1954,7 +1962,7 @@ impl TypeChecker {
 
     /// * `callee_name` - Name of the function being called
     /// * `span` - Source location of the call
-    fn record_call_site(&mut self, callee_name: impl Into<Text>, span: Span) {
+    pub(super) fn record_call_site(&mut self, callee_name: impl Into<Text>, span: Span) {
         use crate::context_check::CallSiteInfo;
 
         let callee_name = callee_name.into();
@@ -1985,7 +1993,7 @@ impl TypeChecker {
     ///
 
     /// `Ok(())` if the call is valid, or an error if it violates negative constraints
-    fn check_negative_context_violation(&self, callee_name: &str, span: Span) -> Result<()> {
+    pub(super) fn check_negative_context_violation(&self, callee_name: &str, span: Span) -> Result<()> {
         // Check if caller has any negative context constraints
         if let Maybe::Some(ref caller_contexts) = self.current_function_contexts {
             // Check if any excluded contexts would be violated by calling this function
@@ -2530,7 +2538,7 @@ impl TypeChecker {
 
     /// Returns Some(name) if the expression is a simple identifier,
     /// or None for complex expressions like method calls or field access.
-    fn extract_simple_var_name(&self, expr: &Expr) -> Maybe<verum_common::Text> {
+    pub(super) fn extract_simple_var_name(&self, expr: &Expr) -> Maybe<verum_common::Text> {
         match &expr.kind {
             ExprKind::Path(path) => {
                 if path.segments.len() == 1 {
@@ -2550,7 +2558,7 @@ impl TypeChecker {
 
     /// When matching a pattern, we learn constraints about the scrutinee.
     /// For example, matching `Some(x)` tells us the value is Some variant.
-    fn add_pattern_evidence(
+    pub(super) fn add_pattern_evidence(
         &mut self,
         pattern: &verum_ast::pattern::Pattern,
         var_name: verum_common::Text,
@@ -2668,7 +2676,7 @@ impl TypeChecker {
 
     /// When entering an if-then branch with condition `x > 0`, this method
     /// narrows the type of `x` from `Int` to `Int{it > 0}` in the current scope.
-    fn narrow_variable_types_from_condition(&mut self, condition: &Expr, negated: bool) {
+    pub(super) fn narrow_variable_types_from_condition(&mut self, condition: &Expr, negated: bool) {
         if negated {
             let neg = crate::refinement_evidence::PathCondition::negate_expr_static(condition);
             self.narrow_variable_types_impl(&neg);
@@ -2872,7 +2880,7 @@ impl TypeChecker {
     // ==================== Existential Type Verification ====================
 
     /// Verify that a concrete type satisfies protocol bounds of an existential type variable.
-    fn verify_existential_return_bounds(
+    pub(super) fn verify_existential_return_bounds(
         &self,
         concrete_ty: &Type,
         existential_var: &TypeVar,
@@ -3257,7 +3265,7 @@ impl TypeChecker {
 
     /// Division by zero produces the original expression (no panic).
     /// Negation of `Int::MIN` is also preserved as-is to avoid overflow.
-    fn const_fold_expr(expr: &Expr) -> Expr {
+    pub(super) fn const_fold_expr(expr: &Expr) -> Expr {
         use verum_ast::expr::{BinOp, UnOp};
         use verum_ast::literal::{Literal, LiteralKind};
 
@@ -3399,7 +3407,7 @@ impl TypeChecker {
 
     /// Check if a type contains any TypeApp nodes (GAT/HKT applications).
     /// Used to decide whether normalize_type is needed to reduce projections.
-    fn contains_type_app(ty: &Type) -> bool {
+    pub(super) fn contains_type_app(ty: &Type) -> bool {
         match ty {
             Type::TypeApp { .. } => true,
             Type::Tuple(tys) => tys.iter().any(Self::contains_type_app),
@@ -3452,7 +3460,7 @@ impl TypeChecker {
     /// Check if a type mentions a specific named type anywhere in its structure.
     /// Used to detect recursive type definitions to prevent exponential expansion
     /// during normalization.
-    fn type_mentions_name(ty: &Type, name: &str) -> bool {
+    pub(super) fn type_mentions_name(ty: &Type, name: &str) -> bool {
         match ty {
             Type::Named { path, args } => {
                 let type_name = path
@@ -3499,7 +3507,7 @@ impl TypeChecker {
 
     /// Collect free type variables from a type, in order of first appearance.
     /// Used for positional substitution in TypeApp with Variant constructors.
-    fn collect_free_vars_ordered(ty: &Type) -> Vec<TypeVar> {
+    pub(super) fn collect_free_vars_ordered(ty: &Type) -> Vec<TypeVar> {
         let mut vars = Vec::new();
         let mut seen = std::collections::HashSet::new();
         Self::collect_free_vars_inner(ty, &mut vars, &mut seen);
@@ -3566,7 +3574,7 @@ impl TypeChecker {
     }
 
     /// Check if a type contains unresolved type variables
-    fn has_unresolved_vars(&self, ty: &Type) -> bool {
+    pub(super) fn has_unresolved_vars(&self, ty: &Type) -> bool {
         match ty {
             Type::Var(_) => true,
             Type::Function {
@@ -3673,7 +3681,7 @@ impl TypeChecker {
     /// This method verifies the constraint and returns an error if verification fails
     /// and the constraint is proven invalid. Unknown results are treated as tentatively
     /// valid (gradual verification) - they will be checked at runtime.
-    fn verify_dependent_type_constraint(
+    pub(super) fn verify_dependent_type_constraint(
         &mut self,
         constraint: &crate::dependent_integration::DependentTypeConstraint,
         span: Span,
@@ -3736,7 +3744,7 @@ impl TypeChecker {
     /// - GenericArg::Lifetime(lt) - Convert to path expression referencing the lifetime
     /// - GenericArg::Binding(binding) - Recursively convert the associated type
     /// - None - Generate fresh type variable expression for inference
-    fn type_arg_to_expr(
+    pub(super) fn type_arg_to_expr(
         &self,
         arg: Option<&verum_ast::ty::GenericArg>,
         span: Span,
@@ -3842,7 +3850,7 @@ impl TypeChecker {
     /// This is stdlib-agnostic: the base type is derived from the `ConstValue`
     /// kind through its built-in primitive mapping, never by inspecting type
     /// names or hardcoding stdlib knowledge.
-    fn eval_const_arg(&self, expr: &verum_ast::expr::Expr) -> Option<Type> {
+    pub(super) fn eval_const_arg(&self, expr: &verum_ast::expr::Expr) -> Option<Type> {
         let mut evaluator = crate::const_eval::ConstEvaluator::new();
         let value = evaluator.eval(expr).ok()?;
         let base_ty = match &value {
@@ -3893,7 +3901,7 @@ impl TypeChecker {
     /// The symbolic value is distinct from concrete values:
     /// - Symbolic: Used for type-level well-formedness verification
     /// - Concrete: Used when actual values are assigned to Fin<n> variables
-    fn create_symbolic_fin_value(&self, span: Span) -> verum_ast::expr::Expr {
+    pub(super) fn create_symbolic_fin_value(&self, span: Span) -> verum_ast::expr::Expr {
         use std::sync::atomic::{AtomicU64, Ordering};
         use verum_ast::expr::{Expr, ExprKind};
         use verum_ast::ty::{Ident, Path, PathSegment};
@@ -7916,7 +7924,7 @@ impl TypeChecker {
 
     /// This enables order-independent function resolution within a file by consulting
     /// the environment where all function signatures are pre-registered.
-    fn lookup_function_in_module(&self, name: &str) -> Maybe<TypeScheme> {
+    pub(super) fn lookup_function_in_module(&self, name: &str) -> Maybe<TypeScheme> {
         // First check the type environment where register_function_signature() stores signatures
         // This enables order-independent function resolution within a file
         if let Some(scheme) = self.ctx.env.lookup(name) {
@@ -7975,7 +7983,7 @@ impl TypeChecker {
     }
 
     /// Add a diagnostic (warning, note, etc.)
-    fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
+    pub(super) fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
     }
 
@@ -8009,7 +8017,7 @@ impl TypeChecker {
     }
 
     /// Get the name of a type (for resolving Self to the actual type name)
-    fn type_to_name(&self, ty: &Type) -> Text {
+    pub(super) fn type_to_name(&self, ty: &Type) -> Text {
         match ty {
             Type::Named { path, .. } => {
                 // Get the last segment of the path as the type name
@@ -8030,7 +8038,7 @@ impl TypeChecker {
 
     /// Extract record fields from a type (for struct spread syntax).
     /// Handles Type::Record directly and Type::Named by looking up the struct definition.
-    fn extract_record_fields(
+    pub(super) fn extract_record_fields(
         &self,
         ty: &Type,
     ) -> Result<indexmap::IndexMap<verum_common::Text, Type>> {
@@ -8868,7 +8876,7 @@ impl TypeChecker {
     ///
 
     /// `error_type` is the type of the error being recovered from (the `E` in `Result<T, E>`).
-    fn infer_recover_body(
+    pub(super) fn infer_recover_body(
         &mut self,
         recover: &verum_ast::expr::RecoverBody,
         error_type: &Type,
@@ -8923,7 +8931,7 @@ impl TypeChecker {
     /// Extract the error type from the enclosing function's return type.
     /// If the function returns Result<T, E>, returns Some(E).
     /// Returns None if the function doesn't return a Result type.
-    fn extract_function_error_type(&self) -> Option<Type> {
+    pub(super) fn extract_function_error_type(&self) -> Option<Type> {
         if let Maybe::Some(ref ret_ty) = self.current_function_return_type {
             let resolved = self.unifier.apply(ret_ty);
             // Structural check: Result<T, E> (nominal) or variant { Ok(T), Err(E) }
@@ -8937,7 +8945,7 @@ impl TypeChecker {
     /// Scans the try block expression for Try (?) operators and extracts
     /// the error type from the first Result or Maybe type found.
     /// Returns a fresh type variable if no ? operators are found.
-    fn extract_try_block_error_type(&mut self, try_block: &Expr) -> Result<Type> {
+    pub(super) fn extract_try_block_error_type(&mut self, try_block: &Expr) -> Result<Type> {
         // Find the first ? operator in the expression and extract its error type
         if let Some(error_ty) = self.find_try_operator_error_type(try_block) {
             Ok(error_ty)
@@ -8955,7 +8963,7 @@ impl TypeChecker {
 
     /// Design: Uses protocol-based resolution exclusively - no hardcoded type names.
     /// The Try protocol defines: type Output; type Residual;
-    fn extract_try_output_types(&self, ty: &Type) -> (Type, Type) {
+    pub(super) fn extract_try_output_types(&self, ty: &Type) -> (Type, Type) {
         // First resolve any type variables
         let resolved = self.unifier.apply(ty);
 
@@ -8982,7 +8990,7 @@ impl TypeChecker {
     /// Check if a type is Try-compatible using PROTOCOL resolution.
     /// A type is Try-compatible if it implements the Try protocol.
     /// This is stdlib-agnostic: uses protocol implementation lookup.
-    fn is_try_compatible_type(&self, ty: &Type) -> bool {
+    pub(super) fn is_try_compatible_type(&self, ty: &Type) -> bool {
         let resolved = self.unifier.apply(ty);
 
         // Type variables are treated as potentially Try-compatible
@@ -9003,7 +9011,7 @@ impl TypeChecker {
     /// Wrap a value type in a success variant that matches the expected type's structure.
     /// Uses the expected type's variant structure to construct the appropriate wrapper.
     /// This preserves the structural form of the expected type.
-    fn wrap_in_success_type(&self, value_ty: &Type, expected: &Type, error_ty: Type) -> Type {
+    pub(super) fn wrap_in_success_type(&self, value_ty: &Type, expected: &Type, error_ty: Type) -> Type {
         self.wrap_in_success_type_impl(value_ty, expected, error_ty, 0)
     }
 
@@ -9080,7 +9088,7 @@ impl TypeChecker {
     /// Try to expand a type alias to its underlying definition.
     /// Returns None if the type cannot be expanded (not an alias or definition not found).
     /// Uses cycle detection to prevent infinite expansion of self-referential type aliases.
-    fn expand_type_alias(&self, ty: &Type) -> Option<Type> {
+    pub(super) fn expand_type_alias(&self, ty: &Type) -> Option<Type> {
         match ty {
             Type::Generic { name, args } => {
                 // Cycle detection: if we're already expanding this type, stop
@@ -9417,7 +9425,7 @@ impl TypeChecker {
     }
 
     /// Recursively search an expression for a Try (?) operator and extract its error type.
-    fn find_try_operator_error_type(&mut self, expr: &Expr) -> Option<Type> {
+    pub(super) fn find_try_operator_error_type(&mut self, expr: &Expr) -> Option<Type> {
         use verum_ast::expr::ExprKind;
         use verum_ast::stmt::StmtKind;
 
@@ -10147,7 +10155,7 @@ impl TypeChecker {
 
     /// This is the version for iterative inference where we have types, not expressions.
     /// Returns Some(output_type) if a matching protocol implementation is found.
-    fn try_operator_protocol_with_types(
+    pub(super) fn try_operator_protocol_with_types(
         &mut self,
         left_ty: &Type,
         right_ty: &Type,
@@ -10202,7 +10210,7 @@ impl TypeChecker {
     }
 
     /// Check if two types are compatible (for protocol matching)
-    fn types_compatible(&self, ty1: &Type, ty2: &Type) -> bool {
+    pub(super) fn types_compatible(&self, ty1: &Type, ty2: &Type) -> bool {
         // Pre-check for method disambiguation: reject when CERTAINLY incompatible,
         // accept when uncertain (let real type checker decide).
         match (ty1, ty2) {
@@ -10296,7 +10304,7 @@ impl TypeChecker {
     /// ARCHITECTURAL RULE: This function MUST NOT contain hardcoded knowledge
     /// of stdlib types like Duration, Time, Text, etc. All operator behavior
     /// is discovered through protocol implementations.
-    fn infer_binop(
+    pub(super) fn infer_binop(
         &mut self,
         op: BinOp,
         left: &Expr,
@@ -10736,7 +10744,7 @@ impl TypeChecker {
     }
 
     /// Infer type for unary operation.
-    fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
+    pub(super) fn infer_unop(&mut self, op: UnOp, expr: &Expr, _span: Span) -> Result<InferResult> {
         use UnOp::*;
 
         match op {
@@ -11360,7 +11368,7 @@ impl TypeChecker {
     /// - `container.field` -> Some("container")
     /// - `a.b.c` -> Some("a") (extracts root receiver)
     /// - `(expr).field` -> None (complex expressions not tracked)
-    fn extract_receiver_name(&self, receiver: &Expr) -> Option<Text> {
+    pub(super) fn extract_receiver_name(&self, receiver: &Expr) -> Option<Text> {
         match &receiver.kind {
             ExprKind::Path(path) => {
                 // Simple variable: container.field
@@ -11387,7 +11395,7 @@ impl TypeChecker {
     /// Extract implicit type parameters from an AST type.
     /// For types like `fn(I.Item) -> U`, finds uppercase identifiers that aren't
     /// already registered as type variables (like `U`) and registers them.
-    fn extract_implicit_type_params_from_type(
+    pub(super) fn extract_implicit_type_params_from_type(
         &mut self,
         ty: &verum_ast::ty::Type,
         type_param_names: &mut List<Text>,
@@ -11548,7 +11556,7 @@ impl TypeChecker {
     /// - `T.max` -> T (maximum value, only for numeric types)
     /// - `T.bits` -> Int (bit width, only for sized types)
     /// - `T.name` -> Text (type name as string)
-    fn infer_type_property(
+    pub(super) fn infer_type_property(
         &mut self,
         ty: &verum_ast::ty::Type,
         property: &TypeProperty,
@@ -11645,7 +11653,7 @@ impl TypeChecker {
     /// Coerce float types: when one is Float and the other is Float64/Float32,
     /// return the sized type (Float64/Float32). This enables mixing float literals
     /// (which default to Float) with sized float variables.
-    fn coerce_float_types(&self, left: &Type, right: &Type) -> Option<Type> {
+    pub(super) fn coerce_float_types(&self, left: &Type, right: &Type) -> Option<Type> {
         let left_name = self.get_type_name(left);
         let right_name = self.get_type_name(right);
 
@@ -11673,7 +11681,7 @@ impl TypeChecker {
 
     /// Built-in dereferenceable types (Heap<T>, Shared<T>) are handled here
     /// as well as user-defined types implementing Ref<T>.
-    fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
+    pub(super) fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
         // Protocol-based deref: query Ref<T> protocol implementations.
         // No hardcoded type names — all dereferenceable types must implement Ref<T>.
         self.find_ref_protocol_target(ty)
@@ -11723,7 +11731,7 @@ impl TypeChecker {
     ///
 
     /// Example: `T: Clone + Display` -> [ProtocolBound(Clone), ProtocolBound(Display)]
-    fn convert_type_bounds_to_protocol_bounds(
+    pub(super) fn convert_type_bounds_to_protocol_bounds(
         &mut self,
         bounds: &[verum_ast::ty::TypeBound],
     ) -> Result<List<crate::protocol::ProtocolBound>> {
@@ -11813,7 +11821,7 @@ impl TypeChecker {
 
     /// # Returns
     /// A list of Types representing direct type bounds (function types, etc.)
-    fn extract_type_bounds_from_ast(&mut self, bounds: &[verum_ast::ty::TypeBound]) -> List<Type> {
+    pub(super) fn extract_type_bounds_from_ast(&mut self, bounds: &[verum_ast::ty::TypeBound]) -> List<Type> {
         let mut type_bounds = List::new();
 
         for bound in bounds {
@@ -11869,7 +11877,7 @@ impl TypeChecker {
     /// - `<T>` -> TypeParam { name: "T", bounds: [], default: None }
     /// - `<T: Clone>` -> TypeParam { name: "T", bounds: [Clone], default: None }
     /// - `<T = Int>` -> TypeParam { name: "T", bounds: [], default: Some(Int) }
-    fn convert_generic_params_to_type_params(
+    pub(super) fn convert_generic_params_to_type_params(
         &mut self,
         generics: &[verum_ast::ty::GenericParam],
     ) -> List<crate::protocol::TypeParam> {
