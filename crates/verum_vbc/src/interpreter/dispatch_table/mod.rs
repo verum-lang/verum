@@ -808,7 +808,19 @@ pub(crate) fn call_closure_sync(
 }
 
 /// Execute a function by FunctionId synchronously, returning its result.
-fn call_function_sync(
+///
+/// Core primitive for nested execution: spawned async tasks
+/// (`execute_pending_task`), method-dispatch trampolines (e.g. the
+/// `Result.map(|x| f(x))` path), and the cubical-stack
+/// `transp` evaluator all funnel through this helper. Uses
+/// `try_push_frame` to surface register-file overflow as a typed
+/// `StackOverflow` error instead of panicking — adversarial bytecode
+/// with deep recursion gets a clean error path. The historical
+/// duplicate at `handlers/method_dispatch.rs::call_function_sync`
+/// used the panic-on-overflow `push_frame` and was deleted in tandem
+/// with the consolidation of `call_closure_sync` / `alloc_list_from_values`
+/// / array helpers (commit 4fcff3b7c).
+pub(crate) fn call_function_sync(
     state: &mut InterpreterState,
     func_id: FunctionId,
     args: &[Value],

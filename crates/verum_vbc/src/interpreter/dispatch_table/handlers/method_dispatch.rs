@@ -35,7 +35,7 @@ use super::debug::format_value_for_print;
 
 // Import helper functions that remain in dispatch_table/mod.rs
 use super::super::{
-    alloc_list_from_values, call_closure_sync, deep_value_eq,
+    alloc_list_from_values, call_closure_sync, call_function_sync, deep_value_eq,
     dispatch_loop_table_with_entry_depth, get_array_element, get_array_length, value_eq,
     value_hash,
 };
@@ -1757,6 +1757,33 @@ pub(in super::super) fn handle_call_method(
     } else {
         "<unknown-tag>"
     };
+    if std::env::var("VERUM_DBG_DISPATCH").is_ok() {
+        eprintln!(
+            "[DBG] method '{}' bare='{}' suffix='{}' qualified={} on receiver kind {}",
+            method_name, bare_method_name, method_suffix, is_already_qualified, receiver_kind
+        );
+        if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            if !ptr.is_null() {
+                let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                eprintln!("[DBG] receiver type_id={}", header.type_id.0);
+            }
+        }
+        let mut hits: Vec<String> = Vec::new();
+        for func in &state.module.functions {
+            let n = state.module.strings.get(func.name).unwrap_or("");
+            if n.contains(bare_method_name.as_str()) {
+                hits.push(format!(
+                    "{} (id={}, params={}, parent={:?})",
+                    n,
+                    func.id.0,
+                    func.params.len(),
+                    func.parent_type
+                ));
+            }
+        }
+        eprintln!("[DBG] candidates: {:#?}", hits);
+    }
     Err(InterpreterError::Panic {
         message: format!(
             "method '{}' not found on receiver of runtime kind `{}`. \
@@ -6086,53 +6113,17 @@ pub(super) fn dispatch_primitive_method(
 // definitions in `dispatch_table/mod.rs`) — same drift-collapse
 // pattern as the `deep_value_eq` consolidation in commit 91672599e.
 
-/// Execute a function by FunctionId synchronously, returning its result.
-///
-
-/// This is the core primitive for async task execution: Spawn uses this to
-/// eagerly evaluate spawned functions. The function runs to completion in a
-/// nested dispatch loop and the return value is captured.
-///
-
-/// # Arguments
-/// * `state` - Interpreter state
-/// * `func_id` - Function to call
-/// * `args` - Argument values
-///
-
-/// # Returns
-/// The function's return value.
-pub(super) fn call_function_sync(
-    state: &mut InterpreterState,
-    func_id: FunctionId,
-    args: &[Value],
-) -> InterpreterResult<Value> {
-    let func = state
-        .module
-        .get_function(func_id)
-        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
-
-    let reg_count = func.register_count;
-    let return_pc = state.pc();
-    let entry_depth = state.call_stack.depth();
-
-    // Push frame with Reg(0) as dummy dst
-    let new_base = state
-        .call_stack
-        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state.registers.push_frame(reg_count);
-
-    // Copy arguments
-    for (i, val) in args.iter().enumerate() {
-        state.registers.set(new_base, Reg(i as u16), *val);
-    }
-
-    // Start at function entry
-    state.set_pc(0);
-
-    // Run nested dispatch loop — returns when the function returns
-    dispatch_loop_table_with_entry_depth(state, entry_depth)
-}
+// `call_function_sync` formerly had a parallel local definition here
+// that diverged on register-overflow handling: this one used
+// `push_frame` (panics) while the canonical
+// `super::super::call_function_sync` uses `try_push_frame` and
+// surfaces `InterpreterError::StackOverflow`. Same divergence class
+// as the `call_closure_sync` duplication closed earlier; both are
+// now imported from `super::super::`.
+//
+// `cubical.rs` (which previously imported via
+// `super::method_dispatch::call_function_sync`) needs to update its
+// import to `super::super::call_function_sync` after this commit.
 
 // `alloc_list_from_values` formerly had a parallel local definition
 // here that was bit-identical to `super::super::alloc_list_from_values`

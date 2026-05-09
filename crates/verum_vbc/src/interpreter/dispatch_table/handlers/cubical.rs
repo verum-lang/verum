@@ -18,9 +18,8 @@
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
-use super::super::call_closure_sync;
+use super::super::{call_closure_sync, call_function_sync};
 use super::bytecode_io::*;
-use super::method_dispatch::call_function_sync;
 use crate::instruction::{CubicalSubOpcode, Opcode};
 use crate::value::Value;
 
