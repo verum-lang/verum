@@ -66,136 +66,214 @@ pub enum Profile {
     Research,
 }
 
+// =========================================================================
+// Profile metadata — single source of truth for the 3 variants.
+//
+// Pre-refactor Profile carried seven parallel match-arm accessors —
+// `name`, `description`, `is_vbc_interpretable`, `requires_aot`,
+// `allows_embedded`, `default_execution_tier`, `enabled_features`
+// — each independently spelling out per-variant data.  Cross-cutting
+// invariants (e.g. `is_vbc_interpretable ⊕ requires_aot`,
+// `allows_embedded ⇒ requires_aot`) lived implicitly across the
+// independent matches and could drift on rename.
+//
+// Latent performance defect: `enabled_features()` constructed a
+// fresh `Set<Feature>` on every call by pushing 8-11 entries, and
+// `is_feature_enabled(f)` in turn called `enabled_features()` —
+// every feature lookup allocated.  Hot consumers (e.g. the
+// `phases::ffi_boundary` audit pass) hit this on every FFI
+// declaration.  After consolidation, `enabled_features` returns a
+// const `&'static [Feature]` slice and `is_feature_enabled`
+// becomes a slice scan — zero allocation.
+//
+// Same drift-collapse pattern as the verum_vbc sub-opcode meta()
+// series + verum_compiler LintMeta + verum_ast BinOpMeta.
+// =========================================================================
+
+/// Co-located metadata for one `Profile` variant.
+#[derive(Debug, Clone, Copy)]
+pub struct ProfileMeta {
+    /// Display name (`"Application"`, `"Systems"`, `"Research"`).
+    pub name: &'static str,
+    /// One-line description for `--help` output.
+    pub description: &'static str,
+    /// Whether code in this profile can run on the Tier-0
+    /// VBC interpreter.  Mutually exclusive with `requires_aot`.
+    pub is_vbc_interpretable: bool,
+    /// Whether code in this profile must be AOT-compiled.
+    /// Mirror of `!is_vbc_interpretable` (pinned by drift test).
+    pub requires_aot: bool,
+    /// Whether this profile allows embedded/bare-metal targets.
+    /// Implies `requires_aot` (pinned by drift test).
+    pub allows_embedded: bool,
+    /// Default execution tier for this profile.  Consistent
+    /// with `is_vbc_interpretable` / `requires_aot` (pinned).
+    pub default_execution_tier: ExecutionTier,
+    /// Static slice of features enabled by this profile.
+    /// Pre-computed at compile time; zero-allocation membership
+    /// check via slice scan.
+    pub enabled_features: &'static [Feature],
+}
+
+// --- Per-profile feature sets, defined once as static slices ---
+//
+// Co-locating these constants here (vs inlining at each match arm)
+// makes them grep-able and lets the meta() table stay narrow.  Each
+// slice is `&'static [Feature]` so `is_feature_enabled` does a
+// const-time linear scan with no allocation.
+
+/// Application profile: base + safety triad.
+const APPLICATION_FEATURES: &[Feature] = &[
+    Feature::BasicTypes, Feature::Functions, Feature::Generics, Feature::Traits, Feature::Async,
+    Feature::RefinementTypes, Feature::ContextSystem, Feature::Cbgr,
+];
+
+/// Systems profile: base + safety triad + systems triad.
+const SYSTEMS_FEATURES: &[Feature] = &[
+    Feature::BasicTypes, Feature::Functions, Feature::Generics, Feature::Traits, Feature::Async,
+    Feature::RefinementTypes, Feature::ContextSystem, Feature::Cbgr,
+    Feature::UnsafeCode, Feature::InlineAssembly, Feature::RawPointers,
+];
+
+/// Research profile: base + safety triad + research triad.
+/// Note: Verum does NOT support algebraic effects by design — the
+/// ContextSystem is the dependency-injection mechanism instead.
+const RESEARCH_FEATURES: &[Feature] = &[
+    Feature::BasicTypes, Feature::Functions, Feature::Generics, Feature::Traits, Feature::Async,
+    Feature::RefinementTypes, Feature::ContextSystem, Feature::Cbgr,
+    Feature::DependentTypes, Feature::FormalProofs, Feature::LinearTypes,
+];
+
 impl Profile {
+    /// All variants in stable order — canonical iteration source
+    /// for drift-pin tests.
+    pub const ALL: &'static [Self] = &[
+        Self::Application,
+        Self::Systems,
+        Self::Research,
+    ];
+
+    /// Returns co-located metadata for this profile.  Single
+    /// source of truth for `name` / `description` / interpretability
+    /// flags / default tier / enabled feature set.
+    pub const fn meta(self) -> ProfileMeta {
+        match self {
+            Self::Application => ProfileMeta {
+                name: "Application",
+                description: "Safe, productive development with full safety checks",
+                is_vbc_interpretable: true,
+                requires_aot: false,
+                allows_embedded: false,
+                default_execution_tier: ExecutionTier::Interpreter,
+                enabled_features: APPLICATION_FEATURES,
+            },
+            Self::Systems => ProfileMeta {
+                // Systems profile cannot be interpreted: it may
+                // use raw pointers / unsafe ops not supported by
+                // the interpreter and is intended for embedded /
+                // OS-kernel development where interpretation is
+                // not meaningful.  VBC serves only as a portable
+                // IR for cross-compilation in this profile.
+                name: "Systems",
+                description: "Performance-critical code with optional unsafe (AOT only)",
+                is_vbc_interpretable: false,
+                requires_aot: true,
+                allows_embedded: true,
+                default_execution_tier: ExecutionTier::Aot,
+                enabled_features: SYSTEMS_FEATURES,
+            },
+            Self::Research => ProfileMeta {
+                name: "Research",
+                description: "Experimental features and formal verification",
+                is_vbc_interpretable: true,
+                requires_aot: false,
+                allows_embedded: false,
+                default_execution_tier: ExecutionTier::Interpreter,
+                enabled_features: RESEARCH_FEATURES,
+            },
+        }
+    }
+
     /// Get the default profile
     pub fn default() -> Self {
         Profile::Application
     }
 
     /// Get profile name
-    pub fn name(&self) -> &str {
-        match self {
-            Profile::Application => "Application",
-            Profile::Systems => "Systems",
-            Profile::Research => "Research",
-        }
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Get profile description
-    pub fn description(&self) -> &str {
-        match self {
-            Profile::Application => "Safe, productive development with full safety checks",
-            Profile::Systems => "Performance-critical code with optional unsafe (AOT only)",
-            Profile::Research => "Experimental features and formal verification",
-        }
+    #[inline]
+    pub const fn description(&self) -> &'static str {
+        self.meta().description
     }
 
     /// Check if this profile allows VBC interpretation.
     ///
-
-    /// # VBC Interpretability Rules
-    ///
-
+    /// VBC Interpretability Rules:
     /// - **Application**: VBC-interpretable (Tier 0 execution supported)
     /// - **Systems**: NOT interpretable (VBC is intermediate IR only, AOT required)
     /// - **Research**: VBC-interpretable (Tier 0 execution supported)
-    ///
-
-    /// Systems profile code cannot be interpreted because:
-    /// 1. It may use raw pointers and unsafe operations not supported by interpreter
-    /// 2. It may require direct hardware access (memory-mapped I/O, interrupts)
-    /// 3. It is intended for embedded/OS kernel development where interpretation
-    ///  is not meaningful
-    /// 4. VBC serves only as a portable IR for cross-compilation, not execution
-    pub fn is_vbc_interpretable(&self) -> bool {
-        match self {
-            Profile::Application => true,
-            Profile::Systems => false, // VBC is intermediate IR only
-            Profile::Research => true,
-        }
+    #[inline]
+    pub const fn is_vbc_interpretable(&self) -> bool {
+        self.meta().is_vbc_interpretable
     }
 
     /// Check if this profile requires AOT compilation for execution.
     ///
-
     /// Systems profile MUST use AOT compilation - VBC is only an intermediate
     /// representation for portable cross-compilation.
-    pub fn requires_aot(&self) -> bool {
-        match self {
-            Profile::Application => false,
-            Profile::Systems => true, // Always requires AOT
-            Profile::Research => false,
-        }
+    #[inline]
+    pub const fn requires_aot(&self) -> bool {
+        self.meta().requires_aot
     }
 
     /// Check if this profile allows embedded/bare-metal targets.
     ///
-
     /// Only Systems profile is appropriate for embedded development.
-    pub fn allows_embedded(&self) -> bool {
-        match self {
-            Profile::Application => false,
-            Profile::Systems => true,
-            Profile::Research => false,
-        }
+    #[inline]
+    pub const fn allows_embedded(&self) -> bool {
+        self.meta().allows_embedded
     }
 
     /// Get the default execution tier for this profile.
     ///
-
     /// - Application/Research: Tier 0 (Interpreter) for fast iteration
     /// - Systems: Tier 1 (AOT) required - no interpreter support
-    pub fn default_execution_tier(&self) -> ExecutionTier {
-        match self {
-            Profile::Application => ExecutionTier::Interpreter,
-            Profile::Systems => ExecutionTier::Aot,
-            Profile::Research => ExecutionTier::Interpreter,
-        }
+    #[inline]
+    pub const fn default_execution_tier(&self) -> ExecutionTier {
+        self.meta().default_execution_tier
     }
 
-    /// Get enabled features for this profile
+    /// Get enabled features for this profile.
+    ///
+    /// Returns a `Set<Feature>` for back-compat; the underlying
+    /// data is a `&'static [Feature]` slice (see
+    /// `enabled_features_slice` for the zero-allocation accessor).
     pub fn enabled_features(&self) -> Set<Feature> {
-        let mut features = Set::new();
-
-        // Base features (all profiles)
-        features.insert(Feature::BasicTypes);
-        features.insert(Feature::Functions);
-        features.insert(Feature::Generics);
-        features.insert(Feature::Traits);
-        features.insert(Feature::Async);
-
-        match self {
-            Profile::Application => {
-                features.insert(Feature::RefinementTypes);
-                features.insert(Feature::ContextSystem);
-                features.insert(Feature::Cbgr);
-            }
-            Profile::Systems => {
-                features.insert(Feature::RefinementTypes);
-                features.insert(Feature::ContextSystem);
-                features.insert(Feature::Cbgr);
-                features.insert(Feature::UnsafeCode);
-                features.insert(Feature::InlineAssembly);
-                features.insert(Feature::RawPointers);
-            }
-            Profile::Research => {
-                features.insert(Feature::RefinementTypes);
-                features.insert(Feature::ContextSystem);
-                features.insert(Feature::Cbgr);
-                features.insert(Feature::DependentTypes);
-                features.insert(Feature::FormalProofs);
-                features.insert(Feature::LinearTypes);
-                // Note: Verum does NOT support algebraic effects by design.
-                // Use ContextSystem for dependency injection instead.
-            }
-        }
-
-        features
+        self.meta().enabled_features.iter().copied().collect()
     }
 
-    /// Check if a feature is enabled
+    /// Get enabled features as a static slice — zero-allocation
+    /// accessor for hot-path consumers.  Preserves the canonical
+    /// declaration order from the per-profile feature constants.
+    #[inline]
+    pub const fn enabled_features_slice(&self) -> &'static [Feature] {
+        self.meta().enabled_features
+    }
+
+    /// Check if a feature is enabled.
+    ///
+    /// Pre-refactor this method allocated a `Set<Feature>` per
+    /// call by invoking `enabled_features()`.  Now it scans the
+    /// static feature slice — zero allocation, O(n=14) worst
+    /// case but n is bounded and the slice is L1-cache resident.
+    #[inline]
     pub fn is_feature_enabled(&self, feature: Feature) -> bool {
-        self.enabled_features().contains(&feature)
+        self.meta().enabled_features.contains(&feature)
     }
 }
 
@@ -341,5 +419,175 @@ impl PlatformExt for Platform {
             Platform::WasmWasi | Platform::WasmEmbedded => true, // WASM supports VBC interpretation
             Platform::Embedded => false,
         }
+    }
+}
+
+// =========================================================================
+// Profile meta() drift-pin tests
+//
+// These tests pin the cross-cutting invariants between the seven
+// per-profile fields that the legacy implementation maintained
+// implicitly across independent match statements.
+// =========================================================================
+
+#[cfg(test)]
+mod profile_meta_drift_pins {
+    use super::*;
+
+    #[test]
+    fn profile_count_pinned_at_three() {
+        assert_eq!(Profile::ALL.len(), 3,
+            "Profile variant count drift: expected 3 (Application / Systems / Research)");
+    }
+
+    /// `is_vbc_interpretable` ⊕ `requires_aot` — every profile is
+    /// either interpretable or AOT-required, never both, never
+    /// neither.
+    #[test]
+    fn profile_interpretable_xor_aot_required() {
+        for &p in Profile::ALL {
+            assert_ne!(p.is_vbc_interpretable(), p.requires_aot(),
+                "{:?}: is_vbc_interpretable={} but requires_aot={} — must be mutually exclusive",
+                p, p.is_vbc_interpretable(), p.requires_aot());
+        }
+    }
+
+    /// `allows_embedded` ⇒ `requires_aot` — embedded targets
+    /// cannot use the VBC interpreter.
+    #[test]
+    fn profile_embedded_implies_aot() {
+        for &p in Profile::ALL {
+            if p.allows_embedded() {
+                assert!(p.requires_aot(),
+                    "{:?}: allows_embedded but does not require_aot — embedded targets cannot interpret",
+                    p);
+            }
+        }
+    }
+
+    /// `default_execution_tier` is consistent with
+    /// `is_vbc_interpretable` / `requires_aot`.
+    #[test]
+    fn profile_default_tier_consistent_with_interpretability() {
+        for &p in Profile::ALL {
+            match p.default_execution_tier() {
+                ExecutionTier::Interpreter => assert!(p.is_vbc_interpretable(),
+                    "{:?}: default tier is Interpreter but is_vbc_interpretable=false", p),
+                ExecutionTier::Aot => assert!(p.requires_aot(),
+                    "{:?}: default tier is Aot but requires_aot=false", p),
+                _ => {}  // Check / other tiers — no specific invariant
+            }
+        }
+    }
+
+    /// Every profile carries the five base features
+    /// (BasicTypes, Functions, Generics, Traits, Async).
+    #[test]
+    fn profile_base_features_present_in_every_profile() {
+        let base = [
+            Feature::BasicTypes,
+            Feature::Functions,
+            Feature::Generics,
+            Feature::Traits,
+            Feature::Async,
+        ];
+        for &p in Profile::ALL {
+            for &f in &base {
+                assert!(p.is_feature_enabled(f),
+                    "{:?}: missing base feature {:?}", p, f);
+            }
+        }
+    }
+
+    /// Every profile carries the safety triad (RefinementTypes,
+    /// ContextSystem, Cbgr).  These are foundational Verum
+    /// features — every profile uses them.
+    #[test]
+    fn profile_safety_triad_present_in_every_profile() {
+        let safety = [
+            Feature::RefinementTypes,
+            Feature::ContextSystem,
+            Feature::Cbgr,
+        ];
+        for &p in Profile::ALL {
+            for &f in &safety {
+                assert!(p.is_feature_enabled(f),
+                    "{:?}: missing safety-triad feature {:?}", p, f);
+            }
+        }
+    }
+
+    /// Systems-specific features are exclusive to Systems profile.
+    #[test]
+    fn profile_systems_features_exclusive() {
+        let systems_only = [
+            Feature::UnsafeCode,
+            Feature::InlineAssembly,
+            Feature::RawPointers,
+        ];
+        for &f in &systems_only {
+            assert!(Profile::Systems.is_feature_enabled(f),
+                "Systems should have {:?}", f);
+            assert!(!Profile::Application.is_feature_enabled(f),
+                "Application should NOT have {:?}", f);
+            assert!(!Profile::Research.is_feature_enabled(f),
+                "Research should NOT have {:?}", f);
+        }
+    }
+
+    /// Research-specific features are exclusive to Research profile.
+    #[test]
+    fn profile_research_features_exclusive() {
+        let research_only = [
+            Feature::DependentTypes,
+            Feature::FormalProofs,
+            Feature::LinearTypes,
+        ];
+        for &f in &research_only {
+            assert!(Profile::Research.is_feature_enabled(f),
+                "Research should have {:?}", f);
+            assert!(!Profile::Application.is_feature_enabled(f),
+                "Application should NOT have {:?}", f);
+            assert!(!Profile::Systems.is_feature_enabled(f),
+                "Systems should NOT have {:?}", f);
+        }
+    }
+
+    /// `enabled_features_slice` returns the same set as
+    /// `enabled_features` (the slow Set<Feature>-allocating
+    /// back-compat accessor).
+    #[test]
+    fn profile_enabled_features_slice_matches_set() {
+        for &p in Profile::ALL {
+            let slice_set: Set<Feature> = p.enabled_features_slice().iter().copied().collect();
+            let alloc_set = p.enabled_features();
+            assert_eq!(slice_set, alloc_set,
+                "{:?}: slice and Set accessors disagree", p);
+        }
+    }
+
+    /// Every profile's name is unique and non-empty.
+    #[test]
+    fn profile_names_unique_and_non_empty() {
+        let mut seen: Vec<&'static str> = Vec::with_capacity(Profile::ALL.len());
+        for &p in Profile::ALL {
+            let n = p.name();
+            assert!(!n.is_empty(), "{:?}: empty name", p);
+            assert!(!seen.contains(&n), "duplicate name {:?}", n);
+            seen.push(n);
+        }
+    }
+
+    /// Pin canonical feature counts per profile.  Bumping these
+    /// asserts is the explicit signal that a feature was added /
+    /// removed from a profile.
+    #[test]
+    fn profile_feature_counts_pinned() {
+        assert_eq!(Profile::Application.enabled_features_slice().len(), 8,
+            "Application: 5 base + 3 safety");
+        assert_eq!(Profile::Systems.enabled_features_slice().len(), 11,
+            "Systems: 5 base + 3 safety + 3 systems");
+        assert_eq!(Profile::Research.enabled_features_slice().len(), 11,
+            "Research: 5 base + 3 safety + 3 research");
     }
 }
