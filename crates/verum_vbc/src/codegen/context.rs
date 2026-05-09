@@ -1887,6 +1887,25 @@ impl CodegenContext {
         self.functions.get(name)
     }
 
+    /// Look up a function by its globally-unique `FunctionId`.
+    ///
+    /// Used by the #91 pre-resolved-static-call fast path: the
+    /// typechecker stamps the resolved id onto the `MethodCall` AST
+    /// node, codegen retrieves the FunctionInfo here without
+    /// re-deriving it through string-based name resolution.
+    ///
+    /// Implementation: linear scan over the function table; the
+    /// fast path runs once per resolved method-call site so the
+    /// O(N) cost is bounded by the call's argument-evaluation work
+    /// already performed.  An id→name reverse-index is a future
+    /// micro-optimisation if profiling shows this on the hot path.
+    pub fn lookup_function_by_id(
+        &self,
+        id: crate::module::FunctionId,
+    ) -> Option<&FunctionInfo> {
+        self.functions.values().find(|f| f.id == id)
+    }
+
     /// Looks up a function by name with arity disambiguation.
     /// When the primary lookup returns a function with wrong arity,
     /// checks for an arity-qualified alternative (name#arity).

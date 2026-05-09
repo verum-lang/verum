@@ -352,6 +352,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         }
     }
 
@@ -361,6 +362,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         }
     }
 
@@ -370,6 +372,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         }
     }
 
@@ -383,6 +386,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         }
     }
 
@@ -442,6 +446,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         assert_eq!(expr_to_smtlib(&e).unwrap(), "(not b)");
     }
@@ -456,6 +461,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         assert_eq!(expr_to_smtlib(&e).unwrap(), "(- x)");
     }
@@ -479,6 +485,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         assert_eq!(expr_to_smtlib(&e).unwrap(), "(f x y)");
     }
@@ -490,6 +497,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         };
         assert_eq!(expr_to_smtlib(&e).unwrap(), "x");
     }
@@ -522,6 +530,7 @@ mod tests {
             span: sp(),
             ref_kind: None,
             check_eliminated: false,
+        resolved_call_target: None,
         }
     }
 

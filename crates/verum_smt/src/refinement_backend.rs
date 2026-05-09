@@ -242,6 +242,7 @@ fn make_bool_literal(value: bool, span: Span) -> Expr {
         span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -258,6 +259,7 @@ fn make_binary_and(left: Expr, right: Expr) -> Expr {
         span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 

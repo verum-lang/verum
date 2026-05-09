@@ -1096,6 +1096,7 @@ fn extract_effects_impl(expr: &Expr, state_vars: &List<Text>, effects: &mut List
                                 },
                                 span: expr.span,
                                 check_eliminated: false,
+        resolved_call_target: None,
                                 ref_kind: None,
                             }
                         };

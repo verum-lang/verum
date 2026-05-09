@@ -7605,6 +7605,7 @@ impl ProofValidator {
             span: expr.span,
             ref_kind: expr.ref_kind,
             check_eliminated: expr.check_eliminated,
+            resolved_call_target: expr.resolved_call_target,
         }
     }
 

@@ -317,6 +317,7 @@ pub fn export_refinement_check(predicate: &Expr, var_name: &str, var_type: &Type
         span: predicate.span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
 
     exporter.assert(&negated);

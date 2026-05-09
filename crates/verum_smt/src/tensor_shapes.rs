@@ -1233,6 +1233,7 @@ impl TensorShapeVerifier {
                 span: verum_ast::Span::default(),
                 ref_kind: None,
                 check_eliminated: false,
+        resolved_call_target: None,
             }
         } else {
             // Return a placeholder for symbolic result
@@ -1249,6 +1250,7 @@ impl TensorShapeVerifier {
                 span: verum_ast::Span::default(),
                 ref_kind: None,
                 check_eliminated: false,
+        resolved_call_target: None,
             }
         }
     }

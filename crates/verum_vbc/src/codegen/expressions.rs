@@ -714,7 +714,12 @@ impl VbcCodegen {
                 method,
                 args,
                 type_args: _,
-            } => self.compile_method_call(receiver, method, args),
+            } => self.compile_method_call(
+                receiver,
+                method,
+                args,
+                expr.resolved_call_target.as_ref(),
+            ),
 
             // === Control Flow ===
             ExprKind::If {
@@ -5130,6 +5135,63 @@ impl VbcCodegen {
         self.compile_variant_constructor_with_tag_named(None, tag, args)
     }
 
+    /// Emit bytecode for a typechecker-resolved dispatch target.
+    ///
+    /// This is the PRE-RESOLVED FAST PATH consumer (#91): the
+    /// typechecker has already determined which `FunctionId` /
+    /// variant tag this method call dispatches to, so codegen can
+    /// emit the direct `Call` / `MakeVariant` instruction in O(1)
+    /// without re-deriving the answer through the legacy 7-step
+    /// name-resolution cascade.
+    ///
+    /// The cascade in `try_resolve_static_method` remains as a
+    /// FALLBACK for AST nodes built by paths that bypass the
+    /// typechecker (lenient/runtime-only modes, parser-only paths,
+    /// etc.).  Every path that DID go through inference lands here.
+    fn compile_resolved_call_target(
+        &mut self,
+        target: &verum_ast::expr::ResolvedCallTarget,
+        args: &verum_common::List<Expr>,
+        method: &verum_ast::Ident,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::expr::ResolvedCallTarget;
+        match *target {
+            ResolvedCallTarget::StaticCall { function_id } => {
+                // The typechecker already verified the function
+                // exists and the arity matches, so we look up the
+                // FunctionInfo by the resolved id, sanity-check it,
+                // and forward to the existing static-call emitter.
+                // O(1) lookup vs the cascade's 7-step probe.
+                let info = self
+                    .ctx
+                    .lookup_function_by_id(crate::module::FunctionId(function_id))
+                    .cloned()
+                    .ok_or_else(|| {
+                        CodegenError::internal(format!(
+                            "resolved-target FunctionId({}) not in registry — typechecker / codegen registry drift",
+                            function_id
+                        ))
+                    })?;
+                self.compile_static_method_call(&info, args)
+            }
+            ResolvedCallTarget::VariantCtor { tag, parent_type_id: _ } => {
+                // Reuse the variant constructor emit path with the
+                // method name (e.g. "Some", "Ok", "Less") so the
+                // typed-MakeVariant code at `emit_make_variant`
+                // resolves the parent type id via the existing
+                // `lookup_function` → `parent_type_name` →
+                // `type_name_to_id` chain.  Skipping the chain
+                // here would leave parent-type-id resolution to two
+                // separate paths and re-introduce drift.
+                self.compile_variant_constructor_with_tag_named(
+                    Some(method.name.as_str()),
+                    tag,
+                    args,
+                )
+            }
+        }
+    }
+
     /// Sibling of `compile_variant_constructor_with_tag` that
     /// additionally takes the variant's simple name so the typed-
     /// emission path can resolve the parent type's TypeId via
@@ -5283,13 +5345,40 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
-    /// Compiles a method call.
+    /// Compile a method call.  Architecturally split into two phases:
+    ///
+    ///   1. **Pre-resolved fast path** — if the typechecker stamped
+    ///      `resolved_target` onto the AST node (`Some`), emit the
+    ///      direct Call/MakeVariant instruction in O(1) and return.
+    ///      No string lookups, no cascade, no fallthrough to dyn:
+    ///      dispatch.
+    ///
+    ///   2. **Legacy name-resolution cascade** — for AST nodes that
+    ///      bypassed the typechecker (parser-only paths, lenient/
+    ///      runtime-only modes), the existing 7-step
+    ///      `try_resolve_static_method` cascade runs as a fallback.
+    ///      Concrete-type misses surface as `UndefinedFunction`
+    ///      (#92) instead of silently producing wrong bytecode.
+    ///
+    /// This is the consumer half of the architectural separation
+    /// introduced in #91: the typechecker is the source of truth for
+    /// dispatch resolution; codegen reads its answer rather than
+    /// re-deriving it through a string-cascade.  See
+    /// `verum_ast::expr::ResolvedCallTarget` for the sidecar shape.
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
+        resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
+        // ──────────────────────────────────────────────────────────
+        // Phase 1: Pre-resolved fast path.
+        // ──────────────────────────────────────────────────────────
+        if let Some(target) = resolved_target {
+            return self.compile_resolved_call_target(target, args, method);
+        }
+
         // Resolve the receiver as a static type name when the user wrote either
         // `Foo.method(...)` (bare path) or `Foo<T>.method(...)` (TypeExpr emitted
         // by the parser because of explicit type arguments). Both forms designate
