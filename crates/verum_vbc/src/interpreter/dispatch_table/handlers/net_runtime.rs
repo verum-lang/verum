@@ -718,35 +718,41 @@ pub fn udp_close(fd: i64) -> i64 {
 // ============================================================================
 // VBC-NET-RT-2 — reactor-backed timeout-bound I/O
 //
-// The functions below take an explicit `timeout_ms` parameter and use
-// the singleton `interpreter::reactor` (kqueue/epoll backend) to wait
-// for socket readiness.  Once the reactor signals `Ready`, the I/O is
-// performed via the same clone-and-go pattern as the blocking variants,
-// but the cloned socket is set non-blocking so we can detect spurious
-// wake-ups and re-arm the wait if needed.
+// The `*_coop` functions below take an explicit `timeout_ms`
+// parameter and use the singleton `interpreter::reactor`
+// (kqueue/epoll backend) to wait for socket readiness — sliced
+// into 5ms kernel waits so concurrent ready tasks in
+// `state.tasks` get pumped between waits (VBC-COOP-SCHED-1, see
+// section below).  Once the reactor signals `Ready`, the I/O is
+// performed via the same clone-and-go pattern as the blocking
+// variants, but the cloned socket is set non-blocking so we can
+// detect spurious wake-ups and re-arm the wait if needed.
 //
 // Return convention (chosen for ergonomic intrinsic dispatch):
 //
-//  * `tcp_accept_timeout(fd, timeout_ms) -> i64`
+//  * `tcp_accept_timeout_coop(state, fd, timeout_ms) -> i64`
 //      - >0: accepted synthetic fd
 //      - -1: I/O error (registry miss, accept failed)
 //      - -2: timeout
 //      - -3: reactor unhealthy (caller should fall back to blocking)
 //
-//  * `tcp_recv_timeout(fd, max_len, timeout_ms) -> (i64, String)`
+//  * `tcp_recv_timeout_coop(state, fd, max_len, timeout_ms) -> (i64, String)`
 //      - i64: status code (>=0 = bytes, -1 = EOF/closed, -2 = timeout, -3 = err)
 //      - String: payload (empty for non-positive status)
 //
-//  * `udp_recv_from_timeout(fd, max_len, timeout_ms)
+//  * `udp_recv_from_timeout_coop(state, fd, max_len, timeout_ms)
 //        -> (i64, String, Option<(family, host, port)>)`
 //
-//  * `tcp_send_timeout(fd, data, timeout_ms) -> i64`
+//  * `tcp_send_timeout_coop(state, fd, data, timeout_ms) -> i64`
 //      - bytes_written or negative status as above.
 //
 //  * `tcp_connect_timeout(host, port, timeout_ms) -> i64`
-//      - synthetic fd or negative status.
+//      - synthetic fd or negative status.  Connect-timeout has no
+//        coop variant today: every intrinsic dispatch site for it
+//        runs at script-startup before the task scheduler has any
+//        ready peers to pump.
 //
-// All five preserve the same lock-drop discipline as the blocking
+// All preserve the same lock-drop discipline as the blocking
 // variants (try_clone under the lock, drop the lock, do I/O on the
 // clone).  The reactor itself uses a sharded waiter map so concurrent
 // timeout waits on different fds proceed in parallel.
@@ -1169,201 +1175,7 @@ pub fn tcp_send_timeout_coop(
     written as i64
 }
 
-pub fn tcp_accept_timeout(listen_fd: i64, timeout_ms: i64) -> i64 {
-    // Read the listener's raw_fd briefly under the lock — the
-    // registry holds the listener alive throughout this call (we
-    // don't take it out), so the raw fd is stable.  Concurrent
-    // tcp_accept callers serialise at the kernel's accept queue
-    // (kernel-level lock), NOT at the REGISTRY mutex, mirroring
-    // the lock-drop discipline the rest of this module follows.
-    let raw_fd: i64 = {
-        let map = REGISTRY.lock().unwrap();
-        match map.get(&listen_fd) {
-            Some(NetResource::Listener(l)) => listener_raw_fd(l),
-            _ => -1,
-        }
-    };
-    if raw_fd >= 0 {
-        let deadline =
-            std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-        loop {
-            let now = std::time::Instant::now();
-            if now >= deadline {
-                return NET_STATUS_TIMEOUT;
-            }
-            let remaining_ms = (deadline - now).as_millis() as i64;
-            match io_wait_readable(raw_fd, remaining_ms.max(1)) {
-                0 => return NET_STATUS_TIMEOUT,
-                1 => {}
-                _ => return NET_STATUS_REACTOR_ERROR,
-            }
-            // Per-call non-blocking accept via libc::accept on the
-            // raw kernel fd.  We do NOT set O_NONBLOCK on the
-            // listener — the kernel-level accept queue serialises
-            // multiple concurrent acceptors automatically.  If the
-            // queue is empty (spurious wake), accept blocks; that's
-            // acceptable for the rare-spurious case since the
-            // reactor's signal almost always corresponds to a real
-            // pending connection.  For absolute non-blocking
-            // semantics on Linux we'd use accept4(SOCK_NONBLOCK);
-            // macOS lacks accept4 and the fcntl-on-listener path
-            // would pollute the shared file description.
-            let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-            let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-            #[cfg(target_os = "linux")]
-            let conn_fd = unsafe {
-                libc::accept4(
-                    raw_fd as libc::c_int,
-                    &mut peer as *mut _ as *mut libc::sockaddr,
-                    &mut peer_len,
-                    libc::SOCK_CLOEXEC,
-                )
-            };
-            #[cfg(not(target_os = "linux"))]
-            let conn_fd = unsafe {
-                libc::accept(
-                    raw_fd as libc::c_int,
-                    &mut peer as *mut _ as *mut libc::sockaddr,
-                    &mut peer_len,
-                )
-            };
-            if conn_fd >= 0 {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::io::FromRawFd;
-                    let stream = unsafe { TcpStream::from_raw_fd(conn_fd) };
-                    return register(NetResource::Stream(stream));
-                }
-                #[cfg(not(unix))]
-                return NET_STATUS_IO_ERROR;
-            }
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => continue, // spurious wake — re-park
-                std::io::ErrorKind::Interrupted => continue,
-                _ => return NET_STATUS_IO_ERROR,
-            }
-        }
-    }
-    // Real-kernel-fd path (caller passed a v2-listener raw fd).
-    #[cfg(unix)]
-    {
-        let deadline =
-            std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-        loop {
-            let now = std::time::Instant::now();
-            if now >= deadline {
-                return NET_STATUS_TIMEOUT;
-            }
-            let remaining_ms = (deadline - now).as_millis() as i64;
-            match io_wait_readable(listen_fd, remaining_ms.max(1)) {
-                0 => return NET_STATUS_TIMEOUT,
-                1 => {}
-                _ => return NET_STATUS_REACTOR_ERROR,
-            }
-            let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-            let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-            let conn_fd = unsafe {
-                libc::accept(
-                    listen_fd as libc::c_int,
-                    &mut peer as *mut _ as *mut libc::sockaddr,
-                    &mut peer_len,
-                )
-            };
-            if conn_fd >= 0 {
-                use std::os::unix::io::FromRawFd;
-                let stream = unsafe { TcpStream::from_raw_fd(conn_fd) };
-                return register(NetResource::Stream(stream));
-            }
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => continue,
-                std::io::ErrorKind::Interrupted => continue,
-                _ => return NET_STATUS_IO_ERROR,
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = listen_fd;
-        NET_STATUS_REACTOR_ERROR
-    }
-}
 
-pub fn tcp_recv_timeout(fd: i64, max_len: i64, timeout_ms: i64) -> (i64, String) {
-    if max_len <= 0 {
-        return (0, String::new());
-    }
-    let cap = max_len.min(1 << 20) as usize;
-    let mut buf = vec![0_u8; cap];
-    // We need the ORIGINAL kernel fd (the one stored in the
-    // registry) so reactor signals are delivered for the long-
-    // lived socket, NOT for an ephemeral dup that we'd close on
-    // function return.  Reading the raw fd while holding the
-    // registry lock keeps it valid for the duration of the
-    // function (the registry holds the TcpStream alive).
-    let raw_fd: i64 = {
-        let map = REGISTRY.lock().unwrap();
-        match map.get(&fd) {
-            Some(NetResource::Stream(s)) => stream_raw_fd(s),
-            _ => return (NET_STATUS_IO_ERROR, String::new()),
-        }
-    };
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-    loop {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            return (NET_STATUS_TIMEOUT, String::new());
-        }
-        let remaining_ms = (deadline - now).as_millis() as i64;
-        match io_wait_readable(raw_fd, remaining_ms.max(1)) {
-            0 => return (NET_STATUS_TIMEOUT, String::new()),
-            1 => {}
-            _ => return (NET_STATUS_REACTOR_ERROR, String::new()),
-        }
-        // Try a non-blocking recv via MSG_DONTWAIT — this is
-        // per-call, not per-socket, so nothing else's view of the
-        // mode is affected.  On WouldBlock (spurious wake from
-        // POLLHUP / level-triggered re-fire / kqueue stale event
-        // after fd recycling), loop back to the reactor.
-        let n = unsafe {
-            libc::recv(
-                raw_fd as libc::c_int,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-                libc::MSG_DONTWAIT,
-            )
-        };
-        if n > 0 {
-            let n = n as usize;
-            buf.truncate(n);
-            return (n as i64, String::from_utf8_lossy(&buf).into_owned());
-        } else if n == 0 {
-            // Defensive: kqueue's EV_EOF can latch from a previous
-            // socket that occupied this kernel fd before recycling.
-            // To distinguish a real peer-FIN from a stale event,
-            // verify with getsockopt(SO_ERROR) (zero = clean state)
-            // AND a peek-recv (would-block = no real EOF; the read
-            // returned 0 spuriously and the OS is still happy with
-            // the connection).  Only then return EOF.
-            if !verify_real_eof(raw_fd) {
-                continue;
-            }
-            return (NET_STATUS_EOF, String::new());
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => {
-                    // Spurious wake — loop, the deadline check at
-                    // the top of the loop will eventually fire.
-                    continue;
-                }
-                std::io::ErrorKind::Interrupted => continue,
-                _ => return (NET_STATUS_IO_ERROR, String::new()),
-            }
-        }
-    }
-}
 
 /// Distinguish a genuine peer-FIN from a kqueue stale-event wake
 /// after fd recycling.  Returns true iff the kernel agrees the
@@ -1405,74 +1217,6 @@ fn verify_real_eof(raw_fd: i64) -> bool {
     true
 }
 
-pub fn tcp_send_timeout(fd: i64, data: &[u8], timeout_ms: i64) -> i64 {
-    if data.is_empty() {
-        return 0;
-    }
-    let raw_fd: i64 = {
-        let map = REGISTRY.lock().unwrap();
-        match map.get(&fd) {
-            Some(NetResource::Stream(s)) => stream_raw_fd(s),
-            _ => return NET_STATUS_IO_ERROR,
-        }
-    };
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-    let mut written = 0_usize;
-    while written < data.len() {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            return if written > 0 {
-                written as i64
-            } else {
-                NET_STATUS_TIMEOUT
-            };
-        }
-        let remaining_ms = (deadline - now).as_millis() as i64;
-        match io_wait_writable(raw_fd, remaining_ms.max(1)) {
-            0 => {
-                return if written > 0 {
-                    written as i64
-                } else {
-                    NET_STATUS_TIMEOUT
-                };
-            }
-            1 => {}
-            _ => return NET_STATUS_REACTOR_ERROR,
-        }
-        // Per-call non-blocking send via MSG_DONTWAIT |
-        // MSG_NOSIGNAL — keeps the socket's mode unchanged AND
-        // suppresses the SIGPIPE that would kill the host process
-        // on EPIPE (peer closed the stream half-way through).
-        let flags = libc::MSG_DONTWAIT | platform_msg_nosignal();
-        let n = unsafe {
-            libc::send(
-                raw_fd as libc::c_int,
-                data[written..].as_ptr() as *const libc::c_void,
-                data.len() - written,
-                flags,
-            )
-        };
-        if n > 0 {
-            written += n as usize;
-        } else if n == 0 {
-            return NET_STATUS_EOF;
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => continue,
-                std::io::ErrorKind::Interrupted => continue,
-                _ => {
-                    return if written > 0 {
-                        written as i64
-                    } else {
-                        NET_STATUS_IO_ERROR
-                    };
-                }
-            }
-        }
-    }
-    written as i64
-}
 
 /// Per-platform MSG_NOSIGNAL.  macOS doesn't have it (uses SO_NOSIGPIPE
 /// socket option instead, set when the socket is opened); Linux has it.
@@ -1488,74 +1232,6 @@ fn platform_msg_nosignal() -> i32 {
     }
 }
 
-pub fn udp_recv_from_timeout(
-    fd: i64,
-    max_len: i64,
-    timeout_ms: i64,
-) -> (i64, String, Option<(u8, String, i64)>) {
-    if max_len <= 0 {
-        return (0, String::new(), None);
-    }
-    let cap = max_len.min(1 << 20) as usize;
-    let mut buf = vec![0_u8; cap];
-    let raw_fd: i64 = {
-        let map = REGISTRY.lock().unwrap();
-        match map.get(&fd) {
-            Some(NetResource::Udp(s)) => udp_raw_fd(s),
-            _ => return (NET_STATUS_IO_ERROR, String::new(), None),
-        }
-    };
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-    loop {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            return (NET_STATUS_TIMEOUT, String::new(), None);
-        }
-        let remaining_ms = (deadline - now).as_millis() as i64;
-        match io_wait_readable(raw_fd, remaining_ms.max(1)) {
-            0 => return (NET_STATUS_TIMEOUT, String::new(), None),
-            1 => {}
-            _ => return (NET_STATUS_REACTOR_ERROR, String::new(), None),
-        }
-        // Per-call recvfrom with MSG_DONTWAIT — leaves socket mode
-        // untouched.  Use libc::sockaddr_storage to capture peer
-        // (IPv4 or IPv6) without the dup-fd / mode-flip dance.
-        let mut peer_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-        let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-        let n = unsafe {
-            libc::recvfrom(
-                raw_fd as libc::c_int,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-                libc::MSG_DONTWAIT,
-                &mut peer_storage as *mut _ as *mut libc::sockaddr,
-                &mut peer_len,
-            )
-        };
-        if n > 0 {
-            let n = n as usize;
-            buf.truncate(n);
-            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
-            return (
-                n as i64,
-                String::from_utf8_lossy(&buf).into_owned(),
-                peer_tuple,
-            );
-        } else if n == 0 {
-            // UDP recv of 0 bytes is unusual but legal (zero-length
-            // datagram).  Report 0 + empty body + decoded peer.
-            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
-            return (0, String::new(), peer_tuple);
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => continue,
-                std::io::ErrorKind::Interrupted => continue,
-                _ => return (NET_STATUS_IO_ERROR, String::new(), None),
-            }
-        }
-    }
-}
 
 /// Decode a `sockaddr_storage` populated by `recvfrom` into the
 /// `(family, host_str, port)` tuple shape used by the rest of
@@ -1899,133 +1575,6 @@ mod tests {
     // unaffected).
     static REACTOR_TEST_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-    /// `tcp_accept_timeout` returns NET_STATUS_TIMEOUT when no
-    /// client connects in the allotted window — and does so within
-    /// the deadline, not after the OS-default accept blocking.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn tcp_accept_timeout_returns_minus_two_on_no_client() {
-        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(listen_fd > 0);
-        let start = std::time::Instant::now();
-        let r = tcp_accept_timeout(listen_fd, 150);
-        let elapsed = start.elapsed();
-        assert_eq!(r, NET_STATUS_TIMEOUT);
-        assert!(
-            elapsed >= Duration::from_millis(120) && elapsed < Duration::from_secs(2),
-            "elapsed={elapsed:?}"
-        );
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
-
-    /// `tcp_accept_timeout` returns the accepted fd when a client
-    /// connects within the deadline.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn tcp_accept_timeout_succeeds_when_client_connects() {
-        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        assert!(listen_fd > 0);
-        let port = tcp_local_port(listen_fd);
-        let h = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(40));
-            let cfd = tcp_connect("127.0.0.1", port);
-            assert!(cfd > 0);
-            tcp_close(cfd)
-        });
-        let conn_fd = tcp_accept_timeout(listen_fd, 1500);
-        assert!(conn_fd > 0, "expected fd>0, got {conn_fd}");
-        assert_eq!(tcp_close(conn_fd), 0);
-        h.join().unwrap();
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
-
-    /// `tcp_recv_timeout` returns (NET_STATUS_TIMEOUT, "") when
-    /// the peer never sends.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn tcp_recv_timeout_returns_timeout_when_silent() {
-        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 8, 0);
-        assert!(listen_fd > 0);
-        let port = tcp_local_port(listen_fd);
-        let cfd = tcp_connect("127.0.0.1", port);
-        assert!(cfd > 0);
-        let server_fd = tcp_accept(listen_fd);
-        assert!(server_fd > 0, "tcp_accept returned {server_fd}");
-        thread::sleep(Duration::from_millis(20));
-        let start = std::time::Instant::now();
-        let (status, body) = tcp_recv_timeout(cfd, 64, 200);
-        let elapsed = start.elapsed();
-        assert_eq!(
-            status, NET_STATUS_TIMEOUT,
-            "expected timeout, got status={status} body={body:?} elapsed={elapsed:?}"
-        );
-        assert!(body.is_empty());
-        assert!(elapsed < Duration::from_secs(2));
-        assert_eq!(tcp_close(cfd), 0);
-        assert_eq!(tcp_close(server_fd), 0);
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
-
-    /// `tcp_recv_timeout` returns the data when it arrives within
-    /// the deadline.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn tcp_recv_timeout_succeeds_when_data_arrives() {
-        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
-        let listen_fd = tcp_listen_v2("127.0.0.1", 0, 8, 1);
-        let port = tcp_local_port(listen_fd);
-        let h = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(30));
-            let cfd = tcp_connect("127.0.0.1", port);
-            assert_eq!(tcp_send(cfd, b"hello"), 5);
-            thread::sleep(Duration::from_millis(50));
-            tcp_close(cfd)
-        });
-        let server_fd = tcp_accept_timeout(listen_fd, 2000);
-        assert!(server_fd > 0);
-        let (status, body) = tcp_recv_timeout(server_fd, 64, 1000);
-        assert_eq!(status, 5);
-        assert_eq!(body, "hello");
-        assert_eq!(tcp_close(server_fd), 0);
-        h.join().unwrap();
-        assert_eq!(tcp_close(listen_fd), 0);
-    }
-
-    /// `udp_recv_from_timeout` reports timeout AND preserves the
-    /// peer (None on timeout, Some(...) on success).
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn udp_recv_from_timeout_reports_peer_and_timeout() {
-        let _guard = REACTOR_TEST_MUTEX.lock().unwrap();
-        let recv_fd = udp_bind(0);
-        let recv_port = {
-            let map = REGISTRY.lock().unwrap();
-            match map.get(&recv_fd) {
-                Some(NetResource::Udp(s)) => s.local_addr().unwrap().port(),
-                _ => panic!("recv socket missing"),
-            }
-        };
-        // Timeout path.
-        let start = std::time::Instant::now();
-        let (st, body, peer) = udp_recv_from_timeout(recv_fd, 64, 100);
-        assert_eq!(st, NET_STATUS_TIMEOUT);
-        assert!(body.is_empty());
-        assert!(peer.is_none());
-        assert!(start.elapsed() < Duration::from_secs(2));
-        // Success path.
-        let send_fd = udp_bind(0);
-        assert_eq!(udp_send(send_fd, b"ping", "127.0.0.1", recv_port as i64), 4);
-        let (st2, body2, peer2) = udp_recv_from_timeout(recv_fd, 64, 1500);
-        assert_eq!(st2, 4);
-        assert_eq!(body2, "ping");
-        let (family, _, _) = peer2.expect("peer");
-        assert_eq!(family, 4);
-        assert_eq!(udp_close(recv_fd), 0);
-        assert_eq!(udp_close(send_fd), 0);
-    }
 
     /// Generic readiness primitive — `io_wait_readable` must return
     /// 0 (timeout) for a fresh listener with no connections.
