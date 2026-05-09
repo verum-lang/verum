@@ -28,6 +28,7 @@
 //! - `@setup: <fn_name>` - Function to call before each test function in this file
 //! - `@teardown: <fn_name>` - Function to call after each test function in this file
 //! - `@isolation: <level>` - Isolation level: none | process | directory | container
+//! - `@snapshot: <name>` - Golden-file snapshot name; test output compared against stored snapshot
 //!
 //! # Multi-line Values
 //!
@@ -833,6 +834,9 @@ pub struct TestDirectives {
     /// Isolation level for subprocess-per-test execution.
     /// Values: none | process | directory | container.
     pub isolation: Option<Text>,
+    /// Golden-file snapshot name for snapshot testing.
+    /// Test output is compared against `snapshots/<name>.snap`; use --update-snapshots to refresh.
+    pub snapshot: Option<Text>,
     /// Parse errors encountered during directive parsing (non-fatal)
     pub parse_warnings: List<Text>,
 
@@ -872,6 +876,7 @@ impl Default for TestDirectives {
             setup_fn: None,
             teardown_fn: None,
             isolation: None,
+            snapshot: None,
             // Meta-system defaults
             expected_value: None,
             expected_type: None,
@@ -1082,6 +1087,8 @@ impl TestDirectives {
                 directives.teardown_fn = Some(rest.trim().to_string().into());
             } else if let Some(rest) = comment.strip_prefix("@isolation:") {
                 directives.isolation = Some(rest.trim().to_string().into());
+            } else if let Some(rest) = comment.strip_prefix("@snapshot:") {
+                directives.snapshot = Some(rest.trim().to_string().into());
             } else if comment.starts_with('@')
                 && let Some(directive_name) = comment.split(':').next()
                 && !directive_name.is_empty()

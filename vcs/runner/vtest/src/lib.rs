@@ -74,6 +74,7 @@ pub mod fuzz;
 pub mod isolation;
 pub mod progress;
 pub mod report;
+pub mod snapshot;
 pub mod watch;
 
 use crate::directive::{DirectiveError, Level, TestDirectives, Tier, discover_tests};

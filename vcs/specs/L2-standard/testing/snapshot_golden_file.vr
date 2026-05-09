@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: testing, snapshot, golden-file
+// @snapshot: greeting_output
+// @description: Pins the @snapshot directive for golden-file testing (#61).
+//               @snapshot: <name> names a .snap file in snapshots/ beside this spec.
+//               The runner compares captured stdout against the stored snapshot;
+//               pass --update-snapshots to regenerate.
+
+mount core.base.{Text, List, Maybe}
+mount core.io.{print}
+
+// SnapshotName wraps the @snapshot directive value.
+type SnapshotName is (Text);
+
+implement SnapshotName {
+    fn new(name: Text) -> SnapshotName {
+        SnapshotName(name)
+    }
+
+    fn value(&self) -> Text {
+        let SnapshotName(inner) = self;
+        inner
+    }
+
+    fn snap_filename(&self) -> Text {
+        let SnapshotName(inner) = self;
+        f"snapshots/{inner}.snap"
+    }
+}
+
+// SnapshotResult mirrors snapshot.rs::SnapshotResult.
+type SnapshotResult is
+    | Match
+    | Created
+    | Updated
+    | Mismatch { expected: Text, actual: Text }
+    | Missing { path: Text };
+
+// is_pass returns true for outcomes that do not fail the test run.
+fn is_pass(result: SnapshotResult) -> Bool {
+    result is Match | Created | Updated
+}
+
+fn test_snapshot_name_value() {
+    let sn = SnapshotName.new("greeting_output");
+    assert_eq(sn.value(), "greeting_output");
+}
+
+fn test_snap_filename() {
+    let sn = SnapshotName.new("greeting_output");
+    assert_eq(sn.snap_filename(), "snapshots/greeting_output.snap");
+}
+
+fn test_snapshot_result_match_is_pass() {
+    assert(is_pass(SnapshotResult.Match));
+}
+
+fn test_snapshot_result_created_is_pass() {
+    assert(is_pass(SnapshotResult.Created));
+}
+
+fn test_snapshot_result_updated_is_pass() {
+    assert(is_pass(SnapshotResult.Updated));
+}
+
+fn test_snapshot_result_mismatch_is_not_pass() {
+    let r = SnapshotResult.Mismatch { expected: "old", actual: "new" };
+    assert(!is_pass(r));
+}
+
+fn test_snapshot_result_missing_is_not_pass() {
+    let r = SnapshotResult.Missing { path: "snapshots/x.snap" };
+    assert(!is_pass(r));
+}
+
+fn main() {
+    test_snapshot_name_value();
+    test_snap_filename();
+    test_snapshot_result_match_is_pass();
+    test_snapshot_result_created_is_pass();
+    test_snapshot_result_updated_is_pass();
+    test_snapshot_result_mismatch_is_not_pass();
+    test_snapshot_result_missing_is_not_pass();
+    print("snapshot golden-file spec ok");
+}
