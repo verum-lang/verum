@@ -7,7 +7,7 @@
 /// Test closure capturing reference to dropped value - detected at runtime via CBGR.
 /// The closure captures a reference, but the target is dropped when function returns.
 /// CBGR detects the dangling reference when closure is invoked.
-/// Spec: 26-cbgr-implementation.md#dangling-prevention
+/// Spec: cbgr-implementation.md#dangling-prevention
 
 fn create_dangling_closure() -> Heap<fn() -> Int> {
     let local = 42;

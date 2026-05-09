@@ -11,7 +11,7 @@
 /// - Tier 1: &checked T - compile-time verified, zero-cost
 /// - Tier 2: &unsafe T - manual safety proof required
 ///
-/// Spec: 26-cbgr-implementation.md#tier-conversion
+/// Spec: cbgr-implementation.md#tier-conversion
 
 // ============================================================================
 // TEST 1: Basic to_checked() conversion

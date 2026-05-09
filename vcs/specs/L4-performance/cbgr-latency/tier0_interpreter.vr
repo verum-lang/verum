@@ -17,7 +17,7 @@
 /// - Epoch capability verification
 /// - Bounds checking for fat references
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 /// Benchmark configuration
 const WARMUP_ITERATIONS: Int = 1_000;

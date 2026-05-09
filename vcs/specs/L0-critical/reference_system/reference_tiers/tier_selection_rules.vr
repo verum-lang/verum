@@ -7,7 +7,7 @@
 
 /// Test the rules for selecting reference tiers.
 /// Compiler should select appropriate tier based on context.
-/// Spec: 26-cbgr-implementation.md#tier-selection
+/// Spec: cbgr-implementation.md#tier-selection
 
 fn main() {
     test_default_tier_selection();

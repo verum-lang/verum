@@ -5,7 +5,7 @@
 
 /// Comprehensive CBGR (Checked Borrow Generation Reference) overview.
 /// This test documents and verifies the CBGR memory safety system.
-/// Spec: 26-cbgr-implementation.md
+/// Spec: cbgr-implementation.md
 ///
 /// CBGR provides memory safety through:
 /// 1. Generation tracking - unique ID per allocation

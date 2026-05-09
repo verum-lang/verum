@@ -380,7 +380,7 @@ if let Some(stats) = cache.get_stats(&uri) {
 
 - [LSP Specification](https://microsoft.github.io/language-server-protocol/)
 - [Verum Language Specification](../../docs/detailed/05-syntax-grammar.md)
-- [CBGR System](../../docs/detailed/26-cbgr-implementation.md)
+- [CBGR System](../../docs/detailed/cbgr-implementation.md)
 - [Type System](../../docs/detailed/03-type-system.md)
 
 ## Contributing

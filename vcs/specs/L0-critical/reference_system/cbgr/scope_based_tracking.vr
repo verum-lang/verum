@@ -5,7 +5,7 @@
 
 /// Test CBGR scope-based lifetime tracking.
 /// CBGR integrates with lexical scopes for safety.
-/// Spec: 26-cbgr-implementation.md#scope-integration
+/// Spec: cbgr-implementation.md#scope-integration
 
 fn main() {
     test_scope_drops();

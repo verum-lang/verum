@@ -14,7 +14,7 @@
 /// Note: Arrays of Copy types like [Int; 3] are Copy themselves.
 /// To test use-after-move, we need a type marked as 'affine' (non-Copy).
 ///
-/// Spec: docs/detailed/26-cbgr-implementation.md#use-after-move
+/// Spec: docs/detailed/cbgr-implementation.md#use-after-move
 
 // Define an affine (move-only) type using the 'affine' keyword
 type affine Resource is {

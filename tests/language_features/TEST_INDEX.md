@@ -434,7 +434,7 @@ All test files verified for:
 - **Type System**: `/docs/detailed/03-type-system.md`
 - **Context System**: `/docs/detailed/16-context-system.md`
 - **Advanced Protocols**: `/docs/detailed/18-advanced-protocols.md`
-- **CBGR**: `/docs/detailed/26-cbgr-implementation.md`
+- **CBGR**: `/docs/detailed/cbgr-implementation.md`
 
 ---
 

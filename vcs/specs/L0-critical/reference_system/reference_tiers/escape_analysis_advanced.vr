@@ -16,7 +16,7 @@
 /// 2. Detection of indirect escapes via returned references
 /// 3. Multiple escape path analysis
 ///
-/// Spec: 26-cbgr-implementation.md#escape-analysis
+/// Spec: cbgr-implementation.md#escape-analysis
 
 // ============================================================================
 // TEST 1: Direct function escape (single function)

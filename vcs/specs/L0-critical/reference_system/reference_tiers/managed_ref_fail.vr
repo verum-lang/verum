@@ -9,7 +9,7 @@
 /// When a reference is used after its target is invalidated,
 /// the CBGR generation check catches the error at runtime.
 /// This is the safety net when compile-time analysis cannot prove safety.
-/// Spec: 26-cbgr-implementation.md#runtime-checks
+/// Spec: cbgr-implementation.md#runtime-checks
 
 fn main() {
     // Demonstrate runtime CBGR check catching use-after-free

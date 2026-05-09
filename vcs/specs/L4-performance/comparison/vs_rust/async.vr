@@ -25,7 +25,7 @@
 /// Note: Verum uses a similar async model to Rust with futures and
 /// explicit .await points.
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const TASK_COUNT: Int = 100_000;
 const CHANNEL_OPS: Int = 1_000_000;

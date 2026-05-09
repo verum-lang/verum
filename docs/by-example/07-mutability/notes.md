@@ -87,5 +87,5 @@ controls what the BORROWS can do.
 - Mutability: `grammar/verum.ebnf` §3.1 (`let_stmt`).
 - `implement` blocks: `grammar/verum.ebnf` §2.6 (`impl_block`).
 - Self receivers: `grammar/verum.ebnf` §2.6 (`self_param`).
-- Reference tiers: `docs/detailed/26-cbgr-implementation.md`.
+- Reference tiers: `docs/detailed/cbgr-implementation.md`.
 - Visibility (`public`): `grammar/verum.ebnf` §2 (`visibility`).

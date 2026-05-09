@@ -22,7 +22,7 @@
 /// - Unicode operations
 /// - Formatting
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const ITERATIONS: Int = 100_000;
 const LARGE_ITERATIONS: Int = 1_000_000;

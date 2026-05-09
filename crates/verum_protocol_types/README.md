@@ -88,7 +88,7 @@ This crate is not meant to be used directly by end users. It's an internal crate
   - Section 1: Generic Associated Types (GATs)
   - Section 2: CBGR Integration
   - Section 3: Specialization System
-- `docs/detailed/26-cbgr-implementation.md` - CBGR memory model
+- `docs/detailed/cbgr-implementation.md` - CBGR memory model
 
 ## Performance
 

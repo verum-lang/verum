@@ -105,7 +105,7 @@
 // or use one arena per thread (recommended for performance).
 //
 
-// Spec: docs/detailed/26-cbgr-implementation.md Section 4 (Arena Integration)
+// Spec: docs/detailed/cbgr-implementation.md Section 4 (Arena Integration)
 // =============================================================================
 
 @arch_module(

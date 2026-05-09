@@ -5,7 +5,7 @@
 
 /// Verify the exact memory sizes of reference types.
 /// ThinRef: 16 bytes, FatRef: 24 bytes
-/// Spec: 26-cbgr-implementation.md#memory-layout
+/// Spec: cbgr-implementation.md#memory-layout
 
 fn main() {
     test_thin_ref_size();

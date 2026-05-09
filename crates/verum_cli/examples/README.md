@@ -127,5 +127,5 @@ To add a new example:
 
 - [Verum Language Specification](../../../docs/spec.md)
 - [Type System Documentation](../../../docs/detailed/03-type-system.md)
-- [CBGR Documentation](../../../docs/detailed/24-cbgr-implementation.md)
+- [CBGR Documentation](../../../docs/detailed/cbgr-implementation.md)
 - [Async/Context System](../../../docs/detailed/06-context-system.md)

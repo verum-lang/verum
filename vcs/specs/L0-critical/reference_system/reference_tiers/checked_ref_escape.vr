@@ -8,7 +8,7 @@
 /// The compiler rejects &checked when escape analysis cannot prove safety.
 /// Escaping references must remain as managed references (Tier 0) with runtime checks.
 /// This is a COMPILE-TIME optimization decision, not a borrow checker.
-/// Spec: 26-cbgr-implementation.md#checked-references
+/// Spec: cbgr-implementation.md#checked-references
 ///
 /// Note: E311 is a CBGR tier promotion error.
 /// The compiler's escape analysis determines if a reference can be promoted

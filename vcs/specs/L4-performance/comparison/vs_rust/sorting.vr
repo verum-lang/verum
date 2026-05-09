@@ -26,7 +26,7 @@
 /// - Reverse sorted data
 /// - Data with many duplicates
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const DATA_SIZE: Int = 1_000_000;
 const SMALL_SIZE: Int = 10_000;

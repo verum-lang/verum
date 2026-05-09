@@ -5,7 +5,7 @@
 
 /// Test CBGR generation tracking in concurrent scenarios.
 /// Generation counters must be thread-safe.
-/// Spec: 26-cbgr-implementation.md#thread-safety
+/// Spec: cbgr-implementation.md#thread-safety
 
 mount core.sync.{Mutex, AtomicU32, AtomicInt, MemoryOrdering};
 

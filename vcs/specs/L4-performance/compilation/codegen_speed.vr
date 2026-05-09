@@ -18,7 +18,7 @@
 /// - Optimization passes (O0, O1, O2, O3)
 /// - Native code emission
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const TARGET_LOC_PER_SEC: Int = 50_000;
 const SMALL_LOC: Int = 1_000;

@@ -7,7 +7,7 @@
 /// Test storing dangling reference in collection - detected at runtime via CBGR.
 /// The collection holds a reference, but the target goes out of scope.
 /// CBGR detects the dangling reference when dereferenced.
-/// Spec: 26-cbgr-implementation.md#dangling-prevention
+/// Spec: cbgr-implementation.md#dangling-prevention
 
 fn main() {
     let mut refs: List<&Int> = List.new();

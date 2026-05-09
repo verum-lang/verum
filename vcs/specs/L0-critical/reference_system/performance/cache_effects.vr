@@ -6,7 +6,7 @@
 /// Benchmark cache effects of CBGR metadata.
 /// Larger references (16 vs 8 bytes) affect cache utilization.
 /// Measure impact on cache-sensitive workloads.
-/// Spec: 26-cbgr-implementation.md#cache-considerations
+/// Spec: cbgr-implementation.md#cache-considerations
 
 
 

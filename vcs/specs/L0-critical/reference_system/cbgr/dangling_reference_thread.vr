@@ -9,7 +9,7 @@
 /// When the spawning function returns, 'local' is dropped.
 /// The spawned thread's reference becomes invalid.
 /// CBGR detects the generation mismatch when the thread tries to dereference.
-/// Spec: 26-cbgr-implementation.md#thread-safety
+/// Spec: cbgr-implementation.md#thread-safety
 
 fn main() {
     let local = 42;

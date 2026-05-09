@@ -6,7 +6,7 @@
 /// Comprehensive test of CBGR (Capability-Based Generation Reference) system.
 /// Tests the three core components: generations, epochs, and capabilities.
 /// This is the foundation of Verum's memory safety.
-/// Spec: 26-cbgr-implementation.md
+/// Spec: cbgr-implementation.md
 
 fn main() {
     print("Starting CBGR comprehensive tests...");

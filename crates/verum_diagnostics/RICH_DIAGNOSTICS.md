@@ -229,7 +229,7 @@ Solutions:
 See Also:
 ------------------------------------------------------------
   • Refinement Types Guide: docs/detailed/03-type-system.md#refinement-types
-  • SMT Verification: docs/detailed/26-cbgr-implementation.md
+  • SMT Verification: docs/detailed/cbgr-implementation.md
   • Runtime Validation: docs/runtime-checks.md
 ```
 
@@ -565,7 +565,7 @@ map.insert("E0999".into(), ErrorExplanation {
 - [Type System](../../docs/detailed/03-type-system.md)
 - [Refinement Types](../../docs/detailed/03-type-system.md#refinement-types)
 - [Context System](../../docs/detailed/16-context-system.md)
-- [CBGR Implementation](../../docs/detailed/26-cbgr-implementation.md)
+- [CBGR Implementation](../../docs/detailed/cbgr-implementation.md)
 
 ## License
 

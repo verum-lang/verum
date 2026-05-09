@@ -8,7 +8,7 @@
 //               (use-after-free protection) + write/read_copy
 //               round-trip + page_no→handle map convenience layer.
 //
-// Spec: docs/detailed/26-cbgr-implementation.md (CBGR memory model) +
+// Spec: docs/detailed/cbgr-implementation.md (CBGR memory model) +
 //       sqlite-native.md §8.2 (page-cache backing)
 
 mount core.*;

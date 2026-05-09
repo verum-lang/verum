@@ -353,4 +353,4 @@ This implementation fully complies with:
 - `compilation_metrics.rs` - Compilation phase profiling
 - `profile_cmd.rs` - CBGR overhead profiling
 - `docs/detailed/25-developer-tooling.md` - Full specification
-- `docs/detailed/26-cbgr-implementation.md` - CBGR details
+- `docs/detailed/cbgr-implementation.md` - CBGR details

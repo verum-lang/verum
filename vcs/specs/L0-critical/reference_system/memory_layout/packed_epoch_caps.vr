@@ -6,7 +6,7 @@
 /// Test the packed epoch+capabilities field layout.
 /// This 4-byte field stores epoch timestamp and access capabilities.
 /// Encoding: ((epoch & 0x00FF_FFFF) << 8) | capability_bits
-/// Spec: 26-cbgr-implementation.md#epoch-caps-encoding
+/// Spec: cbgr-implementation.md#epoch-caps-encoding
 
 fn main() {
     test_epoch_caps_encoding();

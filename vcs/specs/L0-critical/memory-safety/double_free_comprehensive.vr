@@ -6,7 +6,7 @@
 /// Comprehensive double-free prevention tests.
 /// Verum's ownership system prevents double-free at compile time.
 /// CBGR provides runtime detection for unsafe code.
-/// Spec: 26-cbgr-implementation.md#double-free
+/// Spec: cbgr-implementation.md#double-free
 
 mount core.panic;
 

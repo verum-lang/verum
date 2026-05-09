@@ -27,7 +27,7 @@
 /// - epoch_id: 24 bits (16M unique epochs)
 /// - capabilities: 8 bits (read, write, exclusive, etc.)
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const WARMUP_ITERATIONS: Int = 10_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

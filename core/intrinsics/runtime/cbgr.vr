@@ -12,7 +12,7 @@
 // VBC Opcode: ChkRef (0x74)
 //
 
-// Spec: docs/detailed/26-cbgr-implementation.md
+// Spec: docs/detailed/cbgr-implementation.md
 // =============================================================================
 
 @arch_module(

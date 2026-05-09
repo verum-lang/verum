@@ -10,7 +10,7 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 // =============================================================================
 // Layer: 1
 // Spec: sqlite-native.md §8.2 (page-cache backing) +
-//       docs/detailed/26-cbgr-implementation.md (CBGR memory model)
+//       docs/detailed/cbgr-implementation.md (CBGR memory model)
 //
 // Pre-fix: `page_cache::CachedFrame` carried `data: List<Byte>` —
 // every cached page allocated a fresh `List<Byte>` on miss, dropped
@@ -28,7 +28,7 @@ module core.database.sqlite.native.l1_pager.wal_page_arena;
 // the underlying `List<Byte>` payload is recycled when the next
 // miss writes new bytes to that slot.
 //
-// CBGR integration (docs/detailed/26-cbgr-implementation.md):
+// CBGR integration (docs/detailed/cbgr-implementation.md):
 //
 //   * **Per-slot generation counter** — bumped on every free.
 //     `PageHandle` captures the generation at alloc time; reads

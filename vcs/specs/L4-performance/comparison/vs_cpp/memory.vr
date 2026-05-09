@@ -27,7 +27,7 @@
 /// - Generation tracking on allocation
 /// - Epoch management overhead
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const ITERATIONS: Int = 1_000_000;
 const LARGE_SIZE: Int = 100 * 1024 * 1024; // 100MB

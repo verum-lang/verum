@@ -6,7 +6,7 @@
 
 /// Test valid tier coercions and conversions.
 /// Some tier conversions are implicit, others require explicit casts.
-/// Spec: 26-cbgr-implementation.md#tier-coercion
+/// Spec: cbgr-implementation.md#tier-coercion
 
 fn main() {
     test_checked_to_managed();

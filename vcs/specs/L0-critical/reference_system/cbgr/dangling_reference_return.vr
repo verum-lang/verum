@@ -8,7 +8,7 @@
 /// When the function returns, the local is dropped.
 /// The returned reference would be invalid.
 /// Verum detects this at COMPILE-TIME.
-/// Spec: 26-cbgr-implementation.md#dangling-prevention
+/// Spec: cbgr-implementation.md#dangling-prevention
 
 fn return_local_ref() -> &Int {
     let local = 42;

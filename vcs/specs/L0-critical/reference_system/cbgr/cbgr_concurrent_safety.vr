@@ -6,7 +6,7 @@
 /// Test CBGR safety guarantees in concurrent contexts.
 /// CBGR ensures memory safety even with multi-threaded access.
 /// Tests Send/Sync bounds, atomic generations, and shared access patterns.
-/// Spec: 26-cbgr-implementation.md#concurrent-safety
+/// Spec: cbgr-implementation.md#concurrent-safety
 
 mount core.sync.{Mutex, AtomicInt, AtomicU32, AtomicBool, MemoryOrdering, Barrier};
 

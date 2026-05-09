@@ -23,7 +23,7 @@
 /// Note: Rust has zero-cost abstractions with compile-time checking,
 /// while Verum's CBGR adds ~15ns runtime overhead for safety.
 ///
-/// Spec reference: docs/detailed/26-cbgr-implementation.md
+/// Spec reference: docs/detailed/cbgr-implementation.md
 
 const ITERATIONS: Int = 10_000_000;
 const DATA_SIZE: Int = 100_000;

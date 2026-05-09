@@ -5,7 +5,7 @@
 
 /// Test weak references with CBGR.
 /// Weak refs don't prevent deallocation but are safely tracked.
-/// Spec: 26-cbgr-implementation.md#weak-references
+/// Spec: cbgr-implementation.md#weak-references
 
 fn main() {
     test_weak_concept();

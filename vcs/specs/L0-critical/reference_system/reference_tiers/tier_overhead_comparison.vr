@@ -11,7 +11,7 @@ mount core.time.{Time};
 /// Tier 0 (&T): ~15ns CBGR checks
 /// Tier 1 (&checked T): 0ns (compile-time verified)
 /// Tier 2 (&unsafe T): 0ns (no checks)
-/// Spec: 26-cbgr-implementation.md#three-tier-system
+/// Spec: cbgr-implementation.md#three-tier-system
 
 fn main() {
     test_tier0_overhead();

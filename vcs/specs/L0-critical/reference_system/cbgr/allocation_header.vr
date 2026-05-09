@@ -5,7 +5,7 @@
 
 /// Test CBGR allocation header behavior.
 /// Every heap allocation has a 32-byte header with generation info.
-/// Spec: 26-cbgr-implementation.md#allocation-header
+/// Spec: cbgr-implementation.md#allocation-header
 /// Source: verum_common/src/cbgr.rs AllocationHeader
 ///
 /// AllocationHeader layout (32 bytes):

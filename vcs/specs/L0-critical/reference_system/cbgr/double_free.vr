@@ -9,7 +9,7 @@
 /// When memory is dropped and then accessed again via a dangling reference,
 /// CBGR detects the generation mismatch and panics.
 /// This prevents memory corruption and security vulnerabilities.
-/// Spec: 26-cbgr-implementation.md#double-free-prevention
+/// Spec: cbgr-implementation.md#double-free-prevention
 
 fn main() {
     // CBGR double-free detection works via generation tracking:

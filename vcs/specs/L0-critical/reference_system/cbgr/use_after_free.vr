@@ -8,7 +8,7 @@
 /// When a reference is used after its target is freed,
 /// the generation check fails and triggers a panic.
 /// This is the core safety guarantee of CBGR.
-/// Spec: 26-cbgr-implementation.md#use-after-free-detection
+/// Spec: cbgr-implementation.md#use-after-free-detection
 
 fn main() {
     // Canonical use-after-free: reference outlives its target
