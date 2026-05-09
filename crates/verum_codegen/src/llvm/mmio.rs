@@ -59,7 +59,7 @@ use verum_llvm::types::IntType;
 use verum_llvm::values::{BasicValue, IntValue, PointerValue};
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp};
 
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::types::TypeLowering;
 
 /// Memory ordering for volatile operations.
@@ -222,7 +222,7 @@ impl<'ctx> MmioLowering<'ctx> {
         let load_instr = self
             .builder
             .build_load(int_type, ptr, name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Mark as volatile
         if let Some(instr) = load_instr.as_instruction_value() {
@@ -257,7 +257,7 @@ impl<'ctx> MmioLowering<'ctx> {
         let store_instr = self
             .builder
             .build_store(ptr, value)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Mark as volatile
         let _ = store_instr.set_volatile(true);
@@ -302,7 +302,7 @@ impl<'ctx> MmioLowering<'ctx> {
         let result = self
             .builder
             .build_atomicrmw(op, ptr, value, ordering.to_llvm())
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Track statistics
         self.stats.atomic_rmw_ops += 1;
@@ -333,7 +333,7 @@ impl<'ctx> MmioLowering<'ctx> {
         // void-result instructions.
         self.builder
             .build_fence(ordering.to_llvm(), false, "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Track statistics
         self.stats.memory_barriers += 1;
@@ -384,7 +384,7 @@ impl<'ctx> MmioLowering<'ctx> {
         let inverted = self
             .builder
             .build_not(mask, "inv_mask")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         self.atomic_rmw(ptr, inverted, AtomicRMWBinOp::And, VolatileOrdering::SeqCst)
     }
@@ -447,17 +447,17 @@ impl<'ctx> MmioLowering<'ctx> {
         let inverted = self
             .builder
             .build_not(clear_mask, "inv_clear")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
         let cleared = self
             .builder
             .build_and(current, inverted, "cleared")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Set specified bits
         let modified = self
             .builder
             .build_or(cleared, set_mask, "modified")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Write back
         self.volatile_store(ptr, modified)?;

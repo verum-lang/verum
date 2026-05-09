@@ -58,7 +58,7 @@ use verum_llvm::intrinsics::Intrinsic;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{FunctionValue, PointerValue};
 
-use super::error::{LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, Result};
 use super::types::TypeLowering;
 
 /// Target architecture for interrupt handling.
@@ -385,7 +385,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let saved = self
             .builder
             .build_alloca(i64_type, "saved_flags")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Generate: pushfq; pop %0; cli
         let asm_fn = self.context.void_type().fn_type(&[i64_type.into()], false);
@@ -403,7 +403,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let call_result = self
             .builder
             .build_indirect_call(asm_fn, asm, &[], "flags")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Store the result (need to extract from call result)
         // Note: The flags are returned in %0, stored to saved
@@ -432,12 +432,12 @@ impl<'ctx> InterruptLowering<'ctx> {
         let flags = self
             .builder
             .build_load(i64_type, saved_state, "flags")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // Call the inline asm to restore
         self.builder
             .build_indirect_call(asm_fn, asm, &[flags.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -451,7 +451,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let saved = self
             .builder
             .build_alloca(i32_type, "saved_primask")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         if let Some(priority) = priority_mask {
             // Use BASEPRI for priority-based masking
@@ -470,7 +470,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
             self.builder
                 .build_indirect_call(asm_fn, asm, &[], "basepri")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
         } else {
             // Disable all interrupts: cpsid i
             // mrs r0, primask; cpsid i
@@ -487,7 +487,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
             self.builder
                 .build_indirect_call(asm_fn, asm, &[], "primask")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
         }
 
         Ok(saved)
@@ -501,7 +501,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let state = self
             .builder
             .build_load(i32_type, saved_state, "state")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // msr primask, r0
         let asm_fn = self.context.void_type().fn_type(&[i32_type.into()], false);
@@ -517,7 +517,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         self.builder
             .build_indirect_call(asm_fn, asm, &[state.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -530,7 +530,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let saved = self
             .builder
             .build_alloca(i64_type, "saved_daif")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // mrs x0, daif; msr daifset, #0xf
         let asm_fn = self.context.void_type().fn_type(&[i64_type.into()], false);
@@ -546,7 +546,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         self.builder
             .build_indirect_call(asm_fn, asm, &[], "daif")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(saved)
     }
@@ -559,7 +559,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let state = self
             .builder
             .build_load(i64_type, saved_state, "state")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // msr daif, x0
         let asm_fn = self.context.void_type().fn_type(&[i64_type.into()], false);
@@ -575,7 +575,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         self.builder
             .build_indirect_call(asm_fn, asm, &[state.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }
@@ -592,7 +592,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let saved = self
             .builder
             .build_alloca(int_type, "saved_mstatus")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // csrrc mstatus, mie (clear MIE bit, return old value)
         // Note: Using csrrci for immediate would be: csrrci zero, mstatus, 8
@@ -609,7 +609,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         self.builder
             .build_indirect_call(asm_fn, asm, &[], "mstatus")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(saved)
     }
@@ -626,7 +626,7 @@ impl<'ctx> InterruptLowering<'ctx> {
         let state = self
             .builder
             .build_load(int_type, saved_state, "state")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         // We need to restore just the MIE bit from saved state
         // csrrs zero, mstatus, saved_mie_bit
@@ -644,7 +644,7 @@ impl<'ctx> InterruptLowering<'ctx> {
 
         self.builder
             .build_indirect_call(asm_fn, asm, &[state.into()], "")
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            .or_llvm_err()?;
 
         Ok(())
     }

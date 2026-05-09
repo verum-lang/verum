@@ -589,7 +589,7 @@ fn coerce_to_bool<'ctx>(
                 // the boolean value for well-formed VBC).
                 ctx.builder()
                     .build_int_truncate(iv, bool_type, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             }
         }
         BasicValueEnum::PointerValue(pv) => {
@@ -597,17 +597,17 @@ fn coerce_to_bool<'ctx>(
             let as_int = ctx
                 .builder()
                 .build_ptr_to_int(pv, i64_type, &format!("{}_p2i", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.builder()
                 .build_int_truncate(as_int, bool_type, name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }
         BasicValueEnum::FloatValue(fv) => {
             // float != 0.0 → true
             let zero = ctx.types().f64_type().const_float(0.0);
             ctx.builder()
                 .build_float_compare(verum_llvm::FloatPredicate::ONE, fv, zero, name)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                .or_llvm_err()
         }
         BasicValueEnum::StructValue(sv) => {
             // Extract first field (usually the pointer or discriminant) and
@@ -619,7 +619,7 @@ fn coerce_to_bool<'ctx>(
             let field0 = ctx
                 .builder()
                 .build_extract_value(sv, 0, &format!("{}_f0", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             coerce_to_bool(ctx, field0, name)
         }
         _ => {
@@ -644,22 +644,22 @@ fn coerce_to_i64_for_switch<'ctx>(
             } else if bw < 64 {
                 ctx.builder()
                     .build_int_z_extend(iv, i64_type, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             } else {
                 ctx.builder()
                     .build_int_truncate(iv, i64_type, name)
-                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+                    .or_llvm_err()
             }
         }
         BasicValueEnum::PointerValue(pv) => ctx
             .builder()
             .build_ptr_to_int(pv, i64_type, name)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+            .or_llvm_err(),
         BasicValueEnum::FloatValue(fv) => ctx
             .builder()
             .build_bit_cast(fv, i64_type, name)
             .map(|v| v.into_int_value())
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string())),
+            .or_llvm_err(),
         BasicValueEnum::StructValue(sv) => {
             if sv.get_type().count_fields() == 0 {
                 return Ok(i64_type.const_zero());
@@ -667,7 +667,7 @@ fn coerce_to_i64_for_switch<'ctx>(
             let field0 = ctx
                 .builder()
                 .build_extract_value(sv, 0, &format!("{}_f0", name))
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             coerce_to_i64_for_switch(ctx, field0, name)
         }
         _ => Ok(i64_type.const_zero()),
@@ -2513,7 +2513,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let ptr_type = self.context.ptr_type(verum_llvm::AddressSpace::default());
                         ctx.builder()
                             .build_int_to_ptr(env_param.into_int_value(), ptr_type, "env_ptr_cast")
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                            .or_llvm_err()?
                     };
                     let i8_type = self.context.i8_type();
                     let i64_type = self.context.i64_type();
@@ -2529,12 +2529,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                     &[i64_type.const_int(offset, false)],
                                     &format!("cap_{}_ptr", i),
                                 )
-                                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                                .or_llvm_err()?
                         };
                         let cap_val = ctx
                             .builder()
                             .build_load(i64_type, cap_ptr, &format!("cap_{}", i))
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                         ctx.set_register(i as u16, cap_val);
                     }
                 }
@@ -3006,7 +3006,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let first_instr_block = ctx.get_block(block_id_offset)?; // block_1
             ctx.builder()
                 .build_unconditional_branch(first_instr_block)
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                .or_llvm_err()?;
             ctx.position_at_end(first_instr_block);
         }
 
@@ -3537,7 +3537,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         let target_block = ctx.get_block(target_block_id)?;
                         ctx.builder()
                             .build_unconditional_branch(target_block)
-                            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                            .or_llvm_err()?;
                     }
                 }
                 Instruction::JmpNot { cond, offset } => {
@@ -3566,7 +3566,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // JmpNot: branch to target if condition is FALSE, fallthrough if TRUE
                     ctx.builder()
                         .build_conditional_branch(cond_val, fallthrough_block, target_block)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 Instruction::JmpIf { cond, offset } => {
                     let raw_cond = ctx.get_register(cond.0)?;
@@ -3594,7 +3594,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // JmpIf: branch to target if condition is TRUE
                     ctx.builder()
                         .build_conditional_branch(cond_val, target_block, fallthrough_block)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 Instruction::Switch {
                     value,
@@ -3629,7 +3629,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
                     ctx.builder()
                         .build_switch(switch_val, default_block, &llvm_cases)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 Instruction::TryBegin { handler_offset } => {
                     // Cross-function exception handling via setjmp/longjmp.
@@ -3731,12 +3731,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             i32_type.const_zero(),
                             "is_exception",
                         )
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
 
                     // Branch: normal (0) → fallthrough, exception (non-zero) → handler
                     ctx.builder()
                         .build_conditional_branch(is_exception, handler_block, fallthrough_block)
-                        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+                        .or_llvm_err()?;
                 }
                 _ => {
                     // Regular instruction — lower normally
@@ -4221,7 +4221,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     pub fn write_ir_to_file(&self, path: &std::path::Path) -> Result<()> {
         self.module
             .print_to_file(path)
-            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))
+            .or_llvm_err()
     }
 
     /// Take ownership of the LLVM module.
