@@ -64,6 +64,7 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 pub mod archive;
+pub mod bytecode_remap;
 pub mod cfg_key;
 pub mod linker;
 pub mod dtype;
@@ -177,8 +178,9 @@ pub use instruction::{
     ArithCategory, ArithOpMeta, ArithSubOpcode, CbgrCategory, CbgrOpMeta, CbgrSubOpcode,
     CmpSubOpcode, FfiSubOpcode, FloatWidth, GpuCategory, GpuOpMeta, GpuSubOpcode, Instruction,
     MachSubOpcode, MathCategory, MathOpMeta, MathSubOpcode, MlCategory, MlOpMeta, MlSubOpcode,
-    Opcode, Reg, RegRange, SyncSubOpcode, SysSubOpcode, SystemCategory, SystemOpMeta,
-    SystemSubOpcode, TensorCategory, TensorOpMeta, TensorSubOpcode, TimeSubOpcode,
+    Opcode, Reg, RegRange, SimdCategory, SimdOpMeta, SimdSubOpcode, SyncSubOpcode, SysSubOpcode,
+    SystemCategory, SystemOpMeta, SystemSubOpcode, TensorCategory, TensorOpMeta, TensorSubOpcode,
+    TimeSubOpcode,
 };
 pub use module::{ConstId, FunctionDescriptor, FunctionId, VbcFunction, VbcModule};
 pub use types::{
