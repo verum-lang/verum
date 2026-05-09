@@ -1993,20 +1993,26 @@ impl VbcCodegen {
             ("SLICES_PER_SEGMENT", 64 * 1024),
             ("SMALL_PAGE_SIZE", 65536),
             ("MEDIUM_PAGE_SIZE", 524288),
-            // Network message flags
-            ("MSG_PEEK", 2),
-            ("MSG_DONTWAIT", 0x40),
-            ("MSG_WAITALL", 0x40),
-            // Shutdown constants (core/net/)
-            ("SHUT_RD", 0),
-            ("SHUT_WR", 1),
-            ("SHUT_RDWR", 2),
-            // Socket type flags (linux)
-            ("SOCK_NONBLOCK", 0x800),
-            ("SOCK_CLOEXEC", 0x80000),
-            // Socket option levels
-            ("SOL_TCP", 6),
-            ("SO_ERROR", 4),
+            // Cross-platform message flag.
+            ("MSG_PEEK", verum_common::posix_sockets::MSG_PEEK),
+            // Platform-divergent message flags. Historical hand-table
+            // mixed Linux MSG_DONTWAIT=0x40 with Darwin MSG_WAITALL=0x40
+            // in the same lookup. Phase-2 dispatch (commit 8e0993944)
+            // routes per build target via
+            // `posix_sockets::socket_const_for_target(name, target_os)`
+            // — entries below are kept for non-dispatch fallback.
+            ("MSG_DONTWAIT", verum_common::posix_sockets::linux::MSG_DONTWAIT), // 0x40 (Linux); Darwin=0x80
+            ("MSG_WAITALL", verum_common::posix_sockets::darwin::MSG_WAITALL), // 0x40 (Darwin); Linux=0x100
+            // Cross-platform shutdown directions.
+            ("SHUT_RD", verum_common::posix_sockets::SHUT_RD),
+            ("SHUT_WR", verum_common::posix_sockets::SHUT_WR),
+            ("SHUT_RDWR", verum_common::posix_sockets::SHUT_RDWR),
+            // Linux-only socket type flags.
+            ("SOCK_NONBLOCK", verum_common::posix_sockets::linux::SOCK_NONBLOCK), // 0o4000 = 0x800
+            ("SOCK_CLOEXEC", verum_common::posix_sockets::linux::SOCK_CLOEXEC),   // 0o2000000 = 0x80000
+            // Linux-only / Darwin-divergent socket option levels.
+            ("SOL_TCP", verum_common::posix_sockets::linux::SOL_TCP),  // Linux only (Darwin uses IPPROTO_TCP)
+            ("SO_ERROR", verum_common::posix_sockets::linux::SO_ERROR), // 4 (Linux); Darwin=0x1007
         ];
 
         // Variant tags for built-in sum-type constructors are sourced from
