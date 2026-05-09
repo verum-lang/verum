@@ -123,6 +123,13 @@ data KernelRule : Set where
   K-Flat : KernelRule
   K-Sharp : KernelRule
 
+-- ====== Per-rule IOU axioms (0 total) ======
+-- Each captures a meta-theory dependency not yet formalised in
+-- Cubical Agda; discharging an IOU = replacing the postulate
+-- with a real definition (or folding its content into
+-- structural premises of the corresponding `Typing` rule).
+
+
 -- K_Var — category Structural — premise arity 0 — side-condition: false
 -- status: Proved (postulated at this layer)
 postulate
