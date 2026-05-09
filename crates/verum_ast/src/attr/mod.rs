@@ -201,6 +201,7 @@ pub use typed::{
     InlineMode,
     // Interrupt handling attributes
     InterruptAttr,
+    InterruptKind,
     InvariantAttr,
     IvdepAttr,
     Likelihood,
@@ -245,6 +246,7 @@ pub use typed::{
     QuantityAttr,
     ReduceAttr,
     ReductionOp,
+    ReductionOpKind,
     RegisterBlockAttr,
     RegisterOffsetAttr,
     Repr,

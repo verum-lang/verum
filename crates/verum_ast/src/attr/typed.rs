@@ -4344,20 +4344,129 @@ pub enum ReductionOp {
     LogicOr,  // ||
 }
 
+/// Per-variant projection for [`ReductionOp`].
+///
+/// `name` is the canonical word form (`"add"`, `"bitxor"`, …) returned
+/// by `as_str`. `operator` is the ASCII operator form parsed by
+/// `from_str` as a tolerant alias. Both forms round-trip through
+/// `from_str` to the same variant; `as_str` always emits `name`.
+#[derive(Debug, Clone, Copy)]
+pub struct ReductionOpMeta {
+    pub name: &'static str,
+    pub operator: &'static str,
+    pub kind: ReductionOpKind,
+}
+
+/// Coarse classification for [`ReductionOp`] used by codegen passes
+/// that need to know whether a reduction is arithmetic, bitwise, or
+/// short-circuit-logical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ReductionOpKind {
+    Arithmetic,
+    Bitwise,
+    Logical,
+}
+
 impl ReductionOp {
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "+" | "add" => Maybe::Some(ReductionOp::Add),
-            "*" | "mul" | "multiply" => Maybe::Some(ReductionOp::Multiply),
-            "min" => Maybe::Some(ReductionOp::Min),
-            "max" => Maybe::Some(ReductionOp::Max),
-            "&" | "bitand" => Maybe::Some(ReductionOp::BitAnd),
-            "|" | "bitor" => Maybe::Some(ReductionOp::BitOr),
-            "^" | "bitxor" => Maybe::Some(ReductionOp::BitXor),
-            "&&" | "and" => Maybe::Some(ReductionOp::LogicAnd),
-            "||" | "or" => Maybe::Some(ReductionOp::LogicOr),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::Add,
+        Self::Multiply,
+        Self::Min,
+        Self::Max,
+        Self::BitAnd,
+        Self::BitOr,
+        Self::BitXor,
+        Self::LogicAnd,
+        Self::LogicOr,
+    ];
+
+    pub const fn meta(self) -> ReductionOpMeta {
+        match self {
+            Self::Add => ReductionOpMeta {
+                name: "add",
+                operator: "+",
+                kind: ReductionOpKind::Arithmetic,
+            },
+            Self::Multiply => ReductionOpMeta {
+                name: "multiply",
+                operator: "*",
+                kind: ReductionOpKind::Arithmetic,
+            },
+            Self::Min => ReductionOpMeta {
+                name: "min",
+                operator: "min",
+                kind: ReductionOpKind::Arithmetic,
+            },
+            Self::Max => ReductionOpMeta {
+                name: "max",
+                operator: "max",
+                kind: ReductionOpKind::Arithmetic,
+            },
+            Self::BitAnd => ReductionOpMeta {
+                name: "bitand",
+                operator: "&",
+                kind: ReductionOpKind::Bitwise,
+            },
+            Self::BitOr => ReductionOpMeta {
+                name: "bitor",
+                operator: "|",
+                kind: ReductionOpKind::Bitwise,
+            },
+            Self::BitXor => ReductionOpMeta {
+                name: "bitxor",
+                operator: "^",
+                kind: ReductionOpKind::Bitwise,
+            },
+            Self::LogicAnd => ReductionOpMeta {
+                name: "and",
+                operator: "&&",
+                kind: ReductionOpKind::Logical,
+            },
+            Self::LogicOr => ReductionOpMeta {
+                name: "or",
+                operator: "||",
+                kind: ReductionOpKind::Logical,
+            },
         }
+    }
+
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        // Aliases: `mul` ↦ Multiply (extra word form), everything else
+        // matches either the canonical name or the operator form.
+        if s == "mul" {
+            return Maybe::Some(Self::Multiply);
+        }
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            let m = v.meta();
+            if m.name.as_bytes() == s.as_bytes()
+                || m.operator.as_bytes() == s.as_bytes()
+            {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
+
+    /// Canonical word form (closes drift defect: `as_str` was missing
+    /// previously despite `from_str` being present).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// ASCII operator form. Round-trips through `from_str` back to
+    /// the same variant.
+    #[inline]
+    pub const fn operator(&self) -> &'static str {
+        self.meta().operator
+    }
+
+    #[inline]
+    pub const fn kind(&self) -> ReductionOpKind {
+        self.meta().kind
     }
 }
 
@@ -4959,44 +5068,86 @@ pub enum InjectionScope {
     Transient,
 }
 
+/// Per-variant projection for [`InjectionScope`].
+///
+/// `lifetime_rank` encodes the scope hierarchy: Singleton=0 (lives
+/// forever), Request=1 (lives for one request), Transient=2 (fresh per
+/// injection). The dependency rule "can depend only on equal-or-
+/// longer-lived scopes" is `self.lifetime_rank >= other.lifetime_rank`.
+#[derive(Debug, Clone, Copy)]
+pub struct InjectionScopeMeta {
+    pub name: &'static str,
+    pub lifetime_rank: u8,
+}
+
 impl InjectionScope {
-    /// Get the scope from a string name
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "Singleton" | "singleton" => Maybe::Some(InjectionScope::Singleton),
-            "Request" | "request" => Maybe::Some(InjectionScope::Request),
-            "Transient" | "transient" => Maybe::Some(InjectionScope::Transient),
-            _ => Maybe::None,
-        }
-    }
+    pub const ALL: &'static [Self] = &[Self::Singleton, Self::Request, Self::Transient];
 
-    /// Get the string name of this scope
-    pub fn as_str(&self) -> &'static str {
+    pub const fn meta(self) -> InjectionScopeMeta {
         match self {
-            InjectionScope::Singleton => "Singleton",
-            InjectionScope::Request => "Request",
-            InjectionScope::Transient => "Transient",
+            Self::Singleton => InjectionScopeMeta {
+                name: "Singleton",
+                lifetime_rank: 0,
+            },
+            Self::Request => InjectionScopeMeta {
+                name: "Request",
+                lifetime_rank: 1,
+            },
+            Self::Transient => InjectionScopeMeta {
+                name: "Transient",
+                lifetime_rank: 2,
+            },
         }
     }
 
-    /// Check if this scope can depend on another scope
-    ///
-
-    /// Scope hierarchy: Singleton → Request → Transient
-    /// Lower scopes cannot depend on higher scopes
-    pub fn can_depend_on(&self, other: &InjectionScope) -> bool {
-        use InjectionScope::*;
-        match (self, other) {
-            // Singleton can only depend on other singletons
-            (Singleton, Singleton) => true,
-            (Singleton, _) => false,
-            // Request can depend on Singleton or Request
-            (Request, Singleton) => true,
-            (Request, Request) => true,
-            (Request, Transient) => false,
-            // Transient can depend on anything
-            (Transient, _) => true,
+    /// Get the scope from a string name. Both PascalCase
+    /// (`"Singleton"`) and lowercase (`"singleton"`) forms parse to
+    /// the same variant; `as_str` always emits PascalCase.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            let m = v.meta();
+            if m.name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            // Tolerant lowercase alias (one per variant).
+            let lower_match = match v {
+                Self::Singleton => s == "singleton",
+                Self::Request => s == "request",
+                Self::Transient => s == "transient",
+            };
+            if lower_match {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    /// Canonical PascalCase name.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Lifetime-hierarchy rank (Singleton=0 lives longest;
+    /// Transient=2 is freshest).
+    #[inline]
+    pub const fn lifetime_rank(&self) -> u8 {
+        self.meta().lifetime_rank
+    }
+
+    /// Check if this scope can depend on another scope.
+    ///
+    /// Scope hierarchy: Singleton → Request → Transient.
+    /// A scope may only depend on scopes at least as long-lived as
+    /// itself: `self.lifetime_rank >= other.lifetime_rank`.
+    /// (Singletons can only depend on other singletons; Transient can
+    /// depend on anything.)
+    #[inline]
+    pub const fn can_depend_on(&self, other: &InjectionScope) -> bool {
+        self.meta().lifetime_rank >= other.meta().lifetime_rank
     }
 }
 
@@ -5672,60 +5823,117 @@ pub enum AccessMode {
     Reserved,
 }
 
+/// Per-variant projection for [`AccessMode`].
+///
+/// Capability flags fold the `can_read` / `can_write` / `is_write_modify`
+/// matches!() into a single dense table. `snake_name` is the
+/// `snake_case` parse alias (e.g. `"read_only"`); `name` is the
+/// canonical PascalCase form returned by `as_str`.
+#[derive(Debug, Clone, Copy)]
+pub struct AccessModeMeta {
+    pub name: &'static str,
+    pub snake_name: &'static str,
+    pub can_read: bool,
+    pub can_write: bool,
+    pub is_write_modify: bool,
+}
+
 impl AccessMode {
-    /// Parse access mode from a string identifier.
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "ReadOnly" | "read_only" => Maybe::Some(AccessMode::ReadOnly),
-            "WriteOnly" | "write_only" => Maybe::Some(AccessMode::WriteOnly),
-            "ReadWrite" | "read_write" => Maybe::Some(AccessMode::ReadWrite),
-            "WriteOneToClear" | "write_one_to_clear" => Maybe::Some(AccessMode::WriteOneToClear),
-            "WriteOneToSet" | "write_one_to_set" => Maybe::Some(AccessMode::WriteOneToSet),
-            "Reserved" | "reserved" => Maybe::Some(AccessMode::Reserved),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::ReadOnly,
+        Self::WriteOnly,
+        Self::ReadWrite,
+        Self::WriteOneToClear,
+        Self::WriteOneToSet,
+        Self::Reserved,
+    ];
+
+    pub const fn meta(self) -> AccessModeMeta {
+        match self {
+            Self::ReadOnly => AccessModeMeta {
+                name: "ReadOnly",
+                snake_name: "read_only",
+                can_read: true,
+                can_write: false,
+                is_write_modify: false,
+            },
+            Self::WriteOnly => AccessModeMeta {
+                name: "WriteOnly",
+                snake_name: "write_only",
+                can_read: false,
+                can_write: true,
+                is_write_modify: false,
+            },
+            Self::ReadWrite => AccessModeMeta {
+                name: "ReadWrite",
+                snake_name: "read_write",
+                can_read: true,
+                can_write: true,
+                is_write_modify: false,
+            },
+            Self::WriteOneToClear => AccessModeMeta {
+                name: "WriteOneToClear",
+                snake_name: "write_one_to_clear",
+                can_read: true,
+                can_write: true,
+                is_write_modify: true,
+            },
+            Self::WriteOneToSet => AccessModeMeta {
+                name: "WriteOneToSet",
+                snake_name: "write_one_to_set",
+                can_read: true,
+                can_write: true,
+                is_write_modify: true,
+            },
+            Self::Reserved => AccessModeMeta {
+                name: "Reserved",
+                snake_name: "reserved",
+                can_read: false,
+                can_write: false,
+                is_write_modify: false,
+            },
         }
     }
 
-    /// Get the string representation.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AccessMode::ReadOnly => "ReadOnly",
-            AccessMode::WriteOnly => "WriteOnly",
-            AccessMode::ReadWrite => "ReadWrite",
-            AccessMode::WriteOneToClear => "WriteOneToClear",
-            AccessMode::WriteOneToSet => "WriteOneToSet",
-            AccessMode::Reserved => "Reserved",
+    /// Parse access mode from a string identifier — accepts both
+    /// PascalCase (`"ReadOnly"`) and snake_case (`"read_only"`) forms.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            let m = v.meta();
+            if m.name.as_bytes() == s.as_bytes()
+                || m.snake_name.as_bytes() == s.as_bytes()
+            {
+                return Maybe::Some(v);
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    /// Get the canonical PascalCase string representation.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Check if this mode allows reading.
-    pub fn can_read(&self) -> bool {
-        matches!(
-            self,
-            AccessMode::ReadOnly
-                | AccessMode::ReadWrite
-                | AccessMode::WriteOneToClear
-                | AccessMode::WriteOneToSet
-        )
+    #[inline]
+    pub const fn can_read(&self) -> bool {
+        self.meta().can_read
     }
 
     /// Check if this mode allows writing.
-    pub fn can_write(&self) -> bool {
-        matches!(
-            self,
-            AccessMode::WriteOnly
-                | AccessMode::ReadWrite
-                | AccessMode::WriteOneToClear
-                | AccessMode::WriteOneToSet
-        )
+    #[inline]
+    pub const fn can_write(&self) -> bool {
+        self.meta().can_write
     }
 
-    /// Check if this is a write-modify mode.
-    pub fn is_write_modify(&self) -> bool {
-        matches!(
-            self,
-            AccessMode::WriteOneToClear | AccessMode::WriteOneToSet
-        )
+    /// Check if this is a write-modify mode (W1C / W1S).
+    #[inline]
+    pub const fn is_write_modify(&self) -> bool {
+        self.meta().is_write_modify
     }
 }
 
@@ -5767,43 +5975,109 @@ pub enum InterruptKind {
     Reset,
 }
 
+/// Per-variant projection for [`InterruptKind`].
+///
+/// `name` is the canonical lowercase form returned by `as_str`.
+/// `aliases` carries the architecture-specific synonyms accepted
+/// by `from_str` — empty if there are none.
+#[derive(Debug, Clone, Copy)]
+pub struct InterruptKindMeta {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub is_maskable: bool,
+    pub needs_special_stack: bool,
+}
+
 impl InterruptKind {
-    /// Parse interrupt kind from a string identifier.
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "regular" | "Regular" | "irq" | "IRQ" => Maybe::Some(InterruptKind::Regular),
-            "nmi" | "NMI" => Maybe::Some(InterruptKind::NMI),
-            "fast" | "Fast" | "fiq" | "FIQ" => Maybe::Some(InterruptKind::Fast),
-            "exception" | "Exception" => Maybe::Some(InterruptKind::Exception),
-            "trap" | "Trap" | "syscall" | "svc" | "SVC" => Maybe::Some(InterruptKind::Trap),
-            "reset" | "Reset" => Maybe::Some(InterruptKind::Reset),
-            _ => Maybe::None,
+    pub const ALL: &'static [Self] = &[
+        Self::Regular,
+        Self::NMI,
+        Self::Fast,
+        Self::Exception,
+        Self::Trap,
+        Self::Reset,
+    ];
+
+    pub const fn meta(self) -> InterruptKindMeta {
+        match self {
+            Self::Regular => InterruptKindMeta {
+                name: "regular",
+                aliases: &["Regular", "irq", "IRQ"],
+                is_maskable: true,
+                needs_special_stack: false,
+            },
+            Self::NMI => InterruptKindMeta {
+                name: "nmi",
+                aliases: &["NMI"],
+                is_maskable: false,
+                needs_special_stack: true,
+            },
+            Self::Fast => InterruptKindMeta {
+                name: "fast",
+                aliases: &["Fast", "fiq", "FIQ"],
+                is_maskable: true,
+                needs_special_stack: false,
+            },
+            Self::Exception => InterruptKindMeta {
+                name: "exception",
+                aliases: &["Exception"],
+                is_maskable: false,
+                needs_special_stack: true,
+            },
+            Self::Trap => InterruptKindMeta {
+                name: "trap",
+                aliases: &["Trap", "syscall", "svc", "SVC"],
+                is_maskable: false,
+                needs_special_stack: false,
+            },
+            Self::Reset => InterruptKindMeta {
+                name: "reset",
+                aliases: &["Reset"],
+                is_maskable: false,
+                needs_special_stack: true,
+            },
         }
     }
 
-    /// Get the string representation.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            InterruptKind::Regular => "regular",
-            InterruptKind::NMI => "nmi",
-            InterruptKind::Fast => "fast",
-            InterruptKind::Exception => "exception",
-            InterruptKind::Trap => "trap",
-            InterruptKind::Reset => "reset",
+    /// Parse interrupt kind from a string identifier — accepts the
+    /// canonical lowercase name plus any architecture-specific
+    /// alias listed in `meta().aliases`.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            let m = v.meta();
+            if m.name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            let mut j = 0;
+            while j < m.aliases.len() {
+                if m.aliases[j].as_bytes() == s.as_bytes() {
+                    return Maybe::Some(v);
+                }
+                j += 1;
+            }
+            i += 1;
         }
+        Maybe::None
+    }
+
+    /// Canonical lowercase name.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Check if this interrupt type can be masked/disabled.
-    pub fn is_maskable(&self) -> bool {
-        matches!(self, InterruptKind::Regular | InterruptKind::Fast)
+    #[inline]
+    pub const fn is_maskable(&self) -> bool {
+        self.meta().is_maskable
     }
 
     /// Check if this requires special stack handling.
-    pub fn needs_special_stack(&self) -> bool {
-        matches!(
-            self,
-            InterruptKind::NMI | InterruptKind::Reset | InterruptKind::Exception
-        )
+    #[inline]
+    pub const fn needs_special_stack(&self) -> bool {
+        self.meta().needs_special_stack
     }
 }
 
