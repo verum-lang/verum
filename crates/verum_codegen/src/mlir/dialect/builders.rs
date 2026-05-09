@@ -6,7 +6,7 @@
 
 use crate::mlir::dialect::ops::*;
 use crate::mlir::dialect::types::{RefTier, VerumType};
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::{MlirError, OptionExt, Result};
 use verum_common::Text;
 use verum_mlir::{
     Context,
