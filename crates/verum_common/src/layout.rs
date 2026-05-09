@@ -280,6 +280,55 @@ pub const VARIANT_TAG_OFFSET: u64 = OBJECT_HEADER_SIZE; // 24
 pub const VARIANT_PAYLOAD_OFFSET: u64 = OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE; // 32
 
 // ============================================================================
+// Heap configuration (allocator-wide invariants)
+// ============================================================================
+//
+// Limits and defaults shared by every heap implementation in the
+// toolchain — the Tier-0 interpreter heap (`verum_vbc::interpreter::heap`),
+// the CBGR-tracked allocator (`verum_vbc::interpreter::cbgr_heap`), and
+// the AOT-emitted bump allocator (`verum_codegen::llvm::platform_ir::
+// emit_allocator`). Drift between any two would yield inconsistent
+// alignment guarantees, allocation rejection thresholds, or initial
+// collection capacities depending on which path serves a given call.
+
+/// Minimum alignment for every heap allocation (bytes).
+///
+/// All Verum allocations align to at least this boundary. The value
+/// matches the natural pointer alignment on the supported 64-bit
+/// targets (x86_64 / aarch64) and is required for the `#[repr(C)]`
+/// `ObjectHeader` / `AllocationHeader` to satisfy their internal
+/// field alignments.
+pub const MIN_HEAP_ALIGNMENT: usize = 8;
+
+/// Hard ceiling on a single heap allocation (bytes).
+///
+/// 1 GiB. Prevents DoS from pathological allocations
+/// (`array of 2^63 elements` style requests). Exceeding this ceiling
+/// produces a structured `AllocationFailure` rather than aborting the
+/// process. Both heap implementations enforce the same threshold.
+pub const MAX_ALLOCATION_SIZE: usize = 1024 * 1024 * 1024;
+
+/// Default capacity for the Tier-0 interpreter heap (bytes).
+///
+/// 16 MiB. Used when constructing a `Heap` with `Heap::new()` /
+/// `Heap::default()`. Larger heaps can be requested via
+/// `Heap::with_threshold(...)`. The value strikes a balance between
+/// fast startup (small initial mmap on platforms that pre-fault) and
+/// avoiding frequent threshold checks during typical program runs.
+pub const DEFAULT_HEAP_SIZE: usize = 16 * 1024 * 1024;
+
+/// Default initial capacity for collections (List / Map / Set / Deque).
+///
+/// 16 entries. Picks a power-of-two starting capacity friendly to the
+/// hash-map probing scheme in `core/collections/map.vr` (which
+/// invokes `next_power_of_two().max(INITIAL_CAPACITY)`). The codegen
+/// allocator and the stdlib `INITIAL_CAPACITY` constant in
+/// `core/collections/map.vr` MUST agree on this value — drift causes
+/// the AOT path to allocate one initial size and the stdlib resize
+/// helpers to grow from another.
+pub const DEFAULT_COLLECTION_CAPACITY: u64 = 16;
+
+// ============================================================================
 // Built-in scalar layouts
 // ============================================================================
 
@@ -464,6 +513,41 @@ mod tests {
         // Variants — tag in slot 0, payload in slot 1.
         assert_eq!(VARIANT_TAG_OFFSET, OBJECT_HEADER_SIZE);
         assert_eq!(VARIANT_PAYLOAD_OFFSET, OBJECT_HEADER_SIZE + VALUE_SLOT_SIZE);
+    }
+
+    /// Heap-configuration invariants. Both interpreter heap impls and
+    /// the AOT bump allocator MUST agree on these limits — duplication
+    /// would let one path accept allocations the other rejects.
+    #[test]
+    fn heap_config_invariants() {
+        // Alignment: ≥ pointer width, power of two.
+        assert_eq!(MIN_HEAP_ALIGNMENT, 8);
+        assert_eq!(MIN_HEAP_ALIGNMENT, POINTER_SIZE as usize);
+        assert!(
+            MIN_HEAP_ALIGNMENT.is_power_of_two(),
+            "alignment must be power-of-two for Layout::from_size_align",
+        );
+
+        // Allocation ceiling: 1 GiB.
+        assert_eq!(MAX_ALLOCATION_SIZE, 1 << 30);
+        assert!(
+            MAX_ALLOCATION_SIZE < usize::MAX / 2,
+            "ceiling must leave headroom for header overhead",
+        );
+
+        // Default heap: 16 MiB, less than the per-allocation ceiling.
+        assert_eq!(DEFAULT_HEAP_SIZE, 16 << 20);
+        assert!(
+            DEFAULT_HEAP_SIZE < MAX_ALLOCATION_SIZE,
+            "default heap fits below the per-allocation ceiling",
+        );
+
+        // Default collection capacity: power of two for hash-probe.
+        assert_eq!(DEFAULT_COLLECTION_CAPACITY, 16);
+        assert!(
+            (DEFAULT_COLLECTION_CAPACITY as u128).is_power_of_two(),
+            "stdlib map probe scheme requires power-of-two cap",
+        );
     }
 
     /// Bit-packing constants stay self-consistent: caps + epoch widths

@@ -65,10 +65,16 @@ use crate::value::Value;
 pub const OBJECT_HEADER_SIZE: usize = verum_common::layout::OBJECT_HEADER_SIZE as usize;
 
 /// Default heap size (16 MB).
-pub const DEFAULT_HEAP_SIZE: usize = 16 * 1024 * 1024;
+///
+/// Re-exports the canonical [`verum_common::layout::DEFAULT_HEAP_SIZE`].
+pub const DEFAULT_HEAP_SIZE: usize = verum_common::layout::DEFAULT_HEAP_SIZE;
 
 /// Minimum alignment for objects.
-pub const MIN_ALIGNMENT: usize = 8;
+///
+/// Re-exports the canonical [`verum_common::layout::MIN_HEAP_ALIGNMENT`]
+/// — the single source of truth shared with `cbgr_heap.rs` and the
+/// AOT bump allocator emitted by `verum_codegen::llvm::platform_ir`.
+pub const MIN_ALIGNMENT: usize = verum_common::layout::MIN_HEAP_ALIGNMENT;
 
 /// Maximum single allocation size (1 GB).
 ///
@@ -76,7 +82,7 @@ pub const MIN_ALIGNMENT: usize = 8;
 /// Prevents DoS attacks via requesting extremely large allocations
 /// (e.g., 2^63 element arrays). Any single allocation request exceeding
 /// this limit is rejected with OutOfMemory.
-pub const MAX_ALLOCATION_SIZE: usize = 1024 * 1024 * 1024;
+pub const MAX_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE;
 
 bitflags! {
     /// Object flags for runtime state.
