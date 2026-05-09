@@ -6440,7 +6440,7 @@ pub fn lower_instruction<'ctx>(
                 .or_llvm_err()?;
             store
                 .set_volatile(true)
-                .map_err(|_| LlvmLoweringError::llvm_error("set_volatile failed".to_string()))?;
+                .map_err(|_| LlvmLoweringError::BuilderError("set_volatile failed".to_string().into()))?;
             let load = ctx
                 .builder()
                 .build_load(i64_type, slot, "opt_barrier_reload")
@@ -10732,7 +10732,7 @@ fn lower_call<'ctx>(
         let result = ctx
             .builder()
             .build_atomicrmw(rmw_op, ptr_val, value_val, ordering_val)
-            .map_err(|e| LlvmLoweringError::llvm_error(format!("atomicrmw: {}", e)))?;
+            .map_err(|e| LlvmLoweringError::BuilderError(format!("atomicrmw: {}", e).into()))?;
         ctx.set_register(dst.0, result.into());
         return Ok(());
     }
@@ -17761,9 +17761,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_bit_cast(a, i64_ty, "f64_to_bits")
-                .map_err(|e: verum_llvm::builder::BuilderError| {
-                    LlvmLoweringError::llvm_error(e.to_string())
-                })?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_int_value().into());
             Ok(())
         }
@@ -17777,9 +17775,7 @@ fn lower_arith_extended<'ctx>(
             let result = ctx
                 .builder()
                 .build_bit_cast(a, f64_ty, "f64_from_bits")
-                .map_err(|e: verum_llvm::builder::BuilderError| {
-                    LlvmLoweringError::llvm_error(e.to_string())
-                })?;
+                .or_llvm_err()?;
             ctx.set_register(dst, result.into_float_value().into());
             Ok(())
         }
@@ -18274,9 +18270,7 @@ fn lower_arith_extended<'ctx>(
             let i32_val = ctx
                 .builder()
                 .build_bit_cast(f32_val, i32_ty, "f32_to_bits")
-                .map_err(|e: verum_llvm::builder::BuilderError| {
-                    LlvmLoweringError::llvm_error(e.to_string())
-                })?
+                .or_llvm_err()?
                 .into_int_value();
             // Sign-extend i32 to i64 (zero-extend would also work; sext preserves bit pattern interpretation)
             let result = ctx
@@ -18309,9 +18303,7 @@ fn lower_arith_extended<'ctx>(
             let f32_val = ctx
                 .builder()
                 .build_bit_cast(i32_val, f32_ty, "bits_to_f32")
-                .map_err(|e: verum_llvm::builder::BuilderError| {
-                    LlvmLoweringError::llvm_error(e.to_string())
-                })?
+                .or_llvm_err()?
                 .into_float_value();
             // Extend f32 to f64
             let result = ctx
@@ -23610,17 +23602,13 @@ fn lower_ffi_extended<'ctx>(
                                     let cast = ctx
                                         .builder()
                                         .build_int_truncate(val_int, it, "ffi_trunc")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else if val_bits < exp_bits {
                                     let cast = ctx
                                         .builder()
                                         .build_int_z_extend(val_int, it, "ffi_zext")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else {
                                     arg_val
@@ -23780,17 +23768,13 @@ fn lower_ffi_extended<'ctx>(
                                     let cast = ctx
                                         .builder()
                                         .build_int_truncate(val_int, it, "ffi_trunc")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else if val_bits < exp_bits {
                                     let cast = ctx
                                         .builder()
                                         .build_int_z_extend(val_int, it, "ffi_zext")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else {
                                     arg_val
@@ -23907,17 +23891,13 @@ fn lower_ffi_extended<'ctx>(
                                     let cast = ctx
                                         .builder()
                                         .build_int_truncate(val_int, it, "ffi_trunc")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else if val_bits < exp_bits {
                                     let cast = ctx
                                         .builder()
                                         .build_int_z_extend(val_int, it, "ffi_zext")
-                                        .map_err(|e| {
-                                            LlvmLoweringError::llvm_error(e.to_string())
-                                        })?;
+                                        .or_llvm_err()?;
                                     BasicValueEnum::from(cast)
                                 } else {
                                     arg_val

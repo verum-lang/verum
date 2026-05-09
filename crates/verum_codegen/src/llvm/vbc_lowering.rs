@@ -4263,7 +4263,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         builder
                             .build_call(target_fn, &[], "init_result")
                             .map_err(|e| {
-                                LlvmLoweringError::llvm_error(format!("global ctor call: {}", e))
+                                LlvmLoweringError::BuilderError(format!("global ctor call: {}", e).into())
                             })?;
                     }
                 }
@@ -4271,14 +4271,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             builder
                 .build_return(None)
-                .map_err(|e| LlvmLoweringError::llvm_error(format!("global ctor return: {}", e)))?;
+                .map_err(|e| LlvmLoweringError::BuilderError(format!("global ctor return: {}", e).into()))?;
 
             super::symbols::add_global_ctor(
                 &self.module,
                 init_fn,
                 super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global ctor: {}", e)))?;
+            .map_err(|e| LlvmLoweringError::BuilderError(format!("emit global ctor: {}", e).into()))?;
         }
 
         // Emit global destructors (same pattern)
@@ -4297,21 +4297,21 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     builder
                         .build_call(target_fn, &[], "fini_result")
                         .map_err(|e| {
-                            LlvmLoweringError::llvm_error(format!("global dtor call: {}", e))
+                            LlvmLoweringError::BuilderError(format!("global dtor call: {}", e).into())
                         })?;
                 }
             }
 
             builder
                 .build_return(None)
-                .map_err(|e| LlvmLoweringError::llvm_error(format!("global dtor return: {}", e)))?;
+                .map_err(|e| LlvmLoweringError::BuilderError(format!("global dtor return: {}", e).into()))?;
 
             super::symbols::add_global_dtor(
                 &self.module,
                 dtor_fn,
                 super::symbols::DEFAULT_CTOR_DTOR_PRIORITY,
             )
-            .map_err(|e| LlvmLoweringError::llvm_error(format!("emit global dtor: {}", e)))?;
+            .map_err(|e| LlvmLoweringError::BuilderError(format!("emit global dtor: {}", e).into()))?;
         }
 
         Ok(())
