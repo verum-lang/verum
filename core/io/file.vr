@@ -116,6 +116,17 @@ public const O_TRUNC: Int = 0x0400;
 public const O_APPEND: Int = 0x0008;
 
 // =============================================================================
+// Default file-creation mode
+// =============================================================================
+// Single source of truth for the rw-r--r-- mask used at every
+// implicit `sys_open(..., flags | O_CREAT, mode)` call site.
+// Matches the umask-022-default that POSIX `creat(... 0666)` produces.
+// Naming follows the POSIX `<sys/stat.h>` convention so the
+// drift-prevention pattern from io/fs.vr (PERM_MASK / S_IWUSR /
+// DEFAULT_DIR_MODE) extends here.
+const DEFAULT_FILE_MODE: Int = 0o644;
+
+// =============================================================================
 // OpenOptions
 // =============================================================================
 
@@ -249,8 +260,7 @@ implement File {
     // Internal: open with flags.
     fn open_with_flags(path: &Text, flags: Int) -> IoResult<File> {
         let bytes = path.as_bytes();
-        // Default mode: rw-r--r-- (0644)
-        let mode = 0o644;
+        let mode = DEFAULT_FILE_MODE;
 
         match sys_open(bytes, flags, mode) {
             Ok(fd) => Ok(File { fd: fd.as_raw() }),
