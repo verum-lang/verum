@@ -4251,17 +4251,55 @@ impl VbcCodegen {
                         }
                     }
                     VariantKind::Tuple => {
+                        // Tuple variants admit two valid `fields` shapes:
+                        //
+                        //   * Empty (the import-from-archive form —
+                        //     `import_archive_type` strips fields for
+                        //     Tuple kind because the archive's fields
+                        //     entry is redundant once arity is known).
+                        //
+                        //   * Positional `_0`, `_1`, …, `_(arity-1)`
+                        //     with `fields.len() == arity` (the
+                        //     fresh-codegen form — see
+                        //     `compile_type_decl` line ~8327, which
+                        //     populates per-slot TypeRef so
+                        //     `archive_metadata` can recover the
+                        //     payload type for each slot WITHOUT
+                        //     falling back to the parent's first
+                        //     generic param).
+                        //
+                        // Anything else (mismatched arity, named
+                        // fields on Tuple) indicates the descriptor
+                        // was assembled by a path that confused
+                        // Tuple with Record — that's the original
+                        // class of bug this gate catches.
                         if !v.fields.is_empty() {
-                            return Err(CodegenError::internal(format!(
-                                "type-layout invariant: variant `{}.{}` is `Tuple` \
-                                 (arity={}) but also has {} record-field(s); \
-                                 tuple variants store payload count in `arity`, \
-                                 not `fields`",
-                                type_name,
-                                v_name,
-                                v.arity,
-                                v.fields.len(),
-                            )));
+                            if v.fields.len() != v.arity as usize {
+                                return Err(CodegenError::internal(format!(
+                                    "type-layout invariant: variant `{}.{}` is `Tuple` \
+                                     (arity={}) but `fields.len() = {}`; \
+                                     positional payload count must agree with arity",
+                                    type_name,
+                                    v_name,
+                                    v.arity,
+                                    v.fields.len(),
+                                )));
+                            }
+                            for (idx, fd) in v.fields.iter().enumerate() {
+                                let expected = format!("_{}", idx);
+                                let actual = strings
+                                    .get(fd.name.0 as usize)
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("");
+                                if actual != expected {
+                                    return Err(CodegenError::internal(format!(
+                                        "type-layout invariant: variant `{}.{}` is `Tuple` \
+                                         but `fields[{}].name = {:?}` (expected positional \
+                                         `{}`); tuple variants must use positional names",
+                                        type_name, v_name, idx, actual, expected,
+                                    )));
+                                }
+                            }
                         }
                         if v.arity == 0 {
                             return Err(CodegenError::internal(format!(

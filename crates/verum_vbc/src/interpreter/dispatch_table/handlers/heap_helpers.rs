@@ -109,7 +109,6 @@ pub(super) fn wrap_in_variant(
     tag: u32,
     fields: &[Value],
 ) -> InterpreterResult<Value> {
-    use heap::OBJECT_HEADER_SIZE;
     let type_id = lookup_type_id_by_name(state, type_name)
         .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag)));
     let field_count = fields.len() as u32;
@@ -117,13 +116,13 @@ pub(super) fn wrap_in_variant(
     let obj = state.heap.alloc(type_id, data_size)?;
     state.record_allocation();
     let base = obj.as_ptr() as *mut u8;
+    // SAFETY: alloc returned a live heap object whose data section is
+    // sized for the variant `(tag, field_count, payload[0..N])` layout;
+    // `field_count` matches the number of payload writes below.
     unsafe {
-        let tag_ptr = base.add(OBJECT_HEADER_SIZE) as *mut u32;
-        *tag_ptr = tag;
-        *tag_ptr.add(1) = field_count;
-        let payload_ptr = base.add(OBJECT_HEADER_SIZE + 8) as *mut Value;
+        heap::write_variant_data_header(base.add(heap::OBJECT_HEADER_SIZE), tag, field_count);
         for (i, v) in fields.iter().enumerate() {
-            *payload_ptr.add(i) = *v;
+            *heap::variant_payload_ptr_mut(base, i) = *v;
         }
     }
     Ok(Value::from_ptr(base))

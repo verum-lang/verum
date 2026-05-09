@@ -998,102 +998,12 @@ pub(crate) fn get_array_element(
     }
 }
 
-/// Check if a type_id represents an array type.
-fn is_array_type_id(type_id: u32) -> bool {
-    type_id == 0
-        || type_id == TypeId::LIST.0
-        || type_id == TypeId::ARRAY.0
-        || type_id == TypeId::TUPLE.0
-}
-
-/// Extract a string representation from a Value.
-fn extract_string(value: &Value, _state: &InterpreterState) -> String {
-    if value.is_small_string() {
-        return value.as_small_string().as_str().to_string();
-    }
-
-    if value.is_ptr() && !value.is_nil() {
-        let base_ptr = value.as_ptr::<u8>();
-        if !base_ptr.is_null() {
-            unsafe {
-                let data_offset = super::heap::OBJECT_HEADER_SIZE;
-                let len_ptr = base_ptr.add(data_offset) as *const u64;
-                let len = *len_ptr as usize;
-                if len <= 65536 {
-                    let bytes_ptr = base_ptr.add(data_offset + 8);
-                    let bytes = std::slice::from_raw_parts(bytes_ptr, len);
-                    if let Ok(s) = std::str::from_utf8(bytes) {
-                        return s.to_string();
-                    }
-                }
-            }
-        }
-    }
-
-    if value.is_int() {
-        return format!("{}", value.as_i64());
-    }
-
-    format!("<value:{}>", value.as_i64())
-}
-
-/// Check if a Value is a heap-allocated string pointer.
-fn is_heap_string(v: &Value) -> bool {
-    if !v.is_ptr() || v.is_nil() {
-        return false;
-    }
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return false;
-    }
-    let type_id = unsafe { *(ptr as *const u32) };
-    type_id == 0x0001 || type_id == TypeId::TEXT.0
-}
-
-/// Check if an integer Value might be a string table index.
-fn is_string_id(v: &Value, state: &InterpreterState) -> bool {
-    if !v.is_int() || v.is_bool() {
-        return false;
-    }
-    let id = v.as_i64();
-    id >= 0
-        && (id as u32) < 10000
-        && state
-            .module
-            .get_string(crate::types::StringId(id as u32))
-            .is_some()
-}
-
-/// Resolve a Value to its string content.
-fn resolve_string_value(v: &Value, state: &InterpreterState) -> String {
-    if v.is_small_string() {
-        return v.as_small_string().as_str().to_string();
-    }
-    if is_heap_string(v) {
-        let base_ptr = v.as_ptr::<u8>();
-        unsafe {
-            let data_offset = super::heap::OBJECT_HEADER_SIZE;
-            let len_ptr = base_ptr.add(data_offset) as *const u64;
-            let len = *len_ptr as usize;
-            if len <= 65536 {
-                let bytes_ptr = base_ptr.add(data_offset + 8);
-                let bytes = std::slice::from_raw_parts(bytes_ptr, len);
-                if let Ok(s) = std::str::from_utf8(bytes) {
-                    return s.to_string();
-                }
-            }
-        }
-    }
-    if v.is_int() && !v.is_bool() {
-        let id = v.as_i64();
-        if id >= 0
-            && let Some(s) = state.module.get_string(crate::types::StringId(id as u32))
-        {
-            return s.to_string();
-        }
-    }
-    format!("<value:{}>", v.as_i64())
-}
+// String / array-type-id helper functions previously duplicated here
+// have been removed in favor of their canonical homes in
+// `super::handlers::string_helpers` (`extract_string`,
+// `is_heap_string`, `is_string_id`, `resolve_string_value`,
+// `is_array_type_id`).  The mod.rs duplicates were dead code — every
+// caller already routed through the `string_helpers` module.
 
 /// **DELETED**: a parallel `deep_value_eq` (with locally-defined,
 /// INCOMPATIBLE `is_cbgr_ref` / `decode_cbgr_ref` helpers) once
