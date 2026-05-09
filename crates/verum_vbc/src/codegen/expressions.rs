@@ -599,6 +599,26 @@ impl VbcCodegen {
     /// (variant constructor) info and route through `emit_make_variant`.
     /// Used by call-form and record-form variant constructor paths
     /// that already have a `parent_type_name` field on the FunctionInfo.
+    ///
+    /// Resolution layers (each closes a distinct codegen gap):
+    ///
+    /// 1. `info(primary).parent_type_name` — the registered metadata; the
+    ///    canonical answer when `register_function_with_parent_type` ran.
+    /// 2. `info(fallback).parent_type_name` — same lookup against the
+    ///    qualified-form name (e.g. `"Maybe::Some"` after the bare
+    ///    `"Some"` lookup misses), useful when the unqualified copy
+    ///    didn't carry the parent.
+    /// 3. **Syntactic recovery from the qualified name itself** — when
+    ///    both metadata lookups missed, the user-side path already
+    ///    encodes the parent in the rightmost-separator-prefix. We
+    ///    consult `parent_type_from_qualified_name` (same routine the
+    ///    runtime uses) so cross-module variant constructors that lost
+    ///    their `parent_type_name` field at archive boundaries still
+    ///    promote to the typed `MakeVariantTyped` form. Without this
+    ///    layer the runtime's `format_variant_for_print_depth` fell back
+    ///    to its O(N_types) tag-scan and could mis-render a user-defined
+    ///    sum type's variant as a colliding-tag variant from another
+    ///    module.
     pub(super) fn emit_make_variant_for_function(
         &mut self,
         dst: Reg,
@@ -617,6 +637,10 @@ impl VbcCodegen {
                         .lookup_function(n)
                         .and_then(|info| info.parent_type_name.clone())
                 })
+            })
+            .or_else(|| self.parent_type_from_qualified_name(primary_lookup_name))
+            .or_else(|| {
+                fallback_lookup_name.and_then(|n| self.parent_type_from_qualified_name(n))
             });
         self.emit_make_variant(dst, tag, field_count, parent_name.as_deref());
     }
@@ -5365,20 +5389,23 @@ impl VbcCodegen {
                 self.compile_static_method_call(&info, args)
             }
             ResolvedCallTarget::VariantCtor { tag, parent_type_name } => {
-                // Reuse the variant constructor emit path with the
-                // method name (e.g. "Some", "Ok", "Less") so the
-                // typed-MakeVariant code at `emit_make_variant`
-                // resolves the parent type id via the existing
-                // `lookup_function` → `parent_type_name` →
-                // `type_name_to_id` chain.  Pass through the
-                // typechecker-resolved parent name when available
-                // so we don't fall back to the
-                // FunctionInfo.parent_type_name lookup.
-                let _ = parent_type_name; // forwarded via method name resolution path
-                self.compile_variant_constructor_with_tag_named(
+                // The typechecker already resolved the parent sum
+                // type — carry it directly into the variant-emit path
+                // instead of re-deriving from the variant's simple
+                // name. Without this, codegen had to round-trip
+                // through `lookup_function(simple_name) →
+                // info.parent_type_name`, a resolution that can miss
+                // when the constructor was registered without parent
+                // metadata or when two sum types share a variant
+                // simple name. Carrying the typechecker's answer
+                // forward means the typed `MakeVariantTyped` form
+                // lands deterministically rather than depending on
+                // FunctionInfo registration order.
+                self.compile_variant_constructor_with_tag_named_and_parent(
                     Some(method.name.as_str()),
                     *tag,
                     args,
+                    parent_type_name.as_deref(),
                 )
             }
         }
@@ -5398,11 +5425,32 @@ impl VbcCodegen {
         tag: u32,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        self.compile_variant_constructor_with_tag_named_and_parent(variant_name, tag, args, None)
+    }
+
+    /// Sibling of `compile_variant_constructor_with_tag_named` that
+    /// accepts a typechecker-resolved parent sum-type name.  When the
+    /// caller already knows the parent (e.g. via
+    /// `ResolvedCallTarget::VariantCtor.parent_type_name` populated by
+    /// type inference), this avoids the lossy round-trip through
+    /// FunctionInfo metadata where missing/stale `parent_type_name`
+    /// fields silently demote the variant emission to the legacy
+    /// `MakeVariant` (synthetic-tag) form.
+    fn compile_variant_constructor_with_tag_named_and_parent(
+        &mut self,
+        variant_name: Option<&str>,
+        tag: u32,
+        args: &verum_common::List<Expr>,
+        explicit_parent: Option<&str>,
+    ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
-        let parent = variant_name.and_then(|n| {
-            self.ctx
-                .lookup_function(n)
-                .and_then(|info| info.parent_type_name.clone())
+        let parent = explicit_parent.map(|s| s.to_string()).or_else(|| {
+            variant_name.and_then(|n| {
+                self.ctx
+                    .lookup_function(n)
+                    .and_then(|info| info.parent_type_name.clone())
+                    .or_else(|| self.parent_type_from_qualified_name(n))
+            })
         });
         self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
         if !args.is_empty() {
