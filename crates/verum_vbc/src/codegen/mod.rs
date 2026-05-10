@@ -108,7 +108,6 @@ pub struct BlanketImpl {
     pub explicit_methods: std::collections::HashSet<String>,
 }
 pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
-use error::CodegenOptionExt as _;
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
 
 use crate::types::CbgrTier;

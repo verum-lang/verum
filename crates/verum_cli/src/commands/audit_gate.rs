@@ -164,7 +164,7 @@ impl AuditRegistry {
 impl Default for AuditRegistry {
     fn default() -> Self {
         let mut r = Self::new();
-        // Full migration of all 27 audit gates. Each gate is one
+        // Full migration of all 28 audit gates. Each gate is one
         // unit struct + one `impl AuditGate` block; the trait impl
         // routes through the existing `audit::audit_*_with_format`
         // function, so all current behaviour is preserved.
@@ -640,7 +640,7 @@ mod tests {
                 name,
             );
         }
-        assert_eq!(r.len(), 27, "expected 27 gates in the default registry");
+        assert_eq!(r.len(), 28, "expected 28 gates in the default registry");
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
     fn registry_list_returns_name_description_pairs() {
         let r = AuditRegistry::default();
         let entries = r.list();
-        assert_eq!(entries.len(), 27);
+        assert_eq!(entries.len(), 28);
         for (name, desc) in &entries {
             assert!(!name.is_empty());
             assert!(!desc.is_empty());

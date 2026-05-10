@@ -596,7 +596,7 @@ pub fn finalise_certificate(
 // AST integration — consume real Verum AST values
 // =============================================================================
 
-use verum_ast::decl::{ProofBody, TacticExpr, TheoremDecl};
+use verum_ast::decl::{ProofBody, ProofStepKind, ProofStructure, TacticExpr, TheoremDecl};
 use verum_ast::expr::{Expr, ExprKind};
 
 /// **Elaborate one tactic expression to a kernel `Term`.**
@@ -835,18 +835,46 @@ fn tactic_variant_name(t: &TacticExpr) -> &'static str {
 ///  delegates to [`expr_to_term`]. Handles the
 ///  `proof = lemma_name(args)` syntax where the user writes a
 ///  constructive witness directly without tactic wrapping.
+///  - `ProofBody::Structured(s)` — degenerate forms (a single
+///  `ProofStepKind::Tactic`, or empty steps + a conclusion tactic)
+///  collapse to [`elaborate_tactic`]. Richer structured bodies
+///  (`have`/`show`/`obtain`/`calc`/`cases`/…) still return
+///  [`ElabError::UnsupportedTactic`].
 ///
 
-/// `Structured` and `ByMethod` proof bodies are not yet handled
-/// and return [`ElabError::UnsupportedTactic`].
+/// `ByMethod` proof bodies are not yet handled and return
+/// [`ElabError::UnsupportedTactic`].
 pub fn elaborate_proof_body(body: &ProofBody, ctx: &mut ElabContext) -> Result<Term, ElabError> {
     match body {
         ProofBody::Tactic(t) => elaborate_tactic(t, ctx),
         ProofBody::Term(e) => expr_to_term(e, ctx),
-        ProofBody::Structured(_) => {
-            Err(ElabError::UnsupportedTactic("ProofBody::Structured".into()))
-        }
+        ProofBody::Structured(s) => match degenerate_structured_to_tactic(s) {
+            Some(t) => elaborate_tactic(t, ctx),
+            None => Err(ElabError::UnsupportedTactic("ProofBody::Structured".into())),
+        },
         ProofBody::ByMethod(_) => Err(ElabError::UnsupportedTactic("ProofBody::ByMethod".into())),
+    }
+}
+
+/// If a `ProofStructure` is the canonical degenerate single-tactic
+/// shape produced by `proof { apply X; }` / `proof { trivial; }`,
+/// return the underlying tactic. Otherwise return `None`.
+///
+/// Two parser-side shapes are accepted:
+///  1. `steps = [Tactic(t)]`, `conclusion = None` — single-step body
+///     (the form `parse_structured_proof_body` produces today).
+///  2. `steps = []`, `conclusion = Some(t)` — pure-conclusion body,
+///     for parser variants that funnel the final tactic into the
+///     dedicated slot.
+fn degenerate_structured_to_tactic(s: &ProofStructure) -> Option<&TacticExpr> {
+    use verum_common::Maybe;
+    match (s.steps.len(), &s.conclusion) {
+        (1, Maybe::None) => match &s.steps.iter().next()?.kind {
+            ProofStepKind::Tactic(t) => Some(t),
+            _ => None,
+        },
+        (0, Maybe::Some(t)) => Some(t),
+        _ => None,
     }
 }
 
