@@ -242,6 +242,36 @@ impl LlvmLoweringError {
     }
 }
 
+// =============================================================================
+// Module helpers — get-or-declare an LLVM function
+// =============================================================================
+
+/// Get the function `name` from `module` if it already exists, otherwise
+/// declare it with the given `fn_type` and return the freshly-added
+/// `FunctionValue`.
+///
+/// This collapses the very common pattern
+///
+///     let func = module
+///         .get_function("llvm.floor.f64")
+///         .unwrap_or_else(|| module.add_function("llvm.floor.f64", fn_type, None));
+///
+/// repeated 240+ times across `instruction.rs` / `runtime.rs` /
+/// `platform_ir.rs` for declaring LLVM intrinsics, the FFI runtime
+/// surface, and the verum runtime symbols.  Centralises the lookup so
+/// future audits (e.g. validating the intrinsic name against
+/// `verum_llvm`'s intrinsic registry) have a single attachment point.
+#[inline]
+pub fn get_or_declare_function<'ctx>(
+    module: &verum_llvm::module::Module<'ctx>,
+    name: &str,
+    fn_type: verum_llvm::types::FunctionType<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    module
+        .get_function(name)
+        .unwrap_or_else(|| module.add_function(name, fn_type, None))
+}
+
 #[cfg(test)]
 mod meta_consolidation_pins {
     use super::LoweringSeverity;
