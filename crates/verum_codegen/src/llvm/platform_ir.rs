@@ -1424,9 +1424,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_os_alloc")
-            .unwrap_or_else(|| module.add_function("verum_os_alloc", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_os_alloc", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -1571,9 +1569,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_os_free")
-            .unwrap_or_else(|| module.add_function("verum_os_free", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_os_free", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -1670,9 +1666,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_os_write")
-            .unwrap_or_else(|| module.add_function("verum_os_write", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_os_write", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -1886,9 +1880,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[i32_type.into()], false);
-        let func = module
-            .get_function("verum_os_exit")
-            .unwrap_or_else(|| module.add_function("verum_os_exit", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_os_exit", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -1978,9 +1970,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into()], false);
-        let main_fn = module
-            .get_function("main")
-            .unwrap_or_else(|| module.add_function("main", fn_type, None));
+        let main_fn = super::error::get_or_declare_function(module, "main", fn_type);
         if main_fn.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2086,9 +2076,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // mainCRTStartup() -> void (noreturn)
         let fn_type = void_type.fn_type(&[], false);
-        let entry_fn = module
-            .get_function("mainCRTStartup")
-            .unwrap_or_else(|| module.add_function("mainCRTStartup", fn_type, None));
+        let entry_fn = super::error::get_or_declare_function(module, "mainCRTStartup", fn_type);
         if entry_fn.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2236,9 +2224,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "__verum_runtime_task_stack_size",
             ),
         ] {
-            let func = module
-                .get_function(fn_name)
-                .unwrap_or_else(|| module.add_function(fn_name, fn_type, None));
+            let func = super::error::get_or_declare_function(module, fn_name, fn_type);
             // Skip if the body has already been emitted (re-entrancy
             // safety — `emit_platform_functions` may run more than
             // once across linked modules).
@@ -2274,9 +2260,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[i32_type.into(), ptr_type.into()], false);
-        let func = module
-            .get_function("verum_store_args")
-            .unwrap_or_else(|| module.add_function("verum_store_args", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_store_args", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2309,9 +2293,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_get_argc")
-            .unwrap_or_else(|| module.add_function("verum_get_argc", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_get_argc", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2343,9 +2325,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_get_argv")
-            .unwrap_or_else(|| module.add_function("verum_get_argv", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_get_argv", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2399,9 +2379,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_runtime_init — currently no-op; alwaysinline so callers
         // collapse the empty body at the call site.
-        let init_fn = module
-            .get_function("verum_runtime_init")
-            .unwrap_or_else(|| module.add_function("verum_runtime_init", fn_type, None));
+        let init_fn = super::error::get_or_declare_function(module, "verum_runtime_init", fn_type);
         if init_fn.count_basic_blocks() == 0 {
             let entry = ctx.append_basic_block(init_fn, "entry");
             let builder = ctx.create_builder();
@@ -2412,9 +2390,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_runtime_cleanup — currently no-op; alwaysinline so callers
         // collapse the empty body at the call site.
-        let cleanup_fn = module
-            .get_function("verum_runtime_cleanup")
-            .unwrap_or_else(|| module.add_function("verum_runtime_cleanup", fn_type, None));
+        let cleanup_fn = super::error::get_or_declare_function(module, "verum_runtime_cleanup", fn_type);
         if cleanup_fn.count_basic_blocks() == 0 {
             let entry = ctx.append_basic_block(cleanup_fn, "entry");
             let builder = ctx.create_builder();
@@ -2454,9 +2430,7 @@ impl<'ctx> PlatformIR<'ctx> {
             ],
             false,
         );
-        let push_fn = module
-            .get_function("verum_push_stack_frame")
-            .unwrap_or_else(|| module.add_function("verum_push_stack_frame", push_type, None));
+        let push_fn = super::error::get_or_declare_function(module, "verum_push_stack_frame", push_type);
         if push_fn.count_basic_blocks() == 0 {
             let entry = ctx.append_basic_block(push_fn, "entry");
             let builder = ctx.create_builder();
@@ -2467,9 +2441,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_pop_stack_frame()
         let pop_type = void_type.fn_type(&[], false);
-        let pop_fn = module
-            .get_function("verum_pop_stack_frame")
-            .unwrap_or_else(|| module.add_function("verum_pop_stack_frame", pop_type, None));
+        let pop_fn = super::error::get_or_declare_function(module, "verum_pop_stack_frame", pop_type);
         if pop_fn.count_basic_blocks() == 0 {
             let entry = ctx.append_basic_block(pop_fn, "entry");
             let builder = ctx.create_builder();
@@ -2498,9 +2470,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_tls_get(slot: i64) -> i64
         let get_type = i64_type.fn_type(&[i64_type.into()], false);
-        let get_fn = module
-            .get_function("verum_tls_get")
-            .unwrap_or_else(|| module.add_function("verum_tls_get", get_type, None));
+        let get_fn = super::error::get_or_declare_function(module, "verum_tls_get", get_type);
         if get_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(get_fn, "entry");
@@ -2532,9 +2502,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_tls_set(slot: i64, value: i64) -> void
         let set_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let set_fn = module
-            .get_function("verum_tls_set")
-            .unwrap_or_else(|| module.add_function("verum_tls_set", set_type, None));
+        let set_fn = super::error::get_or_declare_function(module, "verum_tls_set", set_type);
         if set_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(set_fn, "entry");
@@ -2590,9 +2558,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // verum_mutex_init(mutex_ptr: ptr) → void
         // Stores 0 to the i32 at mutex_ptr
         let init_type = void_type.fn_type(&[ptr_type.into()], false);
-        let init_fn = module
-            .get_function("verum_mutex_init")
-            .unwrap_or_else(|| module.add_function("verum_mutex_init", init_type, None));
+        let init_fn = super::error::get_or_declare_function(module, "verum_mutex_init", init_type);
         if init_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(init_fn, "entry");
@@ -2609,9 +2575,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_mutex_trylock(mutex_ptr: ptr) → i64 (1=acquired, 0=failed)
         let trylock_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let trylock_fn = module
-            .get_function("verum_mutex_trylock")
-            .unwrap_or_else(|| module.add_function("verum_mutex_trylock", trylock_type, None));
+        let trylock_fn = super::error::get_or_declare_function(module, "verum_mutex_trylock", trylock_type);
         if trylock_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(trylock_fn, "entry");
@@ -2642,9 +2606,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_cond_init(condvar_ptr: ptr) → void
         let cond_init_type = void_type.fn_type(&[ptr_type.into()], false);
-        let cond_init_fn = module
-            .get_function("verum_cond_init")
-            .unwrap_or_else(|| module.add_function("verum_cond_init", cond_init_type, None));
+        let cond_init_fn = super::error::get_or_declare_function(module, "verum_cond_init", cond_init_type);
         if cond_init_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(cond_init_fn, "entry");
@@ -2678,9 +2640,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_mutex_lock")
-            .unwrap_or_else(|| module.add_function("verum_mutex_lock", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_mutex_lock", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2787,9 +2747,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_mutex_unlock")
-            .unwrap_or_else(|| module.add_function("verum_mutex_unlock", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_mutex_unlock", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2858,9 +2816,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_cond_signal")
-            .unwrap_or_else(|| module.add_function("verum_cond_signal", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_cond_signal", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -2910,9 +2866,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_cond_broadcast")
-            .unwrap_or_else(|| module.add_function("verum_cond_broadcast", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_cond_broadcast", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -3030,9 +2984,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // verum_ctx_get(type_id: i64) → i64
         // Searches context stack for matching type_id, returns value or 0
         let get_type = i64_type.fn_type(&[i64_type.into()], false);
-        let get_fn = module
-            .get_function("verum_ctx_get")
-            .unwrap_or_else(|| module.add_function("verum_ctx_get", get_type, None));
+        let get_fn = super::error::get_or_declare_function(module, "verum_ctx_get", get_type);
         if get_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(get_fn, "entry");
@@ -3045,9 +2997,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_ctx_provide(type_id: i64, value: i64) → void
         let provide_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let provide_fn = module
-            .get_function("verum_ctx_provide")
-            .unwrap_or_else(|| module.add_function("verum_ctx_provide", provide_type, None));
+        let provide_fn = super::error::get_or_declare_function(module, "verum_ctx_provide", provide_type);
         if provide_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(provide_fn, "entry");
@@ -3057,9 +3007,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // verum_ctx_end(type_id: i64) → void
         let end_type = void_type.fn_type(&[i64_type.into()], false);
-        let end_fn = module
-            .get_function("verum_ctx_end")
-            .unwrap_or_else(|| module.add_function("verum_ctx_end", end_type, None));
+        let end_fn = super::error::get_or_declare_function(module, "verum_ctx_end", end_type);
         if end_fn.count_basic_blocks() == 0 {
             let builder = ctx.create_builder();
             let entry = ctx.append_basic_block(end_fn, "entry");
@@ -4024,9 +3972,7 @@ impl<'ctx> PlatformIR<'ctx> {
         name: &str,
         fn_type: verum_llvm::types::FunctionType<'ctx>,
     ) -> FunctionValue<'ctx> {
-        module
-            .get_function(name)
-            .unwrap_or_else(|| module.add_function(name, fn_type, None))
+        super::error::get_or_declare_function(module, name, fn_type)
     }
 
     /// Ensure common I/O syscalls are declared with Verum ABI (all i64 types).
@@ -5382,9 +5328,7 @@ impl<'ctx> PlatformIR<'ctx> {
         //
         // Post-fix: the libsys helper conforms to the WRAPPER's
         // signature.  All param/return shapes round-trip cleanly.
-        let wrapper = module
-            .get_function(name)
-            .unwrap_or_else(|| module.add_function(name, fn_type, None));
+        let wrapper = super::error::get_or_declare_function(module, name, fn_type);
         let wrapper_fn_ty = wrapper.get_type();
         let wrapper_ret_ty = wrapper_fn_ty.get_return_type();
 

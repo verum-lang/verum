@@ -18100,10 +18100,7 @@ fn lower_arith_extended<'ctx>(
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "logbase_b")?;
             let f64_ty = ctx.types().f64_type();
             let log_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-            let module = ctx.get_module();
-            let log_func = module
-                .get_function("llvm.log.f64")
-                .unwrap_or_else(|| module.add_function("llvm.log.f64", log_fn_type, None));
+            let log_func = super::error::get_or_declare_function(ctx.get_module(), "llvm.log.f64", log_fn_type);
             let log_a = ctx
                 .builder()
                 .build_call(log_func, &[a.into()], "log_a")
@@ -18409,10 +18406,7 @@ fn lower_fma_via_f64<'ctx>(
     let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
     let f64_ty = ctx.types().f64_type();
     let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
-    let module = ctx.get_module();
-    let fma_fn = module
-        .get_function("llvm.fma.f64")
-        .unwrap_or_else(|| module.add_function("llvm.fma.f64", fn_type, None));
+    let fma_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fma.f64", fn_type);
     let result = ctx
         .builder()
         .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma")
@@ -18481,10 +18475,7 @@ fn lower_is_inf_f64<'ctx>(
     let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
     let f64_ty = ctx.types().f64_type();
     let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-    let module = ctx.get_module();
-    let abs_fn = module
-        .get_function("llvm.fabs.f64")
-        .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
+    let abs_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fabs.f64", abs_fn_type);
     let abs_val = ctx
         .builder()
         .build_call(abs_fn, &[a.into()], "fabs")
@@ -18519,10 +18510,7 @@ fn lower_is_finite_f64<'ctx>(
     let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
     let f64_ty = ctx.types().f64_type();
     let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-    let module = ctx.get_module();
-    let abs_fn = module
-        .get_function("llvm.fabs.f64")
-        .unwrap_or_else(|| module.add_function("llvm.fabs.f64", abs_fn_type, None));
+    let abs_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fabs.f64", abs_fn_type);
     let abs_val = ctx
         .builder()
         .build_call(abs_fn, &[a.into()], "fabs_finite")
@@ -20312,9 +20300,11 @@ fn lower_mem_extended<'ctx>(
                 ],
                 false,
             );
-            let memset_fn = module
-                .get_function("llvm.memset.p0.i64")
-                .unwrap_or_else(|| module.add_function("llvm.memset.p0.i64", memset_fn_type, None));
+            let memset_fn = super::error::get_or_declare_function(
+                module,
+                "llvm.memset.p0.i64",
+                memset_fn_type,
+            );
             ctx.builder()
                 .build_call(
                     memset_fn,
