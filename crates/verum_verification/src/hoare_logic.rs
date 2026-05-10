@@ -3522,6 +3522,212 @@ pub enum WPError {
     },
 }
 
+/// Discriminator for [`WPError`] — zero-sized projection
+/// classifying the failure modes of weakest-precondition
+/// (Dijkstra wp) calculation + verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum WPErrorKind {
+    InvalidCommand,
+    MissingInvariant,
+    FrameViolation,
+    TypeError,
+    Unsupported,
+    ConversionError,
+    SmtError,
+    VerificationFailed,
+    Unknown,
+}
+
+/// Per-variant projection for [`WPErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WPErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The error reflects *malformed user input* —
+    /// InvalidCommand + MissingInvariant.  The user supplied
+    /// either a structurally invalid command or omitted a
+    /// required loop invariant.
+    pub is_input_failure: bool,
+    /// The error reflects a *semantic* problem detected during
+    /// wp calculation — FrameViolation + TypeError +
+    /// ConversionError.  These fail before the solver is even
+    /// consulted.
+    pub is_semantic_failure: bool,
+    /// The error reflects an *incomplete wp encoder* —
+    /// Unsupported singleton.  Intermediate state during
+    /// development; should never appear in shipped wp
+    /// implementations.
+    pub is_incompleteness: bool,
+    /// The error was *relayed from the solver subsystem* —
+    /// SmtError + Unknown.
+    pub is_solver_relayed: bool,
+    /// The error is the *negative verdict* (the solver
+    /// concluded the VC is invalid) — VerificationFailed
+    /// singleton.  Distinct from "the solver couldn't
+    /// conclude" (Unknown).
+    pub is_negative_verdict: bool,
+    /// The variant carries a *counterexample* payload —
+    /// VerificationFailed singleton.  IDE-quick-fix surface.
+    pub carries_counterexample: bool,
+    /// The variant carries a *source-location* payload —
+    /// MissingInvariant + VerificationFailed + Unknown.
+    /// Decouples downstream span-rendering from per-variant
+    /// matching.
+    pub carries_location: bool,
+}
+
+impl WPErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidCommand,
+        Self::MissingInvariant,
+        Self::FrameViolation,
+        Self::TypeError,
+        Self::Unsupported,
+        Self::ConversionError,
+        Self::SmtError,
+        Self::VerificationFailed,
+        Self::Unknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> WPErrorKindMeta {
+        match self {
+            WPErrorKind::InvalidCommand => WPErrorKindMeta {
+                name: "invalid_command",
+                is_input_failure: true,
+                is_semantic_failure: false,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::MissingInvariant => WPErrorKindMeta {
+                name: "missing_invariant",
+                is_input_failure: true,
+                is_semantic_failure: false,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: true,
+            },
+            WPErrorKind::FrameViolation => WPErrorKindMeta {
+                name: "frame_violation",
+                is_input_failure: false,
+                is_semantic_failure: true,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::TypeError => WPErrorKindMeta {
+                name: "type_error",
+                is_input_failure: false,
+                is_semantic_failure: true,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::Unsupported => WPErrorKindMeta {
+                name: "unsupported",
+                is_input_failure: false,
+                is_semantic_failure: false,
+                is_incompleteness: true,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::ConversionError => WPErrorKindMeta {
+                name: "conversion_error",
+                is_input_failure: false,
+                is_semantic_failure: true,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::SmtError => WPErrorKindMeta {
+                name: "smt_error",
+                is_input_failure: false,
+                is_semantic_failure: false,
+                is_incompleteness: false,
+                is_solver_relayed: true,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: false,
+            },
+            WPErrorKind::VerificationFailed => WPErrorKindMeta {
+                name: "verification_failed",
+                is_input_failure: false,
+                is_semantic_failure: false,
+                is_incompleteness: false,
+                is_solver_relayed: false,
+                is_negative_verdict: true,
+                carries_counterexample: true,
+                carries_location: true,
+            },
+            WPErrorKind::Unknown => WPErrorKindMeta {
+                name: "unknown",
+                is_input_failure: false,
+                is_semantic_failure: false,
+                is_incompleteness: false,
+                is_solver_relayed: true,
+                is_negative_verdict: false,
+                carries_counterexample: false,
+                carries_location: true,
+            },
+        }
+    }
+}
+
+impl WPError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> WPErrorKind {
+        match self {
+            WPError::InvalidCommand(_) => WPErrorKind::InvalidCommand,
+            WPError::MissingInvariant { .. } => WPErrorKind::MissingInvariant,
+            WPError::FrameViolation { .. } => WPErrorKind::FrameViolation,
+            WPError::TypeError(_) => WPErrorKind::TypeError,
+            WPError::Unsupported(_) => WPErrorKind::Unsupported,
+            WPError::ConversionError(_) => WPErrorKind::ConversionError,
+            WPError::SmtError(_) => WPErrorKind::SmtError,
+            WPError::VerificationFailed { .. } => WPErrorKind::VerificationFailed,
+            WPError::Unknown { .. } => WPErrorKind::Unknown,
+        }
+    }
+
+    /// Returns the source location for the three location-
+    /// bearing variants.  Decoupled from per-variant matching
+    /// via `meta().carries_location`.
+    pub fn location(&self) -> Maybe<SourceLocation> {
+        match self {
+            WPError::MissingInvariant { location } => location.clone(),
+            WPError::VerificationFailed { location, .. } => location.clone(),
+            WPError::Unknown { location, .. } => location.clone(),
+            _ => Maybe::None,
+        }
+    }
+
+    /// Returns the counterexample for the `VerificationFailed`
+    /// band.  Decoupled via `meta().carries_counterexample`.
+    pub fn counterexample(&self) -> Option<&CounterExample> {
+        match self {
+            WPError::VerificationFailed { counterexample, .. } => match counterexample {
+                Maybe::Some(c) => Some(c),
+                Maybe::None => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 // =============================================================================
 // Public API Functions
 // =============================================================================
@@ -4051,5 +4257,137 @@ mod tests {
         assert!(calc.validate_measure(&SmtExpr::sub(SmtExpr::var("n"), SmtExpr::var("i"))));
         assert!(calc.validate_measure(&SmtExpr::UnOp(SmtUnOp::Len, Box::new(SmtExpr::var("arr")))));
         assert!(calc.validate_measure(&SmtExpr::UnOp(SmtUnOp::Abs, Box::new(SmtExpr::var("x")))));
+    }
+
+    /// Drift-pin: `WPErrorKind` discriminator projection.
+    /// Pins variant count, seven classifier partitions
+    /// (perfect-partition over five primary failure modes +
+    /// payload-bearing partitions), live-payload kind() +
+    /// accessor pins.
+    #[test]
+    fn meta_pin_wp_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(WPErrorKind::ALL.len(), 9);
+        let mut seen = std::collections::HashSet::new();
+        for k in WPErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_input_failure: InvalidCommand + MissingInvariant.
+        let input: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_input_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            input,
+            vec![WPErrorKind::InvalidCommand, WPErrorKind::MissingInvariant],
+        );
+
+        // 3. is_semantic_failure: FrameViolation + TypeError +
+        //    ConversionError.
+        let sem: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_semantic_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            sem,
+            vec![
+                WPErrorKind::FrameViolation,
+                WPErrorKind::TypeError,
+                WPErrorKind::ConversionError,
+            ],
+        );
+
+        // 4. is_incompleteness: Unsupported singleton.
+        let inc: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_incompleteness)
+            .copied()
+            .collect();
+        assert_eq!(inc, vec![WPErrorKind::Unsupported]);
+
+        // 5. is_solver_relayed: SmtError + Unknown.
+        let sr: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_solver_relayed)
+            .copied()
+            .collect();
+        assert_eq!(sr, vec![WPErrorKind::SmtError, WPErrorKind::Unknown]);
+
+        // 6. is_negative_verdict: VerificationFailed singleton.
+        let nv: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_negative_verdict)
+            .copied()
+            .collect();
+        assert_eq!(nv, vec![WPErrorKind::VerificationFailed]);
+
+        // 7. Perfect partition over the five primary failure-
+        //    mode classifiers (input / semantic / incompleteness
+        //    / solver-relayed / negative-verdict) — every
+        //    variant flips exactly one.
+        for k in WPErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_input_failure as u32)
+                + (m.is_semantic_failure as u32)
+                + (m.is_incompleteness as u32)
+                + (m.is_solver_relayed as u32)
+                + (m.is_negative_verdict as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one failure mode", k);
+        }
+
+        // 8. carries_counterexample = is_negative_verdict
+        //    (only the negative-verdict variant carries a
+        //    counterexample — pinned exact equality).
+        for k in WPErrorKind::ALL {
+            let m = k.meta();
+            assert_eq!(
+                m.carries_counterexample, m.is_negative_verdict,
+                "{:?}: carries_counterexample = is_negative_verdict",
+                k
+            );
+        }
+
+        // 9. carries_location: 3 variants (MissingInvariant +
+        //    VerificationFailed + Unknown — the structured
+        //    payload-bearing variants).
+        let with_loc: Vec<_> = WPErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_location)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_loc,
+            vec![
+                WPErrorKind::MissingInvariant,
+                WPErrorKind::VerificationFailed,
+                WPErrorKind::Unknown,
+            ],
+        );
+
+        // 10. Live-payload kind() + accessors.
+        let ic = WPError::InvalidCommand(Text::from("malformed"));
+        assert_eq!(ic.kind(), WPErrorKind::InvalidCommand);
+        assert!(matches!(ic.location(), Maybe::None));
+        assert!(ic.counterexample().is_none());
+
+        let mi = WPError::MissingInvariant {
+            location: Maybe::None,
+        };
+        assert_eq!(mi.kind(), WPErrorKind::MissingInvariant);
+
+        let unk = WPError::Unknown {
+            reason: Text::from("z3 timeout"),
+            location: Maybe::None,
+        };
+        assert_eq!(unk.kind(), WPErrorKind::Unknown);
     }
 }

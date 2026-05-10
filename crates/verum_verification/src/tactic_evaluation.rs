@@ -122,6 +122,240 @@ pub enum TacticError {
 /// Result type for tactic operations
 pub type TacticResult<T> = Result<T, TacticError>;
 
+/// Discriminator for [`TacticError`] — zero-sized projection
+/// classifying the failure modes of tactic evaluation.  Two
+/// of the ten variants are *success-flavored* (AlreadyProven,
+/// NoGoals — they signal the proof is already complete rather
+/// than a real error condition) — pinned via the
+/// `is_success_flavored` partition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TacticErrorKind {
+    Failed,
+    InvalidGoal,
+    HypothesisNotFound,
+    TypeMismatch,
+    SmtError,
+    Timeout,
+    NotImplemented,
+    InvalidArgument,
+    AlreadyProven,
+    NoGoals,
+}
+
+/// Per-variant projection for [`TacticErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TacticErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The tactic *failed to make progress* — Failed singleton.
+    /// Distinct from "found a problem with the goal/context"
+    /// (InvalidGoal / HypothesisNotFound) which are
+    /// well-defined failures of the surrounding state.
+    pub is_progress_failure: bool,
+    /// The tactic encountered a *malformed input* — InvalidGoal
+    /// + InvalidArgument.
+    pub is_input_failure: bool,
+    /// A *named entity* couldn't be resolved —
+    /// HypothesisNotFound singleton.
+    pub is_lookup_failure: bool,
+    /// A *type/signature mismatch* surfaced —
+    /// TypeMismatch singleton.
+    pub is_signature_mismatch: bool,
+    /// The error was *relayed from the solver subsystem* —
+    /// SmtError + Timeout (the solver decided not to conclude
+    /// in time).
+    pub is_solver_failure: bool,
+    /// The error reflects an *incomplete tactic implementation*
+    /// — NotImplemented singleton.  Intermediate state during
+    /// development; should never appear in shipped tactic
+    /// libraries.
+    pub is_incompleteness: bool,
+    /// The variant is *success-flavored* — the proof is
+    /// already complete, no work to do.  AlreadyProven +
+    /// NoGoals.  Represented as errors only because the
+    /// tactic-evaluation API is `Result<T, TacticError>`;
+    /// callers can short-circuit through `is_success_flavored`
+    /// rather than per-variant matching.
+    pub is_success_flavored: bool,
+    /// The variant is a *time-bound* failure — Timeout
+    /// singleton.  Useful for telemetry backends that rate-
+    /// limit retry attempts.
+    pub is_time_bound_failure: bool,
+    /// The variant carries a *Text payload* with diagnostic
+    /// detail (8/10 — every variant except the two
+    /// success-flavored ones, which are nullary).
+    pub carries_text: bool,
+}
+
+impl TacticErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Failed,
+        Self::InvalidGoal,
+        Self::HypothesisNotFound,
+        Self::TypeMismatch,
+        Self::SmtError,
+        Self::Timeout,
+        Self::NotImplemented,
+        Self::InvalidArgument,
+        Self::AlreadyProven,
+        Self::NoGoals,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> TacticErrorKindMeta {
+        match self {
+            TacticErrorKind::Failed => TacticErrorKindMeta {
+                name: "failed",
+                is_progress_failure: true,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::InvalidGoal => TacticErrorKindMeta {
+                name: "invalid_goal",
+                is_progress_failure: false,
+                is_input_failure: true,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::HypothesisNotFound => TacticErrorKindMeta {
+                name: "hypothesis_not_found",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: true,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::TypeMismatch => TacticErrorKindMeta {
+                name: "type_mismatch",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: true,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::SmtError => TacticErrorKindMeta {
+                name: "smt_error",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: true,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::Timeout => TacticErrorKindMeta {
+                name: "timeout",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: true,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: true,
+                carries_text: false,
+            },
+            TacticErrorKind::NotImplemented => TacticErrorKindMeta {
+                name: "not_implemented",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: true,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::InvalidArgument => TacticErrorKindMeta {
+                name: "invalid_argument",
+                is_progress_failure: false,
+                is_input_failure: true,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: false,
+                is_time_bound_failure: false,
+                carries_text: true,
+            },
+            TacticErrorKind::AlreadyProven => TacticErrorKindMeta {
+                name: "already_proven",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: true,
+                is_time_bound_failure: false,
+                carries_text: false,
+            },
+            TacticErrorKind::NoGoals => TacticErrorKindMeta {
+                name: "no_goals",
+                is_progress_failure: false,
+                is_input_failure: false,
+                is_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_solver_failure: false,
+                is_incompleteness: false,
+                is_success_flavored: true,
+                is_time_bound_failure: false,
+                carries_text: false,
+            },
+        }
+    }
+}
+
+impl TacticError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> TacticErrorKind {
+        match self {
+            TacticError::Failed(_) => TacticErrorKind::Failed,
+            TacticError::InvalidGoal(_) => TacticErrorKind::InvalidGoal,
+            TacticError::HypothesisNotFound(_) => TacticErrorKind::HypothesisNotFound,
+            TacticError::TypeMismatch { .. } => TacticErrorKind::TypeMismatch,
+            TacticError::SmtError(_) => TacticErrorKind::SmtError,
+            TacticError::Timeout(_) => TacticErrorKind::Timeout,
+            TacticError::NotImplemented(_) => TacticErrorKind::NotImplemented,
+            TacticError::InvalidArgument(_) => TacticErrorKind::InvalidArgument,
+            TacticError::AlreadyProven => TacticErrorKind::AlreadyProven,
+            TacticError::NoGoals => TacticErrorKind::NoGoals,
+        }
+    }
+
+    /// Whether the proof is *already complete* (the call
+    /// surfaced a "no work to do" signal rather than a real
+    /// error).  Routes through `meta().is_success_flavored`
+    /// — single source of truth for callers that need to
+    /// short-circuit.
+    pub fn is_success_flavored(&self) -> bool {
+        self.kind().meta().is_success_flavored
+    }
+}
+
 // ==================== Z3 Tactic Types ====================
 
 /// Result of applying a Z3 tactic to a goal
@@ -6777,5 +7011,136 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(evaluator.state.is_complete());
+    }
+
+    /// Drift-pin: `TacticErrorKind` discriminator projection.
+    /// Pins variant count, eight classifier partitions
+    /// (perfect-partition over the failure-mode axis +
+    /// success-flavored sub-band + payload-bearing partition),
+    /// plus the historical predicate-routing pin via
+    /// `is_success_flavored()`.
+    #[test]
+    fn meta_pin_tactic_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(TacticErrorKind::ALL.len(), 10);
+        let mut seen = std::collections::HashSet::new();
+        for k in TacticErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. Singleton partitions pinned individually.
+        let progress: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_progress_failure)
+            .copied()
+            .collect();
+        assert_eq!(progress, vec![TacticErrorKind::Failed]);
+
+        let lookup: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_lookup_failure)
+            .copied()
+            .collect();
+        assert_eq!(lookup, vec![TacticErrorKind::HypothesisNotFound]);
+
+        let sig: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_signature_mismatch)
+            .copied()
+            .collect();
+        assert_eq!(sig, vec![TacticErrorKind::TypeMismatch]);
+
+        let inc: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_incompleteness)
+            .copied()
+            .collect();
+        assert_eq!(inc, vec![TacticErrorKind::NotImplemented]);
+
+        let tb: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_time_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(tb, vec![TacticErrorKind::Timeout]);
+
+        // 3. Two-element partitions.
+        let input: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_input_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            input,
+            vec![TacticErrorKind::InvalidGoal, TacticErrorKind::InvalidArgument],
+        );
+
+        let solver: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_solver_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            solver,
+            vec![TacticErrorKind::SmtError, TacticErrorKind::Timeout],
+        );
+
+        let success: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_success_flavored)
+            .copied()
+            .collect();
+        assert_eq!(
+            success,
+            vec![TacticErrorKind::AlreadyProven, TacticErrorKind::NoGoals],
+        );
+
+        // 4. Cross-cutting: is_time_bound_failure ⇒
+        //    is_solver_failure (the only time-bound failure
+        //    today is the SMT solver running out of time).
+        for k in TacticErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_time_bound_failure || m.is_solver_failure,
+                "{:?}: time-bound ⇒ solver",
+                k
+            );
+        }
+
+        // 5. carries_text — every Text-payload-bearing variant.
+        //    Excludes the two success-flavored ones (nullary)
+        //    AND Timeout (Duration payload, not Text).  That's
+        //    7/10.  Pinned: no success-flavored variant
+        //    carries text.
+        let with_text: Vec<_> = TacticErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_text)
+            .copied()
+            .collect();
+        assert_eq!(with_text.len(), 7);
+        for k in &with_text {
+            assert!(!k.meta().is_success_flavored);
+        }
+
+        // 6. Live-payload kind() + is_success_flavored() routing.
+        let f = TacticError::Failed(Text::from("no progress"));
+        assert_eq!(f.kind(), TacticErrorKind::Failed);
+        assert!(!f.is_success_flavored());
+
+        assert_eq!(TacticError::AlreadyProven.kind(), TacticErrorKind::AlreadyProven);
+        assert!(TacticError::AlreadyProven.is_success_flavored());
+
+        assert_eq!(TacticError::NoGoals.kind(), TacticErrorKind::NoGoals);
+        assert!(TacticError::NoGoals.is_success_flavored());
+
+        let to = TacticError::Timeout(Duration::from_secs(1));
+        assert_eq!(to.kind(), TacticErrorKind::Timeout);
+        assert!(to.kind().meta().is_time_bound_failure);
     }
 }
