@@ -903,16 +903,118 @@ pub enum FailureCategory {
     Other,
 }
 
+/// Per-variant projection for [`FailureCategory`] — the
+/// classifier flags partition the six runtime-safety failure
+/// classes along three orthogonal axes (failure-domain /
+/// quick-fix-shape / catch-all).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FailureCategoryMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Human-readable display name (matches the `Display`
+    /// impl) — single source of truth replacing the previous
+    /// 6-arm match.
+    pub display_name: &'static str,
+    /// The failure originates from an *arithmetic operation*
+    /// (DivisionByZero + ArithmeticOverflow + NegativeValue —
+    /// each names an arithmetic precondition that wasn't
+    /// guaranteed).  Distinct from memory-/bounds-related
+    /// failure modes.
+    pub is_arithmetic_failure: bool,
+    /// The failure originates from a *memory access* —
+    /// IndexOutOfBounds + NullDereference (array-side and
+    /// pointer-side respectively).
+    pub is_memory_failure: bool,
+    /// The IDE quick-fix surface can offer a *guard* (e.g.
+    /// `x != 0` for DivisionByZero) — the four named failure
+    /// classes flip this; Other does not.  Pinned for the
+    /// IDE consumer's quick-fix gate.
+    pub has_quickfix_pattern: bool,
+    /// Catch-all band — Other singleton.  Used by metrics
+    /// consumers to count "uncategorised" failures separately.
+    pub is_catch_all: bool,
+}
+
+impl FailureCategory {
+    /// All variants in declaration order — drives drift-pin
+    /// tests and consumers enumerating the full taxonomy.
+    pub const ALL: &'static [Self] = &[
+        Self::DivisionByZero,
+        Self::ArithmeticOverflow,
+        Self::IndexOutOfBounds,
+        Self::NullDereference,
+        Self::NegativeValue,
+        Self::Other,
+    ];
+
+    /// Static fact-pack — single source of truth for the
+    /// per-variant data previously scattered across the
+    /// `Display` impl + IDE quick-fix dispatch.
+    pub const fn meta(self) -> FailureCategoryMeta {
+        match self {
+            FailureCategory::DivisionByZero => FailureCategoryMeta {
+                name: "division_by_zero",
+                display_name: "Division by Zero",
+                is_arithmetic_failure: true,
+                is_memory_failure: false,
+                has_quickfix_pattern: true,
+                is_catch_all: false,
+            },
+            FailureCategory::ArithmeticOverflow => FailureCategoryMeta {
+                name: "arithmetic_overflow",
+                display_name: "Arithmetic Overflow",
+                is_arithmetic_failure: true,
+                is_memory_failure: false,
+                has_quickfix_pattern: true,
+                is_catch_all: false,
+            },
+            FailureCategory::IndexOutOfBounds => FailureCategoryMeta {
+                name: "index_out_of_bounds",
+                display_name: "Index Out of Bounds",
+                is_arithmetic_failure: false,
+                is_memory_failure: true,
+                has_quickfix_pattern: true,
+                is_catch_all: false,
+            },
+            FailureCategory::NullDereference => FailureCategoryMeta {
+                name: "null_dereference",
+                display_name: "Null Dereference",
+                is_arithmetic_failure: false,
+                is_memory_failure: true,
+                has_quickfix_pattern: true,
+                is_catch_all: false,
+            },
+            FailureCategory::NegativeValue => FailureCategoryMeta {
+                name: "negative_value",
+                display_name: "Negative Value",
+                is_arithmetic_failure: true,
+                is_memory_failure: false,
+                has_quickfix_pattern: true,
+                is_catch_all: false,
+            },
+            FailureCategory::Other => FailureCategoryMeta {
+                name: "other",
+                display_name: "Other",
+                is_arithmetic_failure: false,
+                is_memory_failure: false,
+                has_quickfix_pattern: false,
+                is_catch_all: true,
+            },
+        }
+    }
+
+    /// Wire-form snake_case name via meta().
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+}
+
 impl fmt::Display for FailureCategory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::DivisionByZero => write!(f, "Division by Zero"),
-            Self::ArithmeticOverflow => write!(f, "Arithmetic Overflow"),
-            Self::IndexOutOfBounds => write!(f, "Index Out of Bounds"),
-            Self::NullDereference => write!(f, "Null Dereference"),
-            Self::NegativeValue => write!(f, "Negative Value"),
-            Self::Other => write!(f, "Other"),
-        }
+        // Display name lives in the meta() table — single
+        // source of truth replacing the previous 6-arm match.
+        f.write_str(self.meta().display_name)
     }
 }
 
@@ -951,6 +1053,111 @@ fn constraint_mentions_var(constraint: &str, var_name: &str) -> bool {
         i += 1;
     }
     false
+}
+
+#[cfg(test)]
+mod failure_category_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `FailureCategory::meta()` is the canonical
+    /// per-variant data table.  Pins variant count, three
+    /// classifier partitions (arithmetic / memory / quickfix-
+    /// pattern / catch-all), cross-cutting invariants binding
+    /// them, and the Display impl agreement with
+    /// `display_name`.
+    #[test]
+    fn meta_pin_failure_category_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(FailureCategory::ALL.len(), 6);
+        let mut seen = std::collections::HashSet::new();
+        for c in FailureCategory::ALL {
+            let m = c.meta();
+            assert!(
+                m.name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_'),
+                "{:?}: name not snake_case",
+                c
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", c);
+        }
+
+        // 2. is_arithmetic_failure: DivisionByZero +
+        //    ArithmeticOverflow + NegativeValue.
+        let arith: Vec<_> = FailureCategory::ALL
+            .iter()
+            .filter(|c| c.meta().is_arithmetic_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            arith,
+            vec![
+                FailureCategory::DivisionByZero,
+                FailureCategory::ArithmeticOverflow,
+                FailureCategory::NegativeValue,
+            ],
+        );
+
+        // 3. is_memory_failure: IndexOutOfBounds +
+        //    NullDereference.
+        let mem: Vec<_> = FailureCategory::ALL
+            .iter()
+            .filter(|c| c.meta().is_memory_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            mem,
+            vec![
+                FailureCategory::IndexOutOfBounds,
+                FailureCategory::NullDereference,
+            ],
+        );
+
+        // 4. has_quickfix_pattern: 5/6 (everything except Other).
+        let qf: Vec<_> = FailureCategory::ALL
+            .iter()
+            .filter(|c| c.meta().has_quickfix_pattern)
+            .copied()
+            .collect();
+        assert_eq!(qf.len(), 5);
+        assert!(!qf.contains(&FailureCategory::Other));
+
+        // 5. is_catch_all: Other singleton.
+        let other: Vec<_> = FailureCategory::ALL
+            .iter()
+            .filter(|c| c.meta().is_catch_all)
+            .copied()
+            .collect();
+        assert_eq!(other, vec![FailureCategory::Other]);
+
+        // 6. Cross-cutting: arithmetic ⊕ memory (a category
+        //    is either arithmetic or memory or neither, never
+        //    both).  Other flips neither.
+        for c in FailureCategory::ALL {
+            let m = c.meta();
+            assert!(
+                !(m.is_arithmetic_failure && m.is_memory_failure),
+                "{:?}: arithmetic ⊕ memory",
+                c
+            );
+        }
+
+        // 7. has_quickfix_pattern ⇔ ¬is_catch_all (every named
+        //    failure has a quick-fix pattern; only the catch-
+        //    all doesn't).
+        for c in FailureCategory::ALL {
+            let m = c.meta();
+            assert_eq!(
+                m.has_quickfix_pattern, !m.is_catch_all,
+                "{:?}: quickfix ⇔ ¬catch-all",
+                c
+            );
+        }
+
+        // 8. Display impl agrees with meta().display_name —
+        //    single source of truth.
+        for c in FailureCategory::ALL {
+            assert_eq!(format!("{}", c), c.meta().display_name);
+        }
+    }
 }
 
 #[cfg(test)]

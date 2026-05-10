@@ -38,7 +38,7 @@ pub struct SymbolInfo {
 }
 
 /// Kind of symbol in the document
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     Function,
     Type,
@@ -49,6 +49,164 @@ pub enum SymbolKind {
     Protocol,
     Module,
     Constant,
+}
+
+/// Per-variant projection for [`SymbolKind`] — classifier flags
+/// partition the nine declaration categories along orthogonal
+/// axes (callable / type-defining / value-bearing / member /
+/// namespace).  Used by the LSP outline / completion / rename
+/// surfaces to filter symbols by structural role rather than
+/// per-variant matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The symbol can be *invoked* — Function singleton.  IDE
+    /// completion uses this to gate `()` post-fix insertion.
+    pub is_callable: bool,
+    /// The symbol *introduces a type* — Type / Protocol /
+    /// Variant.  Type-introducing symbols light up the
+    /// type-search / "go to type definition" surface.
+    pub is_type_introducing: bool,
+    /// The symbol *binds a value* — Variable / Parameter /
+    /// Constant.  Value bindings are the targets of
+    /// assignment / dereference / reference operations.
+    pub is_value_binding: bool,
+    /// The symbol is a *member* of a containing declaration —
+    /// Field (record member) + Variant (sum-type alternative).
+    /// Members surface in the outline as nested children
+    /// rather than top-level entries.
+    pub is_member: bool,
+    /// The symbol is a *namespace* — Module singleton.
+    /// Modules are the only kind that contain other symbols
+    /// recursively.
+    pub is_namespace: bool,
+    /// The symbol is *immutable* by language definition —
+    /// Constant + Parameter (parameter immutability is
+    /// enforced unless the function takes self/`&mut`).
+    pub is_immutable: bool,
+}
+
+impl SymbolKind {
+    /// All variants in declaration order — drives the LSP
+    /// outline ordering and drift-pin tests.
+    pub const ALL: &'static [Self] = &[
+        Self::Function,
+        Self::Type,
+        Self::Variable,
+        Self::Parameter,
+        Self::Field,
+        Self::Variant,
+        Self::Protocol,
+        Self::Module,
+        Self::Constant,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> SymbolKindMeta {
+        match self {
+            SymbolKind::Function => SymbolKindMeta {
+                name: "function",
+                is_callable: true,
+                is_type_introducing: false,
+                is_value_binding: false,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Type => SymbolKindMeta {
+                name: "type",
+                is_callable: false,
+                is_type_introducing: true,
+                is_value_binding: false,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Variable => SymbolKindMeta {
+                name: "variable",
+                is_callable: false,
+                is_type_introducing: false,
+                is_value_binding: true,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Parameter => SymbolKindMeta {
+                name: "parameter",
+                is_callable: false,
+                is_type_introducing: false,
+                is_value_binding: true,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: true,
+            },
+            SymbolKind::Field => SymbolKindMeta {
+                name: "field",
+                is_callable: false,
+                is_type_introducing: false,
+                is_value_binding: false,
+                is_member: true,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Variant => SymbolKindMeta {
+                name: "variant",
+                is_callable: false,
+                is_type_introducing: true,
+                is_value_binding: false,
+                is_member: true,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Protocol => SymbolKindMeta {
+                name: "protocol",
+                is_callable: false,
+                is_type_introducing: true,
+                is_value_binding: false,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: false,
+            },
+            SymbolKind::Module => SymbolKindMeta {
+                name: "module",
+                is_callable: false,
+                is_type_introducing: false,
+                is_value_binding: false,
+                is_member: false,
+                is_namespace: true,
+                is_immutable: false,
+            },
+            SymbolKind::Constant => SymbolKindMeta {
+                name: "constant",
+                is_callable: false,
+                is_type_introducing: false,
+                is_value_binding: true,
+                is_member: false,
+                is_namespace: false,
+                is_immutable: true,
+            },
+        }
+    }
+
+    /// Wire-form snake_case name via meta().
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Inverse of `as_str` — recover the kind from wire form.
+    pub fn from_str(s: &str) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Some(v);
+            }
+            i += 1;
+        }
+        None
+    }
 }
 
 /// CBGR cost information for a reference or operation
@@ -705,5 +863,142 @@ impl DocumentStore {
 impl Default for DocumentStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod symbol_kind_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `SymbolKind::meta()` is the canonical
+    /// per-variant data table.  Pins variant count, six
+    /// classifier flags partition the nine declaration kinds,
+    /// cross-cutting invariants, and the from_str/as_str
+    /// round-trip.
+    #[test]
+    fn meta_pin_symbol_kind_round_trip_and_partitions() {
+        // 1. Variant count + names + uniqueness.
+        assert_eq!(SymbolKind::ALL.len(), 9);
+        let mut seen = std::collections::HashSet::new();
+        for k in SymbolKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+            assert_eq!(SymbolKind::from_str(m.name), Some(*k));
+        }
+        assert_eq!(SymbolKind::from_str("nope"), None);
+
+        // 2. is_callable: Function singleton.
+        let call: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_callable)
+            .copied()
+            .collect();
+        assert_eq!(call, vec![SymbolKind::Function]);
+
+        // 3. is_type_introducing: Type + Variant + Protocol.
+        let ty: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_type_introducing)
+            .copied()
+            .collect();
+        assert_eq!(
+            ty,
+            vec![SymbolKind::Type, SymbolKind::Variant, SymbolKind::Protocol],
+        );
+
+        // 4. is_value_binding: Variable + Parameter + Constant.
+        let vb: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_value_binding)
+            .copied()
+            .collect();
+        assert_eq!(
+            vb,
+            vec![
+                SymbolKind::Variable,
+                SymbolKind::Parameter,
+                SymbolKind::Constant,
+            ],
+        );
+
+        // 5. is_member: Field + Variant.
+        let mem: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_member)
+            .copied()
+            .collect();
+        assert_eq!(mem, vec![SymbolKind::Field, SymbolKind::Variant]);
+
+        // 6. is_namespace: Module singleton.
+        let ns: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_namespace)
+            .copied()
+            .collect();
+        assert_eq!(ns, vec![SymbolKind::Module]);
+
+        // 7. is_immutable: Parameter + Constant.
+        let im: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_immutable)
+            .copied()
+            .collect();
+        assert_eq!(im, vec![SymbolKind::Parameter, SymbolKind::Constant]);
+
+        // 8. Cross-cutting: is_callable / is_namespace are
+        //    disjoint from each other and from
+        //    is_value_binding.  A function is neither a value
+        //    binding nor a namespace; a module is neither
+        //    callable nor a value.
+        for k in SymbolKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.is_callable && m.is_value_binding),
+                "{:?}: callable ⊕ value_binding",
+                k
+            );
+            assert!(
+                !(m.is_namespace && m.is_callable),
+                "{:?}: namespace ⊕ callable",
+                k
+            );
+            assert!(
+                !(m.is_namespace && m.is_value_binding),
+                "{:?}: namespace ⊕ value_binding",
+                k
+            );
+        }
+
+        // 9. is_immutable ⇒ is_value_binding (only value
+        //    bindings have immutability semantics — types and
+        //    namespaces aren't "mutable" in a meaningful
+        //    sense).
+        for k in SymbolKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_immutable || m.is_value_binding,
+                "{:?}: immutable ⇒ value_binding",
+                k
+            );
+        }
+
+        // 10. Variant is the unique symbol that's both a
+        //     member AND a type-introducing kind — sum-type
+        //     alternatives are members of their parent type
+        //     declaration but each introduces a constructor
+        //     name in the type space.  Pinned so a future
+        //     refactor that removes one of those bits surfaces
+        //     here.
+        let intersection: Vec<_> = SymbolKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_member && k.meta().is_type_introducing)
+            .copied()
+            .collect();
+        assert_eq!(intersection, vec![SymbolKind::Variant]);
     }
 }
