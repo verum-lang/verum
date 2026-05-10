@@ -208,6 +208,190 @@ public type EndianBitfield is protocol {
 };
 
 // =============================================================================
+// BIT-MANIPULATION PRIMITIVES
+// =============================================================================
+//
+// Free functions over `USize` — the canonical bit-storage unit used by
+// `BitfieldElement.to_bits / from_bits`. Every operation is `pure` and
+// `@inline(always)`; under monomorphisation each one collapses to one or
+// two CPU instructions, making them suitable for hot-path codegen and
+// constant folding when arguments are themselves constants.
+//
+// All operations are branchless except where a true width boundary
+// (`width == 0` or `width == USIZE_BITS`) makes the generic shift path
+// unsound — there a single `if` lifts the boundary out of the hot path,
+// and the compiler proves both arms trivial under inlining when the
+// width is statically known.
+//
+// Boundary table (let N = USIZE_BITS):
+//
+//   width      | extract / insert / field_mask
+//   -----------+------------------------------------------------------------
+//   0          | extract → 0; insert → value; field_mask → 0
+//   1 .. N-1   | hot path: `((1 << width) - 1) << offset`
+//   N (full)   | extract → value; insert → bits; field_mask → !0 (all ones)
+//
+// The `width >= USIZE_BITS` path exists because LLVM defines `shl ?, N`
+// as poison when `N >= bit_width`; on x86_64 the silicon further masks
+// the shift count to `N-1`, producing `1 << 0 = 1` instead of
+// "all ones". The boundary lift makes the function total over
+// `0..=USIZE_BITS` regardless of host instruction-set quirks.
+//
+// Caller contracts (NOT runtime-enforced):
+//
+//   * `n < USIZE_BITS`              for *_bit operations
+//   * `offset + width <= USIZE_BITS` for *_bits / extract / insert
+//   * `width <= USIZE_BITS`         for field_mask / extract / insert
+//
+// Violating these silently yields the LLVM-poison value of the
+// underlying shift; downstream computations remain defined-but-garbage.
+// Bitfield-codegen call sites prove these invariants from the
+// surrounding `@bits(N)` annotations, so the runtime checks would be
+// pure overhead.
+
+/// Bit-width of a `USize` value (alias for `USize.bits`).
+///
+/// Re-exposed at the bitfield-API site so call sites validating
+/// `offset` / `width` against the canonical bitfield word do not need to
+/// import the `type_info` intrinsics directly.
+public const USIZE_BITS: USize = USize.bits;
+
+// --- Single-bit operations -------------------------------------------------
+
+/// Test bit at position `n` in `value`.
+///
+/// Returns `true` iff bit `n` is set. `(value >> n) & 1 != 0`.
+@inline(always)
+public pure fn test_bit(value: USize, n: USize) -> Bool {
+    (value & ((1 as USize) << n)) != (0 as USize)
+}
+
+/// Set bit at position `n` in `value`.
+///
+/// Idempotent: `set_bit(set_bit(v, n), n) == set_bit(v, n)`.
+@inline(always)
+public pure fn set_bit(value: USize, n: USize) -> USize {
+    value | ((1 as USize) << n)
+}
+
+/// Clear bit at position `n` in `value`.
+///
+/// Idempotent: `clear_bit(clear_bit(v, n), n) == clear_bit(v, n)`.
+@inline(always)
+public pure fn clear_bit(value: USize, n: USize) -> USize {
+    value & !((1 as USize) << n)
+}
+
+/// Toggle bit at position `n` in `value`.
+///
+/// Self-inverse: `toggle_bit(toggle_bit(v, n), n) == v`.
+@inline(always)
+public pure fn toggle_bit(value: USize, n: USize) -> USize {
+    value ^ ((1 as USize) << n)
+}
+
+// --- Mask operations -------------------------------------------------------
+
+/// Set every bit in `value` covered by `mask` (`value | mask`).
+///
+/// Idempotent in `mask`:
+///   `set_bits(set_bits(v, m), m) == set_bits(v, m)`.
+@inline(always)
+public pure fn set_bits(value: USize, mask: USize) -> USize {
+    value | mask
+}
+
+/// Clear every bit in `value` covered by `mask` (`value & !mask`).
+///
+/// Idempotent in `mask`:
+///   `clear_bits(clear_bits(v, m), m) == clear_bits(v, m)`.
+@inline(always)
+public pure fn clear_bits(value: USize, mask: USize) -> USize {
+    value & !mask
+}
+
+// --- Field operations ------------------------------------------------------
+
+/// Build a contiguous-1 mask covering `width` bits starting at `offset`.
+///
+/// Boundary behaviour:
+///
+///   * `field_mask(_, 0)`              → `0`
+///   * `field_mask(0, USIZE_BITS)`     → `!0` (all ones)
+///   * `field_mask(o, w)` for `0 < w < USIZE_BITS`
+///                                     → `((1 << w) - 1) << o`
+///
+/// Disjoint-union law (non-overlapping contiguous fields):
+///   `field_mask(o, w) | field_mask(o + w, k) == field_mask(o, w + k)`
+///   when `o + w + k <= USIZE_BITS`.
+@inline(always)
+public pure fn field_mask(offset: USize, width: USize) -> USize {
+    if width == (0 as USize) {
+        0 as USize
+    } else if width >= USIZE_BITS {
+        !(0 as USize)
+    } else {
+        (((1 as USize) << width) - (1 as USize)) << offset
+    }
+}
+
+/// Extract `width` bits starting at `offset` from `value`. The returned
+/// field is right-shifted so its low bit sits at position 0.
+///
+/// Equivalent to `(value & field_mask(offset, width)) >> offset`, but
+/// the implementation drops the intermediate mask because the right-shift
+/// already discards the high bits before the low-mask is applied.
+///
+/// Boundary behaviour:
+///
+///   * `extract_bits(_, _, 0)`              → `0`
+///   * `extract_bits(value, 0, USIZE_BITS)` → `value` (full read-through)
+@inline(always)
+public pure fn extract_bits(value: USize, offset: USize, width: USize) -> USize {
+    if width == (0 as USize) {
+        0 as USize
+    } else if width >= USIZE_BITS {
+        value
+    } else {
+        (value >> offset) & (((1 as USize) << width) - (1 as USize))
+    }
+}
+
+/// Insert the low `width` bits of `bits` into `value` at `offset`.
+///
+/// Bits in `bits` above position `width - 1` are silently masked away,
+/// so the call cannot bleed into adjacent fields even when `bits` is
+/// untrusted.
+///
+/// Round-trip law (for any `value`, `bits`, `offset`, `width` satisfying
+/// `offset + width <= USIZE_BITS`):
+///
+///   extract_bits(
+///       insert_bits(value, bits, offset, width),
+///       offset, width)
+///     == bits & field_mask(0, width)
+///
+/// Adjacent-field independence: `insert_bits(v, b, o, w)` leaves every
+/// bit outside `[o, o + w)` unchanged.
+///
+/// Boundary behaviour:
+///
+///   * `insert_bits(value, _, _, 0)`            → `value` (no field, no change)
+///   * `insert_bits(_, bits, 0, USIZE_BITS)`    → `bits`  (full overwrite)
+@inline(always)
+public pure fn insert_bits(value: USize, bits: USize, offset: USize, width: USize) -> USize {
+    if width == (0 as USize) {
+        value
+    } else if width >= USIZE_BITS {
+        bits
+    } else {
+        let low_mask: USize = ((1 as USize) << width) - (1 as USize);
+        let field:    USize = low_mask << offset;
+        (value & !field) | ((bits & low_mask) << offset)
+    }
+}
+
+// =============================================================================
 // BITFIELD VERIFICATION
 // =============================================================================
 
