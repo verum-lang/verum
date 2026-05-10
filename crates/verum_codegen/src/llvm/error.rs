@@ -57,6 +57,53 @@ pub enum LoweringSeverity {
     Info,
 }
 
+/// Per-variant projection for [`LoweringSeverity`]. `name` matches
+/// the standard diagnostic-severity wire form (`"warning"` /
+/// `"info"`); `is_warning` flags the higher-severity variant. The
+/// partition is binary by design — `LoweringSeverity` does not
+/// carry `Error` (which is a typed `LlvmLoweringError` instead).
+#[derive(Debug, Clone, Copy)]
+pub struct LoweringSeverityMeta {
+    pub name: &'static str,
+    pub is_warning: bool,
+}
+
+impl LoweringSeverity {
+    pub const ALL: &'static [Self] = &[Self::Warning, Self::Info];
+
+    pub const fn meta(self) -> LoweringSeverityMeta {
+        match self {
+            Self::Warning => LoweringSeverityMeta {
+                name: "warning",
+                is_warning: true,
+            },
+            Self::Info => LoweringSeverityMeta {
+                name: "info",
+                is_warning: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    #[inline]
+    pub const fn is_warning(&self) -> bool {
+        self.meta().is_warning
+    }
+}
+
 /// A structured diagnostic emitted during LLVM lowering.
 ///
 
@@ -192,5 +239,31 @@ impl LlvmLoweringError {
     /// Create an internal error.
     pub fn internal(msg: impl Into<Text>) -> Self {
         LlvmLoweringError::Internal(msg.into())
+    }
+}
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::LoweringSeverity;
+
+    #[test]
+    fn lowering_severity_round_trip_unique_and_partition() {
+        assert_eq!(LoweringSeverity::ALL.len(), 2);
+        for v in LoweringSeverity::ALL {
+            let s = v.as_str();
+            assert_eq!(LoweringSeverity::from_str(s), Some(*v));
+        }
+        // Wire form: lowercase (matches the standard
+        // diagnostic-severity convention used elsewhere in the
+        // codegen layer).
+        assert_eq!(LoweringSeverity::Warning.as_str(), "warning");
+        assert_eq!(LoweringSeverity::Info.as_str(), "info");
+        // is_warning is the binary partition: Warning true, Info false.
+        assert!(LoweringSeverity::Warning.is_warning());
+        assert!(!LoweringSeverity::Info.is_warning());
+        // Pin: enum does NOT carry an Error variant — diagnostics
+        // at error-severity flow through the typed
+        // `LlvmLoweringError` instead.
+        assert!(LoweringSeverity::from_str("error").is_none());
     }
 }

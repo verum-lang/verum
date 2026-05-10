@@ -129,8 +129,85 @@ pub enum Platform {
     Embedded,
 }
 
+/// Per-variant projection for [`Platform`].
+///
+/// `name` is the canonical kebab-case identifier returned by `name()`
+/// and accepted by `from_str` (round-trip). `is_unix` flags Linux /
+/// macOS / FreeBSD (POSIX-syscall family). `is_wasm` flags both WASM
+/// variants. `is_embedded_or_freestanding` flags targets without an
+/// OS substrate (Embedded + WasmEmbedded — the bare-metal tier where
+/// the runtime cannot rely on dynamic library loading).
+#[derive(Debug, Clone, Copy)]
+pub struct PlatformMeta {
+    pub name: &'static str,
+    pub is_unix: bool,
+    pub is_wasm: bool,
+    pub is_embedded_or_freestanding: bool,
+}
+
 impl Platform {
-    /// Get platform from target triple string.
+    pub const ALL: &'static [Self] = &[
+        Self::Linux,
+        Self::MacOS,
+        Self::Windows,
+        Self::FreeBSD,
+        Self::WasmWasi,
+        Self::WasmEmbedded,
+        Self::Embedded,
+    ];
+
+    pub const fn meta(self) -> PlatformMeta {
+        match self {
+            Self::Linux => PlatformMeta {
+                name: "linux",
+                is_unix: true,
+                is_wasm: false,
+                is_embedded_or_freestanding: false,
+            },
+            Self::MacOS => PlatformMeta {
+                name: "macos",
+                is_unix: true,
+                is_wasm: false,
+                is_embedded_or_freestanding: false,
+            },
+            Self::Windows => PlatformMeta {
+                name: "windows",
+                is_unix: false,
+                is_wasm: false,
+                is_embedded_or_freestanding: false,
+            },
+            Self::FreeBSD => PlatformMeta {
+                name: "freebsd",
+                is_unix: true,
+                is_wasm: false,
+                is_embedded_or_freestanding: false,
+            },
+            Self::WasmWasi => PlatformMeta {
+                name: "wasm-wasi",
+                is_unix: false,
+                is_wasm: true,
+                is_embedded_or_freestanding: false,
+            },
+            Self::WasmEmbedded => PlatformMeta {
+                name: "wasm",
+                is_unix: false,
+                is_wasm: true,
+                is_embedded_or_freestanding: true,
+            },
+            Self::Embedded => PlatformMeta {
+                name: "embedded",
+                is_unix: false,
+                is_wasm: false,
+                is_embedded_or_freestanding: true,
+            },
+        }
+    }
+
+    /// Get platform from target triple string. Substring matching —
+    /// preserved verbatim from the legacy `from_triple`. The fallback
+    /// chain order matters: WASM is checked first because targets
+    /// like `"wasm32-wasi"` can otherwise be misclassified by other
+    /// substring matches.
     pub fn from_triple(triple: &str) -> Option<Self> {
         if triple.contains("wasm") {
             // WASM targets: distinguish WASI from embedded
@@ -154,17 +231,46 @@ impl Platform {
         }
     }
 
-    /// Get platform name.
-    pub fn name(&self) -> &str {
-        match self {
-            Platform::Linux => "linux",
-            Platform::MacOS => "macos",
-            Platform::Windows => "windows",
-            Platform::FreeBSD => "freebsd",
-            Platform::WasmWasi => "wasm-wasi",
-            Platform::WasmEmbedded => "wasm",
-            Platform::Embedded => "embedded",
+    /// Parse a platform name (kebab-case form returned by `name()`)
+    /// back to the typed enum. Closes a drift defect: previously
+    /// `name` was present but no inverse mapping existed, so callers
+    /// receiving a serialised platform identifier (e.g. from a
+    /// build-cache key or audit report) had no symmetric way to
+    /// recover the typed form.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    /// Get platform name.
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// True for POSIX-syscall family targets (Linux / macOS /
+    /// FreeBSD).
+    #[inline]
+    pub const fn is_unix(&self) -> bool {
+        self.meta().is_unix
+    }
+
+    /// True for WebAssembly targets (WasmWasi / WasmEmbedded).
+    #[inline]
+    pub const fn is_wasm(&self) -> bool {
+        self.meta().is_wasm
+    }
+
+    /// True for targets without an OS substrate (Embedded /
+    /// WasmEmbedded — the bare-metal tier where the runtime cannot
+    /// rely on dynamic library loading).
+    #[inline]
+    pub const fn is_embedded_or_freestanding(&self) -> bool {
+        self.meta().is_embedded_or_freestanding
     }
 
     /// Detect platform from host.
@@ -463,6 +569,94 @@ pub enum OutputFormat {
     Object,
     /// WebAssembly module (.wasm)
     Wasm,
+}
+
+/// Per-variant projection for [`OutputFormat`].
+///
+/// `name` is the canonical kebab-case identifier; `is_linkable` flags
+/// formats that downstream link steps can consume as input
+/// (Object, StaticLibrary). `unix_extension` is the platform-
+/// independent extension (without the leading dot); for executables
+/// it's empty (the binary extension is platform-derived). For
+/// SharedLibrary the extension also varies per-platform — `"so"` is
+/// the Linux/Unix default; macOS uses `"dylib"`, Windows `"dll"`.
+#[derive(Debug, Clone, Copy)]
+pub struct OutputFormatMeta {
+    pub name: &'static str,
+    pub unix_extension: &'static str,
+    pub is_linkable: bool,
+}
+
+impl OutputFormat {
+    pub const ALL: &'static [Self] = &[
+        Self::Executable,
+        Self::SharedLibrary,
+        Self::StaticLibrary,
+        Self::Object,
+        Self::Wasm,
+    ];
+
+    pub const fn meta(self) -> OutputFormatMeta {
+        match self {
+            Self::Executable => OutputFormatMeta {
+                name: "executable",
+                unix_extension: "",
+                is_linkable: false,
+            },
+            Self::SharedLibrary => OutputFormatMeta {
+                name: "shared-library",
+                unix_extension: "so",
+                is_linkable: false,
+            },
+            Self::StaticLibrary => OutputFormatMeta {
+                name: "static-library",
+                unix_extension: "a",
+                is_linkable: true,
+            },
+            Self::Object => OutputFormatMeta {
+                name: "object",
+                unix_extension: "o",
+                is_linkable: true,
+            },
+            Self::Wasm => OutputFormatMeta {
+                name: "wasm",
+                unix_extension: "wasm",
+                is_linkable: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Default Unix file extension (without the leading dot).
+    /// Empty for `Executable` since the binary extension is
+    /// platform-derived (`""` on Unix, `"exe"` on Windows). For
+    /// `SharedLibrary` this returns `"so"` — callers wanting
+    /// macOS `"dylib"` or Windows `"dll"` must consult the
+    /// `Platform`.
+    #[inline]
+    pub const fn unix_extension(&self) -> &'static str {
+        self.meta().unix_extension
+    }
+
+    /// True for output formats that downstream link steps can
+    /// consume as input (`Object`, `StaticLibrary`).
+    #[inline]
+    pub const fn is_linkable(&self) -> bool {
+        self.meta().is_linkable
+    }
 }
 
 /// Input file type
@@ -1245,5 +1439,109 @@ mod tests {
         let result = LinkSession::new().add_object("test.o").build();
 
         assert!(matches!(result, Err(LinkError::NoOutput)));
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins for Platform / OutputFormat.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_platform_round_trip_unique_and_classification() {
+        assert_eq!(Platform::ALL.len(), 7);
+        let mut seen = Vec::new();
+        for v in Platform::ALL {
+            let s = v.name();
+            assert_eq!(
+                Platform::from_str(s),
+                Some(*v),
+                "Platform::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate platform name '{}'", s);
+            seen.push(s);
+        }
+        assert!(Platform::from_str("__not_a_platform__").is_none());
+
+        // Classification partitions:
+        //   * is_unix: Linux, MacOS, FreeBSD (3)
+        //   * is_wasm: WasmWasi, WasmEmbedded (2)
+        //   * is_embedded_or_freestanding: Embedded, WasmEmbedded (2)
+        let unix_count =
+            Platform::ALL.iter().filter(|v| v.is_unix()).count();
+        let wasm_count =
+            Platform::ALL.iter().filter(|v| v.is_wasm()).count();
+        let embedded_count = Platform::ALL
+            .iter()
+            .filter(|v| v.is_embedded_or_freestanding())
+            .count();
+        assert_eq!(unix_count, 3);
+        assert_eq!(wasm_count, 2);
+        assert_eq!(embedded_count, 2);
+
+        // Cross-cutting: is_unix and is_wasm are disjoint (no
+        // platform is both). Windows is the only non-Unix non-Wasm
+        // hosted target; Embedded is the only non-Unix non-Wasm
+        // freestanding target.
+        for v in Platform::ALL {
+            assert!(
+                !(v.is_unix() && v.is_wasm()),
+                "Platform::{:?}: is_unix ⊕ is_wasm must be disjoint",
+                v
+            );
+        }
+        // WasmEmbedded is the only platform that is both wasm AND
+        // embedded.
+        assert!(
+            Platform::WasmEmbedded.is_wasm()
+                && Platform::WasmEmbedded.is_embedded_or_freestanding()
+        );
+        // from_triple → name round-trip on canonical triples.
+        let triples = &[
+            ("x86_64-unknown-linux-gnu", Platform::Linux),
+            ("aarch64-apple-darwin", Platform::MacOS),
+            ("x86_64-pc-windows-msvc", Platform::Windows),
+            ("x86_64-unknown-freebsd", Platform::FreeBSD),
+            ("wasm32-wasi", Platform::WasmWasi),
+            ("wasm32-unknown-unknown", Platform::WasmEmbedded),
+            ("riscv32-none-elf", Platform::Embedded),
+        ];
+        for (triple, expected) in triples {
+            assert_eq!(
+                Platform::from_triple(triple),
+                Some(*expected),
+                "from_triple drift: {}",
+                triple
+            );
+        }
+    }
+
+    #[test]
+    fn meta_pin_output_format_round_trip_unique_and_extensions() {
+        assert_eq!(OutputFormat::ALL.len(), 5);
+        for v in OutputFormat::ALL {
+            let s = v.as_str();
+            assert_eq!(OutputFormat::from_str(s), Some(*v));
+        }
+        // Extension spot pins. Executable's empty extension is
+        // intentional — the binary extension is platform-derived.
+        assert_eq!(OutputFormat::Executable.unix_extension(), "");
+        assert_eq!(OutputFormat::SharedLibrary.unix_extension(), "so");
+        assert_eq!(OutputFormat::StaticLibrary.unix_extension(), "a");
+        assert_eq!(OutputFormat::Object.unix_extension(), "o");
+        assert_eq!(OutputFormat::Wasm.unix_extension(), "wasm");
+        // Linkable partition: Object + StaticLibrary (link inputs).
+        assert_eq!(
+            OutputFormat::ALL
+                .iter()
+                .filter(|v| v.is_linkable())
+                .count(),
+            2
+        );
+        assert!(OutputFormat::Object.is_linkable());
+        assert!(OutputFormat::StaticLibrary.is_linkable());
+        assert!(!OutputFormat::Executable.is_linkable());
+        assert!(!OutputFormat::SharedLibrary.is_linkable());
+        assert!(!OutputFormat::Wasm.is_linkable());
     }
 }
