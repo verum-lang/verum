@@ -198,6 +198,270 @@ impl std::fmt::Display for TerminationError {
 
 impl std::error::Error for TerminationError {}
 
+/// Discriminator for [`TerminationError`] — zero-sized
+/// projection.  Used by metrics consumers + IDE quick-fix
+/// surfaces that classify termination-check failures without
+/// cloning the per-variant Text / Span / List<Text> payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TerminationErrorKind {
+    NonTerminating,
+    NoDecreasingArgument,
+    InvalidDecreasingClause,
+    MutualRecursionCycle,
+    NotStructurallySmaller,
+    UnguardedCorecursion,
+}
+
+/// Per-variant projection for [`TerminationErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminationErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The error involves *recursion* (multiple variants
+    /// describe non-decreasing measure or cycle).  Distinct
+    /// from the corecursion-side band.
+    pub is_recursive_failure: bool,
+    /// The error involves *corecursion* (codata, infinite
+    /// productive structures).  UnguardedCorecursion
+    /// singleton.
+    pub is_corecursive_failure: bool,
+    /// The error reflects *malformed user input* — the user
+    /// supplied a clause that the measure-checker can't
+    /// interpret.  InvalidDecreasingClause singleton.
+    pub is_input_failure: bool,
+    /// The error involves *mutual recursion* — a cycle of
+    /// functions calls each other without a termination
+    /// witness.  MutualRecursionCycle singleton.
+    pub is_mutual_recursion: bool,
+    /// The variant carries a *function-name* payload — every
+    /// variant except MutualRecursionCycle (which carries a
+    /// list of names rather than a single one).  Pinned for
+    /// the IDE diagnostic surface.
+    pub carries_single_function_name: bool,
+}
+
+impl TerminationErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::NonTerminating,
+        Self::NoDecreasingArgument,
+        Self::InvalidDecreasingClause,
+        Self::MutualRecursionCycle,
+        Self::NotStructurallySmaller,
+        Self::UnguardedCorecursion,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> TerminationErrorKindMeta {
+        match self {
+            TerminationErrorKind::NonTerminating => TerminationErrorKindMeta {
+                name: "non_terminating",
+                is_recursive_failure: true,
+                is_corecursive_failure: false,
+                is_input_failure: false,
+                is_mutual_recursion: false,
+                carries_single_function_name: true,
+            },
+            TerminationErrorKind::NoDecreasingArgument => TerminationErrorKindMeta {
+                name: "no_decreasing_argument",
+                is_recursive_failure: true,
+                is_corecursive_failure: false,
+                is_input_failure: false,
+                is_mutual_recursion: false,
+                carries_single_function_name: true,
+            },
+            TerminationErrorKind::InvalidDecreasingClause => TerminationErrorKindMeta {
+                name: "invalid_decreasing_clause",
+                is_recursive_failure: false,
+                is_corecursive_failure: false,
+                is_input_failure: true,
+                is_mutual_recursion: false,
+                carries_single_function_name: true,
+            },
+            TerminationErrorKind::MutualRecursionCycle => TerminationErrorKindMeta {
+                name: "mutual_recursion_cycle",
+                is_recursive_failure: true,
+                is_corecursive_failure: false,
+                is_input_failure: false,
+                is_mutual_recursion: true,
+                carries_single_function_name: false,
+            },
+            TerminationErrorKind::NotStructurallySmaller => TerminationErrorKindMeta {
+                name: "not_structurally_smaller",
+                is_recursive_failure: true,
+                is_corecursive_failure: false,
+                is_input_failure: false,
+                is_mutual_recursion: false,
+                carries_single_function_name: true,
+            },
+            TerminationErrorKind::UnguardedCorecursion => TerminationErrorKindMeta {
+                name: "unguarded_corecursion",
+                is_recursive_failure: false,
+                is_corecursive_failure: true,
+                is_input_failure: false,
+                is_mutual_recursion: false,
+                carries_single_function_name: true,
+            },
+        }
+    }
+}
+
+impl TerminationError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> TerminationErrorKind {
+        match self {
+            TerminationError::NonTerminating { .. } => {
+                TerminationErrorKind::NonTerminating
+            }
+            TerminationError::NoDecreasingArgument { .. } => {
+                TerminationErrorKind::NoDecreasingArgument
+            }
+            TerminationError::InvalidDecreasingClause { .. } => {
+                TerminationErrorKind::InvalidDecreasingClause
+            }
+            TerminationError::MutualRecursionCycle { .. } => {
+                TerminationErrorKind::MutualRecursionCycle
+            }
+            TerminationError::NotStructurallySmaller { .. } => {
+                TerminationErrorKind::NotStructurallySmaller
+            }
+            TerminationError::UnguardedCorecursion { .. } => {
+                TerminationErrorKind::UnguardedCorecursion
+            }
+        }
+    }
+
+    /// Returns the source span carried by every variant.
+    /// Pinned via the drift test — every variant's payload
+    /// includes a `span` field, so this accessor is total.
+    pub fn span(&self) -> Span {
+        match self {
+            TerminationError::NonTerminating { span, .. } => *span,
+            TerminationError::NoDecreasingArgument { call_site, .. } => *call_site,
+            TerminationError::InvalidDecreasingClause { span, .. } => *span,
+            TerminationError::MutualRecursionCycle { span, .. } => *span,
+            TerminationError::NotStructurallySmaller { span, .. } => *span,
+            TerminationError::UnguardedCorecursion { span, .. } => *span,
+        }
+    }
+}
+
+#[cfg(test)]
+mod kind_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `TerminationErrorKind` discriminator
+    /// projection.  Pins variant count, name uniqueness, four
+    /// classifier partitions, and the cross-cutting
+    /// invariants (recursive ⊕ corecursive — no variant flips
+    /// both; mutual ⇒ recursive — mutual recursion is a
+    /// recursion subspecies).
+    #[test]
+    fn meta_pin_termination_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(TerminationErrorKind::ALL.len(), 6);
+        let mut seen = std::collections::HashSet::new();
+        for k in TerminationErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_recursive_failure: 4/6 (everything except
+        //    InvalidDecreasingClause + UnguardedCorecursion).
+        let rec: Vec<_> = TerminationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_recursive_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            rec,
+            vec![
+                TerminationErrorKind::NonTerminating,
+                TerminationErrorKind::NoDecreasingArgument,
+                TerminationErrorKind::MutualRecursionCycle,
+                TerminationErrorKind::NotStructurallySmaller,
+            ],
+        );
+
+        // 3. is_corecursive_failure: UnguardedCorecursion singleton.
+        let corec: Vec<_> = TerminationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_corecursive_failure)
+            .copied()
+            .collect();
+        assert_eq!(corec, vec![TerminationErrorKind::UnguardedCorecursion]);
+
+        // 4. is_input_failure: InvalidDecreasingClause singleton.
+        let inp: Vec<_> = TerminationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_input_failure)
+            .copied()
+            .collect();
+        assert_eq!(inp, vec![TerminationErrorKind::InvalidDecreasingClause]);
+
+        // 5. is_mutual_recursion: MutualRecursionCycle singleton.
+        let mr: Vec<_> = TerminationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_mutual_recursion)
+            .copied()
+            .collect();
+        assert_eq!(mr, vec![TerminationErrorKind::MutualRecursionCycle]);
+
+        // 6. Cross-cutting: is_recursive_failure ⊕
+        //    is_corecursive_failure (a variant classifies one
+        //    or neither — never both).
+        for k in TerminationErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.is_recursive_failure && m.is_corecursive_failure),
+                "{:?}: recursive ⊕ corecursive",
+                k
+            );
+        }
+
+        // 7. is_mutual_recursion ⇒ is_recursive_failure
+        //    (mutual recursion is a recursion subspecies).
+        for k in TerminationErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_mutual_recursion || m.is_recursive_failure,
+                "{:?}: mutual ⇒ recursive",
+                k
+            );
+        }
+
+        // 8. carries_single_function_name: 5/6 (everything
+        //    except MutualRecursionCycle which carries a list).
+        let with_name: Vec<_> = TerminationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_single_function_name)
+            .copied()
+            .collect();
+        assert_eq!(with_name.len(), 5);
+        assert!(!with_name.contains(&TerminationErrorKind::MutualRecursionCycle));
+
+        // 9. Live-payload kind() + span() projection.
+        let nt = TerminationError::NonTerminating {
+            function: Text::from("foo"),
+            reason: Text::from("infinite loop"),
+            span: Span::default(),
+        };
+        assert_eq!(nt.kind(), TerminationErrorKind::NonTerminating);
+        assert_eq!(nt.span(), Span::default());
+
+        let mrc = TerminationError::MutualRecursionCycle {
+            cycle: List::from(vec![Text::from("a"), Text::from("b")]),
+            span: Span::default(),
+        };
+        assert_eq!(mrc.kind(), TerminationErrorKind::MutualRecursionCycle);
+    }
+}
+
 /// Termination checker for recursive functions
 pub struct TerminationChecker {
     /// Call graph: function -> list of functions it calls

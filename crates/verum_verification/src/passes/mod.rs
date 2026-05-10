@@ -50,6 +50,82 @@ pub enum VerificationError {
     Internal(Text),
 }
 
+/// Discriminator for [`VerificationError`] — zero-sized
+/// projection classifying the failure modes of verification
+/// passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VerificationErrorKind {
+    Failed,
+    Timeout,
+    Internal,
+}
+
+/// Per-variant projection for [`VerificationErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerificationErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The pass *concluded* the verification failed —
+    /// `Failed` singleton.  The negative verdict.
+    pub is_negative_verdict: bool,
+    /// The pass ran out of time — `Timeout` singleton.
+    /// Distinct from `Failed` (genuine refutation).
+    pub is_time_bound_failure: bool,
+    /// Internal-error catch-all — `Internal` singleton.
+    pub is_internal: bool,
+}
+
+impl VerificationErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] =
+        &[Self::Failed, Self::Timeout, Self::Internal];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> VerificationErrorKindMeta {
+        match self {
+            VerificationErrorKind::Failed => VerificationErrorKindMeta {
+                name: "failed",
+                is_negative_verdict: true,
+                is_time_bound_failure: false,
+                is_internal: false,
+            },
+            VerificationErrorKind::Timeout => VerificationErrorKindMeta {
+                name: "timeout",
+                is_negative_verdict: false,
+                is_time_bound_failure: true,
+                is_internal: false,
+            },
+            VerificationErrorKind::Internal => VerificationErrorKindMeta {
+                name: "internal",
+                is_negative_verdict: false,
+                is_time_bound_failure: false,
+                is_internal: true,
+            },
+        }
+    }
+}
+
+impl VerificationError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> VerificationErrorKind {
+        match self {
+            VerificationError::Failed(_) => VerificationErrorKind::Failed,
+            VerificationError::Timeout(_) => VerificationErrorKind::Timeout,
+            VerificationError::Internal(_) => VerificationErrorKind::Internal,
+        }
+    }
+
+    /// Returns the inner message text — every variant carries
+    /// one.  Pinned via the drift test.
+    pub fn message(&self) -> &Text {
+        match self {
+            VerificationError::Failed(t) => t,
+            VerificationError::Timeout(t) => t,
+            VerificationError::Internal(t) => t,
+        }
+    }
+}
+
 /// Result of a verification pass
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationResult {
@@ -180,3 +256,44 @@ pub use smt::{
     VCVerificationResult,
 };
 pub use transition_recommendation::{TransitionRecommendation, TransitionRecommendationPass};
+
+#[cfg(test)]
+mod kind_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `VerificationErrorKind` discriminator
+    /// projection.  Pins variant count, perfect-partition over
+    /// the three classifier flags, live-payload kind() +
+    /// message() accessors.
+    #[test]
+    fn meta_pin_verification_error_kind_round_trip_and_partitions() {
+        assert_eq!(VerificationErrorKind::ALL.len(), 3);
+
+        // Perfect partition: every variant flips exactly one of
+        // {is_negative_verdict, is_time_bound_failure,
+        // is_internal}.
+        for k in VerificationErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_negative_verdict as u32)
+                + (m.is_time_bound_failure as u32)
+                + (m.is_internal as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", k);
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        for k in VerificationErrorKind::ALL {
+            assert!(seen.insert(k.meta().name));
+        }
+
+        // Live-payload kind() + message() routing.
+        let f = VerificationError::Failed(Text::from("counterexample at x=0"));
+        assert_eq!(f.kind(), VerificationErrorKind::Failed);
+        assert_eq!(f.message().as_str(), "counterexample at x=0");
+
+        let to = VerificationError::Timeout(Text::from("z3 timeout 10s"));
+        assert_eq!(to.kind(), VerificationErrorKind::Timeout);
+
+        let i = VerificationError::Internal(Text::from("invariant violation"));
+        assert_eq!(i.kind(), VerificationErrorKind::Internal);
+    }
+}
