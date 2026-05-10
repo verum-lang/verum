@@ -88,6 +88,102 @@ pub enum MetricsError {
 /// Result type for metrics operations
 pub type MetricsResult<T> = Result<T, MetricsError>;
 
+/// Discriminator for [`MetricsError`] — zero-sized projection
+/// classifying the failure modes of metrics collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MetricsErrorKind {
+    Io,
+    CoverageParse,
+    ProfilingParse,
+    Git,
+    InvalidMetric,
+}
+
+/// Per-variant projection for [`MetricsErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetricsErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The error originates from the *I/O subsystem* — the
+    /// metric file couldn't be read.  `Io` singleton.
+    pub is_io_failure: bool,
+    /// The error originates from *parsing* a metric data
+    /// file — CoverageParse + ProfilingParse.
+    pub is_parse_failure: bool,
+    /// The error originates from the *git integration* —
+    /// Git singleton.
+    pub is_git_failure: bool,
+    /// The error reflects *invalid data* (the file parsed
+    /// but the values violate metric invariants).
+    /// InvalidMetric singleton.
+    pub is_validation_failure: bool,
+}
+
+impl MetricsErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Io,
+        Self::CoverageParse,
+        Self::ProfilingParse,
+        Self::Git,
+        Self::InvalidMetric,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> MetricsErrorKindMeta {
+        match self {
+            MetricsErrorKind::Io => MetricsErrorKindMeta {
+                name: "io",
+                is_io_failure: true,
+                is_parse_failure: false,
+                is_git_failure: false,
+                is_validation_failure: false,
+            },
+            MetricsErrorKind::CoverageParse => MetricsErrorKindMeta {
+                name: "coverage_parse",
+                is_io_failure: false,
+                is_parse_failure: true,
+                is_git_failure: false,
+                is_validation_failure: false,
+            },
+            MetricsErrorKind::ProfilingParse => MetricsErrorKindMeta {
+                name: "profiling_parse",
+                is_io_failure: false,
+                is_parse_failure: true,
+                is_git_failure: false,
+                is_validation_failure: false,
+            },
+            MetricsErrorKind::Git => MetricsErrorKindMeta {
+                name: "git",
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_git_failure: true,
+                is_validation_failure: false,
+            },
+            MetricsErrorKind::InvalidMetric => MetricsErrorKindMeta {
+                name: "invalid_metric",
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_git_failure: false,
+                is_validation_failure: true,
+            },
+        }
+    }
+}
+
+impl MetricsError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> MetricsErrorKind {
+        match self {
+            MetricsError::Io(_) => MetricsErrorKind::Io,
+            MetricsError::CoverageParse(_) => MetricsErrorKind::CoverageParse,
+            MetricsError::ProfilingParse(_) => MetricsErrorKind::ProfilingParse,
+            MetricsError::Git(_) => MetricsErrorKind::Git,
+            MetricsError::InvalidMetric(_) => MetricsErrorKind::InvalidMetric,
+        }
+    }
+}
+
 // =============================================================================
 // Enhanced Code Metrics
 // =============================================================================
@@ -1518,3 +1614,47 @@ pub fn nesting_from_cfg(cfg: &EscapeCFG) -> u32 {
 // =============================================================================
 
 // Tests are in tests/metrics_tests.rs per CLAUDE.md standards
+
+#[cfg(test)]
+mod kind_meta_drift_pins {
+    use super::*;
+    use verum_common::Text;
+
+    /// Drift-pin: `MetricsErrorKind` discriminator projection.
+    /// Pins variant count + perfect partition over the four
+    /// failure-source classifiers (io / parse / git /
+    /// validation).
+    #[test]
+    fn meta_pin_metrics_error_kind_round_trip_and_partitions() {
+        assert_eq!(MetricsErrorKind::ALL.len(), 5);
+
+        // Perfect partition: every variant flips exactly one
+        // of the four failure classifiers.
+        for k in MetricsErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_io_failure as u32)
+                + (m.is_parse_failure as u32)
+                + (m.is_git_failure as u32)
+                + (m.is_validation_failure as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", k);
+        }
+
+        // is_parse_failure: CoverageParse + ProfilingParse.
+        let parse: Vec<_> = MetricsErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_parse_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            parse,
+            vec![MetricsErrorKind::CoverageParse, MetricsErrorKind::ProfilingParse],
+        );
+
+        // Live-payload kind() projection.
+        let cp = MetricsError::CoverageParse(Text::from("malformed"));
+        assert_eq!(cp.kind(), MetricsErrorKind::CoverageParse);
+
+        let g = MetricsError::Git(Text::from("git not found"));
+        assert_eq!(g.kind(), MetricsErrorKind::Git);
+    }
+}
