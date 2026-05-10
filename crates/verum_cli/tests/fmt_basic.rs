@@ -13,7 +13,7 @@ use verum_cli::commands::fmt::format_string;
 fn parses(source: &str) -> bool {
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     let lexer = Lexer::new(source, FileId::new(0));
     let parser = VerumParser::new();
     parser.parse_module(lexer, FileId::new(0)).is_ok()

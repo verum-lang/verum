@@ -17,7 +17,7 @@
 use verum_ast::FileId;
 use verum_cli::commands::fmt::format_string;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 fn fmt(source: &str) -> String {
     format_string(source)

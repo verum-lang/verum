@@ -52,6 +52,7 @@ fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
         alignment: Maybe::None,
         methods: List::new(),
         implements: List::new(),
+        decl_span: Maybe::None,
     }
 }
 
