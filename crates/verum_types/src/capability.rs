@@ -115,83 +115,22 @@ impl ContextCapabilities {
 ///
 
 /// Similar to AST Capability but used during type checking.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TypeCapability {
-    /// Read-only access
-    ReadOnly,
-    /// Write-only access
-    WriteOnly,
-    /// Full read-write access
-    ReadWrite,
-    /// Administrative privileges
-    Admin,
-    /// Transaction management
-    Transaction,
-    /// Network access
-    Network,
-    /// File system access
-    FileSystem,
-    /// Database query
-    Query,
-    /// Database mutation
-    Execute,
-    /// Logging
-    Logging,
-    /// Metrics/telemetry
-    Metrics,
-    /// Configuration
-    Config,
-    /// Cache access
-    Cache,
-    /// Authentication
-    Auth,
-    /// Custom named capability
-    Custom(Text),
-}
+///
+/// Pre-collapse this was a 15-variant structural duplicate of
+/// `verum_ast::Capability` paired with a 15-arm identity-shape
+/// `from_ast` mapper.  Now an alias — the canonical home is
+/// `verum_ast::Capability`, with `meta()` / `ALL_STANDARD` /
+/// `from_alias` exposing the partition table that previously
+/// lived as a hardcoded match in `MethodCapabilityMapper::
+/// capability_from_name`.
+pub type TypeCapability = verum_ast::Capability;
 
-impl TypeCapability {
-    /// Convert from AST capability
-    pub fn from_ast(cap: &Capability) -> Self {
-        match cap {
-            Capability::ReadOnly => TypeCapability::ReadOnly,
-            Capability::WriteOnly => TypeCapability::WriteOnly,
-            Capability::ReadWrite => TypeCapability::ReadWrite,
-            Capability::Admin => TypeCapability::Admin,
-            Capability::Transaction => TypeCapability::Transaction,
-            Capability::Network => TypeCapability::Network,
-            Capability::FileSystem => TypeCapability::FileSystem,
-            Capability::Query => TypeCapability::Query,
-            Capability::Execute => TypeCapability::Execute,
-            Capability::Logging => TypeCapability::Logging,
-            Capability::Metrics => TypeCapability::Metrics,
-            Capability::Config => TypeCapability::Config,
-            Capability::Cache => TypeCapability::Cache,
-            Capability::Auth => TypeCapability::Auth,
-            Capability::Custom(name) => TypeCapability::Custom(name.clone()),
-        }
-    }
-
-    /// Get display name
-    pub fn name(&self) -> &str {
-        match self {
-            TypeCapability::ReadOnly => "ReadOnly",
-            TypeCapability::WriteOnly => "WriteOnly",
-            TypeCapability::ReadWrite => "ReadWrite",
-            TypeCapability::Admin => "Admin",
-            TypeCapability::Transaction => "Transaction",
-            TypeCapability::Network => "Network",
-            TypeCapability::FileSystem => "FileSystem",
-            TypeCapability::Query => "Query",
-            TypeCapability::Execute => "Execute",
-            TypeCapability::Logging => "Logging",
-            TypeCapability::Metrics => "Metrics",
-            TypeCapability::Config => "Config",
-            TypeCapability::Cache => "Cache",
-            TypeCapability::Auth => "Auth",
-            TypeCapability::Custom(name) => name.as_str(),
-        }
-    }
-}
+/// Compile-time alias-contract pin: any path resolving to
+/// `TypeCapability` must reach `verum_ast::Capability`.
+#[allow(dead_code)]
+const _: fn() = || {
+    let _: TypeCapability = verum_ast::Capability::ReadOnly;
+};
 
 /// Set of type-level capabilities
 ///
@@ -210,23 +149,18 @@ impl TypeCapabilitySet {
         }
     }
 
-    /// Create a capability set with all capabilities
+    /// Create a capability set populated with every standard
+    /// capability.  Pre-collapse the body was a 14-line
+    /// `set.insert(...)` hardcode that re-enumerated the
+    /// variants verbatim — drift between this body and the
+    /// `Capability` enum was caught only by tests.  Now driven
+    /// by `Capability::ALL_STANDARD` so adding a new variant
+    /// flows through automatically.
     pub fn all() -> Self {
         let mut set = Set::new();
-        set.insert(TypeCapability::ReadOnly);
-        set.insert(TypeCapability::WriteOnly);
-        set.insert(TypeCapability::ReadWrite);
-        set.insert(TypeCapability::Admin);
-        set.insert(TypeCapability::Transaction);
-        set.insert(TypeCapability::Network);
-        set.insert(TypeCapability::FileSystem);
-        set.insert(TypeCapability::Query);
-        set.insert(TypeCapability::Execute);
-        set.insert(TypeCapability::Logging);
-        set.insert(TypeCapability::Metrics);
-        set.insert(TypeCapability::Config);
-        set.insert(TypeCapability::Cache);
-        set.insert(TypeCapability::Auth);
+        for cap in TypeCapability::ALL_STANDARD {
+            set.insert(cap.clone());
+        }
         Self { capabilities: set }
     }
 
@@ -239,12 +173,15 @@ impl TypeCapabilitySet {
         Self { capabilities: set }
     }
 
-    /// Create from AST CapabilitySet
+    /// Create from AST CapabilitySet.  Pre-collapse this routed
+    /// every variant through a 15-arm `TypeCapability::from_ast`
+    /// identity-shape mapper; now a clone, since `TypeCapability`
+    /// is a `pub type` alias for `Capability`.
     pub fn from_ast(ast_caps: &CapabilitySet) -> Self {
         let caps: List<TypeCapability> = ast_caps
             .capabilities
             .iter()
-            .map(TypeCapability::from_ast)
+            .cloned()
             .collect();
         Self::from_list(caps)
     }
@@ -314,7 +251,7 @@ impl TypeCapabilitySet {
     pub fn names(&self) -> List<Text> {
         self.capabilities
             .iter()
-            .map(|c| Text::from(c.name()))
+            .map(|c| Text::from(c.as_str()))
             .collect()
     }
 }
@@ -566,33 +503,18 @@ impl MethodCapabilityMapper {
         caps
     }
 
-    /// Convert a sub-context name to a capability
+    /// Convert a sub-context name to a capability.  Single
+    /// source of truth for the alias-lookup table:
+    /// `Capability::from_alias` (data-driven via
+    /// `meta().aliases`) replaces the previous 14-arm hardcoded
+    /// match that re-enumerated every alias next to its variant.
+    /// Falls back to `ReadOnly` for unknown names — preserves
+    /// the legacy default.
     fn capability_from_name(&self, name: &str) -> TypeCapabilitySet {
         let mut caps = TypeCapabilitySet::empty();
-
-        match name.to_lowercase().as_str() {
-            "read" | "readonly" => caps.insert(TypeCapability::ReadOnly),
-            "query" => caps.insert(TypeCapability::Query),
-            "write" | "writeonly" => caps.insert(TypeCapability::WriteOnly),
-            "execute" => caps.insert(TypeCapability::Execute),
-            "readwrite" => {
-                caps.insert(TypeCapability::ReadWrite);
-            }
-            "admin" | "administrator" => caps.insert(TypeCapability::Admin),
-            "transaction" | "tx" => caps.insert(TypeCapability::Transaction),
-            "network" | "net" => caps.insert(TypeCapability::Network),
-            "filesystem" | "fs" => caps.insert(TypeCapability::FileSystem),
-            "logging" | "log" => caps.insert(TypeCapability::Logging),
-            "metrics" | "telemetry" => caps.insert(TypeCapability::Metrics),
-            "config" | "configuration" => caps.insert(TypeCapability::Config),
-            "cache" => caps.insert(TypeCapability::Cache),
-            "auth" | "authentication" => caps.insert(TypeCapability::Auth),
-            _ => {
-                // Default to ReadOnly
-                caps.insert(TypeCapability::ReadOnly);
-            }
-        }
-
+        let cap = TypeCapability::from_alias(name)
+            .unwrap_or(TypeCapability::ReadOnly);
+        caps.insert(cap);
         caps
     }
 }
@@ -790,7 +712,7 @@ impl CapabilityError {
                 ..
             } => {
                 let missing_names: Vec<String> =
-                    missing.iter().map(|c| c.name().to_string()).collect();
+                    missing.iter().map(|c| c.as_str().to_string()).collect();
                 Text::from(format!(
                     "Operation '{}' on context '{}' requires capabilities: {}",
                     operation,
