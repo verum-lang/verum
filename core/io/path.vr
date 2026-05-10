@@ -48,6 +48,12 @@ mount core.*;
 mount collections.*;
 mount io.fs.{metadata as fs_metadata};
 
+// IntCoercible — Path / PathBuf coerce into Int contexts via
+// length and indexing operations at file-IO call sites. Explicit
+// submount because `core.*` doesn't transitively pull in
+// `core.base.coercion`.
+mount core.base.coercion.{IntCoercible};
+
 // =============================================================================
 // Platform Constants
 // =============================================================================
@@ -185,6 +191,12 @@ implement Display for Component {
 public type Path is {
     inner: Text,
 };
+
+// IntCoercible (core.base.coercion) — Path indexing / length
+// operations produce Int values that flow into Int-typed
+// contexts at file-IO call sites; the marker opts the type
+// into Int-context coercion.
+implement IntCoercible for Path {}
 
 implement Path {
     /// Create a new Path from a string.
@@ -589,6 +601,11 @@ implement Display for Path {
 public type PathBuf is {
     path: Path,
 };
+
+// IntCoercible (core.base.coercion) — same rationale as `Path`
+// above: indexing / length ops produce Int values that flow
+// into Int-typed contexts at file-IO call sites.
+implement IntCoercible for PathBuf {}
 
 implement PathBuf {
     /// Create a new empty PathBuf.

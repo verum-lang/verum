@@ -29,6 +29,10 @@ public mount sys.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
 // Import syscall intrinsic from consolidated stdlib.intrinsics
 mount core.intrinsics.syscall6;
 
+// IntCoercible marker for syscall-arg types — Timespec passes
+// through Linux syscalls as a (tv_sec, tv_nsec) i64 pair.
+mount core.base.coercion.{IntCoercible};
+
 // Architecture-specific syscall numbers. `sys.linux.arch` chooses the
 // right numeric value for x86_64 or aarch64 via @cfg(target_arch).
 public mount sys.linux.arch.{
@@ -183,6 +187,12 @@ public type Timespec is {
     tv_sec: Int64,
     tv_nsec: Int64,
 };
+
+// IntCoercible (core.base.coercion) — Timespec mirrors POSIX
+// `struct timespec`; the (tv_sec, tv_nsec) Int64 pair coerces
+// into Int contexts at every syscall arg-passing boundary
+// (nanosleep, clock_gettime, etc.). Marker protocol opts in.
+implement IntCoercible for Timespec {}
 
 // =============================================================================
 // Safe Syscall Wrappers

@@ -48,6 +48,7 @@ mount core.time.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.channel.{Channel};
 mount core.async.{Future};
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // Process Group and Communication Backend
@@ -71,6 +72,12 @@ public type ProcessGroup is {
     // Group handle
     handle: ProcessGroupHandle,
 };
+
+// IntCoercible (core.base.coercion) — ProcessGroup carries
+// rank-id integers (USize) and an opaque U64 handle that flow
+// through distributed-runtime call boundaries as Int values;
+// the marker opts the type into Int-context coercion.
+implement IntCoercible for ProcessGroup {}
 
 // Opaque process group handle
 type ProcessGroupHandle is (U64);
