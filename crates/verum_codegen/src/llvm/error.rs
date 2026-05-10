@@ -203,6 +203,41 @@ impl<T, E: std::fmt::Display> BuildExt<T> for std::result::Result<T, E> {
     }
 }
 
+/// Extension trait for `verum_llvm::values::ValueKind` providing
+/// the canonical `.basic_or_internal(MSG)` helper that collapses
+/// the verbose
+///
+///     ...build_call(...)?.try_as_basic_value().basic().or_internal(MSG)?
+///
+/// chain into a single call:
+///
+///     ...build_call(...)?.basic_value_or(MSG)?
+///
+/// Repeated 38 times in `instruction.rs` after `build_call` for
+/// runtime helpers / generator opcodes / strcmp / etc.  Each site
+/// is functionally identical: extract the BasicValueEnum from a
+/// CallSiteValue's `try_as_basic_value()` result, treating "the
+/// callee returned void" as an internal error.
+///
+/// Implemented on the `Result<CallSiteValue, _>` shape that
+/// `build_call.or_llvm_err()?` produces.
+pub trait CallSiteExt<'ctx> {
+    /// Extract the BasicValueEnum result of a build_call, returning an
+    /// `LlvmLoweringError::Internal(MSG)` if the call produced
+    /// `Instruction` (i.e., the callee was declared as returning void
+    /// or the call site has no usable return).
+    fn basic_value_or(self, msg: &str) -> Result<verum_llvm::values::BasicValueEnum<'ctx>>;
+}
+
+impl<'ctx> CallSiteExt<'ctx> for verum_llvm::values::CallSiteValue<'ctx> {
+    #[inline]
+    fn basic_value_or(self, msg: &str) -> Result<verum_llvm::values::BasicValueEnum<'ctx>> {
+        self.try_as_basic_value()
+            .basic()
+            .ok_or_else(|| LlvmLoweringError::Internal(msg.into()))
+    }
+}
+
 /// Extension trait for converting `Option<T>` into `Result<T, LlvmLoweringError>`.
 ///
 
