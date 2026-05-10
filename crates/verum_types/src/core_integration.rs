@@ -257,7 +257,7 @@ impl ProtocolCheckerExt for ProtocolChecker {
         let sig = Sig {
             name: Text::from(method),
             type_params: verum_common::List::new(),
-            receiver: ReceiverKind::Ref,
+            receiver: ReceiverKind::SelfRef,
             params,
             return_type,
             is_mutating: false,

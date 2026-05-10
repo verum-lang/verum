@@ -6223,7 +6223,7 @@ impl TypeChecker {
                                             | FunctionParamKind::SelfRefUnsafe => {
                                                 proto_method_receiver_kind =
                                                     verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::Ref,
+                                                        crate::protocol::ReceiverKind::SelfRef,
                                                     );
                                                 None // Skip self - implicit in method calls
                                             }
@@ -6232,7 +6232,7 @@ impl TypeChecker {
                                             | FunctionParamKind::SelfRefUnsafeMut => {
                                                 proto_method_receiver_kind =
                                                     verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::RefMut,
+                                                        crate::protocol::ReceiverKind::SelfMut,
                                                     );
                                                 None // Skip self - implicit in method calls
                                             }
@@ -6242,7 +6242,7 @@ impl TypeChecker {
                                             | FunctionParamKind::SelfOwnMut => {
                                                 proto_method_receiver_kind =
                                                     verum_common::Maybe::Some(
-                                                        crate::protocol::ReceiverKind::Value,
+                                                        crate::protocol::ReceiverKind::SelfValue,
                                                     );
                                                 None // Skip self - implicit in method calls
                                             }
