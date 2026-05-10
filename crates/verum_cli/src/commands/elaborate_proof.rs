@@ -345,12 +345,22 @@ mod tests {
             "expected ok with skipped row, got {:?}",
             result
         );
-        // No .vproof files emitted.
-        let entries: Vec<_> = std::fs::read_dir(out_dir.path())
+        // No .vproof files emitted on skip. (A module-level
+        // verification-surface.json is always emitted — that's
+        // metadata about the elaboration run, not a proof
+        // certificate, so it is allowed here.)
+        let vproofs: Vec<_> = std::fs::read_dir(out_dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x == "vproof")
+                    .unwrap_or(false)
+            })
             .collect();
-        assert!(entries.is_empty(), "no .vproof should be emitted on skip");
+        assert!(vproofs.is_empty(), "no .vproof should be emitted on skip");
 
         std::fs::remove_file(&vr_path).ok();
     }
