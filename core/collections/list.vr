@@ -227,6 +227,22 @@ implement<T> List<T> {
         l
     }
 
+    /// Create a single-element list. Mirror of `Some(x)` /
+    /// `Result.Ok(x)` for the collection family — the canonical way
+    /// to lift a value into a 1-element collection without requiring
+    /// `T: Clone` (unlike `from_elem(x, 1)`) and without going
+    /// through `let mut l = List.new(); l.push(x); l` boilerplate at
+    /// every call site.  Used by `core/net/dns.vr` /
+    /// `core/net/addr.vr` for "resolved literal IP → 1-element
+    /// SocketAddr list", `core/io/fs.vr` for the directory-walk seed
+    /// stack, and `core/meta/{attribute,token}.vr` for single-token
+    /// AST builders.
+    public fn of(value: T) -> List<T> {
+        let mut l = List.with_capacity(1);
+        l.push(value);
+        l
+    }
+
     // =========================================================================
     // Properties
     // =========================================================================
