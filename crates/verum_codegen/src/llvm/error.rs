@@ -272,6 +272,44 @@ pub fn get_or_declare_function<'ctx>(
         .unwrap_or_else(|| module.add_function(name, fn_type, None))
 }
 
+/// Get-or-declare an LLVM function and tag it with `noreturn` on
+/// the first declaration.  Idempotent on subsequent calls — when the
+/// function already exists the attribute is *not* re-applied (LLVM
+/// allows multiple identical attributes but the helper preserves
+/// the original "first-write-wins" semantics of the manual sites
+/// it replaces).
+///
+/// Centralises the verbose
+///
+///     let exit_fn = module.get_function(NAME).unwrap_or_else(|| {
+///         let f = module.add_function(NAME, fn_type, None);
+///         f.add_attribute(
+///             AttributeLoc::Function,
+///             ctx.create_string_attribute("noreturn", ""),
+///         );
+///         f
+///     });
+///
+/// pattern that decorates `verum_internal_exit_i64` and similar
+/// process-terminating runtime helpers.
+#[inline]
+pub fn get_or_declare_noreturn_function<'ctx>(
+    module: &verum_llvm::module::Module<'ctx>,
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    name: &str,
+    fn_type: verum_llvm::types::FunctionType<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    if let Some(existing) = module.get_function(name) {
+        return existing;
+    }
+    let f = module.add_function(name, fn_type, None);
+    f.add_attribute(
+        verum_llvm::attributes::AttributeLoc::Function,
+        llvm_ctx.create_string_attribute("noreturn", ""),
+    );
+    f
+}
+
 #[cfg(test)]
 mod meta_consolidation_pins {
     use super::LoweringSeverity;
