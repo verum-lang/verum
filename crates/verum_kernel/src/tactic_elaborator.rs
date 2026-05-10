@@ -1506,6 +1506,122 @@ mod tests {
         }
     }
 
+    /// Pin: `proof { apply X; }` parses as `ProofBody::Structured`
+    /// with `steps = [Tactic(Apply{X})]` and `conclusion = None`.
+    /// The elaborator must collapse this canonical degenerate form
+    /// to the inner `Apply` and elaborate normally — otherwise the
+    /// entire kernel_v0 verification surface (which uses this form
+    /// throughout — see `core/verify/kernel_v0/soundness.vr` and
+    /// the per-rule lemmas) would be unconditionally skipped.
+    #[test]
+    fn elaborate_proof_body_structured_single_tactic_step_degenerates() {
+        use verum_ast::decl::{ProofStep, ProofStepKind, ProofStructure};
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::universe(0));
+        let mut steps = List::new();
+        steps.push(ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("witness")),
+                args: List::new(),
+            }),
+            span: Span::dummy(),
+        });
+        let body = ProofBody::Structured(ProofStructure {
+            steps,
+            conclusion: verum_common::Maybe::None,
+            span: Span::dummy(),
+        });
+        let term = elaborate_proof_body(&body, &mut ctx)
+            .expect("single-Tactic-step Structured must degenerate to Tactic");
+        assert_eq!(term, Term::Var(0));
+    }
+
+    /// Pin: complementary degenerate shape — empty `steps` plus a
+    /// `conclusion = Some(t)`. Forward-compat for parser variants
+    /// that route the final tactic into the dedicated slot rather
+    /// than packing it into `steps`.
+    #[test]
+    fn elaborate_proof_body_structured_pure_conclusion_degenerates() {
+        use verum_ast::decl::ProofStructure;
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::universe(0));
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::new(),
+            conclusion: verum_common::Maybe::Some(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("witness")),
+                args: List::new(),
+            }),
+            span: Span::dummy(),
+        });
+        let term = elaborate_proof_body(&body, &mut ctx)
+            .expect("pure-conclusion Structured must degenerate to Tactic");
+        assert_eq!(term, Term::Var(0));
+    }
+
+    /// Pin: a Structured body with **two** steps does NOT degenerate
+    /// — it stays UnsupportedTactic. Guards against the degeneration
+    /// helper accidentally collapsing richer multi-step bodies
+    /// (have/show/calc/cases/…) which need their own elaboration.
+    #[test]
+    fn elaborate_proof_body_structured_multi_step_stays_unsupported() {
+        use verum_ast::decl::{ProofStep, ProofStepKind, ProofStructure};
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::universe(0));
+        let mut steps = List::new();
+        for _ in 0..2 {
+            steps.push(ProofStep {
+                kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                    lemma: verum_common::Heap::new(path_expr("witness")),
+                    args: List::new(),
+                }),
+                span: Span::dummy(),
+            });
+        }
+        let body = ProofBody::Structured(ProofStructure {
+            steps,
+            conclusion: verum_common::Maybe::None,
+            span: Span::dummy(),
+        });
+        match elaborate_proof_body(&body, &mut ctx) {
+            Err(ElabError::UnsupportedTactic(_)) => {}
+            other => panic!("expected UnsupportedTactic for multi-step, got {:?}", other),
+        }
+    }
+
+    /// Pin: a single non-Tactic step (e.g. `have h: P by ring`) does
+    /// NOT degenerate — `degenerate_structured_to_tactic` only
+    /// matches `ProofStepKind::Tactic`, not `Have`/`Show`/etc.
+    #[test]
+    fn elaborate_proof_body_structured_non_tactic_step_stays_unsupported() {
+        use verum_ast::decl::{ProofStep, ProofStepKind, ProofStructure};
+        use verum_ast::expr::ExprKind;
+        let span = Span::dummy();
+        let mut ctx = ElabContext::new();
+        let mut steps = List::new();
+        steps.push(ProofStep {
+            kind: ProofStepKind::Show {
+                proposition: verum_common::Heap::new(Expr::new(
+                    ExprKind::Literal(verum_ast::Literal::bool(true, span)),
+                    span,
+                )),
+                justification: TacticExpr::Trivial,
+            },
+            span,
+        });
+        let body = ProofBody::Structured(ProofStructure {
+            steps,
+            conclusion: verum_common::Maybe::None,
+            span,
+        });
+        match elaborate_proof_body(&body, &mut ctx) {
+            Err(ElabError::UnsupportedTactic(_)) => {}
+            other => panic!(
+                "expected UnsupportedTactic for non-Tactic step, got {:?}",
+                other
+            ),
+        }
+    }
+
     #[test]
     fn elaborate_theorem_apply_axiom_round_trips() {
         // Construct: `theorem id_proof() ensures true { proof { apply foo; } }`
