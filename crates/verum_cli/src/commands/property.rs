@@ -328,7 +328,7 @@ impl Generator {
 /// `Maybe(None)` = `Maybe::None`, `Maybe(Some(v))` = `Maybe::Some(v)`,
 /// `Ordering(-1/0/1)` = `Less/Equal/Greater`, `List(elems)` = a Verum
 /// List, `Tuple(fields)` = an anonymous tuple.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TreeValue {
     // ---- primitives ----
     Bool(bool),

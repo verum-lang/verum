@@ -27,7 +27,7 @@
 //! pinpoints the introduced violation rather than burying it in a
 //! whole-stdlib reload.
 
-use verum_parser::Parser;
+use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
 /// Locate the workspace's `core/` directory from `CARGO_MANIFEST_DIR`.
@@ -284,7 +284,7 @@ fn strict_codegen_halts_on_bug_class_skip() {
     // Compiles cleanly under lenient mode (warn-level skip) and
     // returns an error under strict mode.
     let source = "fn caller() -> Int { nope_undefined_42() }";
-    let mut parser = verum_parser::Parser::new(source);
+    let mut parser = verum_fast_parser::Parser::new(source);
     let module = parser
         .parse_module()
         .expect("parse should succeed; the body is the diagnostic");

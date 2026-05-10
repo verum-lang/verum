@@ -28,6 +28,10 @@ fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> T
         clone_fn: None,
         protocols: smallvec![],
         visibility: Visibility::Public,
+        // `Sum` types are not transparent wrappers — variant tags
+        // and payloads must persist at runtime.
+        alias_target: None,
+        is_transparent_wrapper: false,
     }
 }
 
