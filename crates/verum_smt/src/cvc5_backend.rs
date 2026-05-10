@@ -266,141 +266,14 @@ impl Default for Cvc5Config {
     }
 }
 
-/// SMT-LIB logic specifications
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SmtLogic {
-    /// Quantifier-free linear integer arithmetic
-    QF_LIA,
-    /// Quantifier-free linear real arithmetic
-    QF_LRA,
-    /// Quantifier-free bit-vectors
-    QF_BV,
-    /// Quantifier-free nonlinear integer arithmetic
-    QF_NIA,
-    /// Quantifier-free nonlinear real arithmetic
-    QF_NRA,
-    /// Quantifier-free arrays with extensionality
-    QF_AX,
-    /// Quantifier-free uninterpreted functions with linear integer arithmetic
-    QF_UFLIA,
-    /// Quantifier-free arrays, uninterpreted functions, linear integer arithmetic
-    QF_AUFLIA,
-    /// All supported logics (auto-detect)
-    ALL,
-}
-
-/// Per-variant projection for [`SmtLogic`] (CVC5 side).
-///
-/// Same shape as `verum_smt::backend_trait::SmtLogic` (consolidated
-/// in 3d6c96590) — the two enums are structural duplicates of each
-/// other; the meta() shape is identical so future unification can
-/// collapse them. `name` is the SMT-LIB2 logic identifier passed
-/// directly to CVC5's `(set-logic ...)`. `is_quantifier_free` and
-/// `is_arithmetic` carry the same partition as on the
-/// `backend_trait` side: 8/9 logics are QF; 6/9 are arithmetic
-/// (QF_BV/QF_AX/ALL non-arithmetic).
-#[derive(Debug, Clone, Copy)]
-pub struct SmtLogicMeta {
-    pub name: &'static str,
-    pub is_quantifier_free: bool,
-    pub is_arithmetic: bool,
-}
-
-impl SmtLogic {
-    pub const ALL_LOGICS: &'static [Self] = &[
-        Self::QF_LIA,
-        Self::QF_LRA,
-        Self::QF_BV,
-        Self::QF_NIA,
-        Self::QF_NRA,
-        Self::QF_AX,
-        Self::QF_UFLIA,
-        Self::QF_AUFLIA,
-        Self::ALL,
-    ];
-
-    pub const fn meta(self) -> SmtLogicMeta {
-        match self {
-            Self::QF_LIA => SmtLogicMeta {
-                name: "QF_LIA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::QF_LRA => SmtLogicMeta {
-                name: "QF_LRA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::QF_BV => SmtLogicMeta {
-                name: "QF_BV",
-                is_quantifier_free: true,
-                is_arithmetic: false,
-            },
-            Self::QF_NIA => SmtLogicMeta {
-                name: "QF_NIA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::QF_NRA => SmtLogicMeta {
-                name: "QF_NRA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::QF_AX => SmtLogicMeta {
-                name: "QF_AX",
-                is_quantifier_free: true,
-                is_arithmetic: false,
-            },
-            Self::QF_UFLIA => SmtLogicMeta {
-                name: "QF_UFLIA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::QF_AUFLIA => SmtLogicMeta {
-                name: "QF_AUFLIA",
-                is_quantifier_free: true,
-                is_arithmetic: true,
-            },
-            Self::ALL => SmtLogicMeta {
-                name: "ALL",
-                is_quantifier_free: false,
-                is_arithmetic: false,
-            },
-        }
-    }
-
-    /// Return the SMT-LIB 2 logic name string (e.g., `"QF_LIA"`).
-    ///
-    /// These strings are passed directly to CVC5's `set-logic` command.
-    #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        self.meta().name
-    }
-
-    /// Parse an SMT-LIB 2 logic name into the corresponding variant.
-    /// Case-insensitive. Returns `None` for unknown names so the
-    /// caller can fall back to `ALL` and surface a warning rather
-    /// than silently downgrade the solver.
-    pub fn from_str(s: &str) -> Option<Self> {
-        let upper = s.to_ascii_uppercase();
-        for v in Self::ALL_LOGICS {
-            if v.meta().name == upper.as_str() {
-                return Some(*v);
-            }
-        }
-        None
-    }
-
-    #[inline]
-    pub const fn is_quantifier_free(&self) -> bool {
-        self.meta().is_quantifier_free
-    }
-
-    #[inline]
-    pub const fn is_arithmetic(&self) -> bool {
-        self.meta().is_arithmetic
-    }
-}
+// `SmtLogic` and its `SmtLogicMeta` projection live in
+// `crate::backend_trait` — re-exported here so existing
+// `cvc5_backend::SmtLogic` callers (config.rs, the ALL_LOGICS scan,
+// the type-alias `Cvc5SmtLogic`) continue to compile unchanged. The
+// canonical `from_str` is case-insensitive (it absorbs the historical
+// cvc5 behaviour), so this re-export does not narrow any caller's
+// accept set.
+pub use crate::backend_trait::{SmtLogic, SmtLogicMeta};
 
 /// Per-variant projection for [`QuantifierMode`].
 ///
@@ -1905,68 +1778,20 @@ impl std::fmt::Debug for Cvc5Sort {
     }
 }
 
-/// SAT result
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SatResult {
-    Sat,
-    Unsat,
-    Unknown,
-}
+// `SatResult` and its `SatResultMeta` projection live in
+// `crate::backend_trait` — re-exported here so existing
+// `cvc5_backend::SatResult` callers (proof_search.rs, lib.rs From
+// impl, the `Cvc5SatResult` alias and the `From<z3::SatResult>`
+// converter) continue to compile unchanged. SMT-LIB2 wire form is
+// lowercase (`"sat"`/`"unsat"`/`"unknown"`) and identical across
+// every former duplicate, so this re-export is behaviour-preserving.
+pub use crate::backend_trait::{SatResult, SatResultMeta};
 
-/// Per-variant projection for [`SatResult`] (CVC5 side).
-///
-/// Same shape as `verum_smt::backend_trait::SatResult` (consolidated
-/// in 3d6c96590) and `verum_smt::smtlib_check::CheckVerdict`
-/// (consolidated above) — three structural duplicates, all with
-/// SMT-LIB2 lowercase wire form (`"sat"` / `"unsat"` / `"unknown"`)
-/// and the same `is_definitive` partition.
-#[derive(Debug, Clone, Copy)]
-pub struct SatResultMeta {
-    pub name: &'static str,
-    pub is_definitive: bool,
-}
-
-impl SatResult {
-    pub const ALL: &'static [Self] = &[Self::Sat, Self::Unsat, Self::Unknown];
-
-    pub const fn meta(self) -> SatResultMeta {
-        match self {
-            Self::Sat => SatResultMeta {
-                name: "sat",
-                is_definitive: true,
-            },
-            Self::Unsat => SatResultMeta {
-                name: "unsat",
-                is_definitive: true,
-            },
-            Self::Unknown => SatResultMeta {
-                name: "unknown",
-                is_definitive: false,
-            },
-        }
-    }
-
-    #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        self.meta().name
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        for v in Self::ALL {
-            if v.meta().name == s {
-                return Some(*v);
-            }
-        }
-        None
-    }
-
-    #[inline]
-    pub const fn is_definitive(&self) -> bool {
-        self.meta().is_definitive
-    }
-}
-
-/// Type alias for consistency with backend_switcher.rs
+/// Type alias preserved for backend_switcher.rs and external callers
+/// that disambiguate cvc5 vs z3 verdicts at the type level. After the
+/// 5-way unification this is a thin synonym for the canonical
+/// `SatResult`; both names refer to the same nominal type so a value
+/// can flow freely between sites.
 pub type Cvc5SatResult = SatResult;
 
 /// CVC5 value representation
@@ -2138,38 +1963,14 @@ pub fn is_cvc5_available() -> bool {
 
 #[cfg(test)]
 mod meta_consolidation_pins {
-    use super::{QuantifierMode, SatResult, SmtLogic};
+    use super::{Cvc5SatResult, QuantifierMode, SatResult, SmtLogic};
 
-    #[test]
-    fn cvc5_smt_logic_round_trip_unique_and_classification() {
-        assert_eq!(SmtLogic::ALL_LOGICS.len(), 9);
-        for v in SmtLogic::ALL_LOGICS {
-            let s = v.as_str();
-            assert_eq!(SmtLogic::from_str(s), Some(*v));
-        }
-        // Case-insensitivity preserved.
-        assert_eq!(SmtLogic::from_str("qf_lia"), Some(SmtLogic::QF_LIA));
-        assert_eq!(SmtLogic::from_str("all"), Some(SmtLogic::ALL));
-        assert!(SmtLogic::from_str("__bogus__").is_none());
-        // Classification partitions match the backend_trait::SmtLogic
-        // sibling exactly: 8 QF + 1 ALL; 6 arithmetic.
-        assert_eq!(
-            SmtLogic::ALL_LOGICS
-                .iter()
-                .filter(|v| v.is_quantifier_free())
-                .count(),
-            8
-        );
-        assert_eq!(
-            SmtLogic::ALL_LOGICS
-                .iter()
-                .filter(|v| v.is_arithmetic())
-                .count(),
-            6
-        );
-        assert!(!SmtLogic::ALL.is_quantifier_free());
-        assert!(!SmtLogic::ALL.is_arithmetic());
-    }
+    // `SmtLogic` / `SatResult` round-trip + partition pins live with
+    // the canonical types in `crate::backend_trait`. After the 5-way
+    // unification, `cvc5_backend::SmtLogic` and `cvc5_backend::SatResult`
+    // are re-exports of the same nominal types, so duplicating the
+    // pins here would only test the re-export — covered by the
+    // bottom `unification_alias_contract` pin instead.
 
     #[test]
     fn cvc5_quantifier_mode_round_trip_unique_and_alias_table() {
@@ -2224,22 +2025,23 @@ mod meta_consolidation_pins {
         }
     }
 
+    /// Pin: after the 5-way unification, `cvc5_backend::SmtLogic` and
+    /// `cvc5_backend::SatResult` are re-exports of the canonical
+    /// `backend_trait` types — and `Cvc5SatResult` is a thin synonym.
+    /// Values of these aliases are fungible at the type level, so a
+    /// `Cvc5SatResult` flows directly into a `SatResult`-typed slot
+    /// without any conversion. If a future refactor accidentally
+    /// re-introduces a distinct nominal type the let-bindings below
+    /// stop compiling.
     #[test]
-    fn cvc5_sat_result_round_trip_and_definitive_partition() {
-        assert_eq!(SatResult::ALL.len(), 3);
-        for v in SatResult::ALL {
-            let s = v.as_str();
-            assert_eq!(SatResult::from_str(s), Some(*v));
-        }
-        // Wire form matches SMT-LIB2 (and the backend_trait /
-        // smtlib_check siblings exactly).
+    fn unification_alias_contract() {
+        let _: SatResult = SatResult::Sat;
+        let _: SmtLogic = SmtLogic::QF_LIA;
+        let _: Cvc5SatResult = SatResult::Sat;
+        // SMT-LIB2 wire form is lowercase and case-insensitive
+        // identifier parsing absorbed from the historical cvc5 side.
         assert_eq!(SatResult::Sat.as_str(), "sat");
-        assert_eq!(SatResult::Unsat.as_str(), "unsat");
-        assert_eq!(SatResult::Unknown.as_str(), "unknown");
-        assert!(SatResult::Sat.is_definitive());
-        assert!(SatResult::Unsat.is_definitive());
-        assert!(!SatResult::Unknown.is_definitive());
-        // Type alias contract: `Cvc5SatResult` is `SatResult`.
-        let _: super::Cvc5SatResult = SatResult::Sat;
+        assert_eq!(SmtLogic::from_str("qf_lia"), Some(SmtLogic::QF_LIA));
+        assert_eq!(SmtLogic::from_str("ALL"), Some(SmtLogic::ALL));
     }
 }

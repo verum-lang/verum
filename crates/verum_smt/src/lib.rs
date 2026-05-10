@@ -780,37 +780,16 @@ where
     result
 }
 
-/// SMT result wrapper
-#[derive(Debug, Clone)]
-pub enum SmtResult {
-    /// Formula is satisfiable
-    Sat,
-    /// Formula is unsatisfiable
-    Unsat,
-    /// Solver could not determine
-    Unknown,
-}
-
-impl From<z3::SatResult> for SmtResult {
-    fn from(result: z3::SatResult) -> Self {
-        match result {
-            z3::SatResult::Sat => SmtResult::Sat,
-            z3::SatResult::Unsat => SmtResult::Unsat,
-            z3::SatResult::Unknown => SmtResult::Unknown,
-        }
-    }
-}
-
-#[cfg(feature = "cvc5")]
-impl From<crate::cvc5_backend::SatResult> for SmtResult {
-    fn from(result: crate::cvc5_backend::SatResult) -> Self {
-        match result {
-            crate::cvc5_backend::SatResult::Sat => SmtResult::Sat,
-            crate::cvc5_backend::SatResult::Unsat => SmtResult::Unsat,
-            crate::cvc5_backend::SatResult::Unknown => SmtResult::Unknown,
-        }
-    }
-}
+/// SMT result wrapper.
+///
+/// Type alias for the canonical `backend_trait::SatResult`. Before
+/// the 5-way unification this was a separate `enum SmtResult` with
+/// `From<z3::SatResult>` and (cfg-gated) `From<cvc5::SatResult>`
+/// impls; both are now redundant — the former duplicates collapse to
+/// the same nominal type, and z3 → SatResult conversion is provided
+/// by the canonical `backend_trait::IntoSatResult` trait. Public API
+/// callers continue to spell `SmtResult::Sat`, etc., unchanged.
+pub type SmtResult = crate::backend_trait::SatResult;
 
 /// Errors that can occur during SMT operations
 #[derive(Debug, thiserror::Error)]

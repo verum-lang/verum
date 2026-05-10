@@ -361,16 +361,11 @@ impl Default for GoalAnalyzer {
 
 // ==================== Supporting Types ====================
 
-/// Satisfiability result
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SatResult {
-    /// Formula is satisfiable
-    Sat,
-    /// Formula is unsatisfiable
-    Unsat,
-    /// Result is unknown
-    Unknown,
-}
+/// Satisfiability result — re-export of the canonical
+/// `backend_trait::SatResult`. The `as GoalSatResult` import in
+/// `z3_backend.rs` continues to compile unchanged because the
+/// nominal type is preserved across the re-export boundary.
+pub use crate::backend_trait::SatResult;
 
 /// Fast path result
 #[derive(Debug, Clone)]

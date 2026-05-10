@@ -12,79 +12,20 @@
 //! Closes task #67's `--check-smt-formula` surface.
 
 /// Verdict returned by [`check_smtlib_string`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckVerdict {
-    /// The formula is satisfiable.
-    Sat,
-    /// The formula is unsatisfiable.
-    Unsat,
-    /// The solver could not decide within the budget.
-    Unknown,
-}
-
-/// Per-variant projection for [`CheckVerdict`].
 ///
-/// `name` matches the SMT-LIB2 `(check-sat)` output token verbatim,
-/// so a solver-supplied string round-trips through `from_str`/
-/// `as_str`. `is_definitive` flags `Sat` and `Unsat` (the two
-/// terminating verdicts); `Unknown` indicates timeout / resource
-/// exhaustion / undecidable fragment. Same shape as
-/// `verum_smt::backend_trait::SatResult` (consolidated in
-/// 3d6c96590) — the two enums are structural duplicates that
-/// long-term unification can collapse.
-#[derive(Debug, Clone, Copy)]
-pub struct CheckVerdictMeta {
-    pub name: &'static str,
-    pub is_definitive: bool,
-}
+/// Type alias for the canonical `backend_trait::SatResult` — three
+/// SAT verdicts (`Sat` / `Unsat` / `Unknown`) with SMT-LIB2 lowercase
+/// wire form and a definitive partition. Before the 5-way
+/// unification this was a separate `enum CheckVerdict` with an
+/// identical shape; the alias preserves the public surface
+/// (`CheckVerdict::Sat`, `CheckVerdict::ALL`, `as_str`, `from_str`,
+/// `is_definitive`) while collapsing the structural duplication.
+pub type CheckVerdict = crate::backend_trait::SatResult;
 
-impl CheckVerdict {
-    pub const ALL: &'static [Self] = &[Self::Sat, Self::Unsat, Self::Unknown];
-
-    pub const fn meta(self) -> CheckVerdictMeta {
-        match self {
-            Self::Sat => CheckVerdictMeta {
-                name: "sat",
-                is_definitive: true,
-            },
-            Self::Unsat => CheckVerdictMeta {
-                name: "unsat",
-                is_definitive: true,
-            },
-            Self::Unknown => CheckVerdictMeta {
-                name: "unknown",
-                is_definitive: false,
-            },
-        }
-    }
-
-    /// Canonical SMT-LIB verdict string.
-    #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        self.meta().name
-    }
-
-    /// Parse the SMT-LIB verdict token back to the typed verdict.
-    /// Closes a drift defect: previously `as_str` was present but
-    /// no inverse mapping existed, so callers receiving a
-    /// `(check-sat)` output line had to re-implement the lookup.
-    pub fn from_str(s: &str) -> Option<Self> {
-        for v in Self::ALL {
-            if v.meta().name == s {
-                return Some(*v);
-            }
-        }
-        None
-    }
-
-    /// True for `Sat` / `Unsat` (terminating verdicts); false for
-    /// `Unknown` (timeout / resource exhaustion / undecidable
-    /// fragment).
-    #[inline]
-    pub const fn is_definitive(&self) -> bool {
-        self.meta().is_definitive
-    }
-}
+/// Type-alias projection name. The canonical projection lives in
+/// `backend_trait::SatResultMeta`; this alias keeps the
+/// `CheckVerdictMeta` spelling that older callers reference.
+pub type CheckVerdictMeta = crate::backend_trait::SatResultMeta;
 
 /// Error reported by [`check_smtlib_string`].
 #[derive(Debug, thiserror::Error)]
@@ -194,12 +135,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn verdict_as_str_is_canonical() {
-        assert_eq!(CheckVerdict::Sat.as_str(), "sat");
-        assert_eq!(CheckVerdict::Unsat.as_str(), "unsat");
-        assert_eq!(CheckVerdict::Unknown.as_str(), "unknown");
-    }
+    // Wire-form / round-trip / definitive-partition pins live with
+    // the canonical `backend_trait::SatResult`. After the 5-way
+    // unification `CheckVerdict` is a thin alias of that type, so
+    // pinning the same shape here would only test the alias
+    // boundary — covered by `alias_contract` below.
 
     #[test]
     fn z3_solves_trivial_sat_formula() {
@@ -215,21 +155,17 @@ mod tests {
         assert_eq!(r.unwrap(), CheckVerdict::Unsat);
     }
 
+    /// Pin the `CheckVerdict ≡ backend_trait::SatResult` alias
+    /// contract. If a future refactor accidentally re-introduces a
+    /// distinct nominal type the cross-assignments below stop
+    /// compiling, so the public `CheckVerdict` surface and the
+    /// canonical SatResult cannot drift apart silently.
     #[test]
-    fn meta_pin_check_verdict_round_trip_and_definitive_partition() {
-        assert_eq!(CheckVerdict::ALL.len(), 3);
-        for v in CheckVerdict::ALL {
-            let s = v.as_str();
-            assert_eq!(CheckVerdict::from_str(s), Some(*v));
-        }
-        // Wire form matches SMT-LIB2 (check-sat) output tokens.
+    fn alias_contract() {
+        let canonical: crate::backend_trait::SatResult = CheckVerdict::Sat;
+        let _: CheckVerdict = canonical;
+        // Method surface preserved through the alias.
         assert_eq!(CheckVerdict::Sat.as_str(), "sat");
-        assert_eq!(CheckVerdict::Unsat.as_str(), "unsat");
-        assert_eq!(CheckVerdict::Unknown.as_str(), "unknown");
-        // is_definitive partition: Sat/Unsat true; Unknown false.
-        assert!(CheckVerdict::Sat.is_definitive());
-        assert!(CheckVerdict::Unsat.is_definitive());
-        assert!(!CheckVerdict::Unknown.is_definitive());
-        assert!(CheckVerdict::from_str("__bogus__").is_none());
+        assert_eq!(CheckVerdict::from_str("unsat"), Some(CheckVerdict::Unsat));
     }
 }
