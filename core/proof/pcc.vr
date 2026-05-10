@@ -111,7 +111,7 @@ public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
 /// inflated audit metadata.
 public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofBundle {
     let mut certs = b.certificates;
-    let prior_dur: Int = match certs.get_optional(h.digest.clone()) {
+    let prior_dur: Int = match certs.get(h.digest.clone()) {
         Some(prior) => prior.duration_ms,
         None        => 0,
     };
@@ -135,7 +135,7 @@ public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofB
 
 /// Look up a certificate by its goal hash digest. O(1) amortised.
 public fn bundle_lookup(b: &ProofBundle, digest: Text) -> Maybe<ProofCertificate> {
-    b.certificates.get_optional(digest)
+    b.certificates.get(digest)
 }
 
 /// Number of distinct goal hashes in the bundle. O(1).

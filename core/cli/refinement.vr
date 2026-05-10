@@ -61,7 +61,7 @@ implement PredicateRegistry {
     }
 
     public fn lookup(&self, name: &Text) -> Maybe<TextPredicate> {
-        self.by_name.get_optional(name.clone())
+        self.by_name.get(name.clone())
     }
 }
 

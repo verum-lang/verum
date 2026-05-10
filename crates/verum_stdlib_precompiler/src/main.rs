@@ -18,6 +18,18 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 
 fn main() -> ExitCode {
+    // Initialise tracing so `tracing::warn!("[lenient] SKIP …")` emissions
+    // from `verum_vbc::codegen` are visible at build time.  Honours
+    // `RUST_LOG`; defaults to `warn` so the lenient-skip surface always
+    // shows up in CI logs without requiring per-developer setup.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
