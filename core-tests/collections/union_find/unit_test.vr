@@ -1,0 +1,358 @@
+// =============================================================================
+// core-tests/collections/union_find/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.union_find` — UnionFindInt (dense Int-keyed,
+// array-backed) and UnionFind<T> (sparse, Hash+Eq-keyed, map-backed) DSU.
+//
+// Each public method gets its own `@test`, separated by section banners.
+// One axis of behaviour per test — failures must point at the exact case.
+//
+// NB: a meaningful subset of generic UnionFind<T> behaviour is currently
+// blocked by stdlib Map / Text defects (audit.md §3). Those tests are pinned
+// in regression_test.vr behind `@ignore` and re-enabled when the underlying
+// gaps close.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.union_find.{UnionFindInt, UnionFind};
+
+// =============================================================================
+// Section 1: UnionFindInt — construction
+// =============================================================================
+
+@test
+fn test_uf_int_new_zero_capacity() {
+    let uf = UnionFindInt.new(0);
+    assert_eq(uf.len(), 0);
+    assert_eq(uf.component_count(), 0);
+}
+
+@test
+fn test_uf_int_new_negative_clamped_to_zero() {
+    let uf = UnionFindInt.new(-7);
+    assert_eq(uf.len(), 0);
+    assert_eq(uf.component_count(), 0);
+}
+
+@test
+fn test_uf_int_new_positive_capacity() {
+    let uf = UnionFindInt.new(5);
+    assert_eq(uf.len(), 5);
+    assert_eq(uf.component_count(), 5);
+}
+
+@test
+fn test_uf_int_new_singletons_self_rooted() {
+    let mut uf = UnionFindInt.new(4);
+    let mut i = 0;
+    while i < 4 {
+        assert_eq(uf.find(i), i);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: UnionFindInt — find / path compression
+// =============================================================================
+
+@test
+fn test_uf_int_find_root_of_singleton_is_self() {
+    let mut uf = UnionFindInt.new(3);
+    assert_eq(uf.find(0), 0);
+    assert_eq(uf.find(1), 1);
+    assert_eq(uf.find(2), 2);
+}
+
+@test
+fn test_uf_int_find_after_union_returns_shared_root() {
+    let mut uf = UnionFindInt.new(3);
+    let _ = uf.union(0, 1);
+    assert_eq(uf.find(0), uf.find(1));
+}
+
+// =============================================================================
+// Section 3: UnionFindInt — union return value
+// =============================================================================
+
+@test
+fn test_uf_int_union_disjoint_returns_true() {
+    let mut uf = UnionFindInt.new(4);
+    assert(uf.union(0, 1));
+    assert(uf.union(2, 3));
+}
+
+@test
+fn test_uf_int_union_already_merged_returns_false() {
+    let mut uf = UnionFindInt.new(3);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    assert(!uf.union(0, 2));
+    assert(!uf.union(2, 0));
+    assert(!uf.union(0, 0));
+}
+
+// =============================================================================
+// Section 4: UnionFindInt — component_count cache
+// =============================================================================
+
+@test
+fn test_uf_int_component_count_decrements_on_real_union() {
+    let mut uf = UnionFindInt.new(5);
+    assert_eq(uf.component_count(), 5);
+    let _ = uf.union(0, 1);
+    assert_eq(uf.component_count(), 4);
+    let _ = uf.union(2, 3);
+    assert_eq(uf.component_count(), 3);
+}
+
+@test
+fn test_uf_int_component_count_unchanged_on_redundant_union() {
+    let mut uf = UnionFindInt.new(3);
+    let _ = uf.union(0, 1);
+    let before = uf.component_count();
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 0);
+    assert_eq(uf.component_count(), before);
+}
+
+@test
+fn test_uf_int_component_count_one_when_fully_merged() {
+    let mut uf = UnionFindInt.new(6);
+    let mut i = 0;
+    while i < 5 {
+        let _ = uf.union(i, i + 1);
+        i = i + 1;
+    }
+    assert_eq(uf.component_count(), 1);
+}
+
+// =============================================================================
+// Section 5: UnionFindInt — same_set
+// =============================================================================
+
+@test
+fn test_uf_int_same_set_self_is_always_true() {
+    let mut uf = UnionFindInt.new(3);
+    assert(uf.same_set(0, 0));
+    assert(uf.same_set(1, 1));
+    assert(uf.same_set(2, 2));
+}
+
+@test
+fn test_uf_int_same_set_singletons_distinct() {
+    let mut uf = UnionFindInt.new(3);
+    assert(!uf.same_set(0, 1));
+    assert(!uf.same_set(1, 2));
+    assert(!uf.same_set(0, 2));
+}
+
+@test
+fn test_uf_int_same_set_after_union() {
+    let mut uf = UnionFindInt.new(4);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    assert(uf.same_set(0, 1));
+    assert(uf.same_set(2, 3));
+    assert(!uf.same_set(0, 2));
+    assert(!uf.same_set(1, 3));
+}
+
+@test
+fn test_uf_int_same_set_transitive_through_chain() {
+    let mut uf = UnionFindInt.new(5);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    assert(uf.same_set(0, 3));
+    assert(uf.same_set(0, 2));
+    assert(!uf.same_set(0, 4));
+}
+
+// =============================================================================
+// Section 6: UnionFindInt — component_size
+// =============================================================================
+
+@test
+fn test_uf_int_component_size_singleton_is_one() {
+    let mut uf = UnionFindInt.new(3);
+    assert_eq(uf.component_size(0), 1);
+    assert_eq(uf.component_size(1), 1);
+    assert_eq(uf.component_size(2), 1);
+}
+
+@test
+fn test_uf_int_component_size_grows_with_union() {
+    let mut uf = UnionFindInt.new(5);
+    let _ = uf.union(0, 1);
+    assert_eq(uf.component_size(0), 2);
+    assert_eq(uf.component_size(1), 2);
+    let _ = uf.union(0, 2);
+    assert_eq(uf.component_size(0), 3);
+    assert_eq(uf.component_size(2), 3);
+}
+
+@test
+fn test_uf_int_component_size_consistent_across_members() {
+    let mut uf = UnionFindInt.new(6);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 2);    // merge {0,1} and {2,3}
+    let s = uf.component_size(0);
+    assert_eq(s, 4);
+    assert_eq(uf.component_size(1), s);
+    assert_eq(uf.component_size(2), s);
+    assert_eq(uf.component_size(3), s);
+    assert_eq(uf.component_size(4), 1);
+    assert_eq(uf.component_size(5), 1);
+}
+
+// =============================================================================
+// Section 7: UnionFindInt — clear
+// =============================================================================
+
+@test
+fn test_uf_int_clear_resets_components_to_singletons() {
+    let mut uf = UnionFindInt.new(4);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    assert_eq(uf.component_count(), 2);
+    uf.clear();
+    assert_eq(uf.component_count(), 4);
+    assert(!uf.same_set(0, 1));
+    assert(!uf.same_set(2, 3));
+}
+
+@test
+fn test_uf_int_clear_resets_sizes_to_one() {
+    let mut uf = UnionFindInt.new(3);
+    let _ = uf.union(0, 1);
+    assert_eq(uf.component_size(0), 2);
+    uf.clear();
+    assert_eq(uf.component_size(0), 1);
+    assert_eq(uf.component_size(1), 1);
+    assert_eq(uf.component_size(2), 1);
+}
+
+@test
+fn test_uf_int_clear_preserves_len() {
+    let mut uf = UnionFindInt.new(7);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(4, 5);
+    uf.clear();
+    assert_eq(uf.len(), 7);
+}
+
+// =============================================================================
+// Section 8: UnionFindInt — len
+// =============================================================================
+
+@test
+fn test_uf_int_len_matches_capacity() {
+    let uf = UnionFindInt.new(11);
+    assert_eq(uf.len(), 11);
+}
+
+@test
+fn test_uf_int_len_unchanged_by_union() {
+    let mut uf = UnionFindInt.new(5);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 4);
+    assert_eq(uf.len(), 5);
+}
+
+// =============================================================================
+// Section 9: Generic UnionFind<T> — construction
+// =============================================================================
+
+@test
+fn test_uf_generic_new_is_empty() {
+    let uf: UnionFind<Text> = UnionFind.new();
+    assert_eq(uf.len(), 0);
+    assert_eq(uf.component_count(), 0);
+}
+
+// =============================================================================
+// Section 10: Generic UnionFind<T> — make / distinct keys
+//
+// These tests exercise the *additive* path of make() — distinct keys
+// produce distinct singletons. The idempotency path (same key twice
+// → no second insert) is currently blocked by Map.contains_key(&K)
+// silently returning false; pinned in regression_test.vr.
+// =============================================================================
+
+@test
+fn test_uf_generic_make_distinct_keys_distinct_components_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    uf.make(1);
+    uf.make(2);
+    uf.make(3);
+    assert_eq(uf.component_count(), 3);
+    assert(!uf.same_set(&1, &2));
+    assert(!uf.same_set(&2, &3));
+}
+
+// =============================================================================
+// Section 11: Generic UnionFind<T> — find on unregistered keys
+// =============================================================================
+
+@test
+fn test_uf_generic_find_unregistered_returns_self_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    let r = uf.find(&42);
+    assert_eq(r, 42);
+}
+
+// =============================================================================
+// Section 12: Generic UnionFind<T> — union introduces keys, returns true
+// =============================================================================
+
+@test
+fn test_uf_generic_union_disjoint_returns_true_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    assert(uf.union(1, 2));
+}
+
+@test
+fn test_uf_generic_union_creates_keys_implicitly_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    let _ = uf.union(10, 20);
+    assert_eq(uf.len(), 2);
+    assert_eq(uf.component_count(), 1);
+}
+
+// =============================================================================
+// Section 13: Generic UnionFind<T> — same_set on unregistered keys
+// =============================================================================
+
+@test
+fn test_uf_generic_same_set_unregistered_distinct_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    assert(!uf.same_set(&1, &2));
+}
+
+@test
+fn test_uf_generic_same_set_self_unregistered_is_true_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    assert(uf.same_set(&7, &7));
+}
+
+// =============================================================================
+// Section 14: Generic UnionFind<T> — len tracks distinct keys
+// =============================================================================
+
+@test
+fn test_uf_generic_len_tracks_distinct_keys_int() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    uf.make(1);
+    uf.make(2);
+    uf.make(3);
+    assert_eq(uf.len(), 3);
+    let _ = uf.union(1, 2);
+    // len counts known keys, not components.
+    assert_eq(uf.len(), 3);
+}
+
+fn main() {}
