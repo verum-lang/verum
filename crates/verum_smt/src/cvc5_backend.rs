@@ -289,23 +289,92 @@ pub enum SmtLogic {
     ALL,
 }
 
+/// Per-variant projection for [`SmtLogic`] (CVC5 side).
+///
+/// Same shape as `verum_smt::backend_trait::SmtLogic` (consolidated
+/// in 3d6c96590) — the two enums are structural duplicates of each
+/// other; the meta() shape is identical so future unification can
+/// collapse them. `name` is the SMT-LIB2 logic identifier passed
+/// directly to CVC5's `(set-logic ...)`. `is_quantifier_free` and
+/// `is_arithmetic` carry the same partition as on the
+/// `backend_trait` side: 8/9 logics are QF; 6/9 are arithmetic
+/// (QF_BV/QF_AX/ALL non-arithmetic).
+#[derive(Debug, Clone, Copy)]
+pub struct SmtLogicMeta {
+    pub name: &'static str,
+    pub is_quantifier_free: bool,
+    pub is_arithmetic: bool,
+}
+
 impl SmtLogic {
+    pub const ALL_LOGICS: &'static [Self] = &[
+        Self::QF_LIA,
+        Self::QF_LRA,
+        Self::QF_BV,
+        Self::QF_NIA,
+        Self::QF_NRA,
+        Self::QF_AX,
+        Self::QF_UFLIA,
+        Self::QF_AUFLIA,
+        Self::ALL,
+    ];
+
+    pub const fn meta(self) -> SmtLogicMeta {
+        match self {
+            Self::QF_LIA => SmtLogicMeta {
+                name: "QF_LIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_LRA => SmtLogicMeta {
+                name: "QF_LRA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_BV => SmtLogicMeta {
+                name: "QF_BV",
+                is_quantifier_free: true,
+                is_arithmetic: false,
+            },
+            Self::QF_NIA => SmtLogicMeta {
+                name: "QF_NIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_NRA => SmtLogicMeta {
+                name: "QF_NRA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_AX => SmtLogicMeta {
+                name: "QF_AX",
+                is_quantifier_free: true,
+                is_arithmetic: false,
+            },
+            Self::QF_UFLIA => SmtLogicMeta {
+                name: "QF_UFLIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_AUFLIA => SmtLogicMeta {
+                name: "QF_AUFLIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::ALL => SmtLogicMeta {
+                name: "ALL",
+                is_quantifier_free: false,
+                is_arithmetic: false,
+            },
+        }
+    }
+
     /// Return the SMT-LIB 2 logic name string (e.g., `"QF_LIA"`).
     ///
-
     /// These strings are passed directly to CVC5's `set-logic` command.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::QF_LIA => "QF_LIA",
-            Self::QF_LRA => "QF_LRA",
-            Self::QF_BV => "QF_BV",
-            Self::QF_NIA => "QF_NIA",
-            Self::QF_NRA => "QF_NRA",
-            Self::QF_AX => "QF_AX",
-            Self::QF_UFLIA => "QF_UFLIA",
-            Self::QF_AUFLIA => "QF_AUFLIA",
-            Self::ALL => "ALL",
-        }
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Parse an SMT-LIB 2 logic name into the corresponding variant.
@@ -313,35 +382,101 @@ impl SmtLogic {
     /// caller can fall back to `ALL` and surface a warning rather
     /// than silently downgrade the solver.
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_ascii_uppercase().as_str() {
-            "QF_LIA" => Some(Self::QF_LIA),
-            "QF_LRA" => Some(Self::QF_LRA),
-            "QF_BV" => Some(Self::QF_BV),
-            "QF_NIA" => Some(Self::QF_NIA),
-            "QF_NRA" => Some(Self::QF_NRA),
-            "QF_AX" => Some(Self::QF_AX),
-            "QF_UFLIA" => Some(Self::QF_UFLIA),
-            "QF_AUFLIA" => Some(Self::QF_AUFLIA),
-            "ALL" => Some(Self::ALL),
-            _ => None,
+        let upper = s.to_ascii_uppercase();
+        for v in Self::ALL_LOGICS {
+            if v.meta().name == upper.as_str() {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    #[inline]
+    pub const fn is_quantifier_free(&self) -> bool {
+        self.meta().is_quantifier_free
+    }
+
+    #[inline]
+    pub const fn is_arithmetic(&self) -> bool {
+        self.meta().is_arithmetic
     }
 }
 
+/// Per-variant projection for [`QuantifierMode`].
+///
+/// `name` is the canonical lowercase identifier returned by `as_str`
+/// (matches CVC5's `--quant-instantiate-mode` flag value); `aliases`
+/// carries the dash/underscore variants accepted by `from_str` —
+/// only `EMatching` has aliases (`"e-matching"`, `"e_matching"`),
+/// the rest are single-form.
+#[derive(Debug, Clone, Copy)]
+pub struct QuantifierModeMeta {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
 impl QuantifierMode {
+    pub const ALL: &'static [Self] = &[
+        Self::Auto,
+        Self::None,
+        Self::EMatching,
+        Self::CEGQI,
+        Self::MBQI,
+    ];
+
+    pub const fn meta(self) -> QuantifierModeMeta {
+        match self {
+            Self::Auto => QuantifierModeMeta {
+                name: "auto",
+                aliases: &[],
+            },
+            Self::None => QuantifierModeMeta {
+                name: "none",
+                aliases: &[],
+            },
+            Self::EMatching => QuantifierModeMeta {
+                name: "ematching",
+                aliases: &["e-matching", "e_matching"],
+            },
+            Self::CEGQI => QuantifierModeMeta {
+                name: "cegqi",
+                aliases: &[],
+            },
+            Self::MBQI => QuantifierModeMeta {
+                name: "mbqi",
+                aliases: &[],
+            },
+        }
+    }
+
+    /// Canonical lowercase name. Closes a drift defect: previously
+    /// `from_str` was present but no symmetric `as_str` existed, so
+    /// callers had no way to format a `QuantifierMode` back into
+    /// the CVC5 flag form.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
     /// Parse a quantifier-mode name (case-insensitive). The same
     /// names CVC5's `--quant-instantiate-mode` flag accepts:
-    /// `auto`, `none`, `ematching`, `cegqi`, `mbqi`. Returns `None`
-    /// for unknown names so the caller can fall back to `Auto`.
+    /// `auto`, `none`, `ematching` (also `e-matching` /
+    /// `e_matching`), `cegqi`, `mbqi`. Returns `None` for unknown
+    /// names so the caller can fall back to `Auto`.
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "none" => Some(Self::None),
-            "ematching" | "e-matching" | "e_matching" => Some(Self::EMatching),
-            "cegqi" => Some(Self::CEGQI),
-            "mbqi" => Some(Self::MBQI),
-            _ => None,
+        let lower = s.to_ascii_lowercase();
+        for v in Self::ALL {
+            let m = v.meta();
+            if m.name == lower.as_str() {
+                return Some(*v);
+            }
+            for alias in m.aliases {
+                if *alias == lower.as_str() {
+                    return Some(*v);
+                }
+            }
         }
+        None
     }
 }
 
@@ -1778,6 +1913,59 @@ pub enum SatResult {
     Unknown,
 }
 
+/// Per-variant projection for [`SatResult`] (CVC5 side).
+///
+/// Same shape as `verum_smt::backend_trait::SatResult` (consolidated
+/// in 3d6c96590) and `verum_smt::smtlib_check::CheckVerdict`
+/// (consolidated above) — three structural duplicates, all with
+/// SMT-LIB2 lowercase wire form (`"sat"` / `"unsat"` / `"unknown"`)
+/// and the same `is_definitive` partition.
+#[derive(Debug, Clone, Copy)]
+pub struct SatResultMeta {
+    pub name: &'static str,
+    pub is_definitive: bool,
+}
+
+impl SatResult {
+    pub const ALL: &'static [Self] = &[Self::Sat, Self::Unsat, Self::Unknown];
+
+    pub const fn meta(self) -> SatResultMeta {
+        match self {
+            Self::Sat => SatResultMeta {
+                name: "sat",
+                is_definitive: true,
+            },
+            Self::Unsat => SatResultMeta {
+                name: "unsat",
+                is_definitive: true,
+            },
+            Self::Unknown => SatResultMeta {
+                name: "unknown",
+                is_definitive: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_definitive(&self) -> bool {
+        self.meta().is_definitive
+    }
+}
+
 /// Type alias for consistency with backend_switcher.rs
 pub type Cvc5SatResult = SatResult;
 
@@ -1946,4 +2134,112 @@ pub fn create_cvc5_backend_for_logic(logic: SmtLogic) -> Result<Cvc5Backend, Cvc
 /// Returns `true` if the `cvc5-ffi` feature is enabled, `false` otherwise.
 pub fn is_cvc5_available() -> bool {
     cfg!(feature = "cvc5-ffi")
+}
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::{QuantifierMode, SatResult, SmtLogic};
+
+    #[test]
+    fn cvc5_smt_logic_round_trip_unique_and_classification() {
+        assert_eq!(SmtLogic::ALL_LOGICS.len(), 9);
+        for v in SmtLogic::ALL_LOGICS {
+            let s = v.as_str();
+            assert_eq!(SmtLogic::from_str(s), Some(*v));
+        }
+        // Case-insensitivity preserved.
+        assert_eq!(SmtLogic::from_str("qf_lia"), Some(SmtLogic::QF_LIA));
+        assert_eq!(SmtLogic::from_str("all"), Some(SmtLogic::ALL));
+        assert!(SmtLogic::from_str("__bogus__").is_none());
+        // Classification partitions match the backend_trait::SmtLogic
+        // sibling exactly: 8 QF + 1 ALL; 6 arithmetic.
+        assert_eq!(
+            SmtLogic::ALL_LOGICS
+                .iter()
+                .filter(|v| v.is_quantifier_free())
+                .count(),
+            8
+        );
+        assert_eq!(
+            SmtLogic::ALL_LOGICS
+                .iter()
+                .filter(|v| v.is_arithmetic())
+                .count(),
+            6
+        );
+        assert!(!SmtLogic::ALL.is_quantifier_free());
+        assert!(!SmtLogic::ALL.is_arithmetic());
+    }
+
+    #[test]
+    fn cvc5_quantifier_mode_round_trip_unique_and_alias_table() {
+        assert_eq!(QuantifierMode::ALL.len(), 5);
+        for v in QuantifierMode::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                QuantifierMode::from_str(s),
+                Some(*v),
+                "QuantifierMode::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // Wire form (matches CVC5's --quant-instantiate-mode flag).
+        assert_eq!(QuantifierMode::Auto.as_str(), "auto");
+        assert_eq!(QuantifierMode::None.as_str(), "none");
+        assert_eq!(QuantifierMode::EMatching.as_str(), "ematching");
+        assert_eq!(QuantifierMode::CEGQI.as_str(), "cegqi");
+        assert_eq!(QuantifierMode::MBQI.as_str(), "mbqi");
+        // Aliases — only EMatching has them. All round-trip to the
+        // same variant.
+        let aliases: &[(&str, QuantifierMode)] = &[
+            ("e-matching", QuantifierMode::EMatching),
+            ("e_matching", QuantifierMode::EMatching),
+            ("E-MATCHING", QuantifierMode::EMatching),
+            ("E_MATCHING", QuantifierMode::EMatching),
+            ("AUTO", QuantifierMode::Auto),
+        ];
+        for (alias, expected) in aliases {
+            assert_eq!(
+                QuantifierMode::from_str(alias),
+                Some(*expected),
+                "alias '{}' must parse to {:?}",
+                alias,
+                expected
+            );
+        }
+        // Cross-pin: only EMatching declares aliases.
+        for v in QuantifierMode::ALL {
+            let alias_count = v.meta().aliases.len();
+            let expected = if matches!(v, QuantifierMode::EMatching) {
+                2
+            } else {
+                0
+            };
+            assert_eq!(
+                alias_count, expected,
+                "QuantifierMode::{:?}: alias count drift",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn cvc5_sat_result_round_trip_and_definitive_partition() {
+        assert_eq!(SatResult::ALL.len(), 3);
+        for v in SatResult::ALL {
+            let s = v.as_str();
+            assert_eq!(SatResult::from_str(s), Some(*v));
+        }
+        // Wire form matches SMT-LIB2 (and the backend_trait /
+        // smtlib_check siblings exactly).
+        assert_eq!(SatResult::Sat.as_str(), "sat");
+        assert_eq!(SatResult::Unsat.as_str(), "unsat");
+        assert_eq!(SatResult::Unknown.as_str(), "unknown");
+        assert!(SatResult::Sat.is_definitive());
+        assert!(SatResult::Unsat.is_definitive());
+        assert!(!SatResult::Unknown.is_definitive());
+        // Type alias contract: `Cvc5SatResult` is `SatResult`.
+        let _: super::Cvc5SatResult = SatResult::Sat;
+    }
 }
