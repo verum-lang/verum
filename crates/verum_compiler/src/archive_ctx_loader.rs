@@ -454,6 +454,62 @@ fn type_ref_inner_generics(ty: &TypeRef, module: &VbcModule) -> Option<Vec<Strin
 /// Exported so the pipeline can prime its codegen ctx in O(N_clone)
 /// rather than O(N_register) on the second + every later script run
 /// inside the same process (REPL, test runner, watch mode).
+
+/// Build the `wanted_module_prefixes` set used by every archive-walk
+/// path in this module.  Two contributions:
+///
+/// 1. **Up-to-2-hop ancestor walk** of every dotted name in `wanted`:
+///    `core.io.path.read` → `core.io.path` + `core.io`.  Bounded to
+///    two hops because walking all the way to `core` would visit
+///    nearly every archive entry — including unrelated modules that
+///    happen to define a same-named variant (e.g. `core.tracing.span`'s
+///    `Ok` collision with `core.base.result.Result.Ok`).
+///
+/// 2. **Well-known stdlib type expansion** via
+///    `WellKnownType::canonical_archive_modules`.  When user code
+///    mentions a stdlib well-known type by simple name (e.g. `Text`,
+///    `List`, `Map`, `Channel`), step 1 produces nothing — the archive
+///    has no entry literally named `Text`; the carrier module is
+///    `core.text.text` (or grandparent-bundled `core.text`).  Without
+///    this expansion, `Text.new()` / `List.with_capacity(8)` / etc.
+///    fail with `UndefinedFunction` because the archive module never
+///    decodes.  The mapping is centralised in `verum_common`'s
+///    `WellKnownType::canonical_archive_modules` and pin-tested
+///    against `core/`'s `module <path>;` declarations, so adding a
+///    new well-known type or relocating an existing one updates this
+///    loader automatically.
+fn build_wanted_module_prefixes(
+    wanted: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    let mut prefixes: std::collections::HashSet<String> = wanted
+        .iter()
+        .flat_map(|name| {
+            let mut prefixes: Vec<String> = Vec::new();
+            let mut cur = name.as_str();
+            let mut hops = 0;
+            while let Some(idx) = cur.rfind('.') {
+                cur = &cur[..idx];
+                prefixes.push(cur.to_string());
+                hops += 1;
+                if hops >= 2 {
+                    break;
+                }
+            }
+            prefixes
+        })
+        .collect();
+    for name in wanted {
+        if let Some(wkt) =
+            verum_common::well_known_types::WellKnownType::from_name(name)
+        {
+            for module_path in wkt.canonical_archive_modules() {
+                prefixes.insert((*module_path).to_string());
+            }
+        }
+    }
+    prefixes
+}
+
 pub struct ArchiveCtxCache {
     /// One-shot lazily-built table: qualified name → FunctionInfo.
     /// Holds both qualified (`module.simple`) and simple-name keys
@@ -558,32 +614,10 @@ impl ArchiveCtxCache {
         // needs to reach the grandparent (`core.io`) to find the
         // method bodies.
         //
-        // BOUNDED to two ancestors: walking all the way to `core`
-        // would visit nearly every archive entry — including
-        // unrelated modules that happen to define a same-named
-        // variant (e.g. `core.tracing.span`'s `SpanStatusCode is
-        // Unset|Ok|Error` collides with `core.base.result.Result`'s
-        // `Ok` constructor and breaks user-side variant
-        // resolution).  The two-hop bound finds cross-file siblings
-        // and grandparent-bundled methods without polluting the
-        // variant-constructor parent map.
-        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
-            .iter()
-            .flat_map(|name| {
-                let mut prefixes: Vec<String> = Vec::new();
-                let mut cur = name.as_str();
-                let mut hops = 0;
-                while let Some(idx) = cur.rfind('.') {
-                    cur = &cur[..idx];
-                    prefixes.push(cur.to_string());
-                    hops += 1;
-                    if hops >= 2 {
-                        break;
-                    }
-                }
-                prefixes
-            })
-            .collect();
+        // BOUNDED to two ancestors and extended with well-known
+        // stdlib type module paths — see [`build_wanted_module_prefixes`]
+        // for the rationale.
+        let wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         for entry in &archive.index {
             // Skip decode unless this module name matches a
             // qualified-name prefix from the wanted set.  Bare
@@ -684,23 +718,9 @@ impl ArchiveCtxCache {
         // Up to 2-hop ancestor walk (mirrors apply_lazy) — same
         // grandparent-bundling shape: e.g. `core/io/path.vr` declares
         // `module path;` and lands under archive entry `core.io`.
-        let wanted_module_prefixes: std::collections::HashSet<String> = wanted
-            .iter()
-            .flat_map(|name| {
-                let mut prefixes: Vec<String> = Vec::new();
-                let mut cur = name.as_str();
-                let mut hops = 0;
-                while let Some(idx) = cur.rfind('.') {
-                    cur = &cur[..idx];
-                    prefixes.push(cur.to_string());
-                    hops += 1;
-                    if hops >= 2 {
-                        break;
-                    }
-                }
-                prefixes
-            })
-            .collect();
+        // Well-known stdlib types (Text/List/Map/...) get explicit
+        // module-path expansion via `build_wanted_module_prefixes`.
+        let wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
         let mut imported = 0usize;
         for entry in &archive.index {
             if !wanted_module_prefixes.contains(&entry.name) {
@@ -743,23 +763,7 @@ impl ArchiveCtxCache {
         if wanted.is_empty() {
             return (0, 0);
         }
-        let mut wanted_module_prefixes: std::collections::HashSet<String> = wanted
-            .iter()
-            .flat_map(|name| {
-                let mut prefixes: Vec<String> = Vec::new();
-                let mut cur = name.as_str();
-                let mut hops = 0;
-                while let Some(idx) = cur.rfind('.') {
-                    cur = &cur[..idx];
-                    prefixes.push(cur.to_string());
-                    hops += 1;
-                    if hops >= 2 {
-                        break;
-                    }
-                }
-                prefixes
-            })
-            .collect();
+        let mut wanted_module_prefixes = build_wanted_module_prefixes(&wanted);
 
         // **Variant-tag-collision force-load** (load-bearing for
         // bare `Some(x)` / `None` / `Ok(x)` / `Err(e)` syntax — see
@@ -1137,6 +1141,113 @@ mod tests {
             first_count, second_count,
             "cached apply must produce identical entry count across runs"
         );
+    }
+
+    /// Source-of-truth pin test for
+    /// `WellKnownType::canonical_archive_modules`.  Every module path
+    /// returned by the table MUST exist as an archive entry name —
+    /// otherwise the loader's `wanted_module_prefixes` extension is a
+    /// no-op and `Text.new()` / `List.with_capacity(8)` / etc. fall
+    /// through to UndefinedFunction at runtime.
+    ///
+    /// This test catches three drift modes structurally:
+    /// (1) renaming a `core/` module without updating the table;
+    /// (2) adding a new well-known type whose carrier module path is
+    ///     wrong;
+    /// (3) the precompiler bundling a module under a different parent
+    ///     than the table assumes.
+    #[test]
+    fn canonical_archive_modules_match_source() {
+        use verum_common::well_known_types::WellKnownType;
+
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap build without archive — skip
+        };
+        let archive_names: std::collections::HashSet<&str> = archive
+            .index
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+
+        let well_known_types = [
+            WellKnownType::Text,
+            WellKnownType::Char,
+            WellKnownType::List,
+            WellKnownType::Map,
+            WellKnownType::Set,
+            WellKnownType::Deque,
+            WellKnownType::BTreeMap,
+            WellKnownType::BTreeSet,
+            WellKnownType::BinaryHeap,
+            WellKnownType::Maybe,
+            WellKnownType::Result,
+            WellKnownType::Heap,
+            WellKnownType::Shared,
+            WellKnownType::Channel,
+            WellKnownType::Mutex,
+            WellKnownType::RwLock,
+            WellKnownType::Barrier,
+            WellKnownType::WaitGroup,
+            WellKnownType::Once,
+            WellKnownType::Semaphore,
+            WellKnownType::Task,
+            WellKnownType::Nursery,
+            WellKnownType::AtomicInt,
+            WellKnownType::AtomicBool,
+            WellKnownType::Duration,
+            WellKnownType::Instant,
+            WellKnownType::Stopwatch,
+            WellKnownType::PerfCounter,
+            WellKnownType::DeadlineTimer,
+            WellKnownType::Never,
+            WellKnownType::Ordering,
+            WellKnownType::Range,
+            WellKnownType::Int,
+            WellKnownType::Float,
+            WellKnownType::Bool,
+        ];
+
+        let mut missing: Vec<(WellKnownType, &'static str)> = Vec::new();
+        for wkt in well_known_types {
+            // Each well-known type's canonical archive modules — at
+            // least ONE of them must resolve.  The list mixes the
+            // canonical-source-declared path (`core.text.text`) and
+            // grandparent-bundled fallback (`core.text`); the
+            // precompiler picks one or the other depending on
+            // bundling shape, and the loader is happy with either.
+            let mods = wkt.canonical_archive_modules();
+            if mods.is_empty() {
+                continue;
+            }
+            let any_present =
+                mods.iter().any(|m| archive_names.contains(m));
+            if !any_present {
+                missing.push((wkt, mods[0]));
+            }
+        }
+        if !missing.is_empty() {
+            // Diagnostic: print the closest archive entries by prefix
+            // so the maintainer can see the bundling shape.
+            for (wkt, expected) in &missing {
+                let prefix = expected.split('.').next().unwrap_or("");
+                let near: Vec<&str> = archive_names
+                    .iter()
+                    .filter(|n| n.starts_with(prefix))
+                    .copied()
+                    .collect();
+                eprintln!(
+                    "  drift: {:?} expected '{}' or fallback; \
+                     archive has under '{}.': {:?}",
+                    wkt, expected, prefix, near
+                );
+            }
+            panic!(
+                "WellKnownType::canonical_archive_modules drift — \
+                 {} types have no archive-resolvable module path",
+                missing.len()
+            );
+        }
     }
 }
 

@@ -6802,19 +6802,13 @@ impl VbcCodegen {
                             // This enables correct method dispatch for user-defined struct types
                             // like MapFlags and MemProt which both have to_unix_flags() methods.
                             if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
-                                // Check if type_name is a generic type parameter (like T, U, Item).
-                                // Type parameters are typically single uppercase letters or
-                                // short PascalCase names. We detect them by:
-                                // 1. Single uppercase letter (T, U, V, etc.)
-                                // 2. Not a known concrete type (Maybe, Result, List, etc.)
-                                // For type parameters, DON'T prefix - use method name only
-                                // and let runtime dispatch based on actual value type.
-                                let is_type_param = type_name.len() == 1
-                                    && type_name
-                                        .chars()
-                                        .next()
-                                        .map(|c| c.is_ascii_uppercase())
-                                        .unwrap_or(false);
+                                // Generic type parameter (`T`, `Tk`, …) —
+                                // skip the prefix and let runtime dispatch
+                                // route by receiver kind. Classifier shared
+                                // with verum_types so both layers agree on
+                                // what counts as a type param.
+                                let is_type_param =
+                                    verum_common::well_known_types::looks_like_type_param(type_name);
 
                                 if is_type_param {
                                     // Generic type parameter - let runtime dispatch
@@ -6933,7 +6927,15 @@ impl VbcCodegen {
                                     self.field_type_name(base_type, &field.name)
                                 {
                                     let field_base = VbcCodegen::strip_generic_args(field_type);
-                                    format!("{}.{}", field_base, method.name)
+                                    if verum_common::well_known_types::looks_like_type_param(field_base) {
+                                        // Field type is a generic param (e.g.
+                                        // `value: T` on `Cell<T>`) — emit the
+                                        // bare method name so the runtime
+                                        // dispatcher routes by receiver kind.
+                                        method.name.to_string()
+                                    } else {
+                                        format!("{}.{}", field_base, method.name)
+                                    }
                                 } else {
                                     method.name.to_string()
                                 }
@@ -6947,7 +6949,15 @@ impl VbcCodegen {
                             let base_type = VbcCodegen::strip_generic_args(self_type);
                             if let Some(field_type) = self.field_type_name(base_type, &field.name) {
                                 let field_base = VbcCodegen::strip_generic_args(field_type);
-                                format!("{}.{}", field_base, method.name)
+                                if verum_common::well_known_types::looks_like_type_param(field_base) {
+                                    // Field type is a generic param (e.g.
+                                    // `value: T` on `Cell<T>`) — emit the
+                                    // bare method name so the runtime
+                                    // dispatcher routes by receiver kind.
+                                    method.name.to_string()
+                                } else {
+                                    format!("{}.{}", field_base, method.name)
+                                }
                             } else {
                                 method.name.to_string()
                             }

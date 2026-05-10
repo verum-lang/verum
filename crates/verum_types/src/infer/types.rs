@@ -3254,18 +3254,7 @@ impl TypeChecker {
     }
 
     fn looks_like_type_param_name(name: &verum_common::Text) -> bool {
-        let s = name.as_str();
-        match s.len() {
-            1 => s.chars().next().is_some_and(|c| c.is_uppercase()),
-            2 => {
-                let mut chars = s.chars();
-                match (chars.next(), chars.next()) {
-                    (Some(first), Some(second)) => first.is_uppercase() && second.is_lowercase(),
-                    _ => false,
-                }
-            }
-            _ => false,
-        }
+        verum_common::well_known_types::looks_like_type_param(name.as_str())
     }
 
     /// Substitute Self type with a concrete type

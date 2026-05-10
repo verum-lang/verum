@@ -1163,6 +1163,104 @@ pub enum VCResult {
     Unknown,
 }
 
+/// Discriminator for [`VCResult`] — zero-sized projection.
+/// Sibling of `subsumption::SubsumptionResultKind` covering the
+/// VC-generator side of the same Valid / Invalid / Timeout /
+/// Unknown verification verdict taxonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VCResultKind {
+    Valid,
+    Invalid,
+    Timeout,
+    Unknown,
+}
+
+/// Per-variant projection for [`VCResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VCResultKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// The verdict is *definite* (Valid + Invalid — the SMT
+    /// backend reached a conclusion).
+    pub is_definite: bool,
+    /// The verdict is the *positive* answer (Valid singleton —
+    /// VC proven).
+    pub is_positive: bool,
+    /// The variant carries a *counterexample* payload —
+    /// Invalid singleton.
+    pub carries_counterexample: bool,
+    /// The variant indicates a *time-bound* failure (Timeout
+    /// singleton) — distinct from Unknown which is solver-side
+    /// indeterminacy.
+    pub is_time_bound_failure: bool,
+}
+
+impl VCResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Valid,
+        Self::Invalid,
+        Self::Timeout,
+        Self::Unknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> VCResultKindMeta {
+        match self {
+            VCResultKind::Valid => VCResultKindMeta {
+                name: "valid",
+                is_definite: true,
+                is_positive: true,
+                carries_counterexample: false,
+                is_time_bound_failure: false,
+            },
+            VCResultKind::Invalid => VCResultKindMeta {
+                name: "invalid",
+                is_definite: true,
+                is_positive: false,
+                carries_counterexample: true,
+                is_time_bound_failure: false,
+            },
+            VCResultKind::Timeout => VCResultKindMeta {
+                name: "timeout",
+                is_definite: false,
+                is_positive: false,
+                carries_counterexample: false,
+                is_time_bound_failure: true,
+            },
+            VCResultKind::Unknown => VCResultKindMeta {
+                name: "unknown",
+                is_definite: false,
+                is_positive: false,
+                carries_counterexample: false,
+                is_time_bound_failure: false,
+            },
+        }
+    }
+}
+
+impl VCResult {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> VCResultKind {
+        match self {
+            VCResult::Valid => VCResultKind::Valid,
+            VCResult::Invalid(_) => VCResultKind::Invalid,
+            VCResult::Timeout => VCResultKind::Timeout,
+            VCResult::Unknown => VCResultKind::Unknown,
+        }
+    }
+
+    /// Returns the counterexample for the `Invalid` band.
+    /// Decoupled from per-variant matching via
+    /// `meta().carries_counterexample`.
+    pub fn counterexample(&self) -> Option<&CounterExample> {
+        match self {
+            VCResult::Invalid(c) => Some(c),
+            _ => None,
+        }
+    }
+}
+
 /// Counterexample for invalid VCs
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CounterExample {
@@ -3745,4 +3843,88 @@ pub fn substitute(formula: Formula, var: Variable, expr: SmtExpr) -> Formula {
 /// Returns a complete SMT-LIB 2.6 script ready for solver input.
 pub fn vc_to_smtlib(vc: &VerificationCondition) -> Text {
     vc.to_smtlib()
+}
+
+#[cfg(test)]
+mod vc_result_kind_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `VCResultKind` discriminator projection.
+    /// Sibling of `subsumption::SubsumptionResultKind` and
+    /// `tensor_shapes::ConstraintCheckResultKind` — verification
+    /// verdict bands.
+    #[test]
+    fn meta_pin_vc_result_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(VCResultKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in VCResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_definite — Valid + Invalid.
+        let definite: Vec<_> = VCResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![VCResultKind::Valid, VCResultKind::Invalid],
+        );
+
+        // 3. is_positive — Valid singleton.
+        let positive: Vec<_> = VCResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_positive)
+            .copied()
+            .collect();
+        assert_eq!(positive, vec![VCResultKind::Valid]);
+
+        // 4. carries_counterexample — Invalid singleton.
+        let cex: Vec<_> = VCResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_counterexample)
+            .copied()
+            .collect();
+        assert_eq!(cex, vec![VCResultKind::Invalid]);
+
+        // 5. is_time_bound_failure — Timeout singleton.
+        let tb: Vec<_> = VCResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_time_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(tb, vec![VCResultKind::Timeout]);
+
+        // 6. Same cross-cutting invariants as SubsumptionResultKind.
+        for k in VCResultKind::ALL {
+            let m = k.meta();
+            assert!(!m.is_positive || m.is_definite);
+            assert!(!m.carries_counterexample || !m.is_positive);
+            assert!(!m.is_time_bound_failure || !m.is_definite);
+        }
+
+        // 7. Live-payload kind() + counterexample() projection.
+        assert_eq!(VCResult::Valid.kind(), VCResultKind::Valid);
+        assert!(VCResult::Valid.counterexample().is_none());
+
+        let cex = CounterExample {
+            assignments: Map::new(),
+            explanation: Text::from("x=0"),
+        };
+        let inv = VCResult::Invalid(cex);
+        assert_eq!(inv.kind(), VCResultKind::Invalid);
+        assert!(inv.counterexample().is_some());
+
+        assert_eq!(VCResult::Timeout.kind(), VCResultKind::Timeout);
+        assert!(VCResult::Timeout.counterexample().is_none());
+        assert_eq!(VCResult::Unknown.kind(), VCResultKind::Unknown);
+    }
 }
