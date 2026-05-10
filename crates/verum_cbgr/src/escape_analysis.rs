@@ -97,25 +97,98 @@ pub enum EscapeState {
     Unknown,
 }
 
+/// Per-variant projection for [`EscapeState`].
+///
+/// `name` is the bare variant name used by parsers / serialisers
+/// (`"NoEscape"` / `"MayEscape"` / `"Escapes"` / `"Unknown"`).
+/// `display` is the user-facing diagnostic form returned by `as_str`
+/// — the bare name plus a CBGR overhead annotation
+/// (`"NoEscape (0ns)"` / `"MayEscape (~15ns)"` / …) preserved
+/// verbatim from the legacy implementation. `allows_optimization`
+/// and `requires_cbgr` carry the dataflow-classification flags
+/// previously living in two parallel `matches!()` calls.
+#[derive(Debug, Clone, Copy)]
+pub struct EscapeStateMeta {
+    pub name: &'static str,
+    pub display: &'static str,
+    pub allows_optimization: bool,
+    pub requires_cbgr: bool,
+}
+
 impl EscapeState {
-    /// Check if this state allows CBGR check elimination
+    pub const ALL: &'static [Self] = &[
+        Self::NoEscape,
+        Self::MayEscape,
+        Self::Escapes,
+        Self::Unknown,
+    ];
+
+    pub const fn meta(self) -> EscapeStateMeta {
+        match self {
+            Self::NoEscape => EscapeStateMeta {
+                name: "NoEscape",
+                display: "NoEscape (0ns)",
+                allows_optimization: true,
+                requires_cbgr: false,
+            },
+            Self::MayEscape => EscapeStateMeta {
+                name: "MayEscape",
+                display: "MayEscape (~15ns)",
+                allows_optimization: false,
+                requires_cbgr: true,
+            },
+            Self::Escapes => EscapeStateMeta {
+                name: "Escapes",
+                display: "Escapes (~15ns)",
+                allows_optimization: false,
+                requires_cbgr: true,
+            },
+            Self::Unknown => EscapeStateMeta {
+                name: "Unknown",
+                display: "Unknown (~15ns)",
+                allows_optimization: false,
+                requires_cbgr: true,
+            },
+        }
+    }
+
+    /// Bare variant name without the overhead annotation. Round-trips
+    /// through `from_str(x.name())` cleanly.
+    #[inline]
     #[must_use]
-    pub fn allows_optimization(&self) -> bool {
-        matches!(self, EscapeState::NoEscape)
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse the bare variant name back to the typed state. Closes
+    /// a drift defect: previously `as_str` returned an annotated
+    /// `"NoEscape (0ns)"` form not suitable for round-trip parsing,
+    /// and no inverse path existed at all.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Check if this state allows CBGR check elimination
+    #[inline]
+    #[must_use]
+    pub const fn allows_optimization(&self) -> bool {
+        self.meta().allows_optimization
     }
 
     /// Check if this state requires CBGR checks
+    #[inline]
     #[must_use]
-    pub fn requires_cbgr(&self) -> bool {
-        matches!(
-            self,
-            EscapeState::MayEscape | EscapeState::Escapes | EscapeState::Unknown
-        )
+    pub const fn requires_cbgr(&self) -> bool {
+        self.meta().requires_cbgr
     }
 
     /// Merge two escape states (conservative join)
     ///
-
     /// Used in dataflow analysis to combine states from different paths:
     /// - `NoEscape` + `NoEscape` = `NoEscape`
     /// - `NoEscape` + Escapes = Escapes
@@ -141,15 +214,13 @@ impl EscapeState {
         }
     }
 
-    /// Convert to user-facing string
+    /// User-facing string with CBGR overhead annotation
+    /// (`"NoEscape (0ns)"`, `"MayEscape (~15ns)"`, …). Use
+    /// [`EscapeState::name`] for round-trip-safe parsing.
+    #[inline]
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EscapeState::NoEscape => "NoEscape (0ns)",
-            EscapeState::MayEscape => "MayEscape (~15ns)",
-            EscapeState::Escapes => "Escapes (~15ns)",
-            EscapeState::Unknown => "Unknown (~15ns)",
-        }
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().display
     }
 }
 
@@ -211,33 +282,95 @@ pub enum EscapeKind {
     Unknown,
 }
 
+/// Per-variant projection for [`EscapeKind`].
+///
+/// `display_name` is the human-readable form returned by `name()`
+/// (used in diagnostics — preserved verbatim, including the trailing
+/// "escape" suffix on Unknown). `parse_name` is the canonical
+/// snake_case form accepted by `from_str`. `optimization_hint`
+/// carries the per-variant "consider X" recommendation.
+#[derive(Debug, Clone, Copy)]
+pub struct EscapeKindMeta {
+    pub display_name: &'static str,
+    pub parse_name: &'static str,
+    pub optimization_hint: &'static str,
+}
+
 impl EscapeKind {
-    /// Get human-readable name
-    #[must_use]
-    pub fn name(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::ReturnEscape,
+        Self::HeapStore,
+        Self::ClosureCapture,
+        Self::ThreadCrossing,
+        Self::ParameterEscape,
+        Self::GlobalStore,
+        Self::Unknown,
+    ];
+
+    pub const fn meta(self) -> EscapeKindMeta {
         match self {
-            EscapeKind::ReturnEscape => "Return escape",
-            EscapeKind::HeapStore => "Heap store",
-            EscapeKind::ClosureCapture => "Closure capture",
-            EscapeKind::ThreadCrossing => "Thread crossing",
-            EscapeKind::ParameterEscape => "Parameter escape",
-            EscapeKind::GlobalStore => "Global store",
-            EscapeKind::Unknown => "Unknown escape",
+            Self::ReturnEscape => EscapeKindMeta {
+                display_name: "Return escape",
+                parse_name: "return_escape",
+                optimization_hint: "Consider returning owned values instead of references",
+            },
+            Self::HeapStore => EscapeKindMeta {
+                display_name: "Heap store",
+                parse_name: "heap_store",
+                optimization_hint: "Consider stack allocation or arena allocation",
+            },
+            Self::ClosureCapture => EscapeKindMeta {
+                display_name: "Closure capture",
+                parse_name: "closure_capture",
+                optimization_hint: "Consider immediate closure invocation or owned captures",
+            },
+            Self::ThreadCrossing => EscapeKindMeta {
+                display_name: "Thread crossing",
+                parse_name: "thread_crossing",
+                optimization_hint: "Consider message passing instead of shared state",
+            },
+            Self::ParameterEscape => EscapeKindMeta {
+                display_name: "Parameter escape",
+                parse_name: "parameter_escape",
+                optimization_hint: "Consider using &checked T if lifetime is provable",
+            },
+            Self::GlobalStore => EscapeKindMeta {
+                display_name: "Global store",
+                parse_name: "global_store",
+                optimization_hint: "Avoid global mutable state when possible",
+            },
+            Self::Unknown => EscapeKindMeta {
+                display_name: "Unknown escape",
+                parse_name: "unknown",
+                optimization_hint: "Improve type annotations for better analysis",
+            },
         }
     }
 
-    /// Get optimization hint
+    /// Get human-readable name
+    #[inline]
     #[must_use]
-    pub fn optimization_hint(&self) -> &'static str {
-        match self {
-            EscapeKind::ReturnEscape => "Consider returning owned values instead of references",
-            EscapeKind::HeapStore => "Consider stack allocation or arena allocation",
-            EscapeKind::ClosureCapture => "Consider immediate closure invocation or owned captures",
-            EscapeKind::ThreadCrossing => "Consider message passing instead of shared state",
-            EscapeKind::ParameterEscape => "Consider using &checked T if lifetime is provable",
-            EscapeKind::GlobalStore => "Avoid global mutable state when possible",
-            EscapeKind::Unknown => "Improve type annotations for better analysis",
+    pub const fn name(&self) -> &'static str {
+        self.meta().display_name
+    }
+
+    /// Parse a snake_case escape-kind name back to the typed form.
+    /// Accepts the canonical `parse_name` for each variant
+    /// (`"return_escape"`, `"heap_store"`, …, `"unknown"`).
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().parse_name == s {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    /// Get optimization hint
+    #[inline]
+    #[must_use]
+    pub const fn optimization_hint(&self) -> &'static str {
+        self.meta().optimization_hint
     }
 }
 
@@ -1093,5 +1226,94 @@ mod tests {
         };
         assert!(!cfg.enable_thread_analysis);
         assert!(cfg.enable_interprocedural); // Other defaults preserved
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_escape_state_round_trip_unique_and_classification() {
+        assert_eq!(EscapeState::ALL.len(), 4);
+        // Round-trip on the bare `name` (the annotated `as_str` is
+        // intentionally not the parse form).
+        for v in EscapeState::ALL {
+            let s = v.name();
+            assert_eq!(
+                EscapeState::from_str(s),
+                Some(*v),
+                "EscapeState::{:?}: bare name '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Annotated `as_str` form is preserved verbatim from the
+        // legacy implementation (each carries the CBGR overhead
+        // bracket).
+        assert_eq!(EscapeState::NoEscape.as_str(), "NoEscape (0ns)");
+        assert_eq!(EscapeState::MayEscape.as_str(), "MayEscape (~15ns)");
+        assert_eq!(EscapeState::Escapes.as_str(), "Escapes (~15ns)");
+        assert_eq!(EscapeState::Unknown.as_str(), "Unknown (~15ns)");
+        // Classification: `allows_optimization` is the lone NoEscape
+        // bit, `requires_cbgr` is its negation. Cross-pin: the two
+        // flags are exact complements.
+        for v in EscapeState::ALL {
+            assert_eq!(
+                v.allows_optimization(),
+                !v.requires_cbgr(),
+                "EscapeState::{:?}: allows_optimization == ¬requires_cbgr invariant",
+                v
+            );
+        }
+        assert_eq!(
+            EscapeState::ALL
+                .iter()
+                .filter(|v| v.allows_optimization())
+                .count(),
+            1,
+            "exactly one variant (NoEscape) allows optimization"
+        );
+        assert!(EscapeState::from_str("__bogus__").is_none());
+    }
+
+    #[test]
+    fn meta_pin_escape_kind_round_trip_unique_and_hint_distinct() {
+        assert_eq!(EscapeKind::ALL.len(), 7);
+        let mut display_seen = Vec::new();
+        let mut parse_seen = Vec::new();
+        let mut hint_seen = Vec::new();
+        for v in EscapeKind::ALL {
+            let display = v.name();
+            let parse = v.meta().parse_name;
+            let hint = v.optimization_hint();
+            // Round-trip via parse_name.
+            assert_eq!(
+                EscapeKind::from_str(parse),
+                Some(*v),
+                "EscapeKind::{:?}: parse_name '{}' must round-trip",
+                v,
+                parse
+            );
+            // Each of the three projected strings is unique across
+            // variants — drift fix would surface here as a duplicate.
+            assert!(!display_seen.contains(&display));
+            assert!(!parse_seen.contains(&parse));
+            assert!(!hint_seen.contains(&hint));
+            display_seen.push(display);
+            parse_seen.push(parse);
+            hint_seen.push(hint);
+        }
+        // Wire-form spot pins for the canonical parse names.
+        assert_eq!(
+            EscapeKind::from_str("return_escape"),
+            Some(EscapeKind::ReturnEscape)
+        );
+        assert_eq!(
+            EscapeKind::from_str("unknown"),
+            Some(EscapeKind::Unknown)
+        );
+        // `Unknown` is the only variant whose display name uses the
+        // " escape" suffix (legacy convention preserved).
+        assert_eq!(EscapeKind::Unknown.name(), "Unknown escape");
     }
 }
