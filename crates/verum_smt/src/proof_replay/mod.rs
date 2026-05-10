@@ -60,6 +60,114 @@ pub enum ReplayError {
     Custom(Text),
 }
 
+/// Discriminator-only kind for [`ReplayError`].
+///
+/// Three of the four variants share an "unsupported X" shape
+/// (Backend / Schema / Trace) plus a `Custom` catch-all.  The kind
+/// enum is zero-sized so callers iterating the failure-class
+/// surface (telemetry / metric buckets / docs) don't supply
+/// payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReplayErrorKind {
+    UnsupportedBackend,
+    UnsupportedSchema,
+    UnsupportedTrace,
+    Custom,
+}
+
+/// Per-kind projection for [`ReplayErrorKind`].
+///
+/// `name` is the kebab-case telemetry label (matches the
+/// `verum_smt::cert_replay::ReplayError` failure-class
+/// convention used elsewhere in the crate).  `is_unsupported_X`
+/// is the partition: 3 unsupported-family kinds + 1 catch-all
+/// (`Custom`).  Cross-cutting: at most one of the
+/// `is_unsupported_X` flags is true per variant; `Custom` flips
+/// none of them.
+#[derive(Debug, Clone, Copy)]
+pub struct ReplayErrorKindMeta {
+    pub name: &'static str,
+    pub is_unsupported_backend: bool,
+    pub is_unsupported_schema: bool,
+    pub is_unsupported_trace: bool,
+}
+
+impl ReplayErrorKind {
+    pub const ALL: &'static [Self] = &[
+        Self::UnsupportedBackend,
+        Self::UnsupportedSchema,
+        Self::UnsupportedTrace,
+        Self::Custom,
+    ];
+
+    pub const fn meta(self) -> ReplayErrorKindMeta {
+        match self {
+            Self::UnsupportedBackend => ReplayErrorKindMeta {
+                name: "unsupported-backend",
+                is_unsupported_backend: true,
+                is_unsupported_schema: false,
+                is_unsupported_trace: false,
+            },
+            Self::UnsupportedSchema => ReplayErrorKindMeta {
+                name: "unsupported-schema",
+                is_unsupported_backend: false,
+                is_unsupported_schema: true,
+                is_unsupported_trace: false,
+            },
+            Self::UnsupportedTrace => ReplayErrorKindMeta {
+                name: "unsupported-trace",
+                is_unsupported_backend: false,
+                is_unsupported_schema: false,
+                is_unsupported_trace: true,
+            },
+            Self::Custom => ReplayErrorKindMeta {
+                name: "custom",
+                is_unsupported_backend: false,
+                is_unsupported_schema: false,
+                is_unsupported_trace: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for any of the three "unsupported X" kinds (i.e. not
+    /// the `Custom` catch-all).  Useful for callers that want to
+    /// distinguish structured-failure modes from the free-form
+    /// fallback.
+    #[inline]
+    pub const fn is_unsupported_family(&self) -> bool {
+        let m = self.meta();
+        m.is_unsupported_backend
+            || m.is_unsupported_schema
+            || m.is_unsupported_trace
+    }
+}
+
+impl ReplayError {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> ReplayErrorKind {
+        match self {
+            Self::UnsupportedBackend { .. } => ReplayErrorKind::UnsupportedBackend,
+            Self::UnsupportedSchema { .. } => ReplayErrorKind::UnsupportedSchema,
+            Self::UnsupportedTrace { .. } => ReplayErrorKind::UnsupportedTrace,
+            Self::Custom(_) => ReplayErrorKind::Custom,
+        }
+    }
+}
+
 impl std::fmt::Display for ReplayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -562,5 +670,72 @@ mod tests {
             postulate_count, 1,
             "exactly one postulate variant (Axiom)"
         );
+    }
+
+    #[test]
+    fn meta_pin_replay_error_kind_round_trip_and_unsupported_family() {
+        assert_eq!(ReplayErrorKind::ALL.len(), 4);
+        for k in ReplayErrorKind::ALL {
+            let s = k.name();
+            assert_eq!(ReplayErrorKind::from_str(s), Some(*k));
+        }
+        // Wire form (kebab-case for telemetry / metric buckets).
+        assert_eq!(
+            ReplayErrorKind::UnsupportedBackend.name(),
+            "unsupported-backend"
+        );
+        assert_eq!(
+            ReplayErrorKind::UnsupportedSchema.name(),
+            "unsupported-schema"
+        );
+        assert_eq!(
+            ReplayErrorKind::UnsupportedTrace.name(),
+            "unsupported-trace"
+        );
+        assert_eq!(ReplayErrorKind::Custom.name(), "custom");
+        // Unsupported-family partition: 3 unsupported-X + 1 custom.
+        let family_count = ReplayErrorKind::ALL
+            .iter()
+            .filter(|k| k.is_unsupported_family())
+            .count();
+        assert_eq!(family_count, 3);
+        let non_family_count = ReplayErrorKind::ALL
+            .iter()
+            .filter(|k| !k.is_unsupported_family())
+            .count();
+        assert_eq!(non_family_count, 1);
+        assert!(!ReplayErrorKind::Custom.is_unsupported_family());
+        // At most one of the three is_unsupported_X flags is true
+        // per variant — the kinds form a clean tag-bit partition.
+        for k in ReplayErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_unsupported_backend as u8)
+                + (m.is_unsupported_schema as u8)
+                + (m.is_unsupported_trace as u8);
+            assert!(
+                count <= 1,
+                "ReplayErrorKind::{:?}: at most one unsupported-X flag",
+                k
+            );
+        }
+        // Payload variant kind() agreement.
+        let e = ReplayError::UnsupportedBackend {
+            target: Text::from("z3"),
+            cert_backend: Text::from("cvc5"),
+        };
+        assert_eq!(e.kind(), ReplayErrorKind::UnsupportedBackend);
+        let e = ReplayError::UnsupportedSchema {
+            target: Text::from("z3"),
+            found: 5,
+            max_supported: 3,
+        };
+        assert_eq!(e.kind(), ReplayErrorKind::UnsupportedSchema);
+        let e = ReplayError::UnsupportedTrace {
+            target: Text::from("z3"),
+            reason: Text::from("dummy"),
+        };
+        assert_eq!(e.kind(), ReplayErrorKind::UnsupportedTrace);
+        let e = ReplayError::Custom(Text::from("dummy"));
+        assert_eq!(e.kind(), ReplayErrorKind::Custom);
     }
 }
