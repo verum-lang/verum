@@ -24,14 +24,18 @@ use verum_types::capability::*;
 fn test_type_capability_conversion() {
     use verum_ast::expr::Capability as AstCap;
 
-    // Test conversion from AST capabilities
+    // Pre-collapse this exercised the `TypeCapability::from_ast`
+    // identity-shape mapper.  Now `TypeCapability` is a
+    // `pub type` alias for `verum_ast::Capability`, so the
+    // conversion is structurally an identity (same nominal
+    // type) and the test pins the alias contract.
     let ast_cap = AstCap::ReadOnly;
-    let type_cap = TypeCapability::from_ast(&ast_cap);
+    let type_cap: TypeCapability = ast_cap.clone();
     assert_eq!(type_cap, TypeCapability::ReadOnly);
-    assert_eq!(type_cap.name(), "ReadOnly");
+    assert_eq!(type_cap.as_str(), "ReadOnly");
 
     let ast_custom = AstCap::Custom("CustomOp".to_string().into());
-    let type_custom = TypeCapability::from_ast(&ast_custom);
+    let type_custom: TypeCapability = ast_custom.clone();
     match type_custom {
         TypeCapability::Custom(name) => assert_eq!(name.as_str(), "CustomOp"),
         _ => panic!("Expected Custom capability"),

@@ -18803,7 +18803,7 @@ impl TypeChecker {
                 return Err(TypeError::CapabilityViolation {
                     method: method_name.into(),
                     type_name: type_name.into(),
-                    required_capability: Text::from(required.name()),
+                    required_capability: Text::from(required.as_str()),
                     available_capabilities: available_names,
                     span,
                 });

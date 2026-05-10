@@ -4417,7 +4417,7 @@ impl TypeChecker {
                         let missing = new_caps.difference(&current_caps.capabilities);
                         let missing_names: List<verum_common::Text> = missing
                             .iter()
-                            .map(|c| verum_common::Text::from(c.name()))
+                            .map(|c| verum_common::Text::from(c.as_str()))
                             .collect();
 
                         // E0308: Trying to attenuate with capabilities the context doesn't have

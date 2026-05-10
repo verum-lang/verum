@@ -269,47 +269,244 @@ pub enum Capability {
     Custom(Text),
 }
 
+/// Static fact-pack for a [`Capability`] — the partition table
+/// behind name lookup, alias resolution, and family
+/// classification.  Only standard capabilities carry a meta —
+/// `Custom(_)` is structurally separate and goes through the
+/// payload's own name string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapabilityMeta {
+    /// Canonical PascalCase display name — the form `as_str`
+    /// returns for standard variants, and the form `from_str`
+    /// matches against on the wire.
+    pub name: &'static str,
+    /// Lowercase aliases that resolve to this capability via
+    /// case-insensitive lookup (e.g. `"net"` → Network,
+    /// `"fs"` → FileSystem, `"tx"` → Transaction).  Always
+    /// lowercase + non-empty — drift-pinned in
+    /// `meta_pin_capability_aliases_lowercase_and_unique`.
+    pub aliases: &'static [&'static str],
+    /// Whether this capability gates *data access* — the
+    /// read / write / query / execute family.  Used by the
+    /// LSP capability checker to render "data-access denied"
+    /// vs "infrastructure denied" diagnostics.
+    pub is_data_access: bool,
+    /// Whether this capability is an *elevation* — Admin
+    /// singleton.  Pinned as a singleton so a future
+    /// elevated-access variant surfaces as a visible test edit.
+    pub is_privileged: bool,
+    /// Whether this capability gates *external I/O* —
+    /// Network + FileSystem.  Used by the security checker to
+    /// gate sandboxed contexts.
+    pub is_external_io: bool,
+    /// Whether this capability is an *observability* surface
+    /// — Logging + Metrics.
+    pub is_observability: bool,
+    /// Whether this capability is *infrastructure*-grade —
+    /// Transaction + Cache + Config + Auth.  Catch-all for
+    /// non-data, non-elevation, non-IO, non-observability
+    /// capabilities.
+    pub is_infrastructure: bool,
+}
+
 impl Capability {
-    /// Get the string representation of this capability
-    pub fn as_str(&self) -> &str {
+    /// All *standard* capability variants in declaration order.
+    /// `Custom(_)` is intentionally excluded — it's an open
+    /// payload-bearing escape hatch that doesn't have a static
+    /// fact-pack.  Drives `from_str`, `TypeCapabilitySet::all`,
+    /// and the alias-lookup surface.
+    pub const ALL_STANDARD: &'static [Capability] = &[
+        Capability::ReadOnly,
+        Capability::WriteOnly,
+        Capability::ReadWrite,
+        Capability::Admin,
+        Capability::Transaction,
+        Capability::Network,
+        Capability::FileSystem,
+        Capability::Query,
+        Capability::Execute,
+        Capability::Logging,
+        Capability::Metrics,
+        Capability::Config,
+        Capability::Cache,
+        Capability::Auth,
+    ];
+
+    /// Static fact-pack for a standard capability.  Returns
+    /// `None` for `Custom(_)`, which lives outside the static
+    /// taxonomy.
+    pub const fn meta(&self) -> Option<CapabilityMeta> {
         match self {
-            Capability::ReadOnly => "ReadOnly",
-            Capability::WriteOnly => "WriteOnly",
-            Capability::ReadWrite => "ReadWrite",
-            Capability::Admin => "Admin",
-            Capability::Transaction => "Transaction",
-            Capability::Network => "Network",
-            Capability::FileSystem => "FileSystem",
-            Capability::Query => "Query",
-            Capability::Execute => "Execute",
-            Capability::Logging => "Logging",
-            Capability::Metrics => "Metrics",
-            Capability::Config => "Config",
-            Capability::Cache => "Cache",
-            Capability::Auth => "Auth",
-            Capability::Custom(name) => name.as_str(),
+            Capability::ReadOnly => Some(CapabilityMeta {
+                name: "ReadOnly",
+                aliases: &["read", "readonly"],
+                is_data_access: true,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::WriteOnly => Some(CapabilityMeta {
+                name: "WriteOnly",
+                aliases: &["write", "writeonly"],
+                is_data_access: true,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::ReadWrite => Some(CapabilityMeta {
+                name: "ReadWrite",
+                aliases: &["readwrite"],
+                is_data_access: true,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::Admin => Some(CapabilityMeta {
+                name: "Admin",
+                aliases: &["admin", "administrator"],
+                is_data_access: false,
+                is_privileged: true,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::Transaction => Some(CapabilityMeta {
+                name: "Transaction",
+                aliases: &["transaction", "tx"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: true,
+            }),
+            Capability::Network => Some(CapabilityMeta {
+                name: "Network",
+                aliases: &["network", "net"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: true,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::FileSystem => Some(CapabilityMeta {
+                name: "FileSystem",
+                aliases: &["filesystem", "fs"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: true,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::Query => Some(CapabilityMeta {
+                name: "Query",
+                aliases: &["query"],
+                is_data_access: true,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::Execute => Some(CapabilityMeta {
+                name: "Execute",
+                aliases: &["execute"],
+                is_data_access: true,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: false,
+            }),
+            Capability::Logging => Some(CapabilityMeta {
+                name: "Logging",
+                aliases: &["logging", "log"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: true,
+                is_infrastructure: false,
+            }),
+            Capability::Metrics => Some(CapabilityMeta {
+                name: "Metrics",
+                aliases: &["metrics", "telemetry"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: true,
+                is_infrastructure: false,
+            }),
+            Capability::Config => Some(CapabilityMeta {
+                name: "Config",
+                aliases: &["config", "configuration"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: true,
+            }),
+            Capability::Cache => Some(CapabilityMeta {
+                name: "Cache",
+                aliases: &["cache"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: true,
+            }),
+            Capability::Auth => Some(CapabilityMeta {
+                name: "Auth",
+                aliases: &["auth", "authentication"],
+                is_data_access: false,
+                is_privileged: false,
+                is_external_io: false,
+                is_observability: false,
+                is_infrastructure: true,
+            }),
+            Capability::Custom(_) => None,
         }
     }
 
-    /// Parse a capability from a string
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "ReadOnly" => Maybe::Some(Capability::ReadOnly),
-            "WriteOnly" => Maybe::Some(Capability::WriteOnly),
-            "ReadWrite" => Maybe::Some(Capability::ReadWrite),
-            "Admin" => Maybe::Some(Capability::Admin),
-            "Transaction" => Maybe::Some(Capability::Transaction),
-            "Network" => Maybe::Some(Capability::Network),
-            "FileSystem" => Maybe::Some(Capability::FileSystem),
-            "Query" => Maybe::Some(Capability::Query),
-            "Execute" => Maybe::Some(Capability::Execute),
-            "Logging" => Maybe::Some(Capability::Logging),
-            "Metrics" => Maybe::Some(Capability::Metrics),
-            "Config" => Maybe::Some(Capability::Config),
-            "Cache" => Maybe::Some(Capability::Cache),
-            "Auth" => Maybe::Some(Capability::Auth),
-            _ => Maybe::Some(Capability::Custom(Text::from(s))),
+    /// Get the string representation of this capability.
+    /// Routes through `meta()` for standard variants;
+    /// `Custom(name)` returns the payload name directly.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Capability::Custom(name) => name.as_str(),
+            other => other.meta().expect("standard variant has meta").name,
         }
+    }
+
+    /// Parse a capability from a string.  Standard PascalCase
+    /// names round-trip through `as_str()`; everything else
+    /// becomes `Custom(s)`.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        for c in Capability::ALL_STANDARD {
+            if c.as_str() == s {
+                return Maybe::Some(c.clone());
+            }
+        }
+        Maybe::Some(Capability::Custom(Text::from(s)))
+    }
+
+    /// Lookup a *standard* capability by case-insensitive name
+    /// or alias (e.g. `"NET"` / `"net"` / `"network"` →
+    /// `Network`).  Returns `None` for unknown strings —
+    /// callers that want a `Custom(_)` fallback should pair
+    /// this with their own constructor.  Single source of
+    /// truth for the alias table that previously lived in
+    /// `MethodCapabilityMapper::capability_from_name`.
+    pub fn from_alias(s: &str) -> Option<Self> {
+        let lower = s.to_ascii_lowercase();
+        for c in Capability::ALL_STANDARD {
+            let m = c
+                .meta()
+                .expect("ALL_STANDARD entries have meta");
+            if m.aliases.iter().any(|a| *a == lower) {
+                return Some(c.clone());
+            }
+        }
+        None
     }
 
     /// Check if this is a standard (non-custom) capability
@@ -3049,5 +3246,202 @@ mod binop_meta_drift_pins {
             seen.push(s);
         }
         assert_eq!(seen.len(), 34);
+    }
+}
+
+// =========================================================================
+// Capability meta() drift-pin tests
+// =========================================================================
+
+#[cfg(test)]
+mod capability_meta_drift_pins {
+    use super::*;
+
+    /// Total standard-variant count + name partition pin.  Custom
+    /// is open-ended so it lives outside ALL_STANDARD; standard
+    /// variants are exactly the 14 capabilities visible in the
+    /// AST surface.
+    #[test]
+    fn capability_count_pinned_at_fourteen_standard() {
+        assert_eq!(
+            Capability::ALL_STANDARD.len(),
+            14,
+            "Capability standard-variant count drift",
+        );
+    }
+
+    /// Names round-trip through `as_str` ↔ `from_str` for every
+    /// standard variant.  Names are PascalCase + unique.
+    #[test]
+    fn capability_names_round_trip_pin() {
+        let mut seen = std::collections::HashSet::new();
+        for cap in Capability::ALL_STANDARD {
+            let s = cap.as_str();
+            assert!(
+                s.chars().next().map_or(false, |c| c.is_ascii_uppercase()),
+                "{:?}: name is not PascalCase: {}",
+                cap,
+                s
+            );
+            assert!(seen.insert(s), "{:?}: duplicate name {}", cap, s);
+
+            // Round-trip through from_str → standard variant.
+            let parsed = Capability::from_str(s);
+            assert!(
+                matches!(&parsed, verum_common::Maybe::Some(c) if c == cap),
+                "{:?}: from_str(\"{}\") did not round-trip",
+                cap,
+                s,
+            );
+        }
+        assert_eq!(seen.len(), 14);
+    }
+
+    /// Aliases are lowercase + non-empty + unique across the
+    /// whole table.  Pre-collapse the alias table lived as a
+    /// 14-arm match in `MethodCapabilityMapper::
+    /// capability_from_name`; this pin ensures the new
+    /// data-driven table maintains the per-alias uniqueness
+    /// invariant the old match silently encoded.
+    #[test]
+    fn meta_pin_capability_aliases_lowercase_and_unique() {
+        let mut all_aliases: std::collections::HashMap<&str, Capability> =
+            std::collections::HashMap::new();
+        for cap in Capability::ALL_STANDARD {
+            let m = cap.meta().expect("standard variant has meta");
+            assert!(
+                !m.aliases.is_empty(),
+                "{:?}: has no aliases",
+                cap
+            );
+            for alias in m.aliases {
+                assert!(
+                    alias.chars().all(|c| c.is_ascii_lowercase()),
+                    "{:?}: alias {:?} is not lowercase",
+                    cap,
+                    alias,
+                );
+                let prior = all_aliases.insert(alias, cap.clone());
+                assert!(
+                    prior.is_none(),
+                    "{:?}: alias {:?} also bound to {:?}",
+                    cap,
+                    alias,
+                    prior.unwrap(),
+                );
+            }
+        }
+    }
+
+    /// `from_alias` finds every alias.  Custom names go through
+    /// the None branch so callers can decide their own fallback.
+    #[test]
+    fn from_alias_round_trips_every_alias() {
+        for cap in Capability::ALL_STANDARD {
+            let m = cap.meta().expect("standard variant has meta");
+            for alias in m.aliases {
+                assert_eq!(
+                    Capability::from_alias(alias),
+                    Some(cap.clone()),
+                    "alias {:?} should resolve to {:?}",
+                    alias,
+                    cap,
+                );
+                // Case-insensitive: uppercase form works too.
+                assert_eq!(
+                    Capability::from_alias(&alias.to_ascii_uppercase()),
+                    Some(cap.clone()),
+                    "alias {:?} (uppercased) should resolve",
+                    alias,
+                );
+            }
+        }
+        assert_eq!(Capability::from_alias("not_a_real_capability"), None);
+    }
+
+    /// Family-classifier partitions — pinned so adding a new
+    /// variant flipping the wrong flag fails here rather than as
+    /// silent telemetry-classification drift downstream.
+    #[test]
+    fn meta_pin_capability_family_partitions() {
+        let collect = |pred: fn(&CapabilityMeta) -> bool| -> Vec<Capability> {
+            Capability::ALL_STANDARD
+                .iter()
+                .filter(|c| pred(&c.meta().expect("standard")))
+                .cloned()
+                .collect()
+        };
+
+        // Data-access family: Read/Write/ReadWrite/Query/Execute.
+        assert_eq!(
+            collect(|m| m.is_data_access),
+            vec![
+                Capability::ReadOnly,
+                Capability::WriteOnly,
+                Capability::ReadWrite,
+                Capability::Query,
+                Capability::Execute,
+            ],
+        );
+
+        // Privileged: Admin singleton.
+        assert_eq!(
+            collect(|m| m.is_privileged),
+            vec![Capability::Admin],
+        );
+
+        // External-IO: Network + FileSystem.
+        assert_eq!(
+            collect(|m| m.is_external_io),
+            vec![Capability::Network, Capability::FileSystem],
+        );
+
+        // Observability: Logging + Metrics.
+        assert_eq!(
+            collect(|m| m.is_observability),
+            vec![Capability::Logging, Capability::Metrics],
+        );
+
+        // Infrastructure: Transaction + Config + Cache + Auth.
+        assert_eq!(
+            collect(|m| m.is_infrastructure),
+            vec![
+                Capability::Transaction,
+                Capability::Config,
+                Capability::Cache,
+                Capability::Auth,
+            ],
+        );
+
+        // Cross-cutting: every standard variant flips exactly
+        // one family flag (the five families perfectly partition
+        // the 14 standard variants).
+        for cap in Capability::ALL_STANDARD {
+            let m = cap.meta().expect("standard variant has meta");
+            let count = (m.is_data_access as u32)
+                + (m.is_privileged as u32)
+                + (m.is_external_io as u32)
+                + (m.is_observability as u32)
+                + (m.is_infrastructure as u32);
+            assert_eq!(
+                count, 1,
+                "{:?}: must flip exactly one family flag (got {})",
+                cap, count
+            );
+        }
+    }
+
+    /// Custom variants do not have a static meta — the open
+    /// payload-bearing escape hatch.  `is_standard` reports
+    /// false; meta returns None.
+    #[test]
+    fn custom_variant_has_no_meta() {
+        let custom = Capability::Custom("custom_op".to_string().into());
+        assert!(!custom.is_standard());
+        assert!(custom.meta().is_none());
+        // as_str returns the payload string unchanged.
+        assert_eq!(custom.as_str(), "custom_op");
+        // from_alias does not match Custom strings.
+        assert_eq!(Capability::from_alias("custom_op"), None);
     }
 }
