@@ -139,7 +139,6 @@ fn test_check_compilation() {
 
 #[test]
 #[serial]
-#[ignore = "stdlib type mismatch: Ok(Unit)|Err(OSError) vs Ok(Unit)|Overflow(Unit)"]
 fn test_compile_project() {
     with_temp_project(|project_path| {
         // Write a Verum source file with functions
@@ -213,7 +212,6 @@ fn main() -> Int {
 
 #[test]
 #[serial]
-#[ignore = "stdlib type mismatch: Ok(Unit)|Err(OSError) vs Ok(Unit)|Overflow(Unit)"]
 fn test_multi_file_compilation() {
     with_temp_project(|project_path| {
         // Write multiple source files
