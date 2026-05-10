@@ -238,13 +238,109 @@ pub struct MethodSignature {
     pub is_async: bool,
 }
 
-/// Receiver kind for methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Receiver kind for methods.
+///
+/// **Canonical home** for the receiver-kind taxonomy across
+/// `verum_types`.  Pre-collapse three duplicate enums lived at
+/// different modules with different variant names:
+///   * `verum_types::method_resolution::ReceiverKind` —
+///     `None / ByValue / ByRef / ByMutRef`
+///   * `verum_types::protocol::ReceiverKind` —
+///     `Value / Ref / RefMut / Static`
+///   * this canonical home — `None / SelfValue / SelfRef / SelfMut`
+///
+/// All three classified the same four receiver-kind concepts
+/// (no-self / by-value / by-ref / by-mut-ref) with different
+/// vocabularies.  The two duplicates now `pub use` this type;
+/// the `Self*` naming was chosen as canonical because it mirrors
+/// `verum_ast::FunctionParamKind` (the upstream AST surface
+/// `SelfValue` / `SelfRef` / `SelfMut`) and serialises cleanly
+/// to archive metadata via the `Serialize` derive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReceiverKind {
+    /// No receiver — associated function (static method, no
+    /// self parameter).  Aliased as `Static` in the previous
+    /// `protocol::ReceiverKind` form.
     None,
+    /// Takes self by value (consumes ownership).  Aliased as
+    /// `ByValue` in `method_resolution` and `Value` in
+    /// `protocol`.
     SelfValue,
+    /// Takes `&self` (immutable borrow).  Aliased as `ByRef`
+    /// in `method_resolution` and `Ref` in `protocol`.
     SelfRef,
+    /// Takes `&mut self` (mutable borrow).  Aliased as
+    /// `ByMutRef` in `method_resolution` and `RefMut` in
+    /// `protocol`.
     SelfMut,
+}
+
+/// Per-variant projection for [`ReceiverKind`] — the classifier
+/// flags partition the four receiver kinds along three
+/// orthogonal axes (presence-of-self / by-value vs. borrowed /
+/// mutability).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReceiverKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Whether the method takes a `self` parameter at all.
+    /// `None` (static method) is the unique non-self kind;
+    /// the other three flip `has_self`.
+    pub has_self: bool,
+    /// Whether `self` is taken *by value* (consumes
+    /// ownership).  `SelfValue` singleton.
+    pub is_by_value: bool,
+    /// Whether `self` is taken *by reference* (borrowed).
+    /// `SelfRef` + `SelfMut`.
+    pub is_borrowed: bool,
+    /// Whether the receiver is *mutable* (the method may
+    /// modify `self`).  `SelfValue` (owns it, can mutate
+    /// freely) + `SelfMut` (borrowed mutably).  Pinned so
+    /// codegen mutability analysis branches on this single
+    /// flag rather than per-variant matching.
+    pub allows_mutation: bool,
+}
+
+impl ReceiverKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] =
+        &[Self::None, Self::SelfValue, Self::SelfRef, Self::SelfMut];
+
+    /// Static fact-pack — the partition table behind every
+    /// receiver-kind dispatch surface (codegen, vtable layout,
+    /// method-resolution priority).
+    pub const fn meta(self) -> ReceiverKindMeta {
+        match self {
+            ReceiverKind::None => ReceiverKindMeta {
+                name: "none",
+                has_self: false,
+                is_by_value: false,
+                is_borrowed: false,
+                allows_mutation: false,
+            },
+            ReceiverKind::SelfValue => ReceiverKindMeta {
+                name: "self_value",
+                has_self: true,
+                is_by_value: true,
+                is_borrowed: false,
+                allows_mutation: true,
+            },
+            ReceiverKind::SelfRef => ReceiverKindMeta {
+                name: "self_ref",
+                has_self: true,
+                is_by_value: false,
+                is_borrowed: true,
+                allows_mutation: false,
+            },
+            ReceiverKind::SelfMut => ReceiverKindMeta {
+                name: "self_mut",
+                has_self: true,
+                is_by_value: false,
+                is_borrowed: true,
+                allows_mutation: true,
+            },
+        }
+    }
 }
 
 /// Parameter descriptor
@@ -450,6 +546,113 @@ pub fn stdlib_module_order() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `ReceiverKind` is the canonical home (with
+    /// the `Self*` naming).  Pre-collapse three duplicate enums
+    /// lived at different module paths with three different
+    /// vocabularies (`ByValue/ByRef/ByMutRef` in
+    /// method_resolution; `Value/Ref/RefMut/Static` in protocol;
+    /// `SelfValue/SelfRef/SelfMut` here).  This test pins the
+    /// classifier-flag partitions + cross-cutting invariants.
+    #[test]
+    fn meta_pin_receiver_kind_round_trip_and_partitions() {
+        // 1. Variant count + names + uniqueness.
+        assert_eq!(ReceiverKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in ReceiverKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. has_self: every variant except `None`.
+        let with_self: Vec<_> = ReceiverKind::ALL
+            .iter()
+            .filter(|k| k.meta().has_self)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_self,
+            vec![ReceiverKind::SelfValue, ReceiverKind::SelfRef, ReceiverKind::SelfMut],
+        );
+
+        // 3. is_by_value: SelfValue singleton.
+        let bv: Vec<_> = ReceiverKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_by_value)
+            .copied()
+            .collect();
+        assert_eq!(bv, vec![ReceiverKind::SelfValue]);
+
+        // 4. is_borrowed: SelfRef + SelfMut.
+        let br: Vec<_> = ReceiverKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_borrowed)
+            .copied()
+            .collect();
+        assert_eq!(br, vec![ReceiverKind::SelfRef, ReceiverKind::SelfMut]);
+
+        // 5. allows_mutation: SelfValue (owns it) + SelfMut
+        //    (borrowed mutably).  SelfRef forbids mutation;
+        //    None has nothing to mutate.
+        let mut_: Vec<_> = ReceiverKind::ALL
+            .iter()
+            .filter(|k| k.meta().allows_mutation)
+            .copied()
+            .collect();
+        assert_eq!(mut_, vec![ReceiverKind::SelfValue, ReceiverKind::SelfMut]);
+
+        // 6. Cross-cutting: is_by_value ⊕ is_borrowed for every
+        //    has_self variant — a self-bearing method takes
+        //    self either by value or by reference, never both.
+        for k in ReceiverKind::ALL {
+            let m = k.meta();
+            if m.has_self {
+                assert!(
+                    m.is_by_value ^ m.is_borrowed,
+                    "{:?}: has_self ⇒ by_value ⊕ borrowed",
+                    k
+                );
+            } else {
+                // !has_self ⇒ neither by-value nor borrowed.
+                assert!(!m.is_by_value);
+                assert!(!m.is_borrowed);
+            }
+        }
+
+        // 7. allows_mutation ⇒ has_self (no-self can't mutate).
+        for k in ReceiverKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.allows_mutation || m.has_self,
+                "{:?}: allows_mutation ⇒ has_self",
+                k
+            );
+        }
+    }
+
+    /// Alias contract: `verum_types::method_resolution::
+    /// ReceiverKind` and `verum_types::protocol::ReceiverKind`
+    /// both alias the canonical `core_metadata::ReceiverKind`.
+    /// Pinned via cross-path assignment in both directions.
+    #[test]
+    fn receiver_kind_alias_contract() {
+        // method_resolution side.
+        let mr: crate::method_resolution::ReceiverKind = ReceiverKind::SelfValue;
+        assert_eq!(mr, ReceiverKind::SelfValue);
+
+        // protocol side.
+        let p: crate::protocol::ReceiverKind = ReceiverKind::SelfMut;
+        assert_eq!(p, ReceiverKind::SelfMut);
+
+        // Reverse direction.
+        let canonical: ReceiverKind = crate::method_resolution::ReceiverKind::None;
+        assert_eq!(canonical, ReceiverKind::None);
+    }
 
     #[test]
     fn test_stdlib_layer_order() {

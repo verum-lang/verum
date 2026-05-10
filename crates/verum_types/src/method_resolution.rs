@@ -581,18 +581,13 @@ pub struct MethodInfo {
     pub receiver_kind: ReceiverKind,
 }
 
-/// Kind of receiver for a method
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverKind {
-    /// No receiver (static method)
-    None,
-    /// Takes self by value
-    ByValue,
-    /// Takes &self
-    ByRef,
-    /// Takes &mut self
-    ByMutRef,
-}
+/// Kind of receiver for a method — re-exported from
+/// `crate::core_metadata::ReceiverKind` (the canonical home).
+/// Pre-collapse this module had its own 4-variant duplicate
+/// with `None/ByValue/ByRef/ByMutRef` naming; the canonical
+/// names are `None/SelfValue/SelfRef/SelfMut` (mirrors
+/// `verum_ast::FunctionParamKind`).
+pub use crate::core_metadata::ReceiverKind;
 
 /// A method's type signature together with its receiver information.
 #[derive(Debug, Clone)]
@@ -877,20 +872,20 @@ fn receiver_info_from_decl(func: &verum_ast::decl::FunctionDecl) -> (ReceiverKin
     match func.params.first() {
         Some(param) => match &param.kind {
             // By-value self (not mutable)
-            FunctionParamKind::SelfValue => (ReceiverKind::ByValue, false),
+            FunctionParamKind::SelfValue => (ReceiverKind::SelfValue, false),
             // By-value self (mutable binding)
-            FunctionParamKind::SelfValueMut => (ReceiverKind::ByValue, true),
+            FunctionParamKind::SelfValueMut => (ReceiverKind::SelfValue, true),
             // Immutable reference receivers: &self, &checked self, &unsafe self
             FunctionParamKind::SelfRef
             | FunctionParamKind::SelfRefChecked
-            | FunctionParamKind::SelfRefUnsafe => (ReceiverKind::ByRef, false),
+            | FunctionParamKind::SelfRefUnsafe => (ReceiverKind::SelfRef, false),
             // Mutable reference receivers: &mut self, &checked mut self, &unsafe mut self
             FunctionParamKind::SelfRefMut
             | FunctionParamKind::SelfRefCheckedMut
-            | FunctionParamKind::SelfRefUnsafeMut => (ReceiverKind::ByMutRef, true),
+            | FunctionParamKind::SelfRefUnsafeMut => (ReceiverKind::SelfMut, true),
             // Ownership receivers: %self, %mut self
-            FunctionParamKind::SelfOwn => (ReceiverKind::ByValue, false),
-            FunctionParamKind::SelfOwnMut => (ReceiverKind::ByValue, true),
+            FunctionParamKind::SelfOwn => (ReceiverKind::SelfValue, false),
+            FunctionParamKind::SelfOwnMut => (ReceiverKind::SelfValue, true),
             // Regular parameter (no self) — static method
             FunctionParamKind::Regular { .. } => (ReceiverKind::None, false),
         },

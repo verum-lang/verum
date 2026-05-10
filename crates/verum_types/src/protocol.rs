@@ -1354,18 +1354,13 @@ pub struct VTableLayout {
 
 // ==================== Method Registry ====================
 
-/// Kind of receiver for a method
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverKind {
-    /// Takes ownership: self
-    Value,
-    /// Immutable reference: &self
-    Ref,
-    /// Mutable reference: &mut self
-    RefMut,
-    /// Static method (no self)
-    Static,
-}
+/// Kind of receiver for a method — re-exported from
+/// `crate::core_metadata::ReceiverKind` (the canonical home).
+/// Pre-collapse this module had its own 4-variant duplicate
+/// with `Value/Ref/RefMut/Static` naming; the canonical names
+/// are `SelfValue/SelfRef/SelfMut/None` (mirrors
+/// `verum_ast::FunctionParamKind`).
+pub use crate::core_metadata::ReceiverKind;
 
 /// Signature of a method for type-based lookup
 #[derive(Debug, Clone)]
@@ -1398,7 +1393,7 @@ impl MethodSignature {
             receiver,
             params,
             return_type,
-            is_mutating: receiver == ReceiverKind::RefMut,
+            is_mutating: receiver == ReceiverKind::SelfMut,
         }
     }
 
@@ -1416,23 +1411,23 @@ impl MethodSignature {
             receiver,
             params,
             return_type,
-            is_mutating: receiver == ReceiverKind::RefMut,
+            is_mutating: receiver == ReceiverKind::SelfMut,
         }
     }
 
     /// Create an immutable method (&self)
     pub fn immutable(name: impl Into<Text>, params: List<Type>, return_type: Type) -> Self {
-        Self::new(name, ReceiverKind::Ref, params, return_type)
+        Self::new(name, ReceiverKind::SelfRef, params, return_type)
     }
 
     /// Create a mutating method (&mut self)
     pub fn mutating(name: impl Into<Text>, params: List<Type>, return_type: Type) -> Self {
-        Self::new(name, ReceiverKind::RefMut, params, return_type)
+        Self::new(name, ReceiverKind::SelfMut, params, return_type)
     }
 
     /// Create a static method (no self)
     pub fn static_method(name: impl Into<Text>, params: List<Type>, return_type: Type) -> Self {
-        Self::new(name, ReceiverKind::Static, params, return_type)
+        Self::new(name, ReceiverKind::None, params, return_type)
     }
 
     /// Freshen all TypeVars in the method signature.
@@ -4180,9 +4175,9 @@ impl ProtocolChecker {
                 name: method_name.into(),
                 type_params: List::new(),
                 receiver: if is_mutating {
-                    ReceiverKind::RefMut
+                    ReceiverKind::SelfMut
                 } else {
-                    ReceiverKind::Ref
+                    ReceiverKind::SelfRef
                 },
                 params: List::new(),
                 return_type,
@@ -4260,11 +4255,11 @@ impl ProtocolChecker {
                     name: Text::from(WKT::Maybe.as_str()),
                     args: List::from(vec![yield_ty]),
                 };
-                (maybe_ty, true, ReceiverKind::RefMut)
+                (maybe_ty, true, ReceiverKind::SelfMut)
             }
             "has_next" => {
                 // has_next(&self) -> Bool
-                (Type::Bool, false, ReceiverKind::Ref)
+                (Type::Bool, false, ReceiverKind::SelfRef)
             }
             // Common Iterator adapter methods that return new iterators
             // These return Iterator adapter types that wrap the original iterator
@@ -4275,7 +4270,7 @@ impl ProtocolChecker {
                     yield_ty: Box::new(yield_ty),
                     return_ty: Box::new(Type::Unit),
                 };
-                (iter_ty, false, ReceiverKind::Value)
+                (iter_ty, false, ReceiverKind::SelfValue)
             }
             "map" | "flat_map" | "filter_map" => {
                 // These transform the item type - use a fresh type variable for the new item type
@@ -4285,7 +4280,7 @@ impl ProtocolChecker {
                     yield_ty: Box::new(new_item),
                     return_ty: Box::new(Type::Unit),
                 };
-                (iter_ty, false, ReceiverKind::Value)
+                (iter_ty, false, ReceiverKind::SelfValue)
             }
             "chain" => {
                 // chain combines two iterators of the same type
@@ -4293,7 +4288,7 @@ impl ProtocolChecker {
                     yield_ty: Box::new(yield_ty),
                     return_ty: Box::new(Type::Unit),
                 };
-                (iter_ty, false, ReceiverKind::Value)
+                (iter_ty, false, ReceiverKind::SelfValue)
             }
             "zip" => {
                 // zip returns pairs - (Y, OtherItem) - use type variable for other item
@@ -4303,7 +4298,7 @@ impl ProtocolChecker {
                     yield_ty: Box::new(pair_ty),
                     return_ty: Box::new(Type::Unit),
                 };
-                (iter_ty, false, ReceiverKind::Value)
+                (iter_ty, false, ReceiverKind::SelfValue)
             }
             "enumerate" => {
                 // enumerate returns (Int, Y) pairs
@@ -4312,7 +4307,7 @@ impl ProtocolChecker {
                     yield_ty: Box::new(pair_ty),
                     return_ty: Box::new(Type::Unit),
                 };
-                (iter_ty, false, ReceiverKind::Value)
+                (iter_ty, false, ReceiverKind::SelfValue)
             }
             // Collecting methods
             "collect" => {
@@ -4322,24 +4317,24 @@ impl ProtocolChecker {
                     name: Text::from(WKT::List.as_str()),
                     args: List::from(vec![yield_ty]),
                 };
-                (list_ty, false, ReceiverKind::Value)
+                (list_ty, false, ReceiverKind::SelfValue)
             }
-            "count" => (Type::Int, false, ReceiverKind::Value),
-            "sum" | "product" => (yield_ty.clone(), false, ReceiverKind::Value),
-            "any" | "all" => (Type::Bool, false, ReceiverKind::Value),
+            "count" => (Type::Int, false, ReceiverKind::SelfValue),
+            "sum" | "product" => (yield_ty.clone(), false, ReceiverKind::SelfValue),
+            "any" | "all" => (Type::Bool, false, ReceiverKind::SelfValue),
             "first" | "last" => {
                 let maybe_ty = Type::Generic {
                     name: Text::from(WKT::Maybe.as_str()),
                     args: List::from(vec![yield_ty]),
                 };
-                (maybe_ty, false, ReceiverKind::Value)
+                (maybe_ty, false, ReceiverKind::SelfValue)
             }
             "nth" => {
                 let maybe_ty = Type::Generic {
                     name: Text::from(WKT::Maybe.as_str()),
                     args: List::from(vec![yield_ty]),
                 };
-                (maybe_ty, false, ReceiverKind::RefMut)
+                (maybe_ty, false, ReceiverKind::SelfMut)
             }
             _ => return None,
         };
@@ -4785,18 +4780,18 @@ impl ProtocolChecker {
             Type::Function { params, .. } => {
                 if let Some(first) = params.first() {
                     match first {
-                        Type::Reference { mutable: true, .. } => (ReceiverKind::RefMut, true),
-                        Type::Reference { mutable: false, .. } => (ReceiverKind::Ref, false),
+                        Type::Reference { mutable: true, .. } => (ReceiverKind::SelfMut, true),
+                        Type::Reference { mutable: false, .. } => (ReceiverKind::SelfRef, false),
                         Type::Named { path, .. } if path.to_string() == "Self" => {
-                            (ReceiverKind::Value, false)
+                            (ReceiverKind::SelfValue, false)
                         }
-                        _ => (ReceiverKind::Ref, false),
+                        _ => (ReceiverKind::SelfRef, false),
                     }
                 } else {
-                    (ReceiverKind::Static, false)
+                    (ReceiverKind::None, false)
                 }
             }
-            _ => (ReceiverKind::Ref, false),
+            _ => (ReceiverKind::SelfRef, false),
         }
     }
 
@@ -10638,27 +10633,27 @@ impl ProtocolChecker {
                 let receiver = if let Maybe::Some(rk) = &method.receiver_kind {
                     *rk
                 } else if params.is_empty() {
-                    ReceiverKind::Static
+                    ReceiverKind::None
                 } else {
                     match &params[0] {
                         Type::Reference { .. }
                         | Type::CheckedReference { .. }
-                        | Type::UnsafeReference { .. } => ReceiverKind::Ref,
-                        _ => ReceiverKind::Value,
+                        | Type::UnsafeReference { .. } => ReceiverKind::SelfRef,
+                        _ => ReceiverKind::SelfValue,
                     }
                 };
                 match receiver {
-                    ReceiverKind::Static => {
+                    ReceiverKind::None => {
                         errors.push(ObjectSafetyError::NoSelfParameter {
                             method_name: method_name.clone(),
                         });
                     }
-                    ReceiverKind::Value => {
+                    ReceiverKind::SelfValue => {
                         errors.push(ObjectSafetyError::TakesSelfByValue {
                             method_name: method_name.clone(),
                         });
                     }
-                    ReceiverKind::Ref | ReceiverKind::RefMut => {
+                    ReceiverKind::SelfRef | ReceiverKind::SelfMut => {
                         // Object-safe receiver kinds
                     }
                 }
