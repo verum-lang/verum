@@ -8248,9 +8248,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     "ret",
                 )
                 .expect("open libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("open return value")
+                .basic_value_expect("open return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("open return");
         }
@@ -8331,9 +8329,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let ret_i32 = builder
                 .build_call(libsys_close, &[fd_i32.into()], "ret")
                 .expect("close libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("close return value")
+                .basic_value_expect("close return value")
                 .into_int_value();
             let ret_i64 = builder
                 .build_int_s_extend(ret_i32, i64_type, "ret_i64")
@@ -8409,9 +8405,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     "ret",
                 )
                 .expect("read libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("read return value")
+                .basic_value_expect("read return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("read return");
         }
@@ -8480,9 +8474,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let ret = builder
                 .build_call(libsys, &[path.into()], "ret")
                 .expect("unlink libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("unlink return value")
+                .basic_value_expect("unlink return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("unlink return");
         }
@@ -8545,9 +8537,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     "ret",
                 )
                 .expect("lseek libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("lseek return value")
+                .basic_value_expect("lseek return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("lseek return");
         }
@@ -8621,9 +8611,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let ret = builder
                 .build_call(libsys, &[path.into(), mode_i32.into()], "ret")
                 .expect("access libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("access return value")
+                .basic_value_expect("access return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("access return");
         }
@@ -8714,9 +8702,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let ret = builder
                 .build_call(libsys_write, &[fd32.into(), buf.into(), count.into()], "ret")
                 .expect("write libsys call")
-                .try_as_basic_value()
-                .basic()
-                .expect("write return value")
+                .basic_value_expect("write return value")
                 .into_int_value();
             builder.build_return(Some(&ret)).expect("write return");
         }

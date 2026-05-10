@@ -227,6 +227,12 @@ pub trait CallSiteExt<'ctx> {
     /// `Instruction` (i.e., the callee was declared as returning void
     /// or the call site has no usable return).
     fn basic_value_or(self, msg: &str) -> Result<verum_llvm::values::BasicValueEnum<'ctx>>;
+
+    /// Same as [`basic_value_or`](Self::basic_value_or) but panics on
+    /// missing return rather than producing an error.  Use in emit
+    /// paths where a void-return from a fixed-shape helper would be a
+    /// programmer error (signature mismatch).
+    fn basic_value_expect(self, msg: &str) -> verum_llvm::values::BasicValueEnum<'ctx>;
 }
 
 impl<'ctx> CallSiteExt<'ctx> for verum_llvm::values::CallSiteValue<'ctx> {
@@ -235,6 +241,19 @@ impl<'ctx> CallSiteExt<'ctx> for verum_llvm::values::CallSiteValue<'ctx> {
         self.try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::Internal(msg.into()))
+    }
+
+    /// Variant of [`basic_value_or`](Self::basic_value_or) that
+    /// panics on missing return rather than returning an error.
+    /// Use in emit paths where a void-return from a fixed-shape
+    /// runtime helper is a hard programmer error (the helper's
+    /// signature is known at compile time, so this branch should
+    /// be unreachable in practice).
+    #[inline]
+    fn basic_value_expect(self, msg: &str) -> verum_llvm::values::BasicValueEnum<'ctx> {
+        self.try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| panic!("{}", msg))
     }
 }
 
