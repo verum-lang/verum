@@ -39,6 +39,22 @@ public fn text_from_static(s: &'static str) -> Text;
 @inline(always)
 public fn text_byte_len(text: &Text) -> Int;
 
+/// Borrow Text as a byte slice without copying.
+///
+/// Routes through the canonical `TextSubOpcode::AsBytes` runtime handler,
+/// which materialises a FatRef view over all three Text representations
+/// (small-string inline NaN-box, builder-layout `{ptr, len, cap}` heap
+/// object, and heap-string `[ObjectHeader][len:u64][bytes...]`).  Use this
+/// instead of `slice_from_raw_parts(self.ptr, self.len)` — that pattern
+/// requires the caller to know the runtime representation, breaks for
+/// small-string and builder-layout Texts (the field reads don't reach
+/// the actual byte payload), and forces every consumer to special-case
+/// the layout.  This single intrinsic is the *only* correct way to
+/// expose Text bytes to slice-shape APIs.
+@intrinsic("text_as_bytes")
+@inline(always)
+public fn text_as_bytes(text: &Text) -> &[Byte];
+
 // =============================================================================
 // SECTION 2: Parsing
 // =============================================================================
