@@ -11940,15 +11940,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let close_fn = self.get_or_declare_close(module);
         let read_fn = self.get_or_declare_read(module);
         let memcpy_fn = self.get_or_declare_memcpy(module);
-        let free_fn = module
-            .get_function("verum_internal_free")
-            .unwrap_or_else(|| {
-                module.add_function(
-                    "verum_internal_free",
-                    void_type.fn_type(&[ptr_type.into()], false),
-                    None,
-                )
-            });
+        let ft = void_type.fn_type(&[ptr_type.into()], false);
+        let free_fn = super::error::get_or_declare_function(module, "verum_internal_free", ft);
         let waitpid_fn = self.get_or_declare_waitpid(module);
 
         let neg1 = i64_type.const_int(u64::MAX, true);
