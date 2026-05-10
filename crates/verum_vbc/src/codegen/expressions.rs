@@ -18555,6 +18555,32 @@ impl VbcCodegen {
             return Ok(Some(dest));
         };
 
+        // **Cell-family interior-mutability intrinsics.**
+        //
+        // `@vbc(CELL_SET, self, value)` etc. — the stdlib's
+        // `core.base.cell` declares interior-mutability primitives
+        // (`Cell<T>`, `RefCell<T>`, `OnceCell<T>`, `LazyCell<T>`)
+        // whose `set`/`replace`/`take` methods bypass `&self`
+        // immutability via these intrinsics.  The fundamental shape
+        // is "write the receiver's field 0" — every cell-family
+        // type carries its inner value at field 0.  Treating each
+        // intrinsic by name keeps the codegen agnostic of the
+        // specific carrier type (Cell vs RefCell vs OnceCell): the
+        // intrinsic *name* is the contract; the receiver's runtime
+        // type is whatever its descriptor says.
+        if matches!(
+            intrinsic_name.as_str(),
+            "CELL_SET"
+                | "REFCELL_SET"
+                | "ONCECELL_SET"
+                | "ONCECELL_TAKE"
+                | "REFCELL_BORROW"
+                | "REFCELL_BORROW_MUT"
+                | "LAZYCELL_INIT"
+        ) {
+            return self.compile_cell_intrinsic(&intrinsic_name, args, dest);
+        }
+
         // Look up intrinsic in registry
         let intrinsic_info = match lookup_intrinsic(&intrinsic_name) {
             Some(info) => info,
@@ -18584,6 +18610,176 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
+    }
+
+    /// Compile interior-mutability intrinsics from `core.base.cell`.
+    ///
+    /// Each cell-family carrier type (`Cell<T>`, `RefCell<T>`,
+    /// `OnceCell<T>`, `LazyCell<T>`) declares a single payload field
+    /// `value` at index 0.  These intrinsics bypass `&self`
+    /// immutability by writing field 0 directly via `SetF`.  The
+    /// shape is uniform across carriers because all four types are
+    /// single-field records — the intrinsic *name* selects which
+    /// transformation is applied to the value before storing.
+    ///
+    /// Mapping:
+    /// * `CELL_SET(self, v)` / `REFCELL_SET(self, v)`
+    ///   → `self.value = v` — direct field write.
+    /// * `ONCECELL_SET(self, v)`
+    ///   → `self.value = Some(v)` — wrap in `Maybe.Some` first.
+    /// * `ONCECELL_TAKE(self)`
+    ///   → `self.value = None` — replace with `Maybe.None`.
+    /// * `REFCELL_BORROW(self)` / `REFCELL_BORROW_MUT(self)`
+    ///   → return reference to `self.value`.  Borrow tracking is
+    ///   compile-time CBGR's job; runtime returns the inner value.
+    /// * `LAZYCELL_INIT(self, init_fn)`
+    ///   → call `init_fn()` and store result.  Used by `LazyCell`'s
+    ///   first-deref initialization.
+    fn compile_cell_intrinsic(
+        &mut self,
+        name: &str,
+        args: &verum_common::List<Expr>,
+        dest: Reg,
+    ) -> CodegenResult<Option<Reg>> {
+        // Args: [name_path, self, ...rest]
+        let self_arg = args
+            .get(1)
+            .ok_or_else(|| CodegenError::internal("cell intrinsic missing self"))?;
+        let self_reg = self
+            .compile_expr(self_arg)?
+            .or_internal("cell intrinsic self has no value")?;
+
+        match name {
+            "CELL_SET" | "REFCELL_SET" => {
+                let value_arg = args
+                    .get(2)
+                    .ok_or_else(|| CodegenError::internal("CELL_SET missing value"))?;
+                let value_reg = self
+                    .compile_expr(value_arg)?
+                    .or_internal("CELL_SET value has no value")?;
+                // Clone before storing so the cell takes ownership of
+                // an independent copy — matches the field-init
+                // discipline in `compile_record` (avoids aliasing on
+                // `c.set(x); c.set(x);` pattern).
+                let cloned = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Clone {
+                    dst: cloned,
+                    src: value_reg,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: self_reg,
+                    field_idx: 0,
+                    value: cloned,
+                });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                self.ctx.free_temp(cloned);
+                self.ctx.free_temp(value_reg);
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+            "ONCECELL_SET" => {
+                let value_arg = args
+                    .get(2)
+                    .ok_or_else(|| CodegenError::internal("ONCECELL_SET missing value"))?;
+                let value_reg = self
+                    .compile_expr(value_arg)?
+                    .or_internal("ONCECELL_SET value has no value")?;
+                // Wrap in Maybe.Some(value) using the well-known
+                // tag from `verum_common::well_known_types::variant_tags`.
+                let some_tag = verum_common::well_known_types::maybe_success_tag();
+                let some_reg = self.ctx.alloc_temp();
+                self.emit_make_variant(some_reg, some_tag, 1, Some("Maybe"));
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: some_reg,
+                    field: 0,
+                    value: value_reg,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: self_reg,
+                    field_idx: 0,
+                    value: some_reg,
+                });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                self.ctx.free_temp(some_reg);
+                self.ctx.free_temp(value_reg);
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+            "ONCECELL_TAKE" => {
+                // Replace self.value with Maybe.None.
+                let none_tag = verum_common::well_known_types::maybe_none_tag();
+                let none_reg = self.ctx.alloc_temp();
+                self.emit_make_variant(none_reg, none_tag, 0, Some("Maybe"));
+                self.ctx.emit(Instruction::SetF {
+                    obj: self_reg,
+                    field_idx: 0,
+                    value: none_reg,
+                });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                self.ctx.free_temp(none_reg);
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+            "REFCELL_BORROW" | "REFCELL_BORROW_MUT" => {
+                // Borrow tracking is compile-time CBGR; at Tier-0 we
+                // return the inner value.  RefCell's `borrow()`
+                // signature returns `Ref<T>` which is layout-compatible
+                // with the inner T at this tier — Verum's CBGR layer
+                // encodes the borrow scope statically.
+                self.ctx.emit(Instruction::GetF {
+                    dst: dest,
+                    obj: self_reg,
+                    field_idx: 0,
+                });
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+            "LAZYCELL_INIT" => {
+                // Call the init closure (arg 2) and store result in
+                // self.value (wrapped in Some).
+                let init_arg = args
+                    .get(2)
+                    .ok_or_else(|| CodegenError::internal("LAZYCELL_INIT missing init fn"))?;
+                let closure_reg = self
+                    .compile_expr(init_arg)?
+                    .or_internal("LAZYCELL_INIT init has no value")?;
+                let result_reg = self.ctx.alloc_temp();
+                // Call closure with no args.
+                self.ctx.emit(Instruction::CallClosure {
+                    dst: result_reg,
+                    closure: closure_reg,
+                    args: crate::instruction::RegRange {
+                        start: Reg(0),
+                        count: 0,
+                    },
+                });
+                let some_tag = verum_common::well_known_types::maybe_success_tag();
+                let some_reg = self.ctx.alloc_temp();
+                self.emit_make_variant(some_reg, some_tag, 1, Some("Maybe"));
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: some_reg,
+                    field: 0,
+                    value: result_reg,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: self_reg,
+                    field_idx: 0,
+                    value: some_reg,
+                });
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                self.ctx.free_temp(some_reg);
+                self.ctx.free_temp(result_reg);
+                self.ctx.free_temp(closure_reg);
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+            _ => {
+                // Unknown cell intrinsic — fall through to no-op.
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                self.ctx.free_temp(self_reg);
+                Ok(Some(dest))
+            }
+        }
     }
 
     /// Compiles a call to an intrinsic function imported via `import sys.intrinsics.*`.
