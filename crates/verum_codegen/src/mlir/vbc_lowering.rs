@@ -127,35 +127,93 @@ pub enum GpuTarget {
     Metal,
 }
 
+/// Per-variant projection for [`GpuTarget`].
+///
+/// Three parallel `match` blocks (legacy `target_triple` / `dialect`
+/// / `memory_space`) folded into per-variant fields. These all gate
+/// the GPU-MLIR lowering path — a wrong classification would
+/// silently miscompile (e.g. wrong target_triple → wrong PTX/HSACO
+/// emission; wrong memory_space → wrong memref attribute).
+///
+/// `name` is the canonical short identifier accepted by `from_str`
+/// / returned by `as_str` (`"cuda"` / `"rocm"` / `"vulkan"` /
+/// `"metal"`). `target_triple` is the MLIR-side target triple;
+/// `dialect` is the primary MLIR dialect for this target's
+/// device-side code; `memory_space` is the memref memory-space
+/// identifier (1 for CUDA/ROCm device global memory; 0 for
+/// Vulkan/Metal where the host-shared memory model uses the
+/// default address space).
+#[derive(Debug, Clone, Copy)]
+pub struct GpuTargetMeta {
+    pub name: &'static str,
+    pub target_triple: &'static str,
+    pub dialect: &'static str,
+    pub memory_space: u64,
+}
+
 impl GpuTarget {
-    /// Returns the MLIR target triple.
-    pub fn target_triple(&self) -> &'static str {
+    pub const ALL: &'static [Self] =
+        &[Self::Cuda, Self::Rocm, Self::Vulkan, Self::Metal];
+
+    pub const fn meta(self) -> GpuTargetMeta {
         match self {
-            GpuTarget::Cuda => "nvptx64-nvidia-cuda",
-            GpuTarget::Rocm => "amdgcn-amd-amdhsa",
-            GpuTarget::Vulkan => "spirv64-unknown-vulkan",
-            GpuTarget::Metal => "air64-apple-macos",
+            Self::Cuda => GpuTargetMeta {
+                name: "cuda",
+                target_triple: "nvptx64-nvidia-cuda",
+                dialect: "nvvm",
+                memory_space: 1,
+            },
+            Self::Rocm => GpuTargetMeta {
+                name: "rocm",
+                target_triple: "amdgcn-amd-amdhsa",
+                dialect: "rocdl",
+                memory_space: 1,
+            },
+            Self::Vulkan => GpuTargetMeta {
+                name: "vulkan",
+                target_triple: "spirv64-unknown-vulkan",
+                dialect: "spirv",
+                memory_space: 0,
+            },
+            Self::Metal => GpuTargetMeta {
+                name: "metal",
+                target_triple: "air64-apple-macos",
+                dialect: "metal",
+                memory_space: 0,
+            },
         }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Returns the MLIR target triple.
+    #[inline]
+    pub const fn target_triple(&self) -> &'static str {
+        self.meta().target_triple
     }
 
     /// Returns the primary dialect name.
-    pub fn dialect(&self) -> &'static str {
-        match self {
-            GpuTarget::Cuda => "nvvm",
-            GpuTarget::Rocm => "rocdl",
-            GpuTarget::Vulkan => "spirv",
-            GpuTarget::Metal => "metal",
-        }
+    #[inline]
+    pub const fn dialect(&self) -> &'static str {
+        self.meta().dialect
     }
 
     /// Returns the GPU memory space identifier for memrefs.
-    pub fn memory_space(&self) -> u64 {
-        match self {
-            GpuTarget::Cuda => 1,
-            GpuTarget::Rocm => 1,
-            GpuTarget::Vulkan => 0,
-            GpuTarget::Metal => 0,
-        }
+    #[inline]
+    pub const fn memory_space(&self) -> u64 {
+        self.meta().memory_space
     }
 }
 
@@ -842,5 +900,61 @@ mod tests {
         stats.instructions_processed = 100;
         stats.tensor_ops = 60;
         assert!((stats.tensor_op_ratio() - 0.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn meta_pin_gpu_target_round_trip_unique_and_classification() {
+        assert_eq!(GpuTarget::ALL.len(), 4);
+        for v in GpuTarget::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                GpuTarget::from_str(s),
+                Some(*v),
+                "GpuTarget::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Triple table — preserved verbatim from legacy. These
+        // strings are load-bearing for MLIR target setup.
+        assert_eq!(GpuTarget::Cuda.target_triple(), "nvptx64-nvidia-cuda");
+        assert_eq!(GpuTarget::Rocm.target_triple(), "amdgcn-amd-amdhsa");
+        assert_eq!(
+            GpuTarget::Vulkan.target_triple(),
+            "spirv64-unknown-vulkan"
+        );
+        assert_eq!(GpuTarget::Metal.target_triple(), "air64-apple-macos");
+        // Dialect table — also load-bearing (MLIR pass routing).
+        assert_eq!(GpuTarget::Cuda.dialect(), "nvvm");
+        assert_eq!(GpuTarget::Rocm.dialect(), "rocdl");
+        assert_eq!(GpuTarget::Vulkan.dialect(), "spirv");
+        assert_eq!(GpuTarget::Metal.dialect(), "metal");
+        // Memory-space partition: 2 device-memory targets (Cuda/
+        // Rocm at space=1) + 2 host-shared targets (Vulkan/Metal
+        // at space=0). A wrong classification here would silently
+        // miscompile memref attributes.
+        let device_count = GpuTarget::ALL
+            .iter()
+            .filter(|v| v.memory_space() == 1)
+            .count();
+        let host_count = GpuTarget::ALL
+            .iter()
+            .filter(|v| v.memory_space() == 0)
+            .count();
+        assert_eq!(device_count, 2);
+        assert_eq!(host_count, 2);
+        // Triples and dialects are unique across variants.
+        let triples: Vec<&str> =
+            GpuTarget::ALL.iter().map(|v| v.target_triple()).collect();
+        let mut t = triples.clone();
+        t.sort();
+        t.dedup();
+        assert_eq!(t.len(), triples.len());
+        let dialects: Vec<&str> =
+            GpuTarget::ALL.iter().map(|v| v.dialect()).collect();
+        let mut d = dialects.clone();
+        d.sort();
+        d.dedup();
+        assert_eq!(d.len(), dialects.len());
     }
 }
