@@ -183,13 +183,33 @@ fn run_external_tool(
     install_hint: &str,
     excerpt_bytes: usize,
 ) -> CheckResult {
+    run_external_tool_in_dir(tool, args, None, install_hint, excerpt_bytes)
+}
+
+/// Like [`run_external_tool`] but runs the spawned process with
+/// the given current-directory.  Used by checkers whose tool
+/// resolves relative paths against cwd (e.g. Isabelle's legacy
+/// `use_thy "<stem>"` looks up `<stem>.thy` relative to the
+/// process's working dir).
+fn run_external_tool_in_dir(
+    tool: &str,
+    args: &[&str],
+    cwd: Option<&str>,
+    install_hint: &str,
+    excerpt_bytes: usize,
+) -> CheckResult {
     if !is_tool_on_path(tool) {
         return CheckResult::ToolMissing {
             install_hint: install_hint.to_string(),
         };
     }
     let started = Instant::now();
-    let output = match Command::new(tool).args(args).output() {
+    let mut cmd = Command::new(tool);
+    cmd.args(args);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    let output = match cmd.output() {
         Ok(o) => o,
         Err(e) => {
             return CheckResult::RunnerError {
@@ -330,19 +350,84 @@ impl ForeignSystemChecker for AgdaChecker {
         // on the host. Verum-emitted files import nothing by
         // default; if a future emission imports stdlib, this flag
         // can be lifted.
+        //
+        // `--include-path=<parent dir>` tells Agda where to find
+        // the top-level module.  Agda's strict
+        // file-path-matches-module-name rule means a flat
+        // declaration `module trivial_thm where` requires the
+        // file to live at `<include-dir>/trivial_thm.agda`.
+        // Without explicit `-i <parent>`, Agda walks up from CWD
+        // and refuses with `ModuleNameDoesntMatchFileName` when
+        // the emitted file lives under
+        // `target/audit-reports/cross-format-roundtrip/agda/`.
+        let parent_dir = path
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_string());
         run_external_tool(
             "agda",
-            &["--no-libraries", "--no-default-libraries", &p],
+            &[
+                "--no-libraries",
+                "--no-default-libraries",
+                "--include-path",
+                &parent_dir,
+                &p,
+            ],
             self.install_hint(),
             4096,
         )
     }
 }
 
-/// Isabelle/HOL — `isabelle process -e 'use_thy "<file>"'`. Lighter
-/// than `isabelle build -d`; works on standalone .thy files.
+/// Isabelle/HOL standalone-theory checker.
+///
+/// **Version compatibility.**  Isabelle's CLI surface changed
+/// between releases:
+///
+///   * Isabelle ≤ 2024 ships `isabelle process` which accepts
+///     `-l <logic> -e '<ML-cmd>'` (e.g.
+///     `isabelle process -l Pure -e 'use_thy "<stem>"'`).
+///   * Isabelle ≥ 2025 renamed `process` to `process_theories`
+///     with positional theory names and `-d <dir>` for include
+///     paths.  The legacy `process` subcommand was removed, so
+///     `isabelle process -e ...` now fails with
+///     `Unknown Isabelle tool: "process"` — a tool-incompatibility
+///     issue that previously surfaced as a hard theorem-rejection
+///     failure in the cross-format-roundtrip audit gate.
+///
+/// `check_file` resolves which variant the host has via the
+/// `is_tool_on_path("isabelle")` + `select_subcommand` probe and
+/// dispatches to the matching arg shape.  Emitted .thy files
+/// `import Main`, so `-l HOL` is the right logic in both
+/// variants.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IsabelleChecker;
+
+impl IsabelleChecker {
+    /// Probe `isabelle` to determine which subcommand variant is
+    /// available.  Returns `"process_theories"` for newer Isabelle
+    /// (≥ 2025), `"process"` for older.  Falls back to
+    /// `"process_theories"` (the modern default) when the probe
+    /// itself fails — the subsequent `run_external_tool` call
+    /// will then surface the real "Unknown Isabelle tool" message
+    /// via the `Failed` arm with a clear diagnostic.
+    fn select_subcommand() -> &'static str {
+        let output = std::process::Command::new("isabelle").output();
+        match output {
+            Ok(out) => {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if text.contains("process_theories") {
+                    "process_theories"
+                } else if text.contains("\n  process ") || text.starts_with("  process ") {
+                    "process"
+                } else {
+                    "process_theories"
+                }
+            }
+            Err(_) => "process_theories",
+        }
+    }
+}
 
 impl ForeignSystemChecker for IsabelleChecker {
     fn format(&self) -> ExportFormat {
@@ -359,13 +444,46 @@ impl ForeignSystemChecker for IsabelleChecker {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let cmd = format!("use_thy \"{}\"", stem);
-        run_external_tool(
-            "isabelle",
-            &["process", "-l", "Pure", "-e", &cmd],
-            self.install_hint(),
-            4096,
-        )
+        let parent_dir = path
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_string());
+
+        match Self::select_subcommand() {
+            "process_theories" => {
+                // Modern Isabelle (≥ 2025): positional theory
+                // names + `-f <file>` to include the additional
+                // session-file path that contains the theory.
+                // `-d <dir>` would expect a session ROOT
+                // directory (containing a `ROOT` file describing
+                // sessions); a bare path fails with `Bad session
+                // root directory`.  `-f` is the right escape
+                // hatch for ad-hoc single-theory checks.
+                //
+                // Emitted .thy files `import Main`, so logic is
+                // `HOL`.
+                run_external_tool(
+                    "isabelle",
+                    &["process_theories", "-l", "HOL", "-f", &path.to_string_lossy(), &stem],
+                    self.install_hint(),
+                    4096,
+                )
+            }
+            _ => {
+                // Legacy Isabelle (≤ 2024): `-e 'use_thy "..."'`
+                // ML command; runs from the parent directory so
+                // `use_thy` finds the .thy file relative to the
+                // session's working dir.
+                let cmd = format!("use_thy \"{}\"", stem);
+                run_external_tool_in_dir(
+                    "isabelle",
+                    &["process", "-l", "HOL", "-e", &cmd],
+                    Some(parent_dir.as_str()),
+                    self.install_hint(),
+                    4096,
+                )
+            }
+        }
     }
 }
 

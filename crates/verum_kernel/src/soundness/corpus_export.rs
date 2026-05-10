@@ -750,6 +750,42 @@ impl CorpusBackend for AgdaCorpusBackend {
             content.push_str(&format!("-- @verify({})\n", strat));
         }
         content.push('\n');
+
+        // **Mandatory module header** — Agda enforces a strict
+        // "top-level module name MUST equal the file stem"
+        // invariant.  Without this declaration the file is
+        // rejected with `ModuleNameDoesntMatchFileName` even when
+        // the body itself is well-typed.  Matches the file's stem
+        // (`spec.name`) which is also the theorem name.
+        content.push_str(&format!("module {} where\n\n", spec.name));
+
+        // **Hermetic preamble** — define the propositional top /
+        // bottom types inline so the emitted file doesn't require
+        // an `import Data.Unit` / `import Data.Empty` path.  Verum
+        // theorem propositions render `Bool(true)` / `Bool(false)`
+        // literals into `⊤` / `⊥` (see `render_literal_agda`); the
+        // proof tactic `Trivial` for `⊤` lands as `tt` (see
+        // `primitive_tactic_to_agda`).  The two definitions below
+        // close that cycle without external dependencies.
+        //
+        // NB: written via `concat!()` rather than `\`-line-
+        // continuation inside a single string literal.  Rust's
+        // backslash-newline form silently strips leading
+        // whitespace on the continuation, which would un-indent
+        // the `tt : ⊤` constructor and put it outside the
+        // `data ⊤ : Set where` block — Agda's layout rule
+        // requires the constructor indentation strictly greater
+        // than its enclosing `data` keyword.
+        content.push_str(concat!(
+            "-- Hermetic preamble: propositional top / bottom types.\n",
+            "-- Inlined rather than `import Data.Unit` / `import Data.Empty`\n",
+            "-- so the emitted file is self-contained (no Agda stdlib path).\n",
+            "data \u{22a4} : Set where\n",
+            "  tt : \u{22a4}\n",
+            "data \u{22a5} : Set where\n",
+            "\n",
+        ));
+
         content.push_str(&format!(
             "-- Proposition (Verum source): {}\n",
             sanitise_for_agda_line_comment(&spec.proposition_text),
