@@ -94,10 +94,27 @@ public theorem trivial_thm()
     assert!(lean_path.exists(), "Lean file missing: {:?}", lean_path);
 
     let coq_text = fs::read_to_string(&coq_path).unwrap();
-    assert!(coq_text.contains("Theorem trivial_thm : Prop."));
-    assert!(coq_text.contains("Admitted."));
+    // `ensures true` renders to Coq's `True` (the propositional
+    // top type) and proves via `trivial`. Pre-fix the emitter used
+    // `Prop` (the kind of propositions, not a proposition) and
+    // `Admitted` — which actually didn't typecheck (`trivial`
+    // can't prove `Prop`).  Verified passing against installed
+    // Coq via the `coq` foreign-tool roundtrip check.
+    assert!(
+        coq_text.contains("Theorem trivial_thm : True."),
+        "expected `Theorem trivial_thm : True.`; got:\n{}",
+        coq_text,
+    );
+    assert!(coq_text.contains("trivial."));
     let lean_text = fs::read_to_string(&lean_path).unwrap();
-    assert!(lean_text.contains("theorem trivial_thm : Prop := by sorry"));
+    // Same correction for Lean — `True` propositional type, proved
+    // by `trivial`, not `sorry`.  Verified against installed Lean
+    // via the `lean` foreign-tool roundtrip check.
+    assert!(
+        lean_text.contains("theorem trivial_thm : True := by trivial"),
+        "expected Lean term `theorem trivial_thm : True := by trivial`; got:\n{}",
+        lean_text,
+    );
 }
 
 #[test]
@@ -120,15 +137,18 @@ public theorem unproven_thm()
         .join("audit-reports")
         .join("cross-format-roundtrip");
     let coq_text = fs::read_to_string(report_dir.join("coq").join("unproven_thm.v")).unwrap();
+    // `ensures true` renders to the propositional `True` type
+    // (mirrors Lean's `True`); `Axiom unproven_thm : True.` is
+    // the canonical proofless form — postulate-equivalent.
     assert!(
-        coq_text.contains("Axiom unproven_thm : Prop."),
+        coq_text.contains("Axiom unproven_thm : True."),
         "proofless theorem must emit Coq Axiom form; got:\n{}",
         coq_text,
     );
     assert!(!coq_text.contains("Admitted."));
     let lean_text = fs::read_to_string(report_dir.join("lean").join("unproven_thm.lean")).unwrap();
     assert!(
-        lean_text.contains("axiom unproven_thm : Prop"),
+        lean_text.contains("axiom unproven_thm : True"),
         "proofless theorem must emit Lean axiom form; got:\n{}",
         lean_text,
     );
@@ -155,16 +175,25 @@ public theorem trivial_thm()
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["command"], "audit-cross-format-roundtrip");
     assert_eq!(payload["theorems_walked"], 1);
-    assert_eq!(payload["backend_count"], 2);
+    // 5 backends now wired: coq + lean + agda + isabelle + dedukti
+    // (pre-#156 this was 2; the four-foundation cross-validation
+    // matrix added Agda/Isabelle/Dedukti).
+    assert_eq!(payload["backend_count"], 5);
     let roundtrips = payload["roundtrips"].as_array().expect("roundtrips array");
-    // 1 theorem × 2 backends = 2 rows
-    assert_eq!(roundtrips.len(), 2);
+    // 1 theorem × 5 backends = 5 rows.
+    assert_eq!(roundtrips.len(), 5);
     let backends: Vec<&str> = roundtrips
         .iter()
         .map(|r| r["backend"].as_str().unwrap())
         .collect();
-    assert!(backends.contains(&"coq"));
-    assert!(backends.contains(&"lean"));
+    for required in ["coq", "lean", "agda", "isabelle", "dedukti"] {
+        assert!(
+            backends.contains(&required),
+            "JSON output missing backend `{}`; got {:?}",
+            required,
+            backends,
+        );
+    }
     for r in roundtrips {
         assert_eq!(r["theorem"], "trivial_thm");
         // verdict is one of: passed / failed / tool_missing /

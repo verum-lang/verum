@@ -1115,9 +1115,25 @@ fn render_expr_agda(expr: &Expr) -> Option<String> {
 fn render_literal_agda(kind: &LiteralKind) -> Option<String> {
     match kind {
         LiteralKind::Int(int_lit) => Some(int_lit.value.to_string()),
-        // Agda stdlib `Data.Bool` uses lowercase constructors.
-        LiteralKind::Bool(true) => Some("true".to_string()),
-        LiteralKind::Bool(false) => Some("false".to_string()),
+        // `true` / `false` in Verum-theorem propositions denote the
+        // propositional top / bottom types (mirroring Coq's `True` /
+        // `False` and Lean's `True` / `False`).  Agda's canonical
+        // names are `⊤` / `⊥` from `Data.Unit` / `Data.Empty` — we
+        // emit those names; the `AgdaCorpusBackend::render_theorem`
+        // preamble inlines `data ⊤ : Set where tt : ⊤` /
+        // `data ⊥ : Set where` so the emission is hermetic and
+        // doesn't require a stdlib import path.
+        //
+        // **Why not `Data.Bool` constructors?**  Theorems are
+        // propositions of kind `Set`, not `Bool`-typed values;
+        // using lowercase `true` / `false` made the emitted file
+        // ill-typed (`trivial_thm : true` reads as "trivial_thm
+        // has type `Data.Bool.true`", which is nonsense — Bool
+        // constructors aren't types).  This was the root cause of
+        // the Agda foreign-tool rejection (exit=42) in the
+        // cross-format-roundtrip audit gate.
+        LiteralKind::Bool(true) => Some("⊤".to_string()),
+        LiteralKind::Bool(false) => Some("⊥".to_string()),
         LiteralKind::Text(s) => match s {
             StringLit::Regular(t) | StringLit::MultiLine(t) => {
                 Some(format!("\"{}\"", t.as_str().replace('"', "\\\"")))
