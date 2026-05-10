@@ -1817,51 +1817,9 @@ pub fn lower_instruction<'ctx>(
             let src_val = as_f64(ctx, ctx.get_register(src.0)?, "fconv_src")?;
             let rounded = match mode {
                 FloatToIntMode::Trunc => src_val, // fptosi truncates toward zero
-                FloatToIntMode::Floor => {
-                    let f64_ty = ctx.types().f64_type();
-                    let fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-                    let module = ctx.get_module();
-                    let func = module
-                        .get_function("llvm.floor.f64")
-                        .unwrap_or_else(|| module.add_function("llvm.floor.f64", fn_type, None));
-                    ctx.builder()
-                        .build_call(func, &[src_val.into()], "floor")
-                        .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("floor: expected return value")?
-                        .into_float_value()
-                }
-                FloatToIntMode::Ceil => {
-                    let f64_ty = ctx.types().f64_type();
-                    let fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-                    let module = ctx.get_module();
-                    let func = module
-                        .get_function("llvm.ceil.f64")
-                        .unwrap_or_else(|| module.add_function("llvm.ceil.f64", fn_type, None));
-                    ctx.builder()
-                        .build_call(func, &[src_val.into()], "ceil")
-                        .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("ceil: expected return value")?
-                        .into_float_value()
-                }
-                FloatToIntMode::Round => {
-                    let f64_ty = ctx.types().f64_type();
-                    let fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-                    let module = ctx.get_module();
-                    let func = module
-                        .get_function("llvm.round.f64")
-                        .unwrap_or_else(|| module.add_function("llvm.round.f64", fn_type, None));
-                    ctx.builder()
-                        .build_call(func, &[src_val.into()], "round")
-                        .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("round: expected return value")?
-                        .into_float_value()
-                }
+                FloatToIntMode::Floor => build_round_intrinsic(ctx, "llvm.floor.f64", "floor", src_val)?,
+                FloatToIntMode::Ceil => build_round_intrinsic(ctx, "llvm.ceil.f64", "ceil", src_val)?,
+                FloatToIntMode::Round => build_round_intrinsic(ctx, "llvm.round.f64", "round", src_val)?,
             };
             let result = ctx
                 .builder()
@@ -22689,10 +22647,7 @@ fn build_unary_intrinsic<'ctx>(
 ) -> Result<verum_llvm::values::IntValue<'ctx>> {
     let i64_ty = ctx.types().i64_type();
     let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
-    let module = ctx.get_module();
-    let func = module
-        .get_function(intrinsic_name)
-        .unwrap_or_else(|| module.add_function(intrinsic_name, fn_type, None));
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
     let result = ctx
         .builder()
         .build_call(func, &[a.into()], name)
@@ -22703,6 +22658,32 @@ fn build_unary_intrinsic<'ctx>(
             LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
         })?;
     Ok(result.into_int_value())
+}
+
+/// Build a call to a unary LLVM `f64 -> f64` rounding intrinsic
+/// (`llvm.floor.f64`, `llvm.ceil.f64`, `llvm.round.f64`, `llvm.trunc.f64`).
+/// Centralises the get-or-declare + call + return-value-extract sequence
+/// that the three `FloatToIntMode` arms previously duplicated verbatim.
+fn build_round_intrinsic<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    intrinsic_name: &str,
+    name: &str,
+    src: verum_llvm::values::FloatValue<'ctx>,
+) -> Result<verum_llvm::values::FloatValue<'ctx>> {
+    let f64_ty = ctx.types().f64_type();
+    let fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
+    let result = ctx
+        .builder()
+        .build_call(func, &[src.into()], name)
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| {
+            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
+        })?
+        .into_float_value();
+    Ok(result)
 }
 
 /// Build a call to a unary LLVM intrinsic that takes an `is_zero_poison` flag
@@ -22716,10 +22697,7 @@ fn build_unary_intrinsic_with_poison<'ctx>(
     let i64_ty = ctx.types().i64_type();
     let i1_ty = ctx.llvm_context().bool_type();
     let fn_type = i64_ty.fn_type(&[i64_ty.into(), i1_ty.into()], false);
-    let module = ctx.get_module();
-    let func = module
-        .get_function(intrinsic_name)
-        .unwrap_or_else(|| module.add_function(intrinsic_name, fn_type, None));
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
     let is_zero_poison = i1_ty.const_zero(); // false = not poison on zero input
     let result = ctx
         .builder()
