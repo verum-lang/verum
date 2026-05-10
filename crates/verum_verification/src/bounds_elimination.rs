@@ -2308,6 +2308,91 @@ impl fmt::Display for BoundsError {
     }
 }
 
+/// Discriminator for [`BoundsError`] — zero-sized projection
+/// classifying the failure modes of bounds-check elimination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BoundsErrorKind {
+    CannotExtractConstraint,
+    InvalidAccess,
+    Internal,
+}
+
+/// Per-variant projection for [`BoundsErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundsErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The bounds-elimination pass *gave up* — the constraint
+    /// surface didn't match a recognised shape.
+    /// `CannotExtractConstraint` singleton.  Distinct from
+    /// "the access is malformed" (InvalidAccess) which is a
+    /// genuine error condition.
+    pub is_constraint_extraction_failure: bool,
+    /// The array access *itself* is malformed —
+    /// `InvalidAccess` singleton.
+    pub is_invalid_access: bool,
+    /// Internal-error catch-all — `Internal` singleton.
+    /// Should never appear in well-formed compilations.
+    pub is_internal: bool,
+}
+
+impl BoundsErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::CannotExtractConstraint,
+        Self::InvalidAccess,
+        Self::Internal,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> BoundsErrorKindMeta {
+        match self {
+            BoundsErrorKind::CannotExtractConstraint => BoundsErrorKindMeta {
+                name: "cannot_extract_constraint",
+                is_constraint_extraction_failure: true,
+                is_invalid_access: false,
+                is_internal: false,
+            },
+            BoundsErrorKind::InvalidAccess => BoundsErrorKindMeta {
+                name: "invalid_access",
+                is_constraint_extraction_failure: false,
+                is_invalid_access: true,
+                is_internal: false,
+            },
+            BoundsErrorKind::Internal => BoundsErrorKindMeta {
+                name: "internal",
+                is_constraint_extraction_failure: false,
+                is_invalid_access: false,
+                is_internal: true,
+            },
+        }
+    }
+}
+
+impl BoundsError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> BoundsErrorKind {
+        match self {
+            BoundsError::CannotExtractConstraint { .. } => {
+                BoundsErrorKind::CannotExtractConstraint
+            }
+            BoundsError::InvalidAccess { .. } => BoundsErrorKind::InvalidAccess,
+            BoundsError::Internal { .. } => BoundsErrorKind::Internal,
+        }
+    }
+
+    /// Returns the inner Text payload — every variant carries
+    /// one (CannotExtractConstraint.expr / InvalidAccess.reason /
+    /// Internal.message).  Pinned via the drift test.
+    pub fn message(&self) -> &Text {
+        match self {
+            BoundsError::CannotExtractConstraint { expr } => expr,
+            BoundsError::InvalidAccess { reason } => reason,
+            BoundsError::Internal { message } => message,
+        }
+    }
+}
+
 impl std::error::Error for BoundsError {}
 
 // =============================================================================
@@ -2411,5 +2496,51 @@ mod meta_consolidation_pins {
                 < CheckDecision::Keep.overhead_ns()
         );
         assert_eq!(CheckDecision::Eliminate.overhead_ns(), 0);
+    }
+
+    /// Drift-pin: `BoundsErrorKind` discriminator projection.
+    /// Pins variant count, perfect-partition over the three
+    /// classifier flags, plus the live-payload kind() and
+    /// message() accessors.
+    #[test]
+    fn meta_pin_bounds_error_kind_round_trip_and_partitions() {
+        use super::{BoundsError, BoundsErrorKind};
+        use verum_common::Text;
+        assert_eq!(BoundsErrorKind::ALL.len(), 3);
+
+        // Each variant flips exactly one classifier — perfect
+        // partition over the three flags.
+        for k in BoundsErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_constraint_extraction_failure as u32)
+                + (m.is_invalid_access as u32)
+                + (m.is_internal as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", k);
+        }
+
+        // Names are snake_case + unique.
+        let mut seen = std::collections::HashSet::new();
+        for k in BoundsErrorKind::ALL {
+            assert!(seen.insert(k.meta().name));
+        }
+
+        // Live-payload kind() + message() projection.
+        let cec = BoundsError::CannotExtractConstraint {
+            expr: Text::from("a[i] + j"),
+        };
+        assert_eq!(cec.kind(), BoundsErrorKind::CannotExtractConstraint);
+        assert_eq!(cec.message().as_str(), "a[i] + j");
+
+        let ia = BoundsError::InvalidAccess {
+            reason: Text::from("negative index"),
+        };
+        assert_eq!(ia.kind(), BoundsErrorKind::InvalidAccess);
+        assert_eq!(ia.message().as_str(), "negative index");
+
+        let i = BoundsError::Internal {
+            message: Text::from("z3 panic"),
+        };
+        assert_eq!(i.kind(), BoundsErrorKind::Internal);
+        assert_eq!(i.message().as_str(), "z3 panic");
     }
 }
