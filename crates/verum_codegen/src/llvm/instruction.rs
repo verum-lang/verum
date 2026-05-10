@@ -9278,12 +9278,12 @@ fn lower_call<'ctx>(
                 let r = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "m_r")?;
                 let n = as_i64(ctx, ctx.get_register(args.start.0 + 3)?, "m_n")?;
                 let void_type = ctx.types().void_type();
-                let c_fn = module
-                    .get_function("verum_metal_vector_add_f32")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into(); 4], false);
-                        module.add_function("verum_metal_vector_add_f32", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into(); 4], false);
+                let c_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_metal_vector_add_f32",
+                    fn_type,
+                );
                 ctx.builder()
                     .build_call(c_fn, &[a.into(), b.into(), r.into(), n.into()], "")
                     .or_llvm_err()?;
