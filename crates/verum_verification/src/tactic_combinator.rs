@@ -122,84 +122,153 @@ pub enum TacticCombinator {
     ApplyWith,
 }
 
+/// Per-variant projection for [`TacticCombinator`].
+///
+/// Four parallel match blocks (legacy `name` / `from_name` / `all` /
+/// `category`) collapse to per-variant fields. Adding a new
+/// combinator forces the docs-side TOC ordering, the canonical
+/// keyword, and the category bucket to land together in one place.
+#[derive(Debug, Clone, Copy)]
+pub struct TacticCombinatorMeta {
+    pub name: &'static str,
+    pub category: CombinatorCategory,
+}
+
 impl TacticCombinator {
-    /// Stable diagnostic name (matches the surface keyword).
-    pub fn name(self) -> &'static str {
+    /// All 15 canonical combinators, in canonical reading order
+    /// (matches the docs-generator's TOC).
+    pub const ALL: &'static [Self] = &[
+        Self::Skip,
+        Self::Fail,
+        Self::Seq,
+        Self::OrElse,
+        Self::Repeat,
+        Self::RepeatN,
+        Self::Try,
+        Self::Solve,
+        Self::FirstOf,
+        Self::AllGoals,
+        Self::IndexFocus,
+        Self::NamedFocus,
+        Self::PerGoalSplit,
+        Self::Have,
+        Self::ApplyWith,
+    ];
+
+    pub const fn meta(self) -> TacticCombinatorMeta {
         match self {
-            TacticCombinator::Skip => "skip",
-            TacticCombinator::Fail => "fail",
-            TacticCombinator::Seq => "seq",
-            TacticCombinator::OrElse => "orelse",
-            TacticCombinator::Repeat => "repeat",
-            TacticCombinator::RepeatN => "repeat_n",
-            TacticCombinator::Try => "try",
-            TacticCombinator::Solve => "solve",
-            TacticCombinator::FirstOf => "first_of",
-            TacticCombinator::AllGoals => "all_goals",
-            TacticCombinator::IndexFocus => "index_focus",
-            TacticCombinator::NamedFocus => "named_focus",
-            TacticCombinator::PerGoalSplit => "per_goal_split",
-            TacticCombinator::Have => "have",
-            TacticCombinator::ApplyWith => "apply_with",
+            Self::Skip => TacticCombinatorMeta {
+                name: "skip",
+                category: CombinatorCategory::Identity,
+            },
+            Self::Fail => TacticCombinatorMeta {
+                name: "fail",
+                category: CombinatorCategory::Identity,
+            },
+            Self::Seq => TacticCombinatorMeta {
+                name: "seq",
+                category: CombinatorCategory::Composition,
+            },
+            Self::OrElse => TacticCombinatorMeta {
+                name: "orelse",
+                category: CombinatorCategory::Composition,
+            },
+            Self::Repeat => TacticCombinatorMeta {
+                name: "repeat",
+                category: CombinatorCategory::Control,
+            },
+            Self::RepeatN => TacticCombinatorMeta {
+                name: "repeat_n",
+                category: CombinatorCategory::Control,
+            },
+            Self::Try => TacticCombinatorMeta {
+                name: "try",
+                category: CombinatorCategory::Control,
+            },
+            Self::Solve => TacticCombinatorMeta {
+                name: "solve",
+                category: CombinatorCategory::Control,
+            },
+            Self::FirstOf => TacticCombinatorMeta {
+                name: "first_of",
+                category: CombinatorCategory::Composition,
+            },
+            Self::AllGoals => TacticCombinatorMeta {
+                name: "all_goals",
+                category: CombinatorCategory::Focus,
+            },
+            Self::IndexFocus => TacticCombinatorMeta {
+                name: "index_focus",
+                category: CombinatorCategory::Focus,
+            },
+            Self::NamedFocus => TacticCombinatorMeta {
+                name: "named_focus",
+                category: CombinatorCategory::Focus,
+            },
+            Self::PerGoalSplit => TacticCombinatorMeta {
+                name: "per_goal_split",
+                category: CombinatorCategory::Focus,
+            },
+            Self::Have => TacticCombinatorMeta {
+                name: "have",
+                category: CombinatorCategory::Forward,
+            },
+            Self::ApplyWith => TacticCombinatorMeta {
+                name: "apply_with",
+                category: CombinatorCategory::Forward,
+            },
         }
+    }
+
+    /// Stable diagnostic name (matches the surface keyword).
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Convenience synonym for `name` matching the meta() series
+    /// idiom across the codebase.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
     }
 
     /// Parse a combinator from its diagnostic name.
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "skip" => Some(Self::Skip),
-            "fail" => Some(Self::Fail),
-            "seq" => Some(Self::Seq),
-            "orelse" => Some(Self::OrElse),
-            "repeat" => Some(Self::Repeat),
-            "repeat_n" => Some(Self::RepeatN),
-            "try" => Some(Self::Try),
-            "solve" => Some(Self::Solve),
-            "first_of" => Some(Self::FirstOf),
-            "all_goals" => Some(Self::AllGoals),
-            "index_focus" => Some(Self::IndexFocus),
-            "named_focus" => Some(Self::NamedFocus),
-            "per_goal_split" => Some(Self::PerGoalSplit),
-            "have" => Some(Self::Have),
-            "apply_with" => Some(Self::ApplyWith),
-            _ => None,
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == name.as_bytes() {
+                return Some(v);
+            }
+            i += 1;
         }
+        None
     }
 
-    /// All 15 canonical combinators, in canonical reading order
-    /// (matches the docs-generator's TOC).
+    /// Convenience synonym for `from_name`.
+    #[inline]
+    pub fn from_str(name: &str) -> Option<Self> {
+        Self::from_name(name)
+    }
+
+    /// All 15 canonical combinators (preserved as a fixed-size
+    /// array for source compat; new callers should prefer `ALL`).
     pub fn all() -> [TacticCombinator; 15] {
-        [
-            Self::Skip,
-            Self::Fail,
-            Self::Seq,
-            Self::OrElse,
-            Self::Repeat,
-            Self::RepeatN,
-            Self::Try,
-            Self::Solve,
-            Self::FirstOf,
-            Self::AllGoals,
-            Self::IndexFocus,
-            Self::NamedFocus,
-            Self::PerGoalSplit,
-            Self::Have,
-            Self::ApplyWith,
-        ]
+        let mut out = [Self::Skip; 15];
+        let mut i = 0;
+        while i < 15 {
+            out[i] = Self::ALL[i];
+            i += 1;
+        }
+        out
     }
 
     /// Conceptual category (used by docs / `verum tactic list`
     /// grouping headers).
-    pub fn category(self) -> CombinatorCategory {
-        match self {
-            Self::Skip | Self::Fail => CombinatorCategory::Identity,
-            Self::Seq | Self::OrElse | Self::FirstOf => CombinatorCategory::Composition,
-            Self::Repeat | Self::RepeatN | Self::Try | Self::Solve => CombinatorCategory::Control,
-            Self::AllGoals | Self::IndexFocus | Self::NamedFocus | Self::PerGoalSplit => {
-                CombinatorCategory::Focus
-            }
-            Self::Have | Self::ApplyWith => CombinatorCategory::Forward,
-        }
+    #[inline]
+    pub const fn category(self) -> CombinatorCategory {
+        self.meta().category
     }
 }
 
@@ -220,15 +289,50 @@ pub enum CombinatorCategory {
     Forward,
 }
 
+/// Per-variant projection for [`CombinatorCategory`].
+#[derive(Debug, Clone, Copy)]
+pub struct CombinatorCategoryMeta {
+    pub name: &'static str,
+}
+
 impl CombinatorCategory {
-    pub fn name(self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::Identity,
+        Self::Composition,
+        Self::Control,
+        Self::Focus,
+        Self::Forward,
+    ];
+
+    pub const fn meta(self) -> CombinatorCategoryMeta {
         match self {
-            Self::Identity => "identity",
-            Self::Composition => "composition",
-            Self::Control => "control",
-            Self::Focus => "focus",
-            Self::Forward => "forward",
+            Self::Identity => CombinatorCategoryMeta { name: "identity" },
+            Self::Composition => CombinatorCategoryMeta {
+                name: "composition",
+            },
+            Self::Control => CombinatorCategoryMeta { name: "control" },
+            Self::Focus => CombinatorCategoryMeta { name: "focus" },
+            Self::Forward => CombinatorCategoryMeta { name: "forward" },
         }
+    }
+
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
     }
 }
 
@@ -819,5 +923,78 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn meta_pin_tactic_combinator_round_trip_unique_and_category_partition() {
+        assert_eq!(TacticCombinator::ALL.len(), 15);
+        let mut seen = Vec::new();
+        for v in TacticCombinator::ALL {
+            let s = v.name();
+            assert_eq!(
+                TacticCombinator::from_name(s),
+                Some(*v),
+                "TacticCombinator::{:?}: name '{}' round-trip",
+                v,
+                s
+            );
+            assert_eq!(TacticCombinator::from_str(s), Some(*v));
+            assert_eq!(v.as_str(), v.name());
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        assert!(TacticCombinator::from_name("__bogus__").is_none());
+
+        // Legacy `all()` array stays in lockstep with `ALL` slice.
+        let arr = TacticCombinator::all();
+        assert_eq!(arr.len(), TacticCombinator::ALL.len());
+        for (i, v) in TacticCombinator::ALL.iter().enumerate() {
+            assert_eq!(arr[i], *v);
+        }
+
+        // Category partition: 2 Identity + 3 Composition + 4 Control
+        // + 4 Focus + 2 Forward = 15.
+        let mut counts = [0usize; 5];
+        for v in TacticCombinator::ALL {
+            let i = match v.category() {
+                CombinatorCategory::Identity => 0,
+                CombinatorCategory::Composition => 1,
+                CombinatorCategory::Control => 2,
+                CombinatorCategory::Focus => 3,
+                CombinatorCategory::Forward => 4,
+            };
+            counts[i] += 1;
+        }
+        assert_eq!(counts, [2, 3, 4, 4, 2]);
+        assert_eq!(counts.iter().sum::<usize>(), 15);
+
+        // Spot pins on critical category assignments.
+        assert_eq!(
+            TacticCombinator::Skip.category(),
+            CombinatorCategory::Identity
+        );
+        assert_eq!(
+            TacticCombinator::FirstOf.category(),
+            CombinatorCategory::Composition
+        );
+        assert_eq!(
+            TacticCombinator::Solve.category(),
+            CombinatorCategory::Control
+        );
+        assert_eq!(
+            TacticCombinator::Have.category(),
+            CombinatorCategory::Forward
+        );
+    }
+
+    #[test]
+    fn meta_pin_combinator_category_round_trip_unique() {
+        assert_eq!(CombinatorCategory::ALL.len(), 5);
+        for v in CombinatorCategory::ALL {
+            let s = v.name();
+            assert_eq!(CombinatorCategory::from_str(s), Some(*v));
+            assert_eq!(v.as_str(), v.name());
+        }
+        assert!(CombinatorCategory::from_str("__bogus__").is_none());
     }
 }

@@ -56,14 +56,73 @@ pub enum HygieneSeverity {
     Error,
 }
 
+/// Per-variant projection for [`HygieneSeverity`].
+///
+/// `name` matches the standard diagnostic-severity wire form
+/// (`"info"` / `"warning"` / `"error"`). `is_blocking` flags
+/// `Error` — the only severity that aborts the hygiene-check
+/// pass; `Info` and `Warning` are advisory. `rank` is dense
+/// 0..=2 in increasing severity (Info=0 < Warning=1 < Error=2).
+#[derive(Debug, Clone, Copy)]
+pub struct HygieneSeverityMeta {
+    pub name: &'static str,
+    pub rank: u8,
+    pub is_blocking: bool,
+}
+
 impl HygieneSeverity {
-    /// Stable lower-case label for diagnostic surfaces.
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] =
+        &[Self::Info, Self::Warning, Self::Error];
+
+    pub const fn meta(self) -> HygieneSeverityMeta {
         match self {
-            HygieneSeverity::Info => "info",
-            HygieneSeverity::Warning => "warning",
-            HygieneSeverity::Error => "error",
+            Self::Info => HygieneSeverityMeta {
+                name: "info",
+                rank: 0,
+                is_blocking: false,
+            },
+            Self::Warning => HygieneSeverityMeta {
+                name: "warning",
+                rank: 1,
+                is_blocking: false,
+            },
+            Self::Error => HygieneSeverityMeta {
+                name: "error",
+                rank: 2,
+                is_blocking: true,
+            },
         }
+    }
+
+    /// Stable lower-case label for diagnostic surfaces.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a severity name back to the typed enum. Closes a drift
+    /// defect: previously `as_str` was present but no inverse
+    /// mapping existed.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Severity rank: Info=0 < Warning=1 < Error=2 (dense, strictly
+    /// monotone).
+    #[inline]
+    pub const fn rank(&self) -> u8 {
+        self.meta().rank
+    }
+
+    /// True for `Error` — the only blocking severity.
+    #[inline]
+    pub const fn is_blocking(&self) -> bool {
+        self.meta().is_blocking
     }
 }
 
@@ -580,5 +639,41 @@ mod tests {
     fn pass_with_custom_threshold_records_choice() {
         let p = HygieneRecheckPass::with_meta_classifier_threshold(10);
         assert_eq!(p.meta_classifier_threshold(), 10);
+    }
+
+    #[test]
+    fn meta_pin_hygiene_severity_round_trip_dense_rank_and_blocking_partition() {
+        assert_eq!(HygieneSeverity::ALL.len(), 3);
+        for v in HygieneSeverity::ALL {
+            let s = v.as_str();
+            assert_eq!(HygieneSeverity::from_str(s), Some(*v));
+        }
+        // Wire form (lowercase, matches standard
+        // diagnostic-severity convention).
+        assert_eq!(HygieneSeverity::Info.as_str(), "info");
+        assert_eq!(HygieneSeverity::Warning.as_str(), "warning");
+        assert_eq!(HygieneSeverity::Error.as_str(), "error");
+        // Dense rank 0..=2 in declaration order.
+        for (i, v) in HygieneSeverity::ALL.iter().enumerate() {
+            assert_eq!(v.rank() as usize, i);
+        }
+        // Strict monotonicity.
+        for w in HygieneSeverity::ALL.windows(2) {
+            assert!(w[0].rank() < w[1].rank());
+        }
+        // is_blocking partition: only Error blocks.
+        let blocking_count = HygieneSeverity::ALL
+            .iter()
+            .filter(|v| v.is_blocking())
+            .count();
+        assert_eq!(blocking_count, 1);
+        assert!(HygieneSeverity::Error.is_blocking());
+        assert!(!HygieneSeverity::Warning.is_blocking());
+        assert!(!HygieneSeverity::Info.is_blocking());
+        // Cross-pin: blocking ⇔ rank == max.
+        for v in HygieneSeverity::ALL {
+            assert_eq!(v.is_blocking(), v.rank() == 2);
+        }
+        assert!(HygieneSeverity::from_str("__bogus__").is_none());
     }
 }
