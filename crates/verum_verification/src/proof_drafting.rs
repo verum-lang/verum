@@ -166,15 +166,56 @@ pub enum SuggestionCategory {
     LlmProposal,
 }
 
+/// Per-variant projection for [`SuggestionCategory`]. `name` is the
+/// short display label used in IDE / REPL / CLI suggestion-bucket
+/// headers.
+#[derive(Debug, Clone, Copy)]
+pub struct SuggestionCategoryMeta {
+    pub name: &'static str,
+}
+
 impl SuggestionCategory {
-    pub fn name(self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::LemmaApplication,
+        Self::TacticInvocation,
+        Self::StateNavigation,
+        Self::Rewriting,
+        Self::LlmProposal,
+    ];
+
+    pub const fn meta(self) -> SuggestionCategoryMeta {
         match self {
-            SuggestionCategory::LemmaApplication => "lemma",
-            SuggestionCategory::TacticInvocation => "tactic",
-            SuggestionCategory::StateNavigation => "navigation",
-            SuggestionCategory::Rewriting => "rewrite",
-            SuggestionCategory::LlmProposal => "llm",
+            Self::LemmaApplication => SuggestionCategoryMeta { name: "lemma" },
+            Self::TacticInvocation => SuggestionCategoryMeta { name: "tactic" },
+            Self::StateNavigation => {
+                SuggestionCategoryMeta { name: "navigation" }
+            }
+            Self::Rewriting => SuggestionCategoryMeta { name: "rewrite" },
+            Self::LlmProposal => SuggestionCategoryMeta { name: "llm" },
         }
+    }
+
+    #[inline]
+    pub const fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a category label back to the typed enum. Closes a
+    /// drift defect: previously `name()` was present but no inverse
+    /// mapping existed, so a serialised suggestion-bucket label
+    /// could not be re-typed.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
     }
 }
 
@@ -965,5 +1006,29 @@ mod tests {
                 sug.snippet.as_str()
             );
         }
+    }
+
+    #[test]
+    fn meta_pin_suggestion_category_round_trip_unique() {
+        assert_eq!(SuggestionCategory::ALL.len(), 5);
+        for v in SuggestionCategory::ALL {
+            let s = v.name();
+            assert_eq!(SuggestionCategory::from_str(s), Some(*v));
+            assert_eq!(v.as_str(), v.name());
+        }
+        // Wire form (matches IDE/REPL/CLI suggestion-bucket headers).
+        assert_eq!(SuggestionCategory::LemmaApplication.name(), "lemma");
+        assert_eq!(SuggestionCategory::TacticInvocation.name(), "tactic");
+        assert_eq!(SuggestionCategory::StateNavigation.name(), "navigation");
+        assert_eq!(SuggestionCategory::Rewriting.name(), "rewrite");
+        assert_eq!(SuggestionCategory::LlmProposal.name(), "llm");
+        // Names are unique.
+        let names: Vec<&str> =
+            SuggestionCategory::ALL.iter().map(|v| v.name()).collect();
+        let mut dedup = names.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), names.len());
+        assert!(SuggestionCategory::from_str("__bogus__").is_none());
     }
 }
