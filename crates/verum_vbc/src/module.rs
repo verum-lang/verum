@@ -560,15 +560,47 @@ impl VbcModule {
         receiver_type: TypeId,
         bare_method: &str,
     ) -> Option<FunctionId> {
-        let type_name = self
-            .types
-            .iter()
-            .find(|t| t.id == receiver_type)
-            .and_then(|t| self.get_string(t.name))?;
-        let qualified = format!("{}.{}", type_name, bare_method);
-        // Use the qualified-form path of `find_function_by_name`
-        // (exact match + .qualified suffix match).
-        self.find_function_by_name(&qualified)
+        let descriptor = self.types.iter().find(|t| t.id == receiver_type)?;
+        if let Some(type_name) = self.get_string(descriptor.name) {
+            let qualified = format!("{}.{}", type_name, bare_method);
+            if let Some(id) = self.find_function_by_name(&qualified) {
+                return Some(id);
+            }
+        }
+        // Protocol-default-method fallback. When `<Type>.<method>`
+        // doesn't exist (e.g. `Range.collect` — `collect` is a
+        // default method on `Iterator`, not overridden by Range), walk
+        // the protocols this type implements and try
+        // `<ProtocolName>.<method>` for each. ProtocolId is an index
+        // into the same type table (protocols are types), so the name
+        // lookup uses the same shape as the receiver-type path.
+        let bare_suffix = format!(".{}", bare_method);
+        for protocol_impl in descriptor.protocols.iter() {
+            // Prefer the impl-block override: scan its method-id list
+            // for a function whose name ends with `.<bare_method>`.
+            for raw in protocol_impl.methods.iter().copied() {
+                if let Some(desc) = self.functions.get(raw as usize)
+                    && let Some(fname) = self.get_string(desc.name)
+                    && (fname == bare_method || fname.ends_with(&bare_suffix))
+                {
+                    return Some(FunctionId(raw));
+                }
+            }
+            // Fall back to the protocol's default method (declared on
+            // the protocol type itself, not the impl block).
+            let proto_name = self
+                .types
+                .iter()
+                .find(|t| t.id.0 == protocol_impl.protocol.0)
+                .and_then(|t| self.get_string(t.name));
+            if let Some(name) = proto_name {
+                let qualified = format!("{}.{}", name, bare_method);
+                if let Some(id) = self.find_function_by_name(&qualified) {
+                    return Some(id);
+                }
+            }
+        }
+        None
     }
 
     /// Adds a constant to the pool.

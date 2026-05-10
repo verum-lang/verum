@@ -426,7 +426,13 @@ fn cmp_int(a: Int, b: Int) -> Ordering {
 // Formatter
 // =============================================================================
 
-public fn format_semver(v: &SemVer) -> Text {
+/// Format a SemVer as a canonical RFC 2.0.0 string.
+///
+/// Provided under the canonical name `format` for ergonomic
+/// `mount core.base.semver.{format as semver_format}`. The
+/// `format_semver` alias is kept for backward compatibility with
+/// the older naming convention.
+public fn format(v: &SemVer) -> Text {
     let mut out: List<Byte> = [];
     push_u64(&mut out, v.major);
     out.push('.' as Byte);
@@ -443,6 +449,11 @@ public fn format_semver(v: &SemVer) -> Text {
         join_into(&mut out, &v.build_meta, '.' as Byte);
     }
     Text.from_utf8_unchecked(out.as_slice())
+}
+
+/// Backward-compatible alias for `format`.
+public fn format_semver(v: &SemVer) -> Text {
+    format(v)
 }
 
 // =============================================================================

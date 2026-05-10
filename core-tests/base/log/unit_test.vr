@@ -41,13 +41,13 @@ fn test_log_level_name_values() {
 
 @test
 fn test_log_record_new() {
-    let r = LogRecord.new(LogLevel.Info, "hello".to_text());
+    let r = LogRecord.new(LogLevel.Info, "hello".to_text(), []);
     assert_eq(r.message, "hello");
 }
 
 @test
 fn test_log_record_builder_chain() {
-    let r = LogRecord.new(LogLevel.Warn, "msg".to_text())
+    let r = LogRecord.new(LogLevel.Warn, "msg".to_text(), [])
         .with_module_path("foo::bar".to_text())
         .with_file("src/lib.rs".to_text())
         .with_line(42);

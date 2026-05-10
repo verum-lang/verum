@@ -129,11 +129,11 @@ type GlobPart is
 // Compile
 // =============================================================================
 
-public fn compile(pattern: &str) -> Result<GlobPattern, GlobError> {
+public fn compile(pattern: &Text) -> Result<GlobPattern, GlobError> {
     compile_with(pattern, true)
 }
 
-public fn compile_with(pattern: &str, case_sensitive: Bool) -> Result<GlobPattern, GlobError> {
+public fn compile_with(pattern: &Text, case_sensitive: Bool) -> Result<GlobPattern, GlobError> {
     let mut parts: List<GlobPart> = [];
     let b = pattern.as_bytes();
     let mut i: Int = 0;
@@ -223,7 +223,7 @@ fn parse_class(b: &[Byte], from: Int, case_sensitive: Bool) -> Result<(GlobPart,
 // =============================================================================
 
 /// One-shot convenience — compile + match.
-public fn matches(pattern: &str, path: &str) -> Bool {
+public fn matches(pattern: &Text, path: &Text) -> Bool {
     match compile(pattern) {
         Ok(p) => p.matches_path(path),
         Err(_) => false,
@@ -231,7 +231,7 @@ public fn matches(pattern: &str, path: &str) -> Bool {
 }
 
 implement GlobPattern {
-    public fn matches_path(&self, path: &str) -> Bool {
+    public fn matches_path(&self, path: &Text) -> Bool {
         let pb = path.as_bytes();
         let mut text_buf: List<Byte> = [];
         let mut i: Int = 0;

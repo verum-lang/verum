@@ -17,7 +17,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.primitives;
+module core.base.primitives;
 
 // Import intrinsics from specific submodules for reliable resolution
 // (glob re-exports via core.intrinsics may not propagate properly)
