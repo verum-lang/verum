@@ -9399,6 +9399,59 @@ impl VbcCodegen {
                                     None
                                 }
                             })
+                            .or_else(|| {
+                                // **Impl-self-type fallback** (closes the Maybe.cmp /
+                                // Result.cmp tag-drift bug): when the simple-name
+                                // cascade has fallen through every prior tier AND
+                                // `match_scrutinee_type` is None, but we are
+                                // compiling inside an `implement Trait for Type`
+                                // block, the impl's `self` type is the natural
+                                // disambiguator for variant lookup.  The
+                                // `compile_pattern_bind` for `match (self, other)
+                                // { (None, _) => …, … }` inside `Ord for Maybe<T>`
+                                // never propagates `Maybe` into
+                                // `match_scrutinee_type` for the outer tuple
+                                // scrutinee — `extract_expr_type_name(&Tuple)` has
+                                // no tuple-aware handler and returns `None`.
+                                //
+                                // Without this tier, the variant-lookup chain
+                                // bottoms out at the hash-of-name fallback below
+                                // (None → 144); the precompiled archive's
+                                // `Maybe.cmp` body emits `IsVar tag=144` and
+                                // runtime IsVar against a real Maybe value (tag
+                                // 0 or 1) never matches — the (Some, Some)
+                                // tail-arm fires on garbage payloads, surfacing
+                                // as "method 'cmp' not found on receiver of
+                                // runtime kind Float" because the recursive
+                                // `a.cmp(b)` call gets whatever bits ended up
+                                // in those registers.
+                                //
+                                // Reading `variable_type_names["self"]` recovers
+                                // the impl's nominal type (`extract_impl_type_name`
+                                // strips generics so the lookup name is `"Maybe"`,
+                                // which matches the variant-table key directly).
+                                // The qualified `<Type>.<Variant>` form was
+                                // already registered by `register_type_constructors`
+                                // — it was just the SIMPLE form that got wiped
+                                // by a subsequent collision; this tier picks up
+                                // the qualified entry that's still live.
+                                if let Some(self_type) =
+                                    self.ctx.variable_type_names.get("self")
+                                {
+                                    let base_type = self_type
+                                        .split('<')
+                                        .next()
+                                        .unwrap_or(self_type);
+                                    let simple = variant_name
+                                        .rsplit("::")
+                                        .next()
+                                        .unwrap_or(&variant_name);
+                                    self.ctx
+                                        .find_variant_by_type_and_name(base_type, simple)
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap_or_else(|| {
                                 variant_name
                                     .as_bytes()
