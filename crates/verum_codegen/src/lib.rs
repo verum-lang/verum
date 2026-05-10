@@ -265,9 +265,77 @@ pub enum OptimizationLevel {
     Aggressive = 3,
 }
 
+/// Per-variant projection for [`OptimizationLevel`].
+///
+/// `name` is the canonical kebab-case identifier; `cli_flag` is the
+/// `-O<N>` form used at the LLVM/clang invocation boundary; `level`
+/// is the dense u8 0..=3 used by both downstream LLVM and the
+/// compiler-options surface. The triple round-trips through itself:
+/// `from_str(x.name()) == Some(x)`, `from_u8(x.level()) == x`.
+#[derive(Debug, Clone, Copy)]
+pub struct OptimizationLevelMeta {
+    pub name: &'static str,
+    pub cli_flag: &'static str,
+    pub level: u8,
+}
+
+impl OptimizationLevel {
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::Less,
+        Self::Default,
+        Self::Aggressive,
+    ];
+
+    pub const fn meta(self) -> OptimizationLevelMeta {
+        match self {
+            Self::None => OptimizationLevelMeta {
+                name: "none",
+                cli_flag: "-O0",
+                level: 0,
+            },
+            Self::Less => OptimizationLevelMeta {
+                name: "less",
+                cli_flag: "-O1",
+                level: 1,
+            },
+            Self::Default => OptimizationLevelMeta {
+                name: "default",
+                cli_flag: "-O2",
+                level: 2,
+            },
+            Self::Aggressive => OptimizationLevelMeta {
+                name: "aggressive",
+                cli_flag: "-O3",
+                level: 3,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// `-O0` / `-O1` / `-O2` / `-O3` flag form.
+    #[inline]
+    pub const fn cli_flag(&self) -> &'static str {
+        self.meta().cli_flag
+    }
+}
+
 impl From<OptimizationLevel> for u8 {
     fn from(level: OptimizationLevel) -> u8 {
-        level as u8
+        level.meta().level
     }
 }
 
@@ -294,3 +362,62 @@ pub fn mlir_version() -> &'static str {
 
 /// Compiler version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::OptimizationLevel;
+
+    #[test]
+    fn optimization_level_round_trip_unique_and_dense_level() {
+        assert_eq!(OptimizationLevel::ALL.len(), 4);
+        for v in OptimizationLevel::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                OptimizationLevel::from_str(s),
+                Some(*v),
+                "OptimizationLevel::{:?}: name '{}' round-trip",
+                v,
+                s
+            );
+        }
+        assert!(OptimizationLevel::from_str("__not_an_opt_level__").is_none());
+
+        // Dense u8 level 0..=3 in declaration order.
+        for (i, v) in OptimizationLevel::ALL.iter().enumerate() {
+            let level: u8 = (*v).into();
+            assert_eq!(level as usize, i);
+        }
+        // u8 → enum round-trip for every level (saturates at
+        // Aggressive for >3 — preserved from legacy).
+        assert_eq!(
+            OptimizationLevel::from(0_u8),
+            OptimizationLevel::None
+        );
+        assert_eq!(
+            OptimizationLevel::from(3_u8),
+            OptimizationLevel::Aggressive
+        );
+        assert_eq!(
+            OptimizationLevel::from(99_u8),
+            OptimizationLevel::Aggressive,
+            "u8 saturates at Aggressive (legacy invariant)"
+        );
+
+        // CLI flag form.
+        assert_eq!(OptimizationLevel::None.cli_flag(), "-O0");
+        assert_eq!(OptimizationLevel::Less.cli_flag(), "-O1");
+        assert_eq!(OptimizationLevel::Default.cli_flag(), "-O2");
+        assert_eq!(OptimizationLevel::Aggressive.cli_flag(), "-O3");
+        // Cross-pin: cli_flag's last char matches the level digit.
+        for v in OptimizationLevel::ALL {
+            let level: u8 = (*v).into();
+            let flag = v.cli_flag();
+            assert_eq!(
+                flag.as_bytes().last().copied().map(|b| b - b'0'),
+                Some(level),
+                "cli_flag → level parity drift on {:?}",
+                v
+            );
+        }
+    }
+}

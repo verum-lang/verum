@@ -110,21 +110,62 @@ pub enum PanicStrategy {
     Abort,
 }
 
+/// Per-variant projection for [`PanicStrategy`].
+///
+/// `name` is the textual form accepted by `[runtime].panic` in
+/// `Verum.toml` and returned by `as_str` for diagnostic /
+/// build-cache output.
+#[derive(Debug, Clone, Copy)]
+pub struct PanicStrategyMeta {
+    pub name: &'static str,
+}
+
 impl PanicStrategy {
+    pub const ALL: &'static [Self] = &[Self::Unwind, Self::Abort];
+
+    pub const fn meta(self) -> PanicStrategyMeta {
+        match self {
+            Self::Unwind => PanicStrategyMeta { name: "unwind" },
+            Self::Abort => PanicStrategyMeta { name: "abort" },
+        }
+    }
+
+    /// Strict parse — returns `None` for unknown values. The
+    /// warn-and-default `from_manifest_text` is a separate, more
+    /// tolerant entry point.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical textual form. Closes a drift defect: previously the
+    /// manifest could be parsed but not re-emitted (no symmetric
+    /// `as_str`), so build caches and audit reports had to
+    /// re-implement the variant→string mapping.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
     /// Parse from the textual form used in `[runtime].panic`.
     /// Unknown values fall back to `Unwind` with a warning so a
-    /// typo doesn't silently switch panic semantics.
+    /// typo doesn't silently switch panic semantics. Backed by
+    /// `from_str` — this entry point adds the diagnostic and the
+    /// safe-default fallback.
     pub fn from_manifest_text(s: &str) -> Self {
-        match s {
-            "abort" => PanicStrategy::Abort,
-            "unwind" => PanicStrategy::Unwind,
-            other => {
+        match Self::from_str(s) {
+            Some(v) => v,
+            None => {
                 tracing::warn!(
                     "[runtime].panic: unknown value {:?} (expected \
                      \"unwind\" or \"abort\"); defaulting to Unwind",
-                    other
+                    s
                 );
-                PanicStrategy::Unwind
+                Self::Unwind
             }
         }
     }
@@ -4625,5 +4666,49 @@ mod tests {
             .with_nurseries_enabled(true);
         assert!(!config.futures_enabled);
         assert!(config.nurseries_enabled);
+    }
+
+    #[test]
+    fn meta_pin_panic_strategy_round_trip_and_manifest_default() {
+        assert_eq!(PanicStrategy::ALL.len(), 2);
+        // Strict from_str round-trip.
+        for v in PanicStrategy::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                PanicStrategy::from_str(s),
+                Some(*v),
+                "PanicStrategy::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Wire form (matches Verum.toml `[runtime].panic`).
+        assert_eq!(PanicStrategy::Unwind.as_str(), "unwind");
+        assert_eq!(PanicStrategy::Abort.as_str(), "abort");
+        assert!(PanicStrategy::from_str("__bogus__").is_none());
+
+        // from_manifest_text contract: known values agree with
+        // from_str; unknown values fall back to Unwind (the
+        // documented Verum.toml default) so a typo doesn't
+        // silently switch panic semantics.
+        assert_eq!(
+            PanicStrategy::from_manifest_text("unwind"),
+            PanicStrategy::Unwind
+        );
+        assert_eq!(
+            PanicStrategy::from_manifest_text("abort"),
+            PanicStrategy::Abort
+        );
+        assert_eq!(
+            PanicStrategy::from_manifest_text("ABORT"),
+            PanicStrategy::Unwind,
+            "case-sensitive: 'ABORT' is unknown → safe-default Unwind"
+        );
+        assert_eq!(
+            PanicStrategy::from_manifest_text(""),
+            PanicStrategy::Unwind
+        );
+        // Default matches the documented Verum.toml default.
+        assert_eq!(PanicStrategy::default(), PanicStrategy::Unwind);
     }
 }
