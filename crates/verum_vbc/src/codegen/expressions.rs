@@ -8801,7 +8801,28 @@ impl VbcCodegen {
         }
     }
 
-    /// Compile for-in loop for custom iterator types using explicit has_next()/next() calls.
+    /// Compile for-in loop for custom iterator types using the canonical
+    /// Verum `next() -> Maybe<T>` protocol shape.
+    ///
+    /// The Iterator protocol declared in `core.base.iterator` only carries
+    /// `fn next(&mut self) -> Maybe<Self.Item>` — there is no `has_next()`
+    /// method.  Iteration termination is signalled via `Maybe.None`.
+    /// The for-loop expands to:
+    ///
+    /// ```text
+    /// loop {
+    ///     let opt: Maybe<T> = iter.next();
+    ///     match opt {
+    ///         Some(elem) => { <body> }
+    ///         None => break;
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// At the bytecode level we use `GetTag` on the Maybe value to test
+    /// for the `None` tag (declaration-order tag 0 from
+    /// `MAYBE_VARIANT_LAYOUT`), exit the loop on match, and otherwise
+    /// project the `Some` payload via `GetVariantData` field 0.
     /// Works in both interpreter and AOT without special iterator dispatch.
     fn compile_for_custom_iterator(
         &mut self,
@@ -8813,7 +8834,7 @@ impl VbcCodegen {
         // Compile the iterator expression and store in a proper mutable variable.
         // This is critical: temp registers in alloca mode use stack slots, and
         // RefMut on a stack slot creates a pointer to the alloca (not the heap
-        // object). By defining a named variable, the &mut self in has_next/next
+        // object). By defining a named variable, the &mut self in next
         // correctly references the heap-allocated iterator object.
         let iter_val = self
             .compile_expr(iter)?
@@ -8827,35 +8848,18 @@ impl VbcCodegen {
 
         let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
 
-        let has_next_reg = self.ctx.alloc_temp();
+        let opt_reg = self.ctx.alloc_temp();
+        let tag_reg = self.ctx.alloc_temp();
         let elem_reg = self.ctx.alloc_temp();
-        let has_next_method = self.intern_string("has_next");
         let next_method = self.intern_string("next");
+        let none_tag = verum_common::well_known_types::maybe_none_tag();
 
         // Loop start
         self.ctx.define_label(&loop_ctx.continue_label);
 
-        // Call has_next(&self) -> Bool
+        // Call next(&mut self) -> Maybe<T>
         self.ctx.emit(Instruction::CallM {
-            dst: has_next_reg,
-            receiver: iter_reg,
-            method_id: has_next_method,
-            args: crate::instruction::RegRange {
-                start: Reg(0),
-                count: 0,
-            },
-        });
-
-        // Exit if has_next() returned false
-        self.ctx
-            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
-                cond: has_next_reg,
-                offset,
-            });
-
-        // Call next(&mut self) -> T
-        self.ctx.emit(Instruction::CallM {
-            dst: elem_reg,
+            dst: opt_reg,
             receiver: iter_reg,
             method_id: next_method,
             args: crate::instruction::RegRange {
@@ -8863,6 +8867,27 @@ impl VbcCodegen {
                 count: 0,
             },
         });
+
+        // Test for the `None` tag — exit loop if matched.
+        self.ctx.emit(Instruction::IsVar {
+            dst: tag_reg,
+            value: opt_reg,
+            tag: none_tag,
+        });
+        self.ctx
+            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpIf {
+                cond: tag_reg,
+                offset,
+            });
+
+        // Project the `Some` payload via GetVariantData field 0.
+        self.ctx.emit(Instruction::GetVariantData {
+            dst: elem_reg,
+            variant: opt_reg,
+            field: 0,
+        });
+
+        self.ctx.free_temp(tag_reg);
 
         // Bind pattern
         self.ctx.enter_scope();
@@ -8889,7 +8914,7 @@ impl VbcCodegen {
         self.ctx.exit_loop();
 
         self.ctx.free_temp(iter_reg);
-        self.ctx.free_temp(has_next_reg);
+        self.ctx.free_temp(opt_reg);
         self.ctx.free_temp(elem_reg);
 
         let result = self.ctx.alloc_temp();

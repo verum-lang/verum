@@ -509,7 +509,7 @@ implement Data {
     /// Convert to JSON string representation
     fn to_json(&self) -> Text {
         match self {
-            Data.Null => Text.from("null"),
+            Data.Null => "null".to_text(),
             Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
             Data.Int(i) => i.to_text(),
             Data.Float(f) => f.to_text(),
@@ -547,7 +547,7 @@ implement Data {
     /// Convert any value to text representation
     fn to_string(&self) -> Text {
         match self {
-            Data.Null => Text.from("null"),
+            Data.Null => "null".to_text(),
             Data.Bool(b) => b.to_text(),
             Data.Int(i) => i.to_text(),
             Data.Float(f) => f.to_text(),
@@ -565,7 +565,7 @@ implement Data {
         let indent_str = "  ".repeat(indent);
         let next_indent = "  ".repeat(indent + 1);
         match self {
-            Data.Null => Text.from("null"),
+            Data.Null => "null".to_text(),
             Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
             Data.Int(i) => i.to_text(),
             Data.Float(f) => f.to_text(),
@@ -851,7 +851,7 @@ implement JsonParser {
     }
 
     fn match_literal(&mut self, lit: &str) -> Bool {
-        let lit_text = Text.from(lit);
+        let lit_text = lit.to_text();
         let lit_len = lit_text.len();
         if self.pos + lit_len > self.input.len() {
             return false;
