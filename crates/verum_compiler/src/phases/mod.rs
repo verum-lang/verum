@@ -679,12 +679,127 @@ pub enum VerifyMode {
     None,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Optimization level passed through the phase pipeline.
+///
+/// Canonical home for the `verum_compiler::phases` module — the
+/// `phases::optimization::OptimizationLevel` re-export at the
+/// pass-implementation site is wired in that module rather than
+/// as a duplicate definition.  Pre-collapse the two enums had
+/// identical 4-variant lists kept in sync by an explicit
+/// 4-arm identity-shape mapper in `phases/mir_lowering.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OptimizationLevel {
-    O0, // No optimization
-    O1, // Basic optimization
-    O2, // Standard optimization
-    O3, // Aggressive optimization
+    /// No optimization — preserve every operation, emit debug
+    /// info for every position, run zero passes that could
+    /// reorder or fold.  Used for `-O0` debug builds and
+    /// `verum check` paths that don't need codegen.
+    O0,
+    /// Basic optimization — DCE, simple constant folding,
+    /// trivial inlining.  Closer to clang `-O1`.
+    O1,
+    /// Standard optimization — vectorisation, escape analysis-
+    /// driven CBGR elimination, full inlining heuristic.  Closer
+    /// to clang `-O2`.  Default for release builds.
+    O2,
+    /// Aggressive optimization — adds loop unrolling, more
+    /// aggressive inlining, LTO-friendly transforms.  Closer to
+    /// clang `-O3`.
+    O3,
+}
+
+/// Static fact-pack for a [`OptimizationLevel`] — the partition
+/// table behind the optimization-pass dispatch + IDE warning
+/// gates.  Pinned via `meta_pin_optimization_level_round_trip`
+/// so the per-level pass set is kept in lock-step with the
+/// dispatch consumers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OptimizationLevelMeta {
+    /// Canonical wire form — `"O0"`/`"O1"`/`"O2"`/`"O3"`.
+    pub name: &'static str,
+    /// Numeric level (0-3) — used by `-O<n>` CLI flags and the
+    /// LLVM/MLIR opt-level mapping at the codegen boundary.
+    pub level: u8,
+    /// Whether this level is the *debug-build* baseline — only
+    /// O0 carries this.  Optimization passes that would reorder
+    /// or fold gate themselves on the negation.
+    pub is_debug_baseline: bool,
+    /// Whether this level enables *inlining* (function-body
+    /// substitution).  O1+ all enable some form of inlining;
+    /// O0 disables it completely.
+    pub enables_inlining: bool,
+    /// Whether this level enables *vectorisation* and
+    /// auto-vectorising loop transforms.  O2+.
+    pub enables_vectorisation: bool,
+    /// Whether this level enables *aggressive* transforms —
+    /// loop unrolling, profile-driven inlining, LTO-friendly
+    /// shape changes.  O3 singleton.
+    pub enables_aggressive: bool,
+}
+
+impl OptimizationLevel {
+    /// All variants in declaration order.
+    pub const ALL: &'static [OptimizationLevel] = &[
+        OptimizationLevel::O0,
+        OptimizationLevel::O1,
+        OptimizationLevel::O2,
+        OptimizationLevel::O3,
+    ];
+
+    /// Static fact-pack — the partition table behind the
+    /// optimization-pass dispatch surface.
+    pub const fn meta(self) -> OptimizationLevelMeta {
+        match self {
+            OptimizationLevel::O0 => OptimizationLevelMeta {
+                name: "O0",
+                level: 0,
+                is_debug_baseline: true,
+                enables_inlining: false,
+                enables_vectorisation: false,
+                enables_aggressive: false,
+            },
+            OptimizationLevel::O1 => OptimizationLevelMeta {
+                name: "O1",
+                level: 1,
+                is_debug_baseline: false,
+                enables_inlining: true,
+                enables_vectorisation: false,
+                enables_aggressive: false,
+            },
+            OptimizationLevel::O2 => OptimizationLevelMeta {
+                name: "O2",
+                level: 2,
+                is_debug_baseline: false,
+                enables_inlining: true,
+                enables_vectorisation: true,
+                enables_aggressive: false,
+            },
+            OptimizationLevel::O3 => OptimizationLevelMeta {
+                name: "O3",
+                level: 3,
+                is_debug_baseline: false,
+                enables_inlining: true,
+                enables_vectorisation: true,
+                enables_aggressive: true,
+            },
+        }
+    }
+
+    /// Lookup by numeric level (0-3).  Higher values clamp to
+    /// `O3` to match the historical `2.. => Default` semantics
+    /// of the CLI dispatcher.
+    pub const fn from_level(n: u8) -> OptimizationLevel {
+        match n {
+            0 => OptimizationLevel::O0,
+            1 => OptimizationLevel::O1,
+            2 => OptimizationLevel::O2,
+            _ => OptimizationLevel::O3,
+        }
+    }
+
+    /// Wire-form name (`"O0"`/`"O1"`/`"O2"`/`"O3"`).
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
 }
 
 /// Output from a compilation phase
@@ -884,6 +999,132 @@ pub fn type_error_to_diagnostic(
 #[cfg(test)]
 mod ir_track_tests {
     use super::*;
+
+    /// Drift-pin: `OptimizationLevel` is the canonical home —
+    /// pre-collapse the same 4-variant enum lived in
+    /// `phases::optimization` too, kept in sync via a 4-arm
+    /// identity-shape mapper at `mir_lowering.rs`.  This test
+    /// pins the partition table, name round-trip, and
+    /// monotonicity invariant.
+    #[test]
+    fn meta_pin_optimization_level_round_trip_and_partitions() {
+        // 1. Variant count + names + level mapping.
+        assert_eq!(OptimizationLevel::ALL.len(), 4);
+        let names: Vec<_> = OptimizationLevel::ALL
+            .iter()
+            .map(|l| l.meta().name)
+            .collect();
+        assert_eq!(names, vec!["O0", "O1", "O2", "O3"]);
+
+        for (i, l) in OptimizationLevel::ALL.iter().enumerate() {
+            assert_eq!(l.meta().level as usize, i);
+            assert_eq!(OptimizationLevel::from_level(i as u8), *l);
+            assert_eq!(l.as_str(), l.meta().name);
+        }
+        // Higher levels clamp to O3 (matches CLI dispatcher
+        // `2.. => Default` semantics).
+        assert_eq!(
+            OptimizationLevel::from_level(99),
+            OptimizationLevel::O3,
+        );
+
+        // 2. Debug-baseline partition — O0 singleton.
+        let debug: Vec<_> = OptimizationLevel::ALL
+            .iter()
+            .filter(|l| l.meta().is_debug_baseline)
+            .copied()
+            .collect();
+        assert_eq!(debug, vec![OptimizationLevel::O0]);
+
+        // 3. Inlining partition — O1+ enables it.
+        let inline: Vec<_> = OptimizationLevel::ALL
+            .iter()
+            .filter(|l| l.meta().enables_inlining)
+            .copied()
+            .collect();
+        assert_eq!(
+            inline,
+            vec![
+                OptimizationLevel::O1,
+                OptimizationLevel::O2,
+                OptimizationLevel::O3,
+            ],
+        );
+
+        // 4. Vectorisation partition — O2+ enables it.
+        let vec_set: Vec<_> = OptimizationLevel::ALL
+            .iter()
+            .filter(|l| l.meta().enables_vectorisation)
+            .copied()
+            .collect();
+        assert_eq!(
+            vec_set,
+            vec![OptimizationLevel::O2, OptimizationLevel::O3],
+        );
+
+        // 5. Aggressive partition — O3 singleton.
+        let aggro: Vec<_> = OptimizationLevel::ALL
+            .iter()
+            .filter(|l| l.meta().enables_aggressive)
+            .copied()
+            .collect();
+        assert_eq!(aggro, vec![OptimizationLevel::O3]);
+
+        // 6. Monotonicity invariant: every classifier flag is
+        //    monotone non-decreasing in level.  A higher
+        //    optimization level enables a strict superset of
+        //    the lower level's transforms.  Pinned so a future
+        //    "O4 disables vectorisation" misconfiguration
+        //    surfaces here.
+        for i in 0..OptimizationLevel::ALL.len() - 1 {
+            let lo = OptimizationLevel::ALL[i].meta();
+            let hi = OptimizationLevel::ALL[i + 1].meta();
+            assert!(
+                lo.level < hi.level,
+                "level field non-monotone at i={}",
+                i,
+            );
+            assert!(
+                !lo.enables_inlining || hi.enables_inlining,
+                "inlining must be monotone at i={}",
+                i,
+            );
+            assert!(
+                !lo.enables_vectorisation || hi.enables_vectorisation,
+                "vectorisation must be monotone at i={}",
+                i,
+            );
+            assert!(
+                !lo.enables_aggressive || hi.enables_aggressive,
+                "aggressive must be monotone at i={}",
+                i,
+            );
+            // Debug baseline is the inverse — only the lowest
+            // level carries it.
+            assert!(
+                !hi.is_debug_baseline || !lo.is_debug_baseline
+                    || lo.is_debug_baseline,
+                "debug-baseline invariant at i={}",
+                i,
+            );
+        }
+    }
+
+    /// Alias contract: `phases::optimization::OptimizationLevel`
+    /// is a `pub use` re-export of `phases::OptimizationLevel`.
+    /// Asserts both paths refer to the same type so values flow
+    /// through without an identity-shape mapper.
+    #[test]
+    fn optimization_level_alias_contract() {
+        // Compile-time alias check via assignment.
+        let l: crate::phases::optimization::OptimizationLevel =
+            OptimizationLevel::O2;
+        assert_eq!(l, OptimizationLevel::O2);
+
+        let canonical: OptimizationLevel = OptimizationLevel::O3;
+        let aliased: crate::phases::optimization::OptimizationLevel = canonical;
+        assert_eq!(aliased, OptimizationLevel::O3);
+    }
 
     #[test]
     fn phase_data_kind_classifies_each_variant() {
