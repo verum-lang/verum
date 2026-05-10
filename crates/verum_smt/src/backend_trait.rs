@@ -499,14 +499,17 @@ impl SmtLogic {
         self.meta().name
     }
 
-    /// Parse SMT-LIB2 logic name. Closes a drift defect: previously
-    /// `as_str` was present but no inverse mapping existed, so a
-    /// caller receiving an SMT-LIB2 logic identifier (e.g. from a
-    /// `(set-logic ...)` round-trip or from solver-supplied output)
-    /// had no symmetric way to recover the typed enum.
+    /// Parse SMT-LIB2 logic name (case-insensitive — uppercases the
+    /// input before lookup). SMT-LIB2 logic identifiers are
+    /// uppercase-by-convention but solver-supplied or user-typed
+    /// identifiers may vary in case; absorbing the cvc5 backend's
+    /// historical case-insensitive behaviour keeps the canonical
+    /// surface strictly more accepting than any of the previous
+    /// duplicates this method replaced.
     pub fn from_str(s: &str) -> Option<Self> {
+        let upper = s.to_ascii_uppercase();
         for v in Self::ALL_LOGICS {
-            if v.meta().name == s {
+            if v.meta().name == upper.as_str() {
                 return Some(*v);
             }
         }
