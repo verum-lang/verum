@@ -1804,6 +1804,135 @@ pub enum Cvc5Value {
     Unknown,
 }
 
+/// Discriminator-only kind for [`Cvc5Value`].
+///
+/// Four of the variants carry payloads (a primitive datum or a
+/// generic term spelling); `Unknown` is unit-only. The kind enum
+/// is zero-sized so callers iterating the value-classification
+/// surface (telemetry / docs / dispatch tables) can iterate
+/// without supplying payload data. Same discriminator-Kind
+/// pattern as `RecheckReasonKind` / `CachedVerdictKind` /
+/// `CacheDecisionKind` / `KernelVerdictKind` / etc. across the
+/// verification crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Cvc5ValueKind {
+    Bool,
+    Int,
+    Real,
+    Term,
+    Unknown,
+}
+
+/// Per-kind projection for [`Cvc5ValueKind`].
+///
+/// `name` is the snake_case telemetry / log identifier.
+/// `is_numeric` flags `Int` / `Real` (the two arithmetic-typed
+/// model values); `is_definite` flags everything except `Unknown`
+/// (the four kinds where the solver returned a concrete witness).
+/// Cross-cutting: `is_numeric ⇒ is_definite` (every numeric value
+/// is also definite); `Unknown` is the unique non-definite kind.
+#[derive(Debug, Clone, Copy)]
+pub struct Cvc5ValueKindMeta {
+    pub name: &'static str,
+    pub is_numeric: bool,
+    pub is_definite: bool,
+}
+
+impl Cvc5ValueKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Bool,
+        Self::Int,
+        Self::Real,
+        Self::Term,
+        Self::Unknown,
+    ];
+
+    pub const fn meta(self) -> Cvc5ValueKindMeta {
+        match self {
+            Self::Bool => Cvc5ValueKindMeta {
+                name: "bool",
+                is_numeric: false,
+                is_definite: true,
+            },
+            Self::Int => Cvc5ValueKindMeta {
+                name: "int",
+                is_numeric: true,
+                is_definite: true,
+            },
+            Self::Real => Cvc5ValueKindMeta {
+                name: "real",
+                is_numeric: true,
+                is_definite: true,
+            },
+            Self::Term => Cvc5ValueKindMeta {
+                name: "term",
+                is_numeric: false,
+                is_definite: true,
+            },
+            Self::Unknown => Cvc5ValueKindMeta {
+                name: "unknown",
+                is_numeric: false,
+                is_definite: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Int` / `Real` — the arithmetic-typed model values.
+    #[inline]
+    pub const fn is_numeric(&self) -> bool {
+        self.meta().is_numeric
+    }
+
+    /// True for every kind except `Unknown` — the four kinds
+    /// where the solver returned a concrete witness.
+    #[inline]
+    pub const fn is_definite(&self) -> bool {
+        self.meta().is_definite
+    }
+}
+
+impl Cvc5Value {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> Cvc5ValueKind {
+        match self {
+            Self::Bool(_) => Cvc5ValueKind::Bool,
+            Self::Int(_) => Cvc5ValueKind::Int,
+            Self::Real(_, _) => Cvc5ValueKind::Real,
+            Self::Term(_) => Cvc5ValueKind::Term,
+            Self::Unknown => Cvc5ValueKind::Unknown,
+        }
+    }
+
+    /// True for `Int` / `Real` — the arithmetic-typed model values.
+    /// Backed by `kind().is_numeric()`.
+    #[inline]
+    pub fn is_numeric(&self) -> bool {
+        self.kind().is_numeric()
+    }
+
+    /// True for every variant except `Unknown` — the four variants
+    /// where the solver returned a concrete witness. Backed by
+    /// `kind().is_definite()`.
+    #[inline]
+    pub fn is_definite(&self) -> bool {
+        self.kind().is_definite()
+    }
+}
+
 /// Model extractor. Fields exposed through `Debug` and accessor methods
 /// so they remain live across both stub and FFI configurations.
 pub struct Cvc5Model {
@@ -2043,5 +2172,68 @@ mod meta_consolidation_pins {
         assert_eq!(SatResult::Sat.as_str(), "sat");
         assert_eq!(SmtLogic::from_str("qf_lia"), Some(SmtLogic::QF_LIA));
         assert_eq!(SmtLogic::from_str("ALL"), Some(SmtLogic::ALL));
+    }
+
+    #[test]
+    fn meta_pin_cvc5_value_kind_round_trip_and_definite_partition() {
+        use super::{Cvc5Value, Cvc5ValueKind};
+        assert_eq!(Cvc5ValueKind::ALL.len(), 5);
+        for k in Cvc5ValueKind::ALL {
+            let s = k.name();
+            assert_eq!(Cvc5ValueKind::from_str(s), Some(*k));
+        }
+        // Wire form (snake_case for telemetry).
+        assert_eq!(Cvc5ValueKind::Bool.name(), "bool");
+        assert_eq!(Cvc5ValueKind::Int.name(), "int");
+        assert_eq!(Cvc5ValueKind::Real.name(), "real");
+        assert_eq!(Cvc5ValueKind::Term.name(), "term");
+        assert_eq!(Cvc5ValueKind::Unknown.name(), "unknown");
+        // is_numeric partition: Int + Real = 2.
+        let numeric_count = Cvc5ValueKind::ALL
+            .iter()
+            .filter(|k| k.is_numeric())
+            .count();
+        assert_eq!(numeric_count, 2);
+        // is_definite partition: 4 (everything except Unknown).
+        let definite_count = Cvc5ValueKind::ALL
+            .iter()
+            .filter(|k| k.is_definite())
+            .count();
+        assert_eq!(definite_count, 4);
+        // Cross-cutting: is_numeric ⇒ is_definite (every numeric
+        // value is also definite).
+        for k in Cvc5ValueKind::ALL {
+            if k.is_numeric() {
+                assert!(
+                    k.is_definite(),
+                    "Cvc5ValueKind::{:?}: is_numeric ⇒ is_definite",
+                    k
+                );
+            }
+        }
+        // Unknown is the unique non-definite kind.
+        for k in Cvc5ValueKind::ALL {
+            assert_eq!(
+                !k.is_definite(),
+                *k == Cvc5ValueKind::Unknown,
+                "Unknown is the unique non-definite kind"
+            );
+        }
+        // Payload variant kind() agreement.
+        assert_eq!(Cvc5Value::Bool(true).kind(), Cvc5ValueKind::Bool);
+        assert_eq!(Cvc5Value::Int(42).kind(), Cvc5ValueKind::Int);
+        assert_eq!(Cvc5Value::Real(1, 2).kind(), Cvc5ValueKind::Real);
+        assert_eq!(
+            Cvc5Value::Term("x".to_string()).kind(),
+            Cvc5ValueKind::Term
+        );
+        assert_eq!(Cvc5Value::Unknown.kind(), Cvc5ValueKind::Unknown);
+        // Payload-side is_numeric / is_definite delegation.
+        assert!(Cvc5Value::Int(0).is_numeric());
+        assert!(Cvc5Value::Real(1, 1).is_numeric());
+        assert!(!Cvc5Value::Bool(true).is_numeric());
+        assert!(!Cvc5Value::Unknown.is_numeric());
+        assert!(Cvc5Value::Bool(true).is_definite());
+        assert!(!Cvc5Value::Unknown.is_definite());
     }
 }
