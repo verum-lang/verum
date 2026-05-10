@@ -460,6 +460,22 @@ pub struct InterpreterState {
     /// they have no concrete receiver type anyway.
     pub method_cache: HashMap<(u32, u32), crate::FunctionId>,
 
+    /// **Type-name → TypeId index** built once per loaded module so the
+    /// 163 `wrap_in_variant` / `alloc_record_n_fields` callsites in
+    /// `handlers/heap_helpers.rs` resolve in O(1) instead of doing a
+    /// linear scan of `module.types` (which can run hundreds of types
+    /// for stdlib-heavy programs) on every IO operation.  Filters out
+    /// `TypeKind::Protocol` entries so the index value is the
+    /// implementing record/sum-type, not the protocol declaration —
+    /// matches the pre-cache linear-scan semantics of
+    /// `lookup_type_id_by_name`.
+    ///
+    /// Key invariant: the index is populated at `with_config` and
+    /// extended at every `load_module` call.  Never goes stale because
+    /// `VbcModule` is `Arc`-shared and immutable post-load — TypeIds
+    /// inside a loaded module never change.
+    pub type_name_index: HashMap<String, crate::types::TypeId>,
+
     /// **String-constant singleton cache** (#93, parallels AOT
     /// `__rodata` Text globals from #92).
     ///
@@ -1124,6 +1140,44 @@ impl ContextStack {
 /// High-quality mixing function used to initialize other PRNGs.
 /// Matches the implementation in core/math/random.vr.
 #[inline]
+/// Build a `name → TypeId` index over every loaded module's type
+/// table.  Filters out `TypeKind::Protocol` so the value is the
+/// implementing record/sum-type (matches the pre-cache linear-scan
+/// semantics of `handlers/heap_helpers.rs::lookup_type_id_by_name`).
+///
+/// First-write-wins on collisions — preserves the iteration-order
+/// behaviour the linear scan exhibited.
+fn build_type_name_index(
+    modules: &HashMap<String, Arc<VbcModule>>,
+) -> HashMap<String, crate::types::TypeId> {
+    let mut index: HashMap<String, crate::types::TypeId> = HashMap::new();
+    for module in modules.values() {
+        extend_type_name_index(&mut index, module);
+    }
+    index
+}
+
+/// In-place merge for `build_type_name_index`.  Used by both the
+/// initial state construction and the `load_module` extension path
+/// so the linear-scan replacement remains coherent across mid-run
+/// module loads.
+fn extend_type_name_index(
+    index: &mut HashMap<String, crate::types::TypeId>,
+    module: &Arc<VbcModule>,
+) {
+    for ty in &module.types {
+        if matches!(ty.kind, crate::types::TypeKind::Protocol) {
+            continue;
+        }
+        let Some(name) = module.strings.get(ty.name) else {
+            continue;
+        };
+        // First-write-wins: don't clobber an entry an earlier-loaded
+        // module installed for the same simple name.
+        index.entry(name.to_string()).or_insert(ty.id);
+    }
+}
+
 fn splitmix64(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9e3779b97f4a7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -2377,6 +2431,7 @@ impl InterpreterState {
             );
         }
 
+        let type_name_index = build_type_name_index(&modules);
         Self {
             module,
             modules,
@@ -2397,6 +2452,7 @@ impl InterpreterState {
             gpu_shared_memory: None,
             gpu_shared_mem_offset: 0,
             method_cache: HashMap::new(),
+            type_name_index,
             string_const_cache: Vec::new(),
             stdout_buffer: String::new(),
             exception_handlers: ExceptionHandlerStack::new(),
@@ -2486,6 +2542,13 @@ impl InterpreterState {
 
     /// Loads an additional module.
     pub fn load_module(&mut self, module: Arc<VbcModule>) {
+        // Extend the type-name index with the new module's types so
+        // `lookup_type_id_by_name` keeps O(1) resolution after a
+        // mid-run module load.  First-write-wins on collisions —
+        // matches the linear-scan helper's iteration-order behaviour
+        // for the (rare) case where two loaded modules redeclare
+        // the same type name.
+        extend_type_name_index(&mut self.type_name_index, &module);
         self.modules.insert(module.name.clone(), module);
     }
 

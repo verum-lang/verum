@@ -62,15 +62,13 @@ use crate::value::Value;
 /// (variant rendering falls through the global tag-scan in
 /// `format_variant_for_print_depth`).
 pub(super) fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| {
-            state.module.strings.get(td.name) == Some(name)
-                && !matches!(td.kind, crate::types::TypeKind::Protocol)
-        })
-        .map(|td| td.id)
+    // O(1) HashMap lookup against `state.type_name_index`, populated
+    // once at `with_config` and extended at every `load_module`.
+    // Pre-cache, this helper did a linear scan of `state.module.types`
+    // on EVERY invocation — for the 163 stdlib-runtime callsites in
+    // this module on stdlib-heavy programs that equates to
+    // N_callsites × N_types per IO operation.
+    state.type_name_index.get(name).copied()
 }
 
 // ============================================================================
