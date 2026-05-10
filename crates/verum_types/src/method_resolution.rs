@@ -85,7 +85,13 @@ pub struct MethodResolution {
     pub type_substitutions: Map<Text, Type>,
 }
 
-/// Where a method was found
+/// Where a method was found.
+///
+/// Distinct from `verum_protocol_types::MethodSource` (which
+/// classifies a method's *origin within a protocol*: Explicit /
+/// Default / Inherited).  This enum classifies a method's
+/// *resolution path* during method-call type checking: which
+/// kind of impl block matched, plus auto-deref chaining.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MethodSource {
     /// From `implement Type { fn method(...) }` block
@@ -115,6 +121,114 @@ pub enum MethodSource {
         /// Name of the builtin (e.g., "primitive_add")
         name: Text,
     },
+}
+
+/// Discriminator for [`MethodSource`] (the
+/// method-resolution-path 4-variant — distinct from
+/// `verum_protocol_types::MethodSourceKind` which classifies the
+/// origin-within-a-protocol 3-variant taxonomy).  Zero-sized
+/// projection used by metrics / IDE consumers that need the
+/// resolution-path band without cloning the per-variant Text
+/// payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MethodSourceKind {
+    Inherent,
+    Protocol,
+    AutoDeref,
+    Builtin,
+}
+
+/// Per-variant projection for [`MethodSourceKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodSourceKindMeta {
+    /// Lower-snake-case wire form for telemetry.
+    pub name: &'static str,
+    /// Whether the method body lives in a *user-written impl
+    /// block* (Inherent + Protocol).  False for AutoDeref
+    /// (delegated to a wrapped MethodSource) and Builtin
+    /// (compiler-internal).
+    pub is_user_impl: bool,
+    /// Whether the resolution went through *protocol dispatch*
+    /// — Protocol singleton.  Distinct from Inherent which is
+    /// non-protocol direct dispatch.
+    pub is_protocol_dispatch: bool,
+    /// Whether the resolution chained through *auto-deref* —
+    /// AutoDeref singleton.  Pinned because callers that need
+    /// to inspect the chained inner source must branch on this.
+    pub is_chained: bool,
+    /// Whether the method is *compiler-internal* — Builtin
+    /// singleton.  Method bodies for these live in
+    /// `verum_vbc::intrinsics`, not in `.vr` source.
+    pub is_builtin: bool,
+}
+
+impl MethodSourceKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Inherent,
+        Self::Protocol,
+        Self::AutoDeref,
+        Self::Builtin,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> MethodSourceKindMeta {
+        match self {
+            MethodSourceKind::Inherent => MethodSourceKindMeta {
+                name: "inherent",
+                is_user_impl: true,
+                is_protocol_dispatch: false,
+                is_chained: false,
+                is_builtin: false,
+            },
+            MethodSourceKind::Protocol => MethodSourceKindMeta {
+                name: "protocol",
+                is_user_impl: true,
+                is_protocol_dispatch: true,
+                is_chained: false,
+                is_builtin: false,
+            },
+            MethodSourceKind::AutoDeref => MethodSourceKindMeta {
+                name: "auto_deref",
+                is_user_impl: false,
+                is_protocol_dispatch: false,
+                is_chained: true,
+                is_builtin: false,
+            },
+            MethodSourceKind::Builtin => MethodSourceKindMeta {
+                name: "builtin",
+                is_user_impl: false,
+                is_protocol_dispatch: false,
+                is_chained: false,
+                is_builtin: true,
+            },
+        }
+    }
+}
+
+impl MethodSource {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> MethodSourceKind {
+        match self {
+            MethodSource::Inherent { .. } => MethodSourceKind::Inherent,
+            MethodSource::Protocol { .. } => MethodSourceKind::Protocol,
+            MethodSource::AutoDeref { .. } => MethodSourceKind::AutoDeref,
+            MethodSource::Builtin { .. } => MethodSourceKind::Builtin,
+        }
+    }
+
+    /// Walk through any AutoDeref chain to the underlying
+    /// non-deref source.  Pinned via the
+    /// `meta_pin_method_source_resolved_kind` test that
+    /// `resolved_kind() != AutoDeref` for every input — the
+    /// chain always bottoms out at a non-deref leaf.
+    pub fn resolved_kind(&self) -> MethodSourceKind {
+        let mut cur = self;
+        while let MethodSource::AutoDeref { inner_source, .. } = cur {
+            cur = inner_source;
+        }
+        cur.kind()
+    }
 }
 
 /// Method resolution error
@@ -252,6 +366,154 @@ impl std::fmt::Display for MethodError {
 }
 
 impl std::error::Error for MethodError {}
+
+/// Discriminator for [`MethodError`] — zero-sized projection
+/// classifying the *failure-mode band* of a method-resolution
+/// error.  Used by metrics consumers and IDE quick-fix
+/// generators that branch on the failure kind without cloning
+/// the per-variant Type / Text payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MethodErrorKind {
+    MethodNotFound,
+    MutabilityMismatch,
+    AmbiguousMethod,
+    TypeInferenceFailed,
+    ProtocolBoundNotSatisfied,
+}
+
+/// Per-variant projection for [`MethodErrorKind`].  Classifier
+/// flags partition the five failure modes by:
+///   * *resolution stage* — name lookup, signature check,
+///     overload resolution, generics inference, bound check;
+///   * *IDE-actionable* — whether the error has a structured
+///     suggestion the IDE can render as a quick-fix;
+///   * *carries-suggestion* — whether the variant exposes a
+///     suggestion list payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodErrorKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// Resolution failed at the *name-lookup* stage — the
+    /// method name doesn't exist on the receiver type.
+    /// MethodNotFound singleton.
+    pub is_name_lookup_failure: bool,
+    /// Resolution found a method but its *signature* doesn't
+    /// match the call site (mutability or generic-bound
+    /// mismatch).  MutabilityMismatch + ProtocolBoundNotSatisfied.
+    pub is_signature_mismatch: bool,
+    /// Resolution found *multiple* methods and couldn't pick
+    /// one.  AmbiguousMethod singleton.  Pinned because the
+    /// IDE uses this to render a "pick which" picker.
+    pub is_ambiguity: bool,
+    /// Resolution failed at the *generic-inference* stage —
+    /// the type parameters couldn't be inferred from the call
+    /// shape.  TypeInferenceFailed singleton.
+    pub is_inference_failure: bool,
+    /// Whether the variant carries a *suggestions* payload
+    /// (typo-correction list).  MethodNotFound singleton —
+    /// the only failure mode that surfaces "did you mean X" UI.
+    pub carries_suggestions: bool,
+}
+
+impl MethodErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::MethodNotFound,
+        Self::MutabilityMismatch,
+        Self::AmbiguousMethod,
+        Self::TypeInferenceFailed,
+        Self::ProtocolBoundNotSatisfied,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> MethodErrorKindMeta {
+        match self {
+            MethodErrorKind::MethodNotFound => MethodErrorKindMeta {
+                name: "method_not_found",
+                is_name_lookup_failure: true,
+                is_signature_mismatch: false,
+                is_ambiguity: false,
+                is_inference_failure: false,
+                carries_suggestions: true,
+            },
+            MethodErrorKind::MutabilityMismatch => MethodErrorKindMeta {
+                name: "mutability_mismatch",
+                is_name_lookup_failure: false,
+                is_signature_mismatch: true,
+                is_ambiguity: false,
+                is_inference_failure: false,
+                carries_suggestions: false,
+            },
+            MethodErrorKind::AmbiguousMethod => MethodErrorKindMeta {
+                name: "ambiguous_method",
+                is_name_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_ambiguity: true,
+                is_inference_failure: false,
+                carries_suggestions: false,
+            },
+            MethodErrorKind::TypeInferenceFailed => MethodErrorKindMeta {
+                name: "type_inference_failed",
+                is_name_lookup_failure: false,
+                is_signature_mismatch: false,
+                is_ambiguity: false,
+                is_inference_failure: true,
+                carries_suggestions: false,
+            },
+            MethodErrorKind::ProtocolBoundNotSatisfied => MethodErrorKindMeta {
+                name: "protocol_bound_not_satisfied",
+                is_name_lookup_failure: false,
+                is_signature_mismatch: true,
+                is_ambiguity: false,
+                is_inference_failure: false,
+                carries_suggestions: false,
+            },
+        }
+    }
+}
+
+impl MethodError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> MethodErrorKind {
+        match self {
+            MethodError::MethodNotFound { .. } => MethodErrorKind::MethodNotFound,
+            MethodError::MutabilityMismatch { .. } => {
+                MethodErrorKind::MutabilityMismatch
+            }
+            MethodError::AmbiguousMethod { .. } => MethodErrorKind::AmbiguousMethod,
+            MethodError::TypeInferenceFailed { .. } => {
+                MethodErrorKind::TypeInferenceFailed
+            }
+            MethodError::ProtocolBoundNotSatisfied { .. } => {
+                MethodErrorKind::ProtocolBoundNotSatisfied
+            }
+        }
+    }
+
+    /// Returns the typo-correction suggestions for the
+    /// `MethodNotFound` band.  Decoupled from per-variant
+    /// matching via `meta().carries_suggestions`.
+    pub fn suggestions(&self) -> Option<&List<Text>> {
+        match self {
+            MethodError::MethodNotFound { suggestions, .. } => Some(suggestions),
+            _ => None,
+        }
+    }
+
+    /// Returns the source span if the variant carries one.
+    /// Every variant carries a `span: Maybe<Span>` field —
+    /// pinned so consumers can read it without per-variant
+    /// matching.
+    pub fn span(&self) -> Maybe<Span> {
+        match self {
+            MethodError::MethodNotFound { span, .. } => *span,
+            MethodError::MutabilityMismatch { span, .. } => *span,
+            MethodError::AmbiguousMethod { span, .. } => *span,
+            MethodError::TypeInferenceFailed { span, .. } => *span,
+            MethodError::ProtocolBoundNotSatisfied { span, .. } => *span,
+        }
+    }
+}
 
 /// Trait for method resolution
 ///
@@ -825,6 +1087,274 @@ fn is_similar(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `MethodSourceKind` discriminator projection
+    /// (the method-resolution-path 4-variant — distinct from
+    /// `verum_protocol_types::MethodSourceKind`).  Pins variant
+    /// count, four single-flag classifiers, the AutoDeref chain
+    /// resolution invariant, and the live-payload kind()
+    /// projection.
+    #[test]
+    fn meta_pin_method_source_kind_round_trip_and_partitions() {
+        // 1. Variant count + names + uniqueness.
+        assert_eq!(MethodSourceKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_user_impl — Inherent + Protocol.  AutoDeref
+        //    delegates to wrapped source; Builtin is compiler-
+        //    internal.
+        let user: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_user_impl)
+            .copied()
+            .collect();
+        assert_eq!(
+            user,
+            vec![MethodSourceKind::Inherent, MethodSourceKind::Protocol],
+        );
+
+        // 3. is_protocol_dispatch — Protocol singleton.
+        let pd: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_protocol_dispatch)
+            .copied()
+            .collect();
+        assert_eq!(pd, vec![MethodSourceKind::Protocol]);
+
+        // 4. is_chained — AutoDeref singleton.
+        let ch: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_chained)
+            .copied()
+            .collect();
+        assert_eq!(ch, vec![MethodSourceKind::AutoDeref]);
+
+        // 5. is_builtin — Builtin singleton.
+        let bi: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_builtin)
+            .copied()
+            .collect();
+        assert_eq!(bi, vec![MethodSourceKind::Builtin]);
+
+        // 6. is_protocol_dispatch ⇒ is_user_impl (protocol
+        //    dispatch always lands in a user-written impl
+        //    block, never in builtin or auto-deref).
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_protocol_dispatch || m.is_user_impl,
+                "{:?}: protocol-dispatch ⇒ user-impl",
+                k
+            );
+        }
+
+        // 7. is_chained ⊕ is_builtin (chaining and built-in are
+        //    disjoint — auto-deref delegates to a wrapped
+        //    source which itself can never be built-in
+        //    in the chain head).  More importantly, no variant
+        //    flips both.
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert!(!(m.is_chained && m.is_builtin), "{:?}: chained ⊕ builtin", k);
+        }
+
+        // 8. Live-payload kind() projection.
+        let inh = MethodSource::Inherent { type_name: Text::from("List") };
+        assert_eq!(inh.kind(), MethodSourceKind::Inherent);
+
+        let prot = MethodSource::Protocol {
+            protocol_name: Text::from("Eq"),
+            type_name: Text::from("Int"),
+        };
+        assert_eq!(prot.kind(), MethodSourceKind::Protocol);
+
+        let bi = MethodSource::Builtin { name: Text::from("primitive_add") };
+        assert_eq!(bi.kind(), MethodSourceKind::Builtin);
+    }
+
+    /// Drift-pin: `MethodSource::resolved_kind()` walks through
+    /// the AutoDeref chain to a non-AutoDeref leaf.  Pinned so
+    /// that no caller of `resolved_kind` ever observes
+    /// `MethodSourceKind::AutoDeref` — the chain always bottoms
+    /// out.
+    #[test]
+    fn meta_pin_method_source_resolved_kind() {
+        // Single layer: AutoDeref → Inherent.
+        let chain1 = MethodSource::AutoDeref {
+            through_type: Text::from("Heap"),
+            inner_source: Box::new(MethodSource::Inherent {
+                type_name: Text::from("List"),
+            }),
+        };
+        assert_eq!(chain1.resolved_kind(), MethodSourceKind::Inherent);
+        // The unresolved kind is still AutoDeref.
+        assert_eq!(chain1.kind(), MethodSourceKind::AutoDeref);
+
+        // Two layers: AutoDeref → AutoDeref → Builtin.
+        let chain2 = MethodSource::AutoDeref {
+            through_type: Text::from("Shared"),
+            inner_source: Box::new(MethodSource::AutoDeref {
+                through_type: Text::from("Heap"),
+                inner_source: Box::new(MethodSource::Builtin {
+                    name: Text::from("primitive_clone"),
+                }),
+            }),
+        };
+        assert_eq!(chain2.resolved_kind(), MethodSourceKind::Builtin);
+
+        // Non-deref leaf: resolved == kind.
+        for k in MethodSourceKind::ALL {
+            if *k == MethodSourceKind::AutoDeref {
+                continue;
+            }
+            let leaf = match k {
+                MethodSourceKind::Inherent => MethodSource::Inherent {
+                    type_name: Text::from("X"),
+                },
+                MethodSourceKind::Protocol => MethodSource::Protocol {
+                    protocol_name: Text::from("P"),
+                    type_name: Text::from("X"),
+                },
+                MethodSourceKind::Builtin => MethodSource::Builtin {
+                    name: Text::from("b"),
+                },
+                MethodSourceKind::AutoDeref => unreachable!(),
+            };
+            assert_eq!(leaf.resolved_kind(), leaf.kind());
+        }
+    }
+
+    /// Drift-pin: `MethodErrorKind` discriminator projection.
+    /// Pins the five resolution-stage classifiers, the
+    /// suggestion-bearing partition, and cross-cutting
+    /// invariants.
+    #[test]
+    fn meta_pin_method_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(MethodErrorKind::ALL.len(), 5);
+        let mut seen = std::collections::HashSet::new();
+        for k in MethodErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_name_lookup_failure — MethodNotFound singleton.
+        let nl: Vec<_> = MethodErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_name_lookup_failure)
+            .copied()
+            .collect();
+        assert_eq!(nl, vec![MethodErrorKind::MethodNotFound]);
+
+        // 3. is_signature_mismatch — MutabilityMismatch +
+        //    ProtocolBoundNotSatisfied (both found a method
+        //    but the signature didn't match).
+        let sm: Vec<_> = MethodErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_signature_mismatch)
+            .copied()
+            .collect();
+        assert_eq!(
+            sm,
+            vec![
+                MethodErrorKind::MutabilityMismatch,
+                MethodErrorKind::ProtocolBoundNotSatisfied,
+            ],
+        );
+
+        // 4. is_ambiguity — AmbiguousMethod singleton.
+        let am: Vec<_> = MethodErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_ambiguity)
+            .copied()
+            .collect();
+        assert_eq!(am, vec![MethodErrorKind::AmbiguousMethod]);
+
+        // 5. is_inference_failure — TypeInferenceFailed singleton.
+        let inf: Vec<_> = MethodErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_inference_failure)
+            .copied()
+            .collect();
+        assert_eq!(inf, vec![MethodErrorKind::TypeInferenceFailed]);
+
+        // 6. carries_suggestions — MethodNotFound singleton
+        //    (the only failure mode that surfaces "did you mean
+        //    X" UI).
+        let sug: Vec<_> = MethodErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_suggestions)
+            .copied()
+            .collect();
+        assert_eq!(sug, vec![MethodErrorKind::MethodNotFound]);
+
+        // 7. carries_suggestions ⇒ is_name_lookup_failure
+        //    (suggestions only meaningful when name lookup
+        //    failed — at other stages we already found a
+        //    method, just couldn't use it).
+        for k in MethodErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.carries_suggestions || m.is_name_lookup_failure,
+                "{:?}: suggestions ⇒ name-lookup-failure",
+                k
+            );
+        }
+
+        // 8. Every variant flips exactly one of the four
+        //    primary failure-mode classifiers
+        //    (name-lookup / signature / ambiguity / inference).
+        //    Perfect partition pin.  Note signature mismatch
+        //    has 2 variants, the others are singletons.
+        for k in MethodErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_name_lookup_failure as u32)
+                + (m.is_signature_mismatch as u32)
+                + (m.is_ambiguity as u32)
+                + (m.is_inference_failure as u32);
+            assert_eq!(
+                count, 1,
+                "{:?}: must flip exactly one failure-mode classifier",
+                k
+            );
+        }
+
+        // 9. Live-payload kind() + suggestions() + span()
+        //    projection.
+        let nf = MethodError::MethodNotFound {
+            receiver_type: Type::Int,
+            method_name: Text::from("frobnicate"),
+            span: Maybe::None,
+            suggestions: List::from(vec![Text::from("frobenius")]),
+        };
+        assert_eq!(nf.kind(), MethodErrorKind::MethodNotFound);
+        assert_eq!(nf.suggestions().unwrap().len(), 1);
+        assert!(matches!(nf.span(), Maybe::None));
+
+        let mm = MethodError::MutabilityMismatch {
+            method_name: Text::from("push"),
+            expected_mut: true,
+            actual_mut: false,
+            span: Maybe::None,
+        };
+        assert_eq!(mm.kind(), MethodErrorKind::MutabilityMismatch);
+        assert!(mm.suggestions().is_none());
+    }
 
     #[test]
     fn test_type_name_extraction() {
