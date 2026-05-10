@@ -489,6 +489,74 @@ pub enum ReferenceSource {
     Unknown,
 }
 
+/// Per-variant projection for [`ReferenceSource`].
+///
+/// `is_no_escape_default` carries the per-variant default for
+/// `ReferenceInfo::is_no_escape` — `LocalAlloca` is the only
+/// source that defaults to no-escape (matching `ReferenceInfo::
+/// local`); `Parameter` / `HeapLoad` / `Unknown` are conservatively
+/// treated as escaping. The constructors `local()` / `parameter()`
+/// / `unknown()` (legacy) preserve their semantics; the meta lifts
+/// the implicit per-source default into a structural field so
+/// adding a new source forces an explicit policy decision.
+#[derive(Debug, Clone, Copy)]
+pub struct ReferenceSourceMeta {
+    pub name: &'static str,
+    pub is_no_escape_default: bool,
+}
+
+impl ReferenceSource {
+    pub const ALL: &'static [Self] = &[
+        Self::LocalAlloca,
+        Self::Parameter,
+        Self::HeapLoad,
+        Self::Unknown,
+    ];
+
+    pub const fn meta(self) -> ReferenceSourceMeta {
+        match self {
+            Self::LocalAlloca => ReferenceSourceMeta {
+                name: "local_alloca",
+                is_no_escape_default: true,
+            },
+            Self::Parameter => ReferenceSourceMeta {
+                name: "parameter",
+                is_no_escape_default: false,
+            },
+            Self::HeapLoad => ReferenceSourceMeta {
+                name: "heap_load",
+                is_no_escape_default: false,
+            },
+            Self::Unknown => ReferenceSourceMeta {
+                name: "unknown",
+                is_no_escape_default: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Default for `ReferenceInfo::is_no_escape` when constructed
+    /// from this source. `LocalAlloca` is the only no-escape
+    /// default; conservative escape policy applies to the rest.
+    #[inline]
+    pub const fn is_no_escape_default(&self) -> bool {
+        self.meta().is_no_escape_default
+    }
+}
+
 impl ReferenceInfo {
     /// Create info for a local reference (can be optimized).
     pub fn local() -> Self {
@@ -2504,5 +2572,53 @@ mod tests {
         dist.tier2 = 2;
         assert_eq!(dist.total(), 10);
         assert_eq!(dist.elimination_rate(), 0.5); // (3+2) / 10 = 0.5
+    }
+
+    #[test]
+    fn meta_pin_reference_source_round_trip_and_no_escape_default_partition() {
+        assert_eq!(ReferenceSource::ALL.len(), 4);
+        for v in ReferenceSource::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                ReferenceSource::from_str(s),
+                Some(*v),
+                "ReferenceSource::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // is_no_escape_default partition: LocalAlloca is the only
+        // source that defaults to no-escape (matches `ReferenceInfo::
+        // local`); the rest are conservatively escaping.
+        let no_escape_count = ReferenceSource::ALL
+            .iter()
+            .filter(|v| v.is_no_escape_default())
+            .count();
+        assert_eq!(no_escape_count, 1);
+        assert!(ReferenceSource::LocalAlloca.is_no_escape_default());
+        assert!(!ReferenceSource::Parameter.is_no_escape_default());
+        assert!(!ReferenceSource::HeapLoad.is_no_escape_default());
+        assert!(!ReferenceSource::Unknown.is_no_escape_default());
+        // Cross-pin: the per-source default agrees with the
+        // legacy constructors. `ReferenceInfo::local()` constructs
+        // LocalAlloca with `is_no_escape: true`; the other
+        // constructors set `is_no_escape: false`.
+        assert_eq!(
+            ReferenceInfo::local().is_no_escape,
+            ReferenceSource::LocalAlloca.is_no_escape_default()
+        );
+        assert_eq!(
+            ReferenceInfo::parameter().is_no_escape,
+            ReferenceSource::Parameter.is_no_escape_default()
+        );
+        assert_eq!(
+            ReferenceInfo::unknown().is_no_escape,
+            ReferenceSource::Unknown.is_no_escape_default()
+        );
+        // Wire-form spot pin: HeapLoad uses snake_case despite the
+        // CamelCase variant name (matches the rest of the codebase
+        // serde rename convention).
+        assert_eq!(ReferenceSource::HeapLoad.as_str(), "heap_load");
+        assert_eq!(ReferenceSource::LocalAlloca.as_str(), "local_alloca");
     }
 }

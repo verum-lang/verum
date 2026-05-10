@@ -244,6 +244,84 @@ pub enum RefTier {
     Tier2,
 }
 
+/// Per-variant projection for [`RefTier`].
+///
+/// `name` is the canonical short identifier used at the IR-comment /
+/// audit-report wire form; `level` is the dense u8 0..=2 (matches
+/// the documentation's "Tier 0/1/2" naming). `requires_runtime_check`
+/// flags Tier0 — the only tier that emits the ~15ns CBGR check at
+/// runtime; both Tier1 and Tier2 are zero-overhead, but only Tier1
+/// is *proven* safe (Tier2 is unsafe-asserted).
+#[derive(Debug, Clone, Copy)]
+pub struct RefTierMeta {
+    pub name: &'static str,
+    pub level: u8,
+    pub requires_runtime_check: bool,
+    pub is_proven_safe: bool,
+}
+
+impl RefTier {
+    pub const ALL: &'static [Self] = &[Self::Tier0, Self::Tier1, Self::Tier2];
+
+    pub const fn meta(self) -> RefTierMeta {
+        match self {
+            Self::Tier0 => RefTierMeta {
+                name: "tier0",
+                level: 0,
+                requires_runtime_check: true,
+                is_proven_safe: false,
+            },
+            Self::Tier1 => RefTierMeta {
+                name: "tier1",
+                level: 1,
+                requires_runtime_check: false,
+                is_proven_safe: true,
+            },
+            Self::Tier2 => RefTierMeta {
+                name: "tier2",
+                level: 2,
+                requires_runtime_check: false,
+                is_proven_safe: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical short name (`"tier0"` / `"tier1"` / `"tier2"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Dense u8 level 0..=2.
+    #[inline]
+    pub const fn level(&self) -> u8 {
+        self.meta().level
+    }
+
+    /// True for Tier0 — the only tier that emits a runtime CBGR
+    /// check.
+    #[inline]
+    pub const fn requires_runtime_check(&self) -> bool {
+        self.meta().requires_runtime_check
+    }
+
+    /// True for Tier1 (compiler-proven safe). Tier2 is also
+    /// zero-overhead but is unsafe-asserted, not proven.
+    #[inline]
+    pub const fn is_proven_safe(&self) -> bool {
+        self.meta().is_proven_safe
+    }
+}
+
 impl Default for RefTier {
     fn default() -> Self {
         RefTier::Tier0
@@ -266,3 +344,52 @@ pub const THIN_REF_SIZE: usize = verum_common::layout::THIN_REF_SIZE as usize;
 /// the single source of truth. `verum_codegen::llvm::cbgr` constructs
 /// the struct with all 6 fields, matching the stdlib declaration.
 pub const FAT_REF_SIZE: usize = verum_common::layout::FAT_REF_SIZE as usize;
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::RefTier;
+
+    #[test]
+    fn ref_tier_round_trip_unique_dense_level_and_classification() {
+        assert_eq!(RefTier::ALL.len(), 3);
+        for v in RefTier::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                RefTier::from_str(s),
+                Some(*v),
+                "RefTier::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Dense u8 level 0..=2 in declaration order (matches the
+        // documentation's "Tier 0/1/2" naming).
+        for (i, v) in RefTier::ALL.iter().enumerate() {
+            assert_eq!(v.level() as usize, i);
+        }
+        // Classification — pinned cross-cutting invariants:
+        //   * Tier0 is the only tier requiring a runtime check.
+        //   * Tier1 is the only tier proven safe.
+        //   * Tier2 is zero-overhead but unsafe-asserted (neither
+        //     proven safe nor runtime-checked).
+        for v in RefTier::ALL {
+            let expected_runtime = matches!(v, RefTier::Tier0);
+            let expected_proven = matches!(v, RefTier::Tier1);
+            assert_eq!(v.requires_runtime_check(), expected_runtime);
+            assert_eq!(v.is_proven_safe(), expected_proven);
+            // Cross-pin: requires_runtime_check ⇒ ¬is_proven_safe;
+            // any zero-overhead tier (Tier1 / Tier2) is
+            // ¬requires_runtime_check.
+            if v.requires_runtime_check() {
+                assert!(!v.is_proven_safe(),
+                    "RefTier::{:?}: runtime-checked tier cannot be proven safe", v);
+            }
+        }
+        // Default is Tier0 (the safe-but-slow conservative tier).
+        assert_eq!(RefTier::default(), RefTier::Tier0);
+        // Wire-form spot pins.
+        assert_eq!(RefTier::Tier0.as_str(), "tier0");
+        assert_eq!(RefTier::Tier1.as_str(), "tier1");
+        assert_eq!(RefTier::Tier2.as_str(), "tier2");
+    }
+}
