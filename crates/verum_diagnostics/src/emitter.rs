@@ -246,12 +246,10 @@ impl Emitter {
     // Internal: Convert diagnostic to JSON representation
     fn diagnostic_to_json(&self, diagnostic: &Diagnostic) -> JsonDiagnostic {
         JsonDiagnostic {
-            level: match diagnostic.severity() {
-                Severity::Error => "error".into(),
-                Severity::Warning => "warning".into(),
-                Severity::Note => "note".into(),
-                Severity::Help => "help".into(),
-            },
+            // Lift the per-variant name string to the Severity::meta()
+            // table — single source of truth shared with Display, the
+            // priority sort key, and the human-emitter band lookup.
+            level: diagnostic.severity().as_str().into(),
             code: diagnostic.code().map(|s| s.into()),
             message: diagnostic.message().to_string(),
             spans: diagnostic
@@ -428,12 +426,10 @@ impl Diagnostic {
             )
         };
 
-        let severity = match self.severity() {
-            Severity::Error => 1,
-            Severity::Warning => 2,
-            Severity::Note => 3,
-            Severity::Help => 4,
-        };
+        // LSP DiagnosticSeverity numbering matches the Severity::
+        // meta().priority sort key (1=Error, 2=Warning, 3=Note, 4=Help)
+        // — pinned via meta_pin_severity_priority_inverse_of_ord.
+        let severity = u32::from(self.severity().priority());
 
         let related_information = self
             .secondary_labels()

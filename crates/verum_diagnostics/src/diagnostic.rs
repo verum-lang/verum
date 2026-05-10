@@ -11,9 +11,17 @@ use verum_common::{List, Text};
 // Use LineColSpan from verum_common for diagnostics
 use verum_common::span::LineColSpan;
 
-/// Severity level of a diagnostic
-/// Ordered from least to most severe for PartialOrd/Ord
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Severity level of a diagnostic.
+///
+/// Variant order (Help < Note < Warning < Error) is the ascending
+/// severity ladder consumed by `PartialOrd`/`Ord` derives — used
+/// by aggregators that surface "the highest severity in this
+/// session".  The numeric `priority` field on [`SeverityMeta`]
+/// runs in the *opposite* direction (1 = Error, 4 = Help) to
+/// match the historical emitter sort key (errors first); the two
+/// orderings are inverse and the relationship is pinned in
+/// `meta_pin_severity_priority_inverse_of_ord`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Severity {
     /// Helpful suggestion for fixing an issue
     Help,
@@ -25,14 +33,111 @@ pub enum Severity {
     Error,
 }
 
+/// Per-variant projection for [`Severity`].  Single source of
+/// truth replacing the five hardcoded match arms that previously
+/// scattered the per-variant data across `diagnostic.rs` (Display
+/// impl, is_* predicates, accumulator-bucket dispatch) and
+/// `emitter.rs` (name strings, priority u8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeverityMeta {
+    /// Canonical lower-case wire form — matches the `Display`
+    /// impl output and the JSON emitter's `severity` field.
+    pub name: &'static str,
+    /// Sort key for emitters: 1 (Error) → 4 (Help).  Lower
+    /// values surface earlier; inverse polarity to `Ord` on the
+    /// enum itself, pinned via the drift test.
+    pub priority: u8,
+    /// Whether this severity *blocks* compilation — Error
+    /// singleton.  Distinguishes hard fail from advisory bands.
+    pub is_blocking: bool,
+    /// Whether this severity reports a *problem* in user code
+    /// (Error + Warning).  False for the *informational* band
+    /// (Note + Help) which exists to add context rather than to
+    /// flag an issue.  Pinned partition.
+    pub is_problem: bool,
+    /// Whether this severity is *advisory* (Note + Help) — the
+    /// negation of `is_problem`.  Carried for explicit
+    /// classifier-side dispatch.
+    pub is_advisory: bool,
+}
+
+impl Severity {
+    /// All variants in `Display`-name-priority order — Error
+    /// first so emitters that sort by ALL[i] ordering surface
+    /// errors before lower-priority noise.
+    pub const ALL: &'static [Self] = &[
+        Self::Error,
+        Self::Warning,
+        Self::Note,
+        Self::Help,
+    ];
+
+    /// Static fact-pack — single source of truth for the
+    /// per-variant dispatch surface.
+    pub const fn meta(self) -> SeverityMeta {
+        match self {
+            Severity::Error => SeverityMeta {
+                name: "error",
+                priority: 1,
+                is_blocking: true,
+                is_problem: true,
+                is_advisory: false,
+            },
+            Severity::Warning => SeverityMeta {
+                name: "warning",
+                priority: 2,
+                is_blocking: false,
+                is_problem: true,
+                is_advisory: false,
+            },
+            Severity::Note => SeverityMeta {
+                name: "note",
+                priority: 3,
+                is_blocking: false,
+                is_problem: false,
+                is_advisory: true,
+            },
+            Severity::Help => SeverityMeta {
+                name: "help",
+                priority: 4,
+                is_blocking: false,
+                is_problem: false,
+                is_advisory: true,
+            },
+        }
+    }
+
+    /// Canonical lower-case wire form via `meta()`.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Inverse of `as_str` — recover the severity from the wire
+    /// form.  Returns `None` for unknown strings.
+    pub fn from_str(s: &str) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Some(v);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Emitter sort key (1=Error, 2=Warning, 3=Note, 4=Help).
+    /// Inverse polarity to `Ord` on the enum itself.
+    #[inline]
+    pub const fn priority(self) -> u8 {
+        self.meta().priority
+    }
+}
+
 impl fmt::Display for Severity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Severity::Error => write!(f, "error"),
-            Severity::Warning => write!(f, "warning"),
-            Severity::Note => write!(f, "note"),
-            Severity::Help => write!(f, "help"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -857,6 +962,141 @@ impl DiagnosticCollector {
                 }
             })
         });
+    }
+}
+
+#[cfg(test)]
+mod severity_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `Severity::meta()` is the single source of
+    /// truth for the per-variant dispatch surface previously
+    /// scattered across 5 hardcoded match arms.  Pins variant
+    /// count, name partition, priority partition, classifier
+    /// flags, and the cross-cutting invariants binding them.
+    #[test]
+    fn meta_pin_severity_round_trip_and_partitions() {
+        // 1. Variant count + name uniqueness + round-trip.
+        assert_eq!(Severity::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for s in Severity::ALL {
+            let m = s.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase()),
+                "{:?}: name not lowercase: {}",
+                s,
+                m.name,
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", s);
+            assert_eq!(Severity::from_str(m.name), Some(*s));
+            assert_eq!(s.as_str(), m.name);
+        }
+        assert_eq!(Severity::from_str("nope"), None);
+
+        // 2. Display impl agrees with as_str().
+        for s in Severity::ALL {
+            assert_eq!(format!("{}", s), s.as_str());
+        }
+
+        // 3. Priority is dense 1..=4 + unique.
+        let mut priorities: Vec<u8> = Severity::ALL.iter().map(|s| s.priority()).collect();
+        priorities.sort();
+        assert_eq!(priorities, vec![1, 2, 3, 4]);
+
+        // 4. is_blocking — Error singleton.
+        let blocking: Vec<_> = Severity::ALL
+            .iter()
+            .filter(|s| s.meta().is_blocking)
+            .copied()
+            .collect();
+        assert_eq!(blocking, vec![Severity::Error]);
+
+        // 5. is_problem — Error + Warning.
+        let problems: Vec<_> = Severity::ALL
+            .iter()
+            .filter(|s| s.meta().is_problem)
+            .copied()
+            .collect();
+        assert_eq!(problems, vec![Severity::Error, Severity::Warning]);
+
+        // 6. is_advisory — Note + Help.
+        let advisory: Vec<_> = Severity::ALL
+            .iter()
+            .filter(|s| s.meta().is_advisory)
+            .copied()
+            .collect();
+        assert_eq!(advisory, vec![Severity::Note, Severity::Help]);
+
+        // 7. Cross-cutting: is_problem ⊕ is_advisory (every
+        //    severity is exactly one of the two — perfect
+        //    partition over the 4 variants).
+        for s in Severity::ALL {
+            let m = s.meta();
+            assert!(
+                m.is_problem ^ m.is_advisory,
+                "{:?}: must flip exactly one of is_problem / is_advisory",
+                s
+            );
+        }
+
+        // 8. is_blocking ⇒ is_problem (a blocking severity is
+        //    necessarily problem-class — a friendly hint can't
+        //    block compilation).
+        for s in Severity::ALL {
+            let m = s.meta();
+            assert!(
+                !m.is_blocking || m.is_problem,
+                "{:?}: blocking ⇒ problem",
+                s
+            );
+        }
+    }
+
+    /// Drift-pin: `priority()` runs in *inverse* polarity to the
+    /// derived `Ord` on the enum.  Severity::Error is the
+    /// highest by `Ord` (rightmost variant) but priority 1 (the
+    /// lowest = highest emit precedence).  Pinned so a future
+    /// reorder of either ordering surfaces here.
+    #[test]
+    fn meta_pin_severity_priority_inverse_of_ord() {
+        // Variant order ascending: Help < Note < Warning < Error.
+        let by_ord = {
+            let mut v = Severity::ALL.to_vec();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            by_ord,
+            vec![
+                Severity::Help,
+                Severity::Note,
+                Severity::Warning,
+                Severity::Error,
+            ],
+        );
+
+        // Priority ascending: Error(1) < Warning(2) < Note(3) < Help(4).
+        let by_priority = {
+            let mut v = Severity::ALL.to_vec();
+            v.sort_by_key(|s| s.priority());
+            v
+        };
+        assert_eq!(
+            by_priority,
+            vec![
+                Severity::Error,
+                Severity::Warning,
+                Severity::Note,
+                Severity::Help,
+            ],
+        );
+
+        // The two orderings are reverse of each other — a
+        // sequence sorted ascending by Ord and then reversed
+        // matches a sequence sorted ascending by priority.
+        let mut reversed_ord = by_ord.clone();
+        reversed_ord.reverse();
+        assert_eq!(reversed_ord, by_priority);
     }
 }
 
