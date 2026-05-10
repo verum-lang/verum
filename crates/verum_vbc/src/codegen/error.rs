@@ -199,12 +199,23 @@ impl CodegenError {
 pub trait CodegenOptionExt<T> {
     /// Convert `None` into a `CodegenError::Internal(<msg>)`.
     fn or_internal(self, msg: &str) -> CodegenResult<T>;
+
+    /// Like [`or_internal`](Self::or_internal) but the message is
+    /// produced lazily by `f` — only invoked on the None error path.
+    /// Use when the message contains `format!()` interpolation that
+    /// would be wasted work on the (overwhelmingly common) Some path.
+    fn or_internal_else<F: FnOnce() -> String>(self, f: F) -> CodegenResult<T>;
 }
 
 impl<T> CodegenOptionExt<T> for Option<T> {
     #[inline]
     fn or_internal(self, msg: &str) -> CodegenResult<T> {
         self.ok_or_else(|| CodegenError::internal(msg))
+    }
+
+    #[inline]
+    fn or_internal_else<F: FnOnce() -> String>(self, f: F) -> CodegenResult<T> {
+        self.ok_or_else(|| CodegenError::internal(f()))
     }
 }
 

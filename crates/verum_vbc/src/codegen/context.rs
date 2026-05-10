@@ -9,7 +9,7 @@
 //! - Defer stack for cleanup
 //! - CBGR tier decisions for reference operations
 
-use super::error::{CodegenError, CodegenResult};
+use super::error::{CodegenError, CodegenOptionExt, CodegenResult};
 use super::registers::{RegisterAllocator, RegisterInfo};
 use crate::cbgr::DereferenceCodegen;
 use crate::instruction::{Instruction, Reg};
@@ -1311,7 +1311,7 @@ impl CodegenContext {
     ) -> CodegenResult<()> {
         let offset = self
             .label_offset(label)
-            .ok_or_else(|| CodegenError::internal(format!("undefined label: {}", label)))?;
+            .or_internal_else(|| format!("undefined label: {}", label))?;
         // Note: offset is instruction-level, fixup_jump_offsets converts to bytes
         self.emit(make_instr(offset));
         Ok(())

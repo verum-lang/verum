@@ -107,7 +107,8 @@ pub struct BlanketImpl {
     /// These take priority over the derived protocol's default methods.
     pub explicit_methods: std::collections::HashSet<String>,
 }
-pub use error::{CodegenError, CodegenErrorKind, CodegenResult, SkipClass};
+pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
+use error::CodegenOptionExt as _;
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
 
 use crate::types::CbgrTier;
@@ -6005,7 +6006,7 @@ impl VbcCodegen {
         let func_info = self
             .ctx
             .lookup_function(&name)
-            .ok_or_else(|| CodegenError::internal(format!("pattern not registered: {}", name)))?
+            .or_internal_else(|| format!("pattern not registered: {}", name))?
             .clone();
 
         // Build params with mutability (patterns are immutable)
@@ -12659,6 +12660,63 @@ impl VbcCodegen {
         // garbage.  See `TypeDescriptor::is_transparent_wrapper`.
         if imported.is_transparent_wrapper {
             self.ctx.newtype_names.insert(name_str.clone());
+        }
+
+        // **Field-layout cache for record types.** Mirror what
+        // `register_archive_type` does on the eager-population path.
+        // Without this, `resolve_field_index` falls through to the
+        // scan-all-types heuristic ("pick the type with the most
+        // fields"), which silently routes record-construction field
+        // writes to wrong offsets — surfaces at runtime as
+        // `field write out of bounds: field index N exceeds object
+        // data size M` (e.g. `PanicInfo` with 2 fields gets `message`
+        // resolved to idx=7 because some sibling stdlib type also has
+        // a `message` field at position 7 and won the most-fields
+        // tie-break). First-wins on simple-name collision matches the
+        // discipline at `register_archive_type:~3859`.
+        if !imported.fields.is_empty() {
+            let names: Vec<String> = imported
+                .fields
+                .iter()
+                .map(|f| {
+                    self.ctx
+                        .strings
+                        .get(f.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect();
+            self.type_field_layouts
+                .entry(name_str.clone())
+                .or_insert(names);
+        }
+        // Variant-record layouts: each record-style variant's field
+        // names register under the variant's simple name so
+        // `compile_record` for variant constructors finds the same
+        // declared-order layout. Mirrors the same shape as
+        // `register_archive_type` would do via its descriptor walk.
+        for v in imported.variants.iter() {
+            if !matches!(v.kind, crate::types::VariantKind::Record) || v.fields.is_empty() {
+                continue;
+            }
+            let v_name = match self.ctx.strings.get(v.name.0 as usize) {
+                Some(s) => s.clone(),
+                None => continue,
+            };
+            let v_field_names: Vec<String> = v
+                .fields
+                .iter()
+                .map(|f| {
+                    self.ctx
+                        .strings
+                        .get(f.name.0 as usize)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect();
+            self.type_field_layouts
+                .entry(v_name)
+                .or_insert(v_field_names);
         }
 
         // Restore the codegen-local type-alias fast-cache for
