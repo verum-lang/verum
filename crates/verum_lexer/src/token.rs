@@ -121,6 +121,101 @@ pub enum TaggedLiteralDelimiter {
     Brace,
 }
 
+/// Per-variant projection for [`TaggedLiteralDelimiter`].
+///
+/// `name` is the canonical short identifier (`"quote"` / `"triple"`
+/// / `"paren"` / `"bracket"` / `"brace"`). `open` / `close` are
+/// the literal opener/closer strings — `Quote` uses single `"`,
+/// `TripleQuote` uses `"""` triplet, the bracket/paren/brace
+/// variants use single characters. `is_multiline_capable` flags
+/// `TripleQuote` (the only delimiter that natively spans multiple
+/// lines without escaping).
+#[derive(Debug, Clone, Copy)]
+pub struct TaggedLiteralDelimiterMeta {
+    pub name: &'static str,
+    pub open: &'static str,
+    pub close: &'static str,
+    pub is_multiline_capable: bool,
+}
+
+impl TaggedLiteralDelimiter {
+    pub const ALL: &'static [Self] = &[
+        Self::Quote,
+        Self::TripleQuote,
+        Self::Paren,
+        Self::Bracket,
+        Self::Brace,
+    ];
+
+    pub const fn meta(self) -> TaggedLiteralDelimiterMeta {
+        match self {
+            Self::Quote => TaggedLiteralDelimiterMeta {
+                name: "quote",
+                open: "\"",
+                close: "\"",
+                is_multiline_capable: false,
+            },
+            Self::TripleQuote => TaggedLiteralDelimiterMeta {
+                name: "triple",
+                open: "\"\"\"",
+                close: "\"\"\"",
+                is_multiline_capable: true,
+            },
+            Self::Paren => TaggedLiteralDelimiterMeta {
+                name: "paren",
+                open: "(",
+                close: ")",
+                is_multiline_capable: false,
+            },
+            Self::Bracket => TaggedLiteralDelimiterMeta {
+                name: "bracket",
+                open: "[",
+                close: "]",
+                is_multiline_capable: false,
+            },
+            Self::Brace => TaggedLiteralDelimiterMeta {
+                name: "brace",
+                open: "{",
+                close: "}",
+                is_multiline_capable: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Opening delimiter string.
+    #[inline]
+    pub const fn open(&self) -> &'static str {
+        self.meta().open
+    }
+
+    /// Closing delimiter string.
+    #[inline]
+    pub const fn close(&self) -> &'static str {
+        self.meta().close
+    }
+
+    /// True for `TripleQuote` (the only delimiter that natively
+    /// spans multiple lines without escaping).
+    #[inline]
+    pub const fn is_multiline_capable(&self) -> bool {
+        self.meta().is_multiline_capable
+    }
+}
+
 /// Tagged literal data
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaggedLiteralData {
@@ -4155,6 +4250,56 @@ mod tests {
         assert_eq!(tokens2.len(), 1, "100i32 should be 1 token");
         if let TokenKind::Integer(lit) = &tokens2[0] {
             assert_eq!(lit.suffix, Some(Text::from("i32")));
+        }
+    }
+
+    #[test]
+    fn meta_pin_tagged_literal_delimiter_round_trip_and_open_close_pairs() {
+        assert_eq!(TaggedLiteralDelimiter::ALL.len(), 5);
+        for v in TaggedLiteralDelimiter::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                TaggedLiteralDelimiter::from_str(s),
+                Some(*v),
+                "TaggedLiteralDelimiter::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // Open/close strings preserved verbatim. Quote/TripleQuote
+        // are symmetric (open == close); bracket pairs are
+        // asymmetric.
+        assert_eq!(TaggedLiteralDelimiter::Quote.open(), "\"");
+        assert_eq!(TaggedLiteralDelimiter::Quote.close(), "\"");
+        assert_eq!(TaggedLiteralDelimiter::TripleQuote.open(), "\"\"\"");
+        assert_eq!(TaggedLiteralDelimiter::TripleQuote.close(), "\"\"\"");
+        assert_eq!(TaggedLiteralDelimiter::Paren.open(), "(");
+        assert_eq!(TaggedLiteralDelimiter::Paren.close(), ")");
+        assert_eq!(TaggedLiteralDelimiter::Bracket.open(), "[");
+        assert_eq!(TaggedLiteralDelimiter::Bracket.close(), "]");
+        assert_eq!(TaggedLiteralDelimiter::Brace.open(), "{");
+        assert_eq!(TaggedLiteralDelimiter::Brace.close(), "}");
+        // is_multiline_capable: only TripleQuote.
+        let multiline = TaggedLiteralDelimiter::ALL
+            .iter()
+            .filter(|v| v.is_multiline_capable())
+            .count();
+        assert_eq!(multiline, 1);
+        assert!(TaggedLiteralDelimiter::TripleQuote.is_multiline_capable());
+        // Cross-pin: quote-style variants (Quote/TripleQuote) have
+        // identical open/close; bracket-style variants
+        // (Paren/Bracket/Brace) have distinct open/close.
+        for v in TaggedLiteralDelimiter::ALL {
+            let symmetric = matches!(
+                v,
+                TaggedLiteralDelimiter::Quote | TaggedLiteralDelimiter::TripleQuote
+            );
+            assert_eq!(
+                v.open() == v.close(),
+                symmetric,
+                "TaggedLiteralDelimiter::{:?}: open/close symmetry",
+                v
+            );
         }
     }
 }

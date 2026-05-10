@@ -131,6 +131,130 @@ pub enum TriviaKind {
     ByteOrderMark,
 }
 
+/// Per-variant projection for [`TriviaKind`].
+///
+/// Three classifier flags previously implicit in scattered `matches!`
+/// calls now ride per-variant fields:
+///
+///   * `is_comment` — any of the four comment forms.
+///   * `is_doc_comment` — `DocComment` / `InnerDocComment` only;
+///     these are semantically meaningful (extracted by the doc
+///     pass) and must not be stripped silently.
+///   * `is_file_start_only` — `Shebang` / `ByteOrderMark`. Both
+///     are restricted to byte offset 0 of the file (modulo BOM
+///     ordering); a parser pass that emits them anywhere else
+///     is a soundness fault.
+#[derive(Debug, Clone, Copy)]
+pub struct TriviaKindMeta {
+    pub name: &'static str,
+    pub is_comment: bool,
+    pub is_doc_comment: bool,
+    pub is_file_start_only: bool,
+}
+
+impl TriviaKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Whitespace,
+        Self::Newline,
+        Self::LineComment,
+        Self::BlockComment,
+        Self::DocComment,
+        Self::InnerDocComment,
+        Self::Shebang,
+        Self::ByteOrderMark,
+    ];
+
+    pub const fn meta(self) -> TriviaKindMeta {
+        match self {
+            Self::Whitespace => TriviaKindMeta {
+                name: "whitespace",
+                is_comment: false,
+                is_doc_comment: false,
+                is_file_start_only: false,
+            },
+            Self::Newline => TriviaKindMeta {
+                name: "newline",
+                is_comment: false,
+                is_doc_comment: false,
+                is_file_start_only: false,
+            },
+            Self::LineComment => TriviaKindMeta {
+                name: "line_comment",
+                is_comment: true,
+                is_doc_comment: false,
+                is_file_start_only: false,
+            },
+            Self::BlockComment => TriviaKindMeta {
+                name: "block_comment",
+                is_comment: true,
+                is_doc_comment: false,
+                is_file_start_only: false,
+            },
+            Self::DocComment => TriviaKindMeta {
+                name: "doc_comment",
+                is_comment: true,
+                is_doc_comment: true,
+                is_file_start_only: false,
+            },
+            Self::InnerDocComment => TriviaKindMeta {
+                name: "inner_doc_comment",
+                is_comment: true,
+                is_doc_comment: true,
+                is_file_start_only: false,
+            },
+            Self::Shebang => TriviaKindMeta {
+                name: "shebang",
+                is_comment: false,
+                is_doc_comment: false,
+                is_file_start_only: true,
+            },
+            Self::ByteOrderMark => TriviaKindMeta {
+                name: "byte_order_mark",
+                is_comment: false,
+                is_doc_comment: false,
+                is_file_start_only: true,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// True for any of the four comment forms (line / block / doc /
+    /// inner-doc).
+    #[inline]
+    pub const fn is_comment(&self) -> bool {
+        self.meta().is_comment
+    }
+
+    /// True for `DocComment` / `InnerDocComment` — the comments
+    /// that carry semantic meaning (extracted by the doc pass).
+    /// Pin: `is_doc_comment ⇒ is_comment`.
+    #[inline]
+    pub const fn is_doc_comment(&self) -> bool {
+        self.meta().is_doc_comment
+    }
+
+    /// True for `Shebang` / `ByteOrderMark` — both restricted to
+    /// byte offset 0 of the file (modulo BOM ordering); a parser
+    /// pass that emits them anywhere else is a soundness fault.
+    #[inline]
+    pub const fn is_file_start_only(&self) -> bool {
+        self.meta().is_file_start_only
+    }
+}
+
 /// A token with attached trivia for lossless parsing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RichToken {
@@ -623,5 +747,66 @@ mod tests {
                 .iter()
                 .any(|i| i.kind == TriviaKind::DocComment)
         );
+    }
+
+    #[test]
+    fn meta_pin_trivia_kind_round_trip_and_classifier_partitions() {
+        assert_eq!(TriviaKind::ALL.len(), 8);
+        for v in TriviaKind::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                TriviaKind::from_str(s),
+                Some(*v),
+                "TriviaKind::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // Classifier partitions:
+        //   * is_comment: 4 (LineComment + BlockComment + DocComment +
+        //     InnerDocComment)
+        //   * is_doc_comment: 2 (DocComment + InnerDocComment)
+        //   * is_file_start_only: 2 (Shebang + ByteOrderMark)
+        let comment_count =
+            TriviaKind::ALL.iter().filter(|v| v.is_comment()).count();
+        let doc_comment_count =
+            TriviaKind::ALL.iter().filter(|v| v.is_doc_comment()).count();
+        let file_start_count = TriviaKind::ALL
+            .iter()
+            .filter(|v| v.is_file_start_only())
+            .count();
+        assert_eq!(comment_count, 4);
+        assert_eq!(doc_comment_count, 2);
+        assert_eq!(file_start_count, 2);
+        // Cross-cutting invariants:
+        //   * is_doc_comment ⇒ is_comment.
+        //   * is_file_start_only and is_comment are disjoint
+        //     (Shebang and BOM are not comments).
+        for v in TriviaKind::ALL {
+            if v.is_doc_comment() {
+                assert!(
+                    v.is_comment(),
+                    "TriviaKind::{:?}: is_doc_comment ⇒ is_comment",
+                    v
+                );
+            }
+            assert!(
+                !(v.is_file_start_only() && v.is_comment()),
+                "TriviaKind::{:?}: file_start_only and comment must be disjoint",
+                v
+            );
+        }
+        // Spot pins: critical wire forms.
+        assert_eq!(TriviaKind::DocComment.as_str(), "doc_comment");
+        assert_eq!(
+            TriviaKind::InnerDocComment.as_str(),
+            "inner_doc_comment"
+        );
+        assert_eq!(TriviaKind::ByteOrderMark.as_str(), "byte_order_mark");
+        // Shebang and ByteOrderMark are the file-start-only set —
+        // pinned exhaustively for the parser-pass invariant that
+        // these never appear after byte 0 (modulo BOM ordering).
+        assert!(TriviaKind::Shebang.is_file_start_only());
+        assert!(TriviaKind::ByteOrderMark.is_file_start_only());
     }
 }
