@@ -3992,9 +3992,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let void_type = ctx.void_type();
 
         let fn_type = void_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_free")
-            .unwrap_or_else(|| module.add_function("verum_text_free", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_free", fn_type);
 
         // Must not be inlined — inlining re-introduces the block explosion problem.
         let noinline_id = verum_llvm::attributes::Attribute::get_named_enum_kind_id("noinline");
@@ -4106,9 +4104,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i8_type = ctx.i8_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_generic_len")
-            .unwrap_or_else(|| module.add_function("verum_generic_len", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_generic_len", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let text_path = ctx.append_basic_block(func, "text_len");
@@ -4194,9 +4190,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = ctx.i64_type();
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_strlen_export")
-            .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_strlen_export", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let builder = ctx.create_builder();
@@ -4235,9 +4229,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i1_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_is_text_object")
-            .unwrap_or_else(|| module.add_function("verum_is_text_object", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_is_text_object", fn_type);
         // Mark as always-inline for zero overhead
         func.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
@@ -4403,9 +4395,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = ctx.i64_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_generic_eq")
-            .unwrap_or_else(|| module.add_function("verum_generic_eq", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let check_text = ctx.append_basic_block(func, "check_text");
@@ -4532,9 +4522,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| module.add_function("verum_generic_hash", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_generic_hash", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let hash_text_bb = ctx.append_basic_block(func, "hash_text");
@@ -4710,9 +4698,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = ctx.i64_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_int_to_text")
-            .unwrap_or_else(|| module.add_function("verum_int_to_text", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_int_to_text", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let builder = ctx.create_builder();
@@ -4850,9 +4836,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let f64_type = ctx.f64_type();
 
         let fn_type = i64_type.fn_type(&[f64_type.into()], false);
-        let func = module
-            .get_function("verum_float_to_text")
-            .unwrap_or_else(|| module.add_function("verum_float_to_text", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_float_to_text", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let builder = ctx.create_builder();
@@ -4946,9 +4930,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_text_parse_int")
-            .unwrap_or_else(|| module.add_function("verum_text_parse_int", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_parse_int", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let do_parse = ctx.append_basic_block(func, "do_parse");
@@ -5008,9 +4990,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_text_parse_float")
-            .unwrap_or_else(|| module.add_function("verum_text_parse_float", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_parse_float", fn_type);
 
         let entry = ctx.append_basic_block(func, "entry");
         let do_parse = ctx.append_basic_block(func, "do_parse");
@@ -5186,9 +5166,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i32_type = self.context.i32_type();
         let _ = i32_type; // used only on the libSystem/libc fallback paths
         let fn_type = i64_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_time_monotonic_nanos")
-            .unwrap_or_else(|| module.add_function("verum_time_monotonic_nanos", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -5265,9 +5243,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i32_type = self.context.i32_type();
         let _ = i32_type; // used only on the libSystem fallback path
         let fn_type = i64_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_time_realtime_nanos")
-            .unwrap_or_else(|| module.add_function("verum_time_realtime_nanos", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_time_realtime_nanos", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -5339,9 +5315,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_time_sleep_nanos")
-            .unwrap_or_else(|| module.add_function("verum_time_sleep_nanos", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_time_sleep_nanos", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let do_sleep = self.context.append_basic_block(func, "do_sleep");
         let done = self.context.append_basic_block(func, "done");
@@ -5443,9 +5417,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         };
 
         let fn_type = i64_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_random_u64")
-            .unwrap_or_else(|| module.add_function("verum_random_u64", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_random_u64", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let seed_bb = self.context.append_basic_block(func, "seed");
         let seed_check = self.context.append_basic_block(func, "seed_check");
@@ -5571,9 +5543,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let f64_type = self.context.f64_type();
         let fn_type = f64_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_random_float")
-            .unwrap_or_else(|| module.add_function("verum_random_float", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_random_float", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -5621,9 +5591,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_range_new")
-            .unwrap_or_else(|| module.add_function("verum_range_new", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_range_new", fn_type);
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -5708,9 +5676,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_log_set_level(level: i64) -> void
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_log_set_level")
-                .unwrap_or_else(|| module.add_function("verum_log_set_level", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_log_set_level", fn_type);
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -5730,9 +5696,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_log_get_level() -> i64
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_log_get_level")
-                .unwrap_or_else(|| module.add_function("verum_log_get_level", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_log_get_level", fn_type);
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -5749,9 +5713,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_log_flush() -> void (no-op, stderr is unbuffered)
         {
             let fn_type = void_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_log_flush")
-                .unwrap_or_else(|| module.add_function("verum_log_flush", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_log_flush", fn_type);
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -5765,9 +5727,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Writes "[LEVEL] msg\n" to stderr using write(2, buf, len)
         {
             let fn_type = void_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-            let func = module
-                .get_function("verum_log_message")
-                .unwrap_or_else(|| module.add_function("verum_log_message", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_log_message", fn_type);
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -6079,9 +6039,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_open")
-                .unwrap_or_else(|| module.add_function("verum_file_open", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_open", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_path");
@@ -6208,9 +6166,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_close")
-                .unwrap_or_else(|| module.add_function("verum_file_close", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_close", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let bad_bb = self.context.append_basic_block(func, "bad_fd");
@@ -6250,9 +6206,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            let func = module
-                .get_function("verum_file_exists")
-                .unwrap_or_else(|| module.add_function("verum_file_exists", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_exists", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_path");
@@ -6306,9 +6260,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            let func = module
-                .get_function("verum_file_delete")
-                .unwrap_or_else(|| module.add_function("verum_file_delete", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_delete", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_path");
@@ -6356,9 +6308,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_write_all")
-                .unwrap_or_else(|| module.add_function("verum_file_write_all", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_write_all", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fail_bb = self.context.append_basic_block(func, "fail");
@@ -6476,9 +6426,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_append_all")
-                .unwrap_or_else(|| module.add_function("verum_file_append_all", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_append_all", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fail_bb = self.context.append_basic_block(func, "fail");
@@ -6593,9 +6541,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            let func = module
-                .get_function("verum_file_read_all")
-                .unwrap_or_else(|| module.add_function("verum_file_read_all", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_read_all", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let empty_bb = self.context.append_basic_block(func, "empty");
@@ -6823,9 +6769,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_read_text")
-                .unwrap_or_else(|| module.add_function("verum_file_read_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_read_text", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let empty_bb = self.context.append_basic_block(func, "empty");
@@ -6957,9 +6901,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_file_write_text")
-                .unwrap_or_else(|| module.add_function("verum_file_write_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_write_text", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fail_bb = self.context.append_basic_block(func, "fail");
@@ -7037,9 +6979,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-            let func = module
-                .get_function("verum_file_read_to_string")
-                .unwrap_or_else(|| module.add_function("verum_file_read_to_string", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_read_to_string", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_ret");
@@ -7240,9 +7180,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-            let func = module
-                .get_function("verum_file_write_string")
-                .unwrap_or_else(|| module.add_function("verum_file_write_string", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_file_write_string", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fail_bb = self.context.append_basic_block(func, "fail");
@@ -7411,9 +7349,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // VerumMutex is { _Atomic(int32_t) state } = 4 bytes, but allocate 8 for alignment
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_mutex_new")
-                .unwrap_or_else(|| module.add_function("verum_mutex_new", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_mutex_new", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -7445,9 +7381,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_mutex_lock_bridge(mutex_ptr: i64) -> void
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_mutex_lock_bridge")
-                .unwrap_or_else(|| module.add_function("verum_mutex_lock_bridge", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_mutex_lock_bridge", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
@@ -7485,9 +7419,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_mutex_unlock_bridge(mutex_ptr: i64) -> void
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_mutex_unlock_bridge")
-                .unwrap_or_else(|| module.add_function("verum_mutex_unlock_bridge", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_mutex_unlock_bridge", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
@@ -7574,9 +7506,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // VerumCondVar is { _Atomic(int32_t) seq } = 4 bytes, allocate 8 for alignment
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_cond_new")
-                .unwrap_or_else(|| module.add_function("verum_cond_new", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_cond_new", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -7605,9 +7535,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_cond_wait_bridge(cond_ptr: i64, mutex_ptr: i64) -> void
         {
             let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_cond_wait_bridge")
-                .unwrap_or_else(|| module.add_function("verum_cond_wait_bridge", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_cond_wait_bridge", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
@@ -7734,9 +7662,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // verum_cond_signal_bridge(cond_ptr: i64) -> void
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_cond_signal_bridge")
-                .unwrap_or_else(|| module.add_function("verum_cond_signal_bridge", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_cond_signal_bridge", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
@@ -7843,9 +7769,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         //  libsystem IS the macOS OS interface).
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_sys_getpid")
-                .unwrap_or_else(|| module.add_function("verum_sys_getpid", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_getpid", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -7896,9 +7820,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         //  `non-macos non-windows` arm at ffi_extended.rs:1738).
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = module
-                .get_function("verum_sys_gettid")
-                .unwrap_or_else(|| module.add_function("verum_sys_gettid", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_gettid", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -7985,9 +7907,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 ],
                 false,
             );
-            let func = module
-                .get_function("verum_sys_mmap")
-                .unwrap_or_else(|| module.add_function("verum_sys_mmap", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_mmap", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -8005,9 +7925,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         {
             let void_type = self.context.void_type();
             let fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_sys_munmap")
-                .unwrap_or_else(|| module.add_function("verum_sys_munmap", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_munmap", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -8034,9 +7952,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         {
             let fn_type =
                 i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_sys_madvise")
-                .unwrap_or_else(|| module.add_function("verum_sys_madvise", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_madvise", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -8051,9 +7967,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Fill with zeros as a safe default (proper entropy would need arc4random/getrandom)
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_sys_getentropy")
-                .unwrap_or_else(|| module.add_function("verum_sys_getentropy", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_sys_getentropy", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
@@ -8094,9 +8008,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         let fn_type = ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-        let func = module
-            .get_function("verum_string_join")
-            .unwrap_or_else(|| module.add_function("verum_string_join", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_string_join", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -9631,9 +9543,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // `platform_ir.rs::emit_verum_os_alloc`. That helper does
         // the per-platform dispatch (mmap / VirtualAlloc) under the
         // libc-free architectural rule.
-        let os_alloc_fn = module
-            .get_function("verum_os_alloc")
-            .unwrap_or_else(|| module.add_function("verum_os_alloc", malloc_fn_type, None));
+        let os_alloc_fn = super::error::get_or_declare_function(module, "verum_os_alloc", malloc_fn_type);
 
         // OOM abort path: route through verum_os_exit (libc-free) —
         // emit_verum_os_exit lowers to ExitProcess on Windows,
@@ -10799,9 +10709,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 eprintln!("[aot-net] verum_tcp_listen");
             }
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_listen")
-                .unwrap_or_else(|| module.add_function("verum_tcp_listen", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_listen", fn_type);
             // Skip body emission if the existing function has wrong arity —
             // means a Verum-side function with the same name was lowered
             // from VBC with a different signature, and emitting our
@@ -10959,9 +10867,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 ],
                 false,
             );
-            let func = module
-                .get_function("verum_tcp_listen_v2")
-                .unwrap_or_else(|| module.add_function("verum_tcp_listen_v2", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_listen_v2", fn_type);
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -11184,9 +11090,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         {
             let getsockname_fn = self.get_or_declare_getsockname(module);
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_local_port")
-                .unwrap_or_else(|| module.add_function("verum_tcp_local_port", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_local_port", fn_type);
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
                 let entry = self.context.append_basic_block(func, "entry");
@@ -11271,9 +11175,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_accept")
-                .unwrap_or_else(|| module.add_function("verum_tcp_accept", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_accept", fn_type);
             // Skip body emission if existing function has wrong arity — see
             // verum_tcp_listen above for the rationale (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
@@ -11309,9 +11211,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_connect")
-                .unwrap_or_else(|| module.add_function("verum_tcp_connect", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_connect", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11543,9 +11443,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_send_text")
-                .unwrap_or_else(|| module.add_function("verum_tcp_send_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_send_text", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11599,9 +11497,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_recv_text")
-                .unwrap_or_else(|| module.add_function("verum_tcp_recv_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_recv_text", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11698,9 +11594,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_tcp_close")
-                .unwrap_or_else(|| module.add_function("verum_tcp_close", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_tcp_close", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11721,9 +11615,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_udp_bind")
-                .unwrap_or_else(|| module.add_function("verum_udp_bind", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_udp_bind", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11803,9 +11695,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 ],
                 false,
             );
-            let func = module
-                .get_function("verum_udp_send_text")
-                .unwrap_or_else(|| module.add_function("verum_udp_send_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_udp_send_text", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -11941,9 +11831,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_udp_recv_text")
-                .unwrap_or_else(|| module.add_function("verum_udp_recv_text", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_udp_recv_text", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -12050,9 +11938,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         {
             let fn_type =
                 i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_udp_sendto")
-                .unwrap_or_else(|| module.add_function("verum_udp_sendto", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_udp_sendto", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -12108,9 +11994,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            let func = module
-                .get_function("verum_udp_recvfrom")
-                .unwrap_or_else(|| module.add_function("verum_udp_recvfrom", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_udp_recvfrom", fn_type);
             // Arity-skip guard (round-2 §4.2 audit).
             if func.count_params() == fn_type.count_param_types() && func.count_basic_blocks() == 0
             {
@@ -12250,9 +12134,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_process_wait")
-                .unwrap_or_else(|| module.add_function("verum_process_wait", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_process_wait", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fail_bb = self.context.append_basic_block(func, "fail");
@@ -12301,9 +12183,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_fd_read_all")
-                .unwrap_or_else(|| module.add_function("verum_fd_read_all", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_fd_read_all", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let alloc_fail = self.context.append_basic_block(func, "alloc_fail");
@@ -12434,9 +12314,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // ============================================================
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            let func = module
-                .get_function("verum_fd_close")
-                .unwrap_or_else(|| module.add_function("verum_fd_close", fn_type, None));
+            let func = super::error::get_or_declare_function(module, "verum_fd_close", fn_type);
             if func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let b = self.context.create_builder();
@@ -12639,9 +12517,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_strlen_export(s: ptr) -> i64 ---
     if module.get_function("verum_strlen_export").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_strlen_export")
-            .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_strlen_export", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -12670,9 +12546,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Allocates a 24-byte Text object {ptr, len, cap}
     if module.get_function("verum_text_alloc").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_alloc")
-            .unwrap_or_else(|| module.add_function("verum_text_alloc", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_alloc", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -12734,9 +12608,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // result to a single `adrp + add` pair on aarch64.
     if module.get_function("verum_text_get_ptr").is_none() {
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_get_ptr")
-            .unwrap_or_else(|| module.add_function("verum_text_get_ptr", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         func.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
@@ -12822,9 +12694,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Create Text object from null-terminated C string
     if module.get_function("verum_text_from_cstr").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_text_from_cstr")
-            .unwrap_or_else(|| module.add_function("verum_text_from_cstr", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_from_cstr", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let null_bb = context.append_basic_block(func, "null_str");
@@ -12886,9 +12756,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Create Text from static string data (copies to new buffer)
     if module.get_function("verum_text_from_static").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_from_static")
-            .unwrap_or_else(|| module.add_function("verum_text_from_static", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_from_static", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -12960,9 +12828,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Concatenate two Text objects
     if module.get_function("verum_text_concat").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_concat")
-            .unwrap_or_else(|| module.add_function("verum_text_concat", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_concat", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -13101,9 +12967,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Count UTF-8 characters (count bytes that are NOT continuation bytes 10xxxxxx)
     if module.get_function("verum_text_char_len").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_char_len")
-            .unwrap_or_else(|| module.add_function("verum_text_char_len", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_char_len", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let loop_bb = context.append_basic_block(func, "loop");
@@ -13201,9 +13065,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Convert Unicode codepoint to Text (UTF-8 encoded)
     if module.get_function("verum_char_to_text").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_char_to_text")
-            .unwrap_or_else(|| module.add_function("verum_char_to_text", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_char_to_text", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -13262,9 +13124,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // `verum_text_alloc` / `verum_text_get_ptr` / `verum_text_concat`.
     if module.get_function("verum_text_byte_len").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_byte_len")
-            .unwrap_or_else(|| module.add_function("verum_text_byte_len", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_byte_len", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -13293,9 +13153,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Returns 1 if `len == 0`, 0 otherwise.  Single-load probe.
     if module.get_function("verum_text_is_empty").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_is_empty")
-            .unwrap_or_else(|| module.add_function("verum_text_is_empty", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_is_empty", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -13349,9 +13207,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // exist within `len` AND each carries the `10` high bits.
     if module.get_function("verum_text_is_utf8").is_none() {
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = module
-            .get_function("verum_text_is_utf8")
-            .unwrap_or_else(|| module.add_function("verum_text_is_utf8", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_text_is_utf8", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let loop_header = context.append_basic_block(func, "loop_header");
@@ -13635,9 +13491,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Doubles the capacity, allocates new backing array, copies elements.
     if module.get_function("verum_list_grow").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_list_grow")
-            .unwrap_or_else(|| module.add_function("verum_list_grow", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_grow", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let grow = context.append_basic_block(func, "grow");
@@ -13770,9 +13624,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // Insertion sort on i64 backing array.
     if module.get_function("verum_list_sort").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_list_sort")
-            .unwrap_or_else(|| module.add_function("verum_list_sort", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_sort", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let outer_loop = context.append_basic_block(func, "outer_loop");
@@ -13929,9 +13781,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_list_reverse(list_ptr: ptr) -> void ---
     if module.get_function("verum_list_reverse").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_list_reverse")
-            .unwrap_or_else(|| module.add_function("verum_list_reverse", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_reverse", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let loop_bb = context.append_basic_block(func, "loop");
@@ -14044,9 +13894,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     if module.get_function("verum_list_swap").is_none() {
         let fn_type =
             void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_list_swap")
-            .unwrap_or_else(|| module.add_function("verum_list_swap", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_swap", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let do_swap = context.append_basic_block(func, "do_swap");
@@ -14156,9 +14004,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_list_insert(list_ptr: ptr, index: i64, value: i64) -> void ---
     if module.get_function("verum_list_insert").is_none() {
         let fn_type = ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_list_insert")
-            .unwrap_or_else(|| module.add_function("verum_list_insert", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_insert", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let do_insert = context.append_basic_block(func, "do_insert");
@@ -14330,9 +14176,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_list_remove(list_ptr: ptr, index: i64) -> i64 ---
     if module.get_function("verum_list_remove").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_list_remove")
-            .unwrap_or_else(|| module.add_function("verum_list_remove", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_remove", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let do_remove = context.append_basic_block(func, "do_remove");
@@ -14465,9 +14309,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_list_extend(dest_ptr: ptr, src_ptr: ptr) -> void ---
     if module.get_function("verum_list_extend").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        let func = module
-            .get_function("verum_list_extend")
-            .unwrap_or_else(|| module.add_function("verum_list_extend", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_extend", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let check_src = context.append_basic_block(func, "check_src");
@@ -14641,9 +14483,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     // --- verum_list_clone(list_ptr: ptr) -> ptr ---
     if module.get_function("verum_list_clone").is_none() {
         let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-        let func = module
-            .get_function("verum_list_clone")
-            .unwrap_or_else(|| module.add_function("verum_list_clone", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_list_clone", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let do_clone = context.append_basic_block(func, "do_clone");
@@ -14921,9 +14761,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
     // --- verum_set_new() -> ptr ---
     if module.get_function("verum_set_new").is_none() {
         let fn_type = ptr_type.fn_type(&[], false);
-        let func = module
-            .get_function("verum_set_new")
-            .unwrap_or_else(|| module.add_function("verum_set_new", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_set_new", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
@@ -15002,9 +14840,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
     // --- verum_set_contains(set: ptr, value: i64) -> i64 ---
     if module.get_function("verum_set_contains").is_none() {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_set_contains")
-            .unwrap_or_else(|| module.add_function("verum_set_contains", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_set_contains", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let probe = context.append_basic_block(func, "probe");
@@ -15201,9 +15037,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
     // We keep void to match the call site signature.
     if module.get_function("verum_set_insert").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_set_insert")
-            .unwrap_or_else(|| module.add_function("verum_set_insert", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_set_insert", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let ret_bb = context.append_basic_block(func, "ret");
@@ -15609,9 +15443,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
     // --- verum_set_remove(set: ptr, value: i64) -> void ---
     if module.get_function("verum_set_remove").is_none() {
         let fn_type = void_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = module
-            .get_function("verum_set_remove")
-            .unwrap_or_else(|| module.add_function("verum_set_remove", fn_type, None));
+        let func = super::error::get_or_declare_function(module, "verum_set_remove", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let ret_bb = context.append_basic_block(func, "ret");
