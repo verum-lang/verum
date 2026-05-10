@@ -140,12 +140,126 @@ pub struct VarianceChecker {
     /// Cache of inferred variances for type definitions
     /// Key: (type_name, param_index) -> Variance
     cache: Map<(Text, usize), Variance>,
+    /// Per-constructor variance overrides.  Stdlib loading or an
+    /// embedder calls [`VarianceChecker::register_constructor_variances`]
+    /// to feed the per-parameter variance recovered from a type's
+    /// `@variance(...)` annotation or from structural inference; the
+    /// override shadows [`DEFAULT_CONSTRUCTOR_VARIANCES`] for that
+    /// type name.
+    ///
+    /// Pre-fix this lived inside `infer_constructor_variances` as a
+    /// hardcoded match-arm with ~25 type names — the comment said
+    /// "temporary implementation until we have a proper type
+    /// definition registry". Replacing the match with
+    /// `[overrides → defaults → empty]` lookup is the seam the
+    /// type-registry plumbing was always missing: dynamic
+    /// registration now slots in without touching this file.
+    constructor_variances: std::collections::HashMap<Text, Vec<Variance>>,
 }
+
+/// Default per-parameter variance for the small set of well-known
+/// constructor types whose variance is fixed by the language
+/// definition or by Verum stdlib semantics.
+///
+/// **Why a default table at all?** Variance is properly a property
+/// of the type DEFINITION, recovered from `@variance(...)`
+/// annotations or inferred from the type body when stdlib is
+/// loaded. Until that pass plumbs results into the
+/// `VarianceChecker`, this table provides the minimal set of
+/// defaults that variance-using sites (currently mostly tests + GAT
+/// verification) expect to see — registering a new entry via
+/// [`VarianceChecker::register_constructor_variances`] shadows the
+/// table at runtime, so embedders / stdlib-loading can extend
+/// without touching this constant.
+///
+/// **What's in here?** Verum stdlib semantic types (`List` /
+/// `Maybe` / `Result` / `Map` / `Set` — pulled from
+/// [`verum_common::well_known_types::type_names`] so a future
+/// rename in the canonical name table flows through automatically),
+/// plus a per-stdlib-mount-audit-accepted set of migration-ergonomic
+/// Rust aliases (`Vec` / `Option` / `HashMap` / `Box` / `Rc` /
+/// `Arc` / …). Function-type variance (`Fn` / `FnOnce` / `FnMut`,
+/// contravariant-in-arg + covariant-in-return) is computed by the
+/// `Type::Function` arm of `variance_at_position` and is
+/// intentionally absent from this Named-type table.
+///
+/// Pinned by `default_constructor_variances_table_pinned` in this
+/// crate's test suite — adding / removing / reordering entries
+/// requires the pin to follow.
+pub const DEFAULT_CONSTRUCTOR_VARIANCES: &[(&str, &[Variance])] = &[
+    // ---- Verum stdlib semantic types (canonical names) ----
+    (WKT_LIST, &[Variance::Covariant]),
+    (WKT_SET, &[Variance::Covariant]),
+    (WKT_MAYBE, &[Variance::Covariant]),
+    (WKT_RESULT, &[Variance::Covariant, Variance::Covariant]),
+    // Map<K, +V> — keys invariant (used in lookups), values covariant.
+    (WKT_MAP, &[Variance::Invariant, Variance::Covariant]),
+
+    // ---- Migration-ergonomic Rust aliases ----
+    // (the same set `stdlib_mount_audit` admits as accepted-by-name)
+    ("Vec", &[Variance::Covariant]),
+    ("Array", &[Variance::Covariant]),
+    ("Seq", &[Variance::Covariant]),
+    ("HashSet", &[Variance::Covariant]),
+    ("TreeSet", &[Variance::Covariant]),
+    ("Option", &[Variance::Covariant]),
+    ("HashMap", &[Variance::Invariant, Variance::Covariant]),
+    ("TreeMap", &[Variance::Invariant, Variance::Covariant]),
+
+    // ---- Tree / graph containers (covariant in element) ----
+    ("Tree", &[Variance::Covariant]),
+    ("Graph", &[Variance::Covariant]),
+
+    // ---- Smart pointers (covariant) ----
+    ("Heap", &[Variance::Covariant]),
+    ("Shared", &[Variance::Covariant]),
+    ("Box", &[Variance::Covariant]),
+    ("Rc", &[Variance::Covariant]),
+    ("Arc", &[Variance::Covariant]),
+
+    // ---- Cell-like (invariant — &mut-style aliasing) ----
+    ("Cell", &[Variance::Invariant]),
+    ("RefCell", &[Variance::Invariant]),
+    ("Atomic", &[Variance::Invariant]),
+    ("Ref", &[Variance::Invariant]),
+    ("RefMut", &[Variance::Invariant]),
+
+    // ---- Tensor family (covariant in element) ----
+    ("Tensor", &[Variance::Covariant]),
+    ("Matrix", &[Variance::Covariant]),
+    ("Vector", &[Variance::Covariant]),
+];
 
 impl VarianceChecker {
     /// Create a new variance checker
     pub fn new() -> Self {
-        Self { cache: Map::new() }
+        Self {
+            cache: Map::new(),
+            constructor_variances: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Register a per-parameter variance list for a named
+    /// constructor — overrides any default in
+    /// [`DEFAULT_CONSTRUCTOR_VARIANCES`]. Call this from stdlib
+    /// loading (after parsing each type's `@variance(...)`
+    /// annotations) or from an embedder that knows variance for a
+    /// type the default table doesn't carry.
+    ///
+    /// Idempotent — re-registering the same name with the same
+    /// list is a no-op.
+    pub fn register_constructor_variances(&mut self, name: &str, variances: Vec<Variance>) {
+        self.constructor_variances
+            .insert(Text::from(name), variances);
+    }
+
+    /// True iff `name` has a registered (non-default) variance
+    /// override.  Inspection-only helper — exposed so callers can
+    /// distinguish "variance came from stdlib's `@variance`
+    /// annotation" from "variance fell back to the default
+    /// table".
+    pub fn has_registered_variance(&self, name: &str) -> bool {
+        self.constructor_variances.contains_key(name)
     }
 
     /// Infer the variance of a type parameter in a type body
@@ -547,16 +661,33 @@ impl VarianceChecker {
         self.cache.insert((param_name.clone(), index), variance);
     }
 
-    /// Infer variance for constructor parameters based on well-known types
+    /// Infer variance for constructor parameters by name.
     ///
-
-    /// This is a temporary implementation until we have a proper type definition registry.
-    /// It provides correct variance for standard library types based on their documented behavior.
+    /// Lookup chain (first hit wins):
+    ///   1. **Instance overrides** in `self.constructor_variances`
+    ///      — registered via
+    ///      [`Self::register_constructor_variances`] from stdlib
+    ///      loading or by an embedder.
+    ///   2. **Static defaults** in
+    ///      [`DEFAULT_CONSTRUCTOR_VARIANCES`] — the curated
+    ///      well-known-types + migration-ergonomic-aliases table.
+    ///   3. **Empty list** — caller defaults to `Variance::Invariant`
+    ///      (the conservative-but-safe choice).
     ///
-
-    /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
+    /// This replaces the prior hardcoded `match type_name { … }`
+    /// that mixed canonical Verum names (`List` / `Maybe` /
+    /// `Result` / `Map` / `Set`) with Rust-style migration aliases
+    /// (`Vec` / `Option` / `HashMap` / …) inside one large arm
+    /// table — adding a new constructor required editing this file,
+    /// even when stdlib already encoded the variance via
+    /// `@variance(...)` declarations. The two-tier lookup gives
+    /// dynamic registration (tier 1) AND a static fallback for the
+    /// well-known set (tier 2) without parallel rule sites.
+    ///
+    /// Variance composition: covariant ∘ covariant = covariant;
+    /// covariant ∘ contravariant = contravariant; any ∘ invariant
+    /// = invariant. Flip reverses covariant ↔ contravariant.
     fn infer_constructor_variances(&self, path: &verum_ast::ty::Path) -> List<Variance> {
-        // Get the last component of the path (the type name)
         use verum_ast::ty::PathSegment;
         let type_name = path
             .segments
@@ -567,51 +698,21 @@ impl VarianceChecker {
             })
             .unwrap_or("");
 
-        match type_name {
-            // Covariant container types (read-only, immutable)
-            WKT_LIST | "Vec" | "Array" | "Seq" => vec![Variance::Covariant].into(),
-            WKT_SET | "HashSet" | "TreeSet" => vec![Variance::Covariant].into(),
-            WKT_MAYBE | "Option" | WKT_RESULT => {
-                // Maybe<+T>, Result<+T, +E>
-                vec![Variance::Covariant, Variance::Covariant].into()
-            }
-            "Tree" | "Graph" => vec![Variance::Covariant].into(),
+        // Tier 1: instance-level overrides.
+        if let Some(variances) = self.constructor_variances.get(type_name) {
+            return variances.iter().copied().collect::<Vec<_>>().into();
+        }
 
-            // Invariant types (mutable, or bidirectional)
-            "Cell" | "RefCell" | "Atomic" => {
-                // Cell<T> has &mut-like semantics, must be invariant
-                vec![Variance::Invariant].into()
-            }
-            "Ref" | "RefMut" => {
-                // References to mutable containers
-                vec![Variance::Invariant].into()
-            }
-            WKT_MAP | "HashMap" | "TreeMap" => {
-                // Map<K, +V> - keys invariant (used in lookups), values covariant
-                vec![Variance::Invariant, Variance::Covariant].into()
-            }
-
-            // Function types are handled separately
-            "Fn" | "FnOnce" | "FnMut" => {
-                // Fn(A) -> B is contravariant in A, covariant in B
-                // But this is handled in the Function arm of variance_at_position
-                vec![Variance::Contravariant, Variance::Covariant].into()
-            }
-
-            // Smart pointers (covariant)
-            "Box" | "Rc" | "Arc" => vec![Variance::Covariant].into(),
-
-            // Tensor types (covariant in element type)
-            "Tensor" | "Matrix" | "Vector" => vec![Variance::Covariant].into(),
-
-            // Conservative default: invariant for unknown types
-            // This is safe but may reject valid variance annotations.
-            // When we have a type registry, we'll look up the actual declared variance.
-            _ => {
-                // Return empty list - caller will use Invariant default
-                List::new()
+        // Tier 2: static defaults table — single source of truth
+        // for the well-known Verum + migration-alias set.
+        for (default_name, defaults) in DEFAULT_CONSTRUCTOR_VARIANCES {
+            if *default_name == type_name {
+                return defaults.iter().copied().collect::<Vec<_>>().into();
             }
         }
+
+        // Tier 3: no data → caller falls back to Invariant.
+        List::new()
     }
 }
 
@@ -704,4 +805,155 @@ pub fn combine_variances(variances: &List<Variance>) -> Variance {
 
     // Default: invariant
     Variance::Invariant
+}
+
+#[cfg(test)]
+mod default_constructor_variances_pins {
+    use super::*;
+
+    /// Pin the entries of [`DEFAULT_CONSTRUCTOR_VARIANCES`] so a
+    /// future edit can't silently change Verum's variance posture
+    /// for a stdlib type — adding / removing / re-ordering an entry
+    /// must be a deliberate test edit. The table is *the* canonical
+    /// source for these defaults; before this pin a typo in the
+    /// list (e.g. `List → Invariant`) would leak into every
+    /// variance-using site.
+    #[test]
+    fn default_constructor_variances_table_pinned() {
+        // Build a name → variances lookup so the assertion order
+        // doesn't depend on the table's internal ordering.
+        let table: std::collections::HashMap<&str, &[Variance]> =
+            DEFAULT_CONSTRUCTOR_VARIANCES.iter().copied().collect();
+
+        // Total entry count — drift-pinned so a future addition
+        // forces this test to follow.
+        assert_eq!(
+            DEFAULT_CONSTRUCTOR_VARIANCES.len(),
+            table.len(),
+            "DEFAULT_CONSTRUCTOR_VARIANCES has duplicate names",
+        );
+        // 5 Verum semantic + 8 Rust aliases + 2 tree/graph
+        // + 5 smart pointers + 5 cell-likes + 3 tensor-family = 28.
+        assert_eq!(
+            DEFAULT_CONSTRUCTOR_VARIANCES.len(),
+            28,
+            "DEFAULT_CONSTRUCTOR_VARIANCES entry count drifted — \
+             update both the table and this pin together",
+        );
+
+        // Verum stdlib semantic types (canonical names from
+        // verum_common::well_known_types::type_names).
+        assert_eq!(table.get(WKT_LIST).copied(), Some(&[Variance::Covariant][..]));
+        assert_eq!(table.get(WKT_SET).copied(), Some(&[Variance::Covariant][..]));
+        assert_eq!(table.get(WKT_MAYBE).copied(), Some(&[Variance::Covariant][..]));
+        assert_eq!(
+            table.get(WKT_RESULT).copied(),
+            Some(&[Variance::Covariant, Variance::Covariant][..]),
+        );
+        assert_eq!(
+            table.get(WKT_MAP).copied(),
+            Some(&[Variance::Invariant, Variance::Covariant][..]),
+        );
+
+        // Migration-ergonomic Rust aliases — same shape as the
+        // canonical-name siblings.
+        assert_eq!(table.get("Vec").copied(), Some(&[Variance::Covariant][..]));
+        assert_eq!(table.get("Option").copied(), Some(&[Variance::Covariant][..]));
+        assert_eq!(
+            table.get("HashMap").copied(),
+            Some(&[Variance::Invariant, Variance::Covariant][..]),
+        );
+
+        // Smart pointers — all covariant.
+        for ptr in ["Heap", "Shared", "Box", "Rc", "Arc"] {
+            assert_eq!(
+                table.get(ptr).copied(),
+                Some(&[Variance::Covariant][..]),
+                "smart pointer `{}` must be covariant",
+                ptr,
+            );
+        }
+
+        // Cell-likes — all invariant.
+        for cell in ["Cell", "RefCell", "Atomic", "Ref", "RefMut"] {
+            assert_eq!(
+                table.get(cell).copied(),
+                Some(&[Variance::Invariant][..]),
+                "cell-like `{}` must be invariant",
+                cell,
+            );
+        }
+
+        // Tensor family — all covariant in element.
+        for tensor in ["Tensor", "Matrix", "Vector"] {
+            assert_eq!(
+                table.get(tensor).copied(),
+                Some(&[Variance::Covariant][..]),
+                "tensor-family `{}` must be covariant",
+                tensor,
+            );
+        }
+
+        // Function types are NOT in this Named-type table — their
+        // variance is computed by the `Type::Function` arm of
+        // `variance_at_position`. A future regression that adds
+        // them here would silently shadow the structural rule.
+        assert!(
+            table.get("Fn").is_none(),
+            "Function types must not appear in the Named-type table",
+        );
+        assert!(table.get("FnOnce").is_none());
+        assert!(table.get("FnMut").is_none());
+    }
+
+    /// `register_constructor_variances` overrides
+    /// [`DEFAULT_CONSTRUCTOR_VARIANCES`] for the registered name —
+    /// a stdlib that declares
+    /// `type Container<+T>` with a non-default variance can flow
+    /// the result into the checker without editing the source
+    /// file's defaults table.
+    #[test]
+    fn register_constructor_variances_overrides_defaults() {
+        let mut checker = VarianceChecker::new();
+
+        // Helper to construct a one-segment Path from a name.
+        fn name_path(name: &str) -> verum_ast::ty::Path {
+            verum_ast::ty::Path {
+                segments: smallvec::smallvec![verum_ast::ty::PathSegment::Name(
+                    verum_ast::Ident::new(verum_common::Text::from(name), Default::default()),
+                )],
+                span: Default::default(),
+            }
+        }
+
+        // Default for Vec is [Covariant] — the override changes it.
+        let pre_override =
+            checker.infer_constructor_variances(&name_path("Vec"));
+        assert_eq!(
+            pre_override.as_slice(),
+            &[Variance::Covariant],
+            "default Vec variance must be Covariant",
+        );
+        assert!(!checker.has_registered_variance("Vec"));
+
+        checker.register_constructor_variances("Vec", vec![Variance::Invariant]);
+        assert!(checker.has_registered_variance("Vec"));
+
+        let post_override =
+            checker.infer_constructor_variances(&name_path("Vec"));
+        assert_eq!(
+            post_override.as_slice(),
+            &[Variance::Invariant],
+            "registered Vec variance must shadow the default",
+        );
+
+        // Unregistered names still go through the defaults table.
+        let list = checker.infer_constructor_variances(&name_path(WKT_LIST));
+        assert_eq!(list.as_slice(), &[Variance::Covariant]);
+
+        // Names not in either tier produce an empty list — caller
+        // falls back to Invariant.
+        let unknown = checker.infer_constructor_variances(&name_path("__no_such_type__"));
+        assert!(unknown.as_slice().is_empty());
+    }
 }
