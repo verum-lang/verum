@@ -2892,21 +2892,11 @@ pub fn lower_instruction<'ctx>(
                 let void_type = ctx.types().void_type();
                 let ptr_type = ctx.types().ptr_type();
                 // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
-                let memset_fn = ctx
-                    .get_module()
-                    .get_function("llvm.memset.p0.i64")
-                    .unwrap_or_else(|| {
-                        let ft = void_type.fn_type(
-                            &[
-                                ptr_type.into(),
-                                i8_type.into(),
-                                i64_type.into(),
-                                bool_type.into(),
-                            ],
-                            false,
-                        );
-                        ctx.get_module().add_function("llvm.memset.p0.i64", ft, None)
-                    });
+                let ft = void_type.fn_type(
+                    &[ptr_type.into(), i8_type.into(), i64_type.into(), bool_type.into()],
+                    false,
+                );
+                let memset_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.memset.p0.i64", ft);
                 let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
                 let module = ctx.get_module();
                 let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
@@ -2992,21 +2982,11 @@ pub fn lower_instruction<'ctx>(
                 let void_type = ctx.types().void_type();
                 let ptr_type = ctx.types().ptr_type();
                 // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
-                let memset_fn = ctx
-                    .get_module()
-                    .get_function("llvm.memset.p0.i64")
-                    .unwrap_or_else(|| {
-                        let ft = void_type.fn_type(
-                            &[
-                                ptr_type.into(),
-                                i8_type.into(),
-                                i64_type.into(),
-                                bool_type.into(),
-                            ],
-                            false,
-                        );
-                        ctx.get_module().add_function("llvm.memset.p0.i64", ft, None)
-                    });
+                let ft = void_type.fn_type(
+                    &[ptr_type.into(), i8_type.into(), i64_type.into(), bool_type.into()],
+                    false,
+                );
+                let memset_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.memset.p0.i64", ft);
                 let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
                 let module = ctx.get_module();
                 let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
@@ -4838,10 +4818,7 @@ pub fn lower_instruction<'ctx>(
                 f
             } else {
                 let fn_name = "verum_char_to_text";
-                module.get_function(fn_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i32_type.into()], false);
-                    module.add_function(fn_name, fn_type, None)
-                })
+                { let fn_type = i64_type.fn_type(&[i32_type.into()], false); super::error::get_or_declare_function(module, fn_name, fn_type) }
             };
 
             // Truncate to i32 if needed
@@ -5963,13 +5940,9 @@ pub fn lower_instruction<'ctx>(
         Instruction::NurserySetTimeout { nursery, timeout } => {
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
-            let set_fn = module
-                .get_function("verum_nursery_set_timeout")
-                .unwrap_or_else(|| {
-                    let void_type = ctx.llvm_context().void_type();
-                    let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_nursery_set_timeout", fn_type, None)
-                });
+            let void_type = ctx.llvm_context().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let set_fn = super::error::get_or_declare_function(module, "verum_nursery_set_timeout", fn_type);
             let nursery_val = ctx.get_register(nursery.0)?;
             let timeout_val = ctx.get_register(timeout.0)?;
             ctx.builder()
@@ -5980,13 +5953,9 @@ pub fn lower_instruction<'ctx>(
         Instruction::NurserySetMaxTasks { nursery, max_tasks } => {
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
-            let set_fn = module
-                .get_function("verum_nursery_set_max_tasks")
-                .unwrap_or_else(|| {
-                    let void_type = ctx.llvm_context().void_type();
-                    let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_nursery_set_max_tasks", fn_type, None)
-                });
+            let void_type = ctx.llvm_context().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let set_fn = super::error::get_or_declare_function(module, "verum_nursery_set_max_tasks", fn_type);
             let nursery_val = ctx.get_register(nursery.0)?;
             let max_tasks_val = ctx.get_register(max_tasks.0)?;
             ctx.builder()
@@ -5997,13 +5966,9 @@ pub fn lower_instruction<'ctx>(
         Instruction::NurserySetErrorBehavior { nursery, behavior } => {
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
-            let set_fn = module
-                .get_function("verum_nursery_set_error_behavior")
-                .unwrap_or_else(|| {
-                    let void_type = ctx.llvm_context().void_type();
-                    let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_nursery_set_error_behavior", fn_type, None)
-                });
+            let void_type = ctx.llvm_context().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let set_fn = super::error::get_or_declare_function(module, "verum_nursery_set_error_behavior", fn_type);
             let nursery_val = ctx.get_register(nursery.0)?;
             let behavior_val = ctx.get_register(behavior.0)?;
             ctx.builder()
@@ -6019,13 +5984,9 @@ pub fn lower_instruction<'ctx>(
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
 
-            let cancel_fn = module
-                .get_function("verum_nursery_cancel")
-                .unwrap_or_else(|| {
-                    let void_type = ctx.llvm_context().void_type();
-                    let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_nursery_cancel", fn_type, None)
-                });
+            let void_type = ctx.llvm_context().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let cancel_fn = super::error::get_or_declare_function(module, "verum_nursery_cancel", fn_type);
 
             let nursery_val = ctx.get_register(nursery.0)?;
             ctx.builder()
