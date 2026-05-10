@@ -587,7 +587,7 @@ impl Interpreter {
         for (i, v) in elements.iter().enumerate() {
             unsafe { *value_ptr.add(i) = *v; }
         }
-        let data_ptr = unsafe { obj.data_ptr() as *mut i64 };
+        let data_ptr = obj.data_ptr() as *mut i64;
         unsafe {
             *data_ptr = count as i64;
             *data_ptr.add(1) = count as i64;
@@ -606,7 +606,7 @@ impl Interpreter {
             .heap
             .alloc(crate::types::TypeId::TUPLE, data_size)?;
         self.state.record_allocation();
-        let data_ptr = unsafe { obj.data_ptr() as *mut Value };
+        let data_ptr = obj.data_ptr() as *mut Value;
         for (i, v) in fields.iter().enumerate() {
             unsafe { *data_ptr.add(i) = *v; }
         }

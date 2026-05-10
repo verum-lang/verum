@@ -764,7 +764,7 @@ pub(crate) fn call_closure_sync(
     let func = state
         .module
         .get_function(func_id)
-        .ok_or({ InterpreterError::FunctionNotFound(func_id) })?;
+        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
     let reg_count = func.register_count;
     let return_pc = state.pc();

@@ -3436,7 +3436,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         Opcode::CmpExtended => {
             let sub_byte = decode_u8(data, offset)?;
             let sub_op =
-                CmpSubOpcode::from_byte(sub_byte).ok_or({ VbcError::InvalidOpcode(sub_byte) })?;
+                CmpSubOpcode::from_byte(sub_byte).ok_or(VbcError::InvalidOpcode(sub_byte))?;
             let dst = decode_reg(data, offset)?;
             let a = decode_reg(data, offset)?;
             let b = decode_reg(data, offset)?;

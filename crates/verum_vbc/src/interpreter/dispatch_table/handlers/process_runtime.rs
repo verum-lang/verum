@@ -584,7 +584,7 @@ fn intercept_native_fd_write_all(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let fd_v = unwrap_ref(state, args_start_reg, caller_base);
-    let data_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    let _data_v = unwrap_ref(state, args_start_reg + 1, caller_base);
     if !fd_v.is_int() {
         let msg = alloc_string_value(state, "fd_write_all: fd must be Int")?;
         return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
@@ -795,7 +795,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_then_wait_round_trip_via_std() {
-        let mut child = std::process::Command::new("/bin/echo")
+        let child = std::process::Command::new("/bin/echo")
             .arg("hello")
             .spawn()
             .unwrap();
