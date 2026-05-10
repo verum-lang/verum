@@ -837,6 +837,32 @@ pub enum InlineMode {
 // attribute form, matching the bare `@inline` default.
 // =========================================================================
 
+/// Per-variant projection for [`InlineMode`].  The classifier
+/// flags partition the four inline modes into two orthogonal
+/// axes: *who decides* (compiler vs. user) and *when it fires*
+/// (always vs. release-only vs. never vs. suggest).  Pinned via
+/// `meta_pin_inline_mode_classifiers` in the drift-pin tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InlineModeMeta {
+    /// Canonical lower-case wire form — matches the
+    /// `@inline(<name>)` attribute syntax.
+    pub name: &'static str,
+    /// Whether the user *forces* inlining at this call site —
+    /// `Always` singleton.  The compiler must inline.
+    pub forces_inline: bool,
+    /// Whether the user *forbids* inlining at this call site —
+    /// `Never` singleton.  The compiler must not inline.
+    pub forbids_inline: bool,
+    /// Whether the decision depends on the build *profile* —
+    /// `Release` singleton.  Inlines under release/optimised
+    /// profiles, defers to the compiler under debug.
+    pub is_profile_dependent: bool,
+    /// Whether the compiler retains discretion — `Suggest` and
+    /// `Release` (under non-release profiles).  Pinned as the
+    /// negation of `forces_inline | forbids_inline`.
+    pub is_compiler_decision: bool,
+}
+
 impl InlineMode {
     /// All variants in stable order.
     pub const ALL: &'static [Self] = &[
@@ -845,6 +871,42 @@ impl InlineMode {
         Self::Never,
         Self::Release,
     ];
+
+    /// Static fact-pack.  Single source of truth for the
+    /// inline-mode partition surface used by codegen
+    /// dispatchers and IDE quick-fix gates.
+    pub const fn meta(self) -> InlineModeMeta {
+        match self {
+            InlineMode::Suggest => InlineModeMeta {
+                name: "suggest",
+                forces_inline: false,
+                forbids_inline: false,
+                is_profile_dependent: false,
+                is_compiler_decision: true,
+            },
+            InlineMode::Always => InlineModeMeta {
+                name: "always",
+                forces_inline: true,
+                forbids_inline: false,
+                is_profile_dependent: false,
+                is_compiler_decision: false,
+            },
+            InlineMode::Never => InlineModeMeta {
+                name: "never",
+                forces_inline: false,
+                forbids_inline: true,
+                is_profile_dependent: false,
+                is_compiler_decision: false,
+            },
+            InlineMode::Release => InlineModeMeta {
+                name: "release",
+                forces_inline: false,
+                forbids_inline: false,
+                is_profile_dependent: true,
+                is_compiler_decision: true,
+            },
+        }
+    }
 
     /// Parse inline mode from string.  Derived from `ALL` so
     /// every `as_str` output round-trips through `from_str`.
@@ -865,12 +927,7 @@ impl InlineMode {
     /// Get string representation.
     #[inline]
     pub const fn as_str(&self) -> &'static str {
-        match self {
-            InlineMode::Suggest => "suggest",
-            InlineMode::Always => "always",
-            InlineMode::Never => "never",
-            InlineMode::Release => "release",
-        }
+        self.meta().name
     }
 }
 
@@ -1565,6 +1622,68 @@ pub enum Likelihood {
     Unlikely,
 }
 
+/// Per-variant projection for [`Likelihood`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LikelihoodMeta {
+    /// Canonical lower-case wire form — matches `@likely` /
+    /// `@unlikely` attribute syntax.
+    pub name: &'static str,
+    /// Polarity of the branch hint — `true` for `Likely` (take
+    /// the branch is the common case), `false` for `Unlikely`
+    /// (take is the rare case).  Used by codegen to pick
+    /// `__builtin_expect`-style hints.
+    pub is_taken_likely: bool,
+}
+
+impl Likelihood {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[Self::Likely, Self::Unlikely];
+
+    /// Static fact-pack.  Wires the `is_taken_likely` polarity
+    /// surface through to the codegen branch-hint dispatch.
+    pub const fn meta(self) -> LikelihoodMeta {
+        match self {
+            Likelihood::Likely => LikelihoodMeta {
+                name: "likely",
+                is_taken_likely: true,
+            },
+            Likelihood::Unlikely => LikelihoodMeta {
+                name: "unlikely",
+                is_taken_likely: false,
+            },
+        }
+    }
+
+    /// Canonical lower-case wire form.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse from canonical wire form.  Derived from `ALL` so
+    /// every `as_str` output round-trips.
+    pub fn from_str(s: &str) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.as_str().as_bytes() == s.as_bytes() {
+                return Some(v);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Negation — `Likely.flipped() == Unlikely`.  Useful when
+    /// inverting condition polarity in cfg branch lowering.
+    pub const fn flipped(self) -> Self {
+        match self {
+            Likelihood::Likely => Likelihood::Unlikely,
+            Likelihood::Unlikely => Likelihood::Likely,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LikelihoodAttr {
     pub likelihood: Likelihood,
@@ -2108,24 +2227,154 @@ pub enum WellFoundedRelation {
     Custom(Text),
 }
 
+/// Discriminator for [`WellFoundedRelation`] — zero-sized
+/// projection over the standard relations only.  `Custom(_)` is
+/// the open escape hatch and lives outside the static taxonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum WellFoundedRelationKind {
+    NaturalLt,
+    Lexicographic,
+    Multiset,
+    Structural,
+}
+
+/// Per-variant projection for [`WellFoundedRelationKind`].  Each
+/// standard relation lists its canonical name + lowercase
+/// aliases (e.g. `"nat"` → `NaturalLt`, `"lex"` →
+/// `Lexicographic`) — single source of truth for the
+/// `from_str` alias table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WellFoundedRelationKindMeta {
+    /// Canonical lower-case wire form.
+    pub name: &'static str,
+    /// Lowercase aliases that resolve to this relation via
+    /// case-insensitive parse.  Always lowercase + non-empty.
+    pub aliases: &'static [&'static str],
+    /// Whether this relation operates on *structural* subterms
+    /// (Structural singleton).  Used by termination-checker
+    /// dispatch to pick the right decreasing measure.
+    pub is_structural: bool,
+    /// Whether this relation operates on *tuples / sequences*
+    /// (Lexicographic + Multiset).  Pinned as a band classifier.
+    pub is_compound: bool,
+}
+
+impl WellFoundedRelationKind {
+    /// All standard variants in declaration order.  `Custom(_)`
+    /// is intentionally excluded — it's an open payload-bearing
+    /// escape hatch.
+    pub const ALL_STANDARD: &'static [Self] = &[
+        Self::NaturalLt,
+        Self::Lexicographic,
+        Self::Multiset,
+        Self::Structural,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> WellFoundedRelationKindMeta {
+        match self {
+            WellFoundedRelationKind::NaturalLt => WellFoundedRelationKindMeta {
+                name: "natural",
+                aliases: &["natural", "nat"],
+                is_structural: false,
+                is_compound: false,
+            },
+            WellFoundedRelationKind::Lexicographic => WellFoundedRelationKindMeta {
+                name: "lexicographic",
+                aliases: &["lexicographic", "lex"],
+                is_structural: false,
+                is_compound: true,
+            },
+            WellFoundedRelationKind::Multiset => WellFoundedRelationKindMeta {
+                name: "multiset",
+                aliases: &["multiset"],
+                is_structural: false,
+                is_compound: true,
+            },
+            WellFoundedRelationKind::Structural => WellFoundedRelationKindMeta {
+                name: "structural",
+                aliases: &["structural"],
+                is_structural: true,
+                is_compound: false,
+            },
+        }
+    }
+
+    /// Lookup a standard variant by case-insensitive
+    /// name-or-alias.  Custom strings return `None` so callers
+    /// can decide their own fallback.  Single source of truth
+    /// for the alias table that previously lived inline in
+    /// `WellFoundedRelation::from_str`.
+    pub fn from_alias(s: &str) -> Option<Self> {
+        let lower = s.to_ascii_lowercase();
+        let mut i = 0;
+        while i < Self::ALL_STANDARD.len() {
+            let v = Self::ALL_STANDARD[i];
+            let m = v.meta();
+            let mut j = 0;
+            while j < m.aliases.len() {
+                if m.aliases[j].as_bytes() == lower.as_bytes() {
+                    return Some(v);
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        None
+    }
+}
+
 impl WellFoundedRelation {
+    /// Discriminator projection — strip the `Custom(_)` payload,
+    /// keep the standard-variant tag.  Returns `None` for
+    /// `Custom(_)`.
+    pub const fn standard_kind(&self) -> Option<WellFoundedRelationKind> {
+        match self {
+            WellFoundedRelation::NaturalLt => Some(WellFoundedRelationKind::NaturalLt),
+            WellFoundedRelation::Lexicographic => {
+                Some(WellFoundedRelationKind::Lexicographic)
+            }
+            WellFoundedRelation::Multiset => Some(WellFoundedRelationKind::Multiset),
+            WellFoundedRelation::Structural => Some(WellFoundedRelationKind::Structural),
+            WellFoundedRelation::Custom(_) => None,
+        }
+    }
+
+    /// Whether this relation is the open user-defined variant.
+    pub const fn is_custom(&self) -> bool {
+        matches!(self, WellFoundedRelation::Custom(_))
+    }
+
     pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "natural" | "nat" => Maybe::Some(WellFoundedRelation::NaturalLt),
-            "lexicographic" | "lex" => Maybe::Some(WellFoundedRelation::Lexicographic),
-            "multiset" => Maybe::Some(WellFoundedRelation::Multiset),
-            "structural" => Maybe::Some(WellFoundedRelation::Structural),
-            _ => Maybe::Some(WellFoundedRelation::Custom(Text::from(s))),
+        // Standard names + aliases route through the canonical
+        // `WellFoundedRelationKind::from_alias` table — single
+        // source of truth replacing the inline 4-arm match that
+        // duplicated the alias-keyword set.
+        match WellFoundedRelationKind::from_alias(s) {
+            Some(WellFoundedRelationKind::NaturalLt) => {
+                Maybe::Some(WellFoundedRelation::NaturalLt)
+            }
+            Some(WellFoundedRelationKind::Lexicographic) => {
+                Maybe::Some(WellFoundedRelation::Lexicographic)
+            }
+            Some(WellFoundedRelationKind::Multiset) => {
+                Maybe::Some(WellFoundedRelation::Multiset)
+            }
+            Some(WellFoundedRelationKind::Structural) => {
+                Maybe::Some(WellFoundedRelation::Structural)
+            }
+            None => Maybe::Some(WellFoundedRelation::Custom(Text::from(s))),
         }
     }
 
     pub fn as_str(&self) -> &str {
         match self {
-            WellFoundedRelation::NaturalLt => "natural",
-            WellFoundedRelation::Lexicographic => "lexicographic",
-            WellFoundedRelation::Multiset => "multiset",
-            WellFoundedRelation::Structural => "structural",
             WellFoundedRelation::Custom(name) => name.as_str(),
+            other => other
+                .standard_kind()
+                .expect("non-Custom variant has standard_kind")
+                .meta()
+                .name,
         }
     }
 }
@@ -4028,6 +4277,114 @@ impl Spanned for PerformanceContract {
             PerformanceContract::ConstantTime { span } => *span,
             PerformanceContract::MaxTime { span, .. } => *span,
             PerformanceContract::MaxMemory { span, .. } => *span,
+        }
+    }
+}
+
+/// Discriminator for [`PerformanceContract`] — zero-sized
+/// projection.  Used by metrics consumers that classify the
+/// performance-contract band without cloning the payload
+/// numerics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PerformanceContractKind {
+    ConstantTime,
+    MaxTime,
+    MaxMemory,
+}
+
+/// Per-variant projection for [`PerformanceContractKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PerformanceContractKindMeta {
+    /// Canonical lower-case wire form — matches the
+    /// `@constant_time` / `@max_time(…)` / `@max_memory(…)`
+    /// attribute syntax.
+    pub name: &'static str,
+    /// Whether this contract bounds *time* — `ConstantTime` and
+    /// `MaxTime`.  Pinned for the codegen latency-checker
+    /// dispatch.
+    pub is_time_bound: bool,
+    /// Whether this contract bounds *memory* — `MaxMemory`
+    /// singleton.
+    pub is_memory_bound: bool,
+    /// Whether the variant carries a *numeric* upper bound
+    /// payload (`MaxTime { microseconds }` or
+    /// `MaxMemory { bytes }`).  `ConstantTime` is the unique
+    /// nullary-bound variant.
+    pub carries_numeric_bound: bool,
+}
+
+impl PerformanceContractKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::ConstantTime,
+        Self::MaxTime,
+        Self::MaxMemory,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> PerformanceContractKindMeta {
+        match self {
+            PerformanceContractKind::ConstantTime => PerformanceContractKindMeta {
+                name: "constant_time",
+                is_time_bound: true,
+                is_memory_bound: false,
+                carries_numeric_bound: false,
+            },
+            PerformanceContractKind::MaxTime => PerformanceContractKindMeta {
+                name: "max_time",
+                is_time_bound: true,
+                is_memory_bound: false,
+                carries_numeric_bound: true,
+            },
+            PerformanceContractKind::MaxMemory => PerformanceContractKindMeta {
+                name: "max_memory",
+                is_time_bound: false,
+                is_memory_bound: true,
+                carries_numeric_bound: true,
+            },
+        }
+    }
+
+    /// Canonical lower-case wire form.
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Inverse of `as_str` — recover the kind from canonical
+    /// wire form.
+    pub fn from_str(s: &str) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Some(v);
+            }
+            i += 1;
+        }
+        None
+    }
+}
+
+impl PerformanceContract {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> PerformanceContractKind {
+        match self {
+            PerformanceContract::ConstantTime { .. } => PerformanceContractKind::ConstantTime,
+            PerformanceContract::MaxTime { .. } => PerformanceContractKind::MaxTime,
+            PerformanceContract::MaxMemory { .. } => PerformanceContractKind::MaxMemory,
+        }
+    }
+
+    /// Returns the numeric upper bound for the bound-carrying
+    /// variants (`MaxTime`/`MaxMemory`).  Pinned via
+    /// `meta().carries_numeric_bound` so consumers can decide
+    /// whether to read the payload without per-variant matching.
+    pub const fn numeric_bound(&self) -> Option<u64> {
+        match self {
+            PerformanceContract::ConstantTime { .. } => None,
+            PerformanceContract::MaxTime { microseconds, .. } => Some(*microseconds),
+            PerformanceContract::MaxMemory { bytes, .. } => Some(*bytes),
         }
     }
 }
@@ -9403,5 +9760,269 @@ mod meta_drift_pins {
             span: Span::default(),
         };
         assert_eq!(b.kind(), PgoAttrKind::BranchProbability);
+    }
+
+    // --- InlineMode ---
+
+    #[test]
+    fn meta_pin_inline_mode_round_trip_and_classifiers() {
+        assert_eq!(InlineMode::ALL.len(), 4);
+
+        // Names + round-trip + uniqueness.
+        let mut seen = std::collections::HashSet::new();
+        for m in InlineMode::ALL {
+            let name = m.meta().name;
+            assert!(seen.insert(name), "{:?}: duplicate name", m);
+            assert!(matches!(InlineMode::from_str(name), Maybe::Some(v) if v == *m));
+        }
+
+        // forces_inline: Always singleton.
+        let forced: Vec<_> = InlineMode::ALL
+            .iter()
+            .filter(|m| m.meta().forces_inline)
+            .copied()
+            .collect();
+        assert_eq!(forced, vec![InlineMode::Always]);
+
+        // forbids_inline: Never singleton.
+        let forbidden: Vec<_> = InlineMode::ALL
+            .iter()
+            .filter(|m| m.meta().forbids_inline)
+            .copied()
+            .collect();
+        assert_eq!(forbidden, vec![InlineMode::Never]);
+
+        // is_profile_dependent: Release singleton.
+        let profile: Vec<_> = InlineMode::ALL
+            .iter()
+            .filter(|m| m.meta().is_profile_dependent)
+            .copied()
+            .collect();
+        assert_eq!(profile, vec![InlineMode::Release]);
+
+        // forces_inline ⊕ forbids_inline (a single attribute
+        // can't both force and forbid).
+        for m in InlineMode::ALL {
+            let meta = m.meta();
+            assert!(
+                !(meta.forces_inline && meta.forbids_inline),
+                "{:?}: cannot both force and forbid inline",
+                m
+            );
+        }
+
+        // is_compiler_decision is the negation of
+        // (forces_inline | forbids_inline) — pinned so a future
+        // 5th variant doesn't silently break the partition.
+        for m in InlineMode::ALL {
+            let meta = m.meta();
+            assert_eq!(
+                meta.is_compiler_decision,
+                !(meta.forces_inline || meta.forbids_inline),
+                "{:?}: is_compiler_decision must be ¬(forces ∨ forbids)",
+                m,
+            );
+        }
+    }
+
+    // --- Likelihood ---
+
+    #[test]
+    fn meta_pin_likelihood_round_trip_and_polarity() {
+        assert_eq!(Likelihood::ALL.len(), 2);
+
+        // Names + round-trip.
+        for l in Likelihood::ALL {
+            assert_eq!(Likelihood::from_str(l.as_str()), Some(*l));
+        }
+
+        // Polarity: Likely flips, Unlikely doesn't.
+        assert!(Likelihood::Likely.meta().is_taken_likely);
+        assert!(!Likelihood::Unlikely.meta().is_taken_likely);
+
+        // flipped() inverts polarity (involutive).
+        for l in Likelihood::ALL {
+            assert_eq!(l.flipped().flipped(), *l);
+            assert_ne!(l.flipped(), *l);
+            assert_eq!(
+                l.flipped().meta().is_taken_likely,
+                !l.meta().is_taken_likely,
+            );
+        }
+    }
+
+    // --- WellFoundedRelation ---
+
+    #[test]
+    fn meta_pin_well_founded_relation_kind_aliases_unique() {
+        assert_eq!(WellFoundedRelationKind::ALL_STANDARD.len(), 4);
+
+        // Aliases are lowercase + non-empty + globally unique
+        // across the whole table.  Pre-collapse the alias table
+        // lived inline in `WellFoundedRelation::from_str`.
+        let mut all_aliases: std::collections::HashMap<&str, WellFoundedRelationKind> =
+            std::collections::HashMap::new();
+        for k in WellFoundedRelationKind::ALL_STANDARD {
+            let m = k.meta();
+            assert!(!m.aliases.is_empty());
+            for alias in m.aliases {
+                assert!(
+                    alias.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                    "{:?}: alias {:?} not lowercase",
+                    k,
+                    alias,
+                );
+                let prior = all_aliases.insert(alias, *k);
+                assert!(
+                    prior.is_none(),
+                    "{:?}: alias {:?} also bound to {:?}",
+                    k,
+                    alias,
+                    prior.unwrap(),
+                );
+            }
+        }
+
+        // is_structural: Structural singleton.
+        let structural: Vec<_> = WellFoundedRelationKind::ALL_STANDARD
+            .iter()
+            .filter(|k| k.meta().is_structural)
+            .copied()
+            .collect();
+        assert_eq!(structural, vec![WellFoundedRelationKind::Structural]);
+
+        // is_compound: Lexicographic + Multiset.
+        let compound: Vec<_> = WellFoundedRelationKind::ALL_STANDARD
+            .iter()
+            .filter(|k| k.meta().is_compound)
+            .copied()
+            .collect();
+        assert_eq!(
+            compound,
+            vec![
+                WellFoundedRelationKind::Lexicographic,
+                WellFoundedRelationKind::Multiset,
+            ],
+        );
+
+        // from_alias round-trips every alias (case-insensitive).
+        for k in WellFoundedRelationKind::ALL_STANDARD {
+            for alias in k.meta().aliases {
+                assert_eq!(WellFoundedRelationKind::from_alias(alias), Some(*k));
+                assert_eq!(
+                    WellFoundedRelationKind::from_alias(&alias.to_ascii_uppercase()),
+                    Some(*k),
+                );
+            }
+        }
+
+        // standard_kind() projection — Custom is None, others
+        // are Some.
+        let custom = WellFoundedRelation::Custom(Text::from("my_relation"));
+        assert!(custom.standard_kind().is_none());
+        assert!(custom.is_custom());
+        assert_eq!(custom.as_str(), "my_relation");
+
+        for k in WellFoundedRelationKind::ALL_STANDARD {
+            let v = match k {
+                WellFoundedRelationKind::NaturalLt => WellFoundedRelation::NaturalLt,
+                WellFoundedRelationKind::Lexicographic => {
+                    WellFoundedRelation::Lexicographic
+                }
+                WellFoundedRelationKind::Multiset => WellFoundedRelation::Multiset,
+                WellFoundedRelationKind::Structural => WellFoundedRelation::Structural,
+            };
+            assert_eq!(v.standard_kind(), Some(*k));
+            assert!(!v.is_custom());
+            assert_eq!(v.as_str(), k.meta().name);
+        }
+    }
+
+    // --- PerformanceContract ---
+
+    #[test]
+    fn meta_pin_performance_contract_kind_round_trip_and_partitions() {
+        assert_eq!(PerformanceContractKind::ALL.len(), 3);
+
+        // Names + round-trip + snake_case.
+        let mut seen = std::collections::HashSet::new();
+        for k in PerformanceContractKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+            assert_eq!(PerformanceContractKind::from_str(m.name), Some(*k));
+        }
+
+        // is_time_bound: ConstantTime + MaxTime.
+        let time: Vec<_> = PerformanceContractKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_time_bound)
+            .copied()
+            .collect();
+        assert_eq!(
+            time,
+            vec![
+                PerformanceContractKind::ConstantTime,
+                PerformanceContractKind::MaxTime,
+            ],
+        );
+
+        // is_memory_bound: MaxMemory singleton.
+        let mem: Vec<_> = PerformanceContractKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_memory_bound)
+            .copied()
+            .collect();
+        assert_eq!(mem, vec![PerformanceContractKind::MaxMemory]);
+
+        // is_time_bound ⊕ is_memory_bound (a single contract
+        // bounds time XOR memory, not both).
+        for k in PerformanceContractKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.is_time_bound ^ m.is_memory_bound,
+                "{:?}: must bound exactly one of time / memory",
+                k
+            );
+        }
+
+        // carries_numeric_bound: MaxTime + MaxMemory.
+        let numeric: Vec<_> = PerformanceContractKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_numeric_bound)
+            .copied()
+            .collect();
+        assert_eq!(
+            numeric,
+            vec![
+                PerformanceContractKind::MaxTime,
+                PerformanceContractKind::MaxMemory,
+            ],
+        );
+
+        // Live-payload kind() + numeric_bound() projection.
+        let ct = PerformanceContract::ConstantTime {
+            span: Span::default(),
+        };
+        assert_eq!(ct.kind(), PerformanceContractKind::ConstantTime);
+        assert!(ct.numeric_bound().is_none());
+
+        let mt = PerformanceContract::MaxTime {
+            microseconds: 1234,
+            span: Span::default(),
+        };
+        assert_eq!(mt.kind(), PerformanceContractKind::MaxTime);
+        assert_eq!(mt.numeric_bound(), Some(1234));
+
+        let mm = PerformanceContract::MaxMemory {
+            bytes: 65536,
+            span: Span::default(),
+        };
+        assert_eq!(mm.kind(), PerformanceContractKind::MaxMemory);
+        assert_eq!(mm.numeric_bound(), Some(65536));
     }
 }
