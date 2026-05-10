@@ -8853,13 +8853,9 @@ fn lower_call<'ctx>(
             "__mutex_lock_raw" => {
                 // __mutex_lock_raw(mutex: Int) -> Int (0)
                 let mutex_val = as_i64(ctx, ctx.get_register(args.start.0)?, "mtx_i64")?;
-                let lock_fn = module
-                    .get_function("verum_mutex_lock_bridge")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_mutex_lock_bridge", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let lock_fn = super::error::get_or_declare_function(module, "verum_mutex_lock_bridge", fn_type);
                 ctx.builder()
                     .build_call(lock_fn, &[mutex_val.into()], "")
                     .or_llvm_err()?;
@@ -8870,13 +8866,9 @@ fn lower_call<'ctx>(
             "__mutex_unlock_raw" => {
                 // __mutex_unlock_raw(mutex: Int) -> Int (0)
                 let mutex_val = as_i64(ctx, ctx.get_register(args.start.0)?, "mtx_i64")?;
-                let unlock_fn = module
-                    .get_function("verum_mutex_unlock_bridge")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_mutex_unlock_bridge", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let unlock_fn = super::error::get_or_declare_function(module, "verum_mutex_unlock_bridge", fn_type);
                 ctx.builder()
                     .build_call(unlock_fn, &[mutex_val.into()], "")
                     .or_llvm_err()?;
@@ -8925,13 +8917,9 @@ fn lower_call<'ctx>(
                 // __cond_wait_raw(cond: Int, mutex: Int) -> Int (0)
                 let cond_val = as_i64(ctx, ctx.get_register(args.start.0)?, "cond_i64")?;
                 let mutex_val = as_i64(ctx, ctx.get_register(Reg(args.start.0 + 1).0)?, "mtx_i64")?;
-                let wait_fn = module
-                    .get_function("verum_cond_wait_bridge")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_cond_wait_bridge", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let wait_fn = super::error::get_or_declare_function(module, "verum_cond_wait_bridge", fn_type);
                 ctx.builder()
                     .build_call(wait_fn, &[cond_val.into(), mutex_val.into()], "")
                     .or_llvm_err()?;
@@ -8966,13 +8954,9 @@ fn lower_call<'ctx>(
             "__cond_signal_raw" => {
                 // __cond_signal_raw(cond: Int) -> Int (0)
                 let cond_val = as_i64(ctx, ctx.get_register(args.start.0)?, "cond_i64")?;
-                let signal_fn = module
-                    .get_function("verum_cond_signal_bridge")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_cond_signal_bridge", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let signal_fn = super::error::get_or_declare_function(module, "verum_cond_signal_bridge", fn_type);
                 ctx.builder()
                     .build_call(signal_fn, &[cond_val.into()], "")
                     .or_llvm_err()?;
@@ -8983,13 +8967,9 @@ fn lower_call<'ctx>(
             "__cond_broadcast_raw" => {
                 // __cond_broadcast_raw(cond: Int) -> Int (0)
                 let cond_val = as_i64(ctx, ctx.get_register(args.start.0)?, "cond_i64")?;
-                let broadcast_fn = module
-                    .get_function("verum_cond_broadcast_bridge")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_cond_broadcast_bridge", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let broadcast_fn = super::error::get_or_declare_function(module, "verum_cond_broadcast_bridge", fn_type);
                 ctx.builder()
                     .build_call(broadcast_fn, &[cond_val.into()], "")
                     .or_llvm_err()?;
@@ -9054,13 +9034,9 @@ fn lower_call<'ctx>(
             "__time_sleep_nanos_raw" => {
                 // __time_sleep_nanos_raw(nanos: Int) -> Int (0)
                 let nanos_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ns_i64")?;
-                let sleep_fn = module
-                    .get_function("verum_time_sleep_nanos")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_time_sleep_nanos", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let sleep_fn = super::error::get_or_declare_function(module, "verum_time_sleep_nanos", fn_type);
                 ctx.builder()
                     .build_call(sleep_fn, &[nanos_val.into()], "")
                     .or_llvm_err()?;
@@ -10835,13 +10811,9 @@ fn lower_call<'ctx>(
             "sleep" => {
                 // sleep(nanos: Int) — sleep for given nanoseconds
                 let nanos_val = as_i64(ctx, ctx.get_register(args.start.0)?, "sleep_ns")?;
-                let sleep_fn = module
-                    .get_function("verum_time_sleep_nanos")
-                    .unwrap_or_else(|| {
-                        let void_type = ctx.types().void_type();
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_time_sleep_nanos", fn_type, None)
-                    });
+                let void_type = ctx.types().void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let sleep_fn = super::error::get_or_declare_function(module, "verum_time_sleep_nanos", fn_type);
                 ctx.builder()
                     .build_call(sleep_fn, &[nanos_val.into()], "")
                     .or_llvm_err()?;
