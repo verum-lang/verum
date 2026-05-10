@@ -18597,10 +18597,12 @@ impl VbcCodegen {
             intrinsic_name.as_str(),
             "CELL_SET"
                 | "REFCELL_SET"
+                | "REFCELL_REPLACE"
                 | "ONCECELL_SET"
                 | "ONCECELL_TAKE"
                 | "REFCELL_BORROW"
                 | "REFCELL_BORROW_MUT"
+                | "LAZYCELL_FORCE"
                 | "LAZYCELL_INIT"
         ) {
             return self.compile_cell_intrinsic(&intrinsic_name, args, dest);
@@ -18675,7 +18677,7 @@ impl VbcCodegen {
             .or_internal("cell intrinsic self has no value")?;
 
         match name {
-            "CELL_SET" | "REFCELL_SET" => {
+            "CELL_SET" | "REFCELL_SET" | "REFCELL_REPLACE" => {
                 let value_arg = args
                     .get(2)
                     .ok_or_else(|| CodegenError::internal("CELL_SET missing value"))?;
@@ -18702,7 +18704,7 @@ impl VbcCodegen {
                 self.ctx.free_temp(self_reg);
                 Ok(Some(dest))
             }
-            "ONCECELL_SET" => {
+            "ONCECELL_SET" | "LAZYCELL_FORCE" => {
                 let value_arg = args
                     .get(2)
                     .ok_or_else(|| CodegenError::internal("ONCECELL_SET missing value"))?;
