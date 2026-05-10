@@ -351,8 +351,14 @@ pub struct MethodResolution {
     pub source: MethodSource,
 }
 
-/// Source of a method implementation
-#[derive(Debug, Clone)]
+/// Source of a method implementation.
+///
+/// Canonical home for the protocol-side method-source taxonomy.
+/// `verum_types::protocol::MethodSource` re-exports this type
+/// rather than defining its own — pre-collapse the two were
+/// structural duplicates with bit-identical doc comments and
+/// payload shapes, kept in sync only by convention.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MethodSource {
     /// Explicitly implemented in the impl block
     Explicit,
@@ -360,4 +366,189 @@ pub enum MethodSource {
     Default(Text),
     /// Inherited from superprotocol
     Inherited(Text),
+}
+
+/// Discriminator for [`MethodSource`] — the zero-sized
+/// projection used by metrics consumers that classify the
+/// method-source band without cloning the protocol-name string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MethodSourceKind {
+    Explicit,
+    Default,
+    Inherited,
+}
+
+/// Static fact-pack for a [`MethodSourceKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodSourceKindMeta {
+    /// Lower-snake-case wire form — used in telemetry surfaces.
+    pub name: &'static str,
+    /// Whether the implementation lives on the *current* impl
+    /// block (true for `Explicit`).  False means the body was
+    /// resolved from a different declaration site —
+    /// either the protocol's default or a superprotocol's impl.
+    pub is_explicit_impl: bool,
+    /// Whether the implementation comes from a *protocol*
+    /// (default body) or from a *superprotocol* (inherited).
+    /// True means *protocol-side* — Default + Inherited both
+    /// flip this; Explicit does not.
+    pub is_protocol_provided: bool,
+    /// Whether the variant carries a *protocol-name* payload
+    /// (the name of the providing protocol or superprotocol).
+    /// True for Default + Inherited; false for Explicit.
+    pub carries_protocol_name: bool,
+}
+
+impl MethodSourceKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [MethodSourceKind] = &[
+        MethodSourceKind::Explicit,
+        MethodSourceKind::Default,
+        MethodSourceKind::Inherited,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> MethodSourceKindMeta {
+        match self {
+            MethodSourceKind::Explicit => MethodSourceKindMeta {
+                name: "explicit",
+                is_explicit_impl: true,
+                is_protocol_provided: false,
+                carries_protocol_name: false,
+            },
+            MethodSourceKind::Default => MethodSourceKindMeta {
+                name: "default",
+                is_explicit_impl: false,
+                is_protocol_provided: true,
+                carries_protocol_name: true,
+            },
+            MethodSourceKind::Inherited => MethodSourceKindMeta {
+                name: "inherited",
+                is_explicit_impl: false,
+                is_protocol_provided: true,
+                carries_protocol_name: true,
+            },
+        }
+    }
+}
+
+impl MethodSource {
+    /// Discriminator projection — strip the protocol-name
+    /// payload, keep the tag.
+    pub const fn kind(&self) -> MethodSourceKind {
+        match self {
+            MethodSource::Explicit => MethodSourceKind::Explicit,
+            MethodSource::Default(_) => MethodSourceKind::Default,
+            MethodSource::Inherited(_) => MethodSourceKind::Inherited,
+        }
+    }
+
+    /// Returns the providing protocol name for the protocol-
+    /// provided variants (Default + Inherited).  Pinned via
+    /// `meta().carries_protocol_name` so consumers can decide
+    /// whether to call this without per-variant matching.
+    pub fn protocol_name(&self) -> Option<&Text> {
+        match self {
+            MethodSource::Explicit => None,
+            MethodSource::Default(name) => Some(name),
+            MethodSource::Inherited(name) => Some(name),
+        }
+    }
+}
+
+#[cfg(test)]
+mod method_source_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `MethodSourceKind` discriminator projection +
+    /// classifier flags.  Pre-collapse the `MethodSource` enum
+    /// lived as a structural duplicate in `verum_types::protocol`;
+    /// now `verum_types` re-exports this canonical home so a new
+    /// variant added here flows through automatically.
+    #[test]
+    fn meta_pin_method_source_kind_round_trip_and_partitions() {
+        // 1. Variant count.
+        assert_eq!(MethodSourceKind::ALL.len(), 3);
+
+        // 2. Names + uniqueness.
+        let mut seen = std::collections::HashSet::new();
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 3. is_explicit_impl partition — Explicit singleton.
+        let explicit: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_explicit_impl)
+            .copied()
+            .collect();
+        assert_eq!(explicit, vec![MethodSourceKind::Explicit]);
+
+        // 4. is_protocol_provided partition — Default + Inherited.
+        let pp: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_protocol_provided)
+            .copied()
+            .collect();
+        assert_eq!(
+            pp,
+            vec![MethodSourceKind::Default, MethodSourceKind::Inherited],
+        );
+
+        // 5. carries_protocol_name partition — Default + Inherited.
+        let cn: Vec<_> = MethodSourceKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_protocol_name)
+            .copied()
+            .collect();
+        assert_eq!(
+            cn,
+            vec![MethodSourceKind::Default, MethodSourceKind::Inherited],
+        );
+
+        // 6. Cross-cutting: is_explicit_impl ⊕ is_protocol_provided
+        //    (a method body comes from exactly one of: the impl
+        //    block itself, or a protocol/superprotocol).
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.is_explicit_impl ^ m.is_protocol_provided,
+                "{:?}: must flip exactly one of is_explicit_impl / is_protocol_provided",
+                k
+            );
+        }
+
+        // 7. is_protocol_provided ⇔ carries_protocol_name —
+        //    only protocol-provided variants carry the protocol-
+        //    name payload.
+        for k in MethodSourceKind::ALL {
+            let m = k.meta();
+            assert_eq!(
+                m.is_protocol_provided, m.carries_protocol_name,
+                "{:?}: protocol-provided iff carries-protocol-name",
+                k
+            );
+        }
+
+        // 8. Live-payload kind() projection + protocol_name()
+        //    accessor.
+        let exp = MethodSource::Explicit;
+        assert_eq!(exp.kind(), MethodSourceKind::Explicit);
+        assert!(exp.protocol_name().is_none());
+
+        let def = MethodSource::Default(Text::from("Display"));
+        assert_eq!(def.kind(), MethodSourceKind::Default);
+        assert_eq!(def.protocol_name().unwrap().as_str(), "Display");
+
+        let inh = MethodSource::Inherited(Text::from("Eq"));
+        assert_eq!(inh.kind(), MethodSourceKind::Inherited);
+        assert_eq!(inh.protocol_name().unwrap().as_str(), "Eq");
+    }
 }

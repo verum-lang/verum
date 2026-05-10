@@ -1045,16 +1045,20 @@ pub struct MethodResolution {
     pub source: MethodSource,
 }
 
-/// Source of a method implementation
-#[derive(Debug, Clone)]
-pub enum MethodSource {
-    /// Explicitly implemented in the impl block
-    Explicit,
-    /// Default implementation from protocol definition
-    Default(Text),
-    /// Inherited from superprotocol
-    Inherited(Text),
-}
+/// Source of a method implementation — re-exported from
+/// `verum_protocol_types::MethodSource` so the type-system-side
+/// surface and the protocol-types-crate-side surface agree by
+/// construction.  Pre-collapse the two definitions had identical
+/// 3-variant lists kept in sync only by convention; the
+/// canonical home is in `verum_protocol_types` because that crate
+/// hosts the rest of the protocol-base data types
+/// (`Protocol` / `MethodResolution` / `ProtocolMethod` etc.).
+///
+/// The kind discriminator + classifier-flag meta() projection
+/// lives on the canonical home; consumers can reach it as
+/// `verum_protocol_types::MethodSourceKind` /
+/// `MethodSource::kind()`.
+pub use verum_protocol_types::MethodSource;
 
 // ==================== VTable Support ====================
 
@@ -14210,6 +14214,25 @@ impl UnifiedProtocolError {
 mod tests {
     use super::*;
     use crate::advanced_protocols::*;
+
+    /// Alias contract: `verum_types::protocol::MethodSource` is
+    /// a `pub use` re-export of `verum_protocol_types::
+    /// MethodSource`.  Pre-collapse the two were structural
+    /// duplicates with identical 3-variant lists.  Asserts both
+    /// paths refer to the same nominal type.
+    #[test]
+    fn method_source_alias_contract() {
+        // Compile-time alias check via assignment.
+        let m: verum_protocol_types::MethodSource = MethodSource::Explicit;
+        assert!(matches!(m, MethodSource::Explicit));
+
+        // Round-trip in the reverse direction.
+        let canonical = verum_protocol_types::MethodSource::Default(
+            Text::from("Display"),
+        );
+        let aliased: MethodSource = canonical;
+        assert_eq!(aliased.kind(), verum_protocol_types::MethodSourceKind::Default);
+    }
 
     /// Drift-pin: `ObjectSafetyErrorKind` is the discriminator
     /// projection.  Wires variant-count, name uniqueness, and the
