@@ -149,7 +149,14 @@ where
                 "RangeLike" => unifier.register_range_like_type(target_text),
                 "BytewiseFfi" => unifier.register_bytewise_ffi_type(target_text),
                 "SizedNumeric" => unifier.register_sized_numeric_type(target_text),
-                "ArrayCoercible" => unifier.register_array_coercible_type(target_text),
+                "ArrayCoercible" => {
+                    // Dual-register: Unifier-instance state for
+                    // the type-checker pipeline + global shared
+                    // state for `Subtyping` instances constructed
+                    // locally outside the pipeline.
+                    unifier.register_array_coercible_type(target_text.clone());
+                    verum_types::subtype::register_global_array_coercible(target_text);
+                }
                 _ => unreachable!("match_coercion_protocol guards this set"),
             }
             registered += 1;

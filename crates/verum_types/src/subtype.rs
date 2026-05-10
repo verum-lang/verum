@@ -15,11 +15,64 @@ use crate::ty::{Type, TypeVar};
 use crate::variance::{DEFAULT_CONSTRUCTOR_VARIANCES, Variance};
 
 use std::cell::Cell;
-use verum_common::well_known_types::WellKnownType as WKT;
+use std::sync::{OnceLock, RwLock};
 use verum_common::{List, Text};
 
 thread_local! {
     static SUBTYPE_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Globally-shared `ArrayCoercible`-marked type registry consumed
+/// by [`Subtyping::is_array_coercible`].
+///
+/// **Why a global, not instance state?**  `Subtyping` is
+/// constructed locally at 7+ call sites (existential.rs,
+/// capability.rs, infer/core.rs, infer/env.rs ×4) without
+/// pipeline integration — there is no central singleton to plumb
+/// the protocol-scan results into.  Lifting the registry to a
+/// process-wide [`OnceLock`]-backed [`RwLock`] gives every
+/// Subtyping instance the same view of the protocol-scan-
+/// populated set, eliminating the previous hardcoded `["List"]`
+/// default and the never-called
+/// `Subtyping::register_array_coercible_type` method.
+///
+/// **Population path.**  `verum_compiler::stdlib_coercion_registry::
+/// scan_protocol_implementations` calls
+/// [`register_global_array_coercible`] alongside the Unifier-
+/// instance registration when it encounters
+/// `implement ArrayCoercible for X {}` blocks during stdlib
+/// bootstrap.
+static GLOBAL_ARRAY_COERCIBLE: OnceLock<RwLock<std::collections::HashSet<Text>>> =
+    OnceLock::new();
+
+fn array_coercible_lock() -> &'static RwLock<std::collections::HashSet<Text>> {
+    GLOBAL_ARRAY_COERCIBLE.get_or_init(|| RwLock::new(std::collections::HashSet::new()))
+}
+
+/// Register a type name as `ArrayCoercible` in the global
+/// shared registry.  Called from the
+/// `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
+/// AST walker for every `implement ArrayCoercible for X {}` block.
+/// Idempotent — repeat registration of the same name is a no-op
+/// (HashSet de-duplicates).
+pub fn register_global_array_coercible(name: Text) {
+    let lock = array_coercible_lock();
+    if let Ok(mut guard) = lock.write() {
+        guard.insert(name);
+    }
+}
+
+/// Query whether a type name is globally registered as
+/// `ArrayCoercible`.  Test-only callers (and the rare locally-
+/// constructed `Subtyping` outside the type-checker context) can
+/// use this directly; production type-checker code routes through
+/// [`Subtyping::is_array_coercible`].
+pub fn is_global_array_coercible(name: &str) -> bool {
+    let lock = array_coercible_lock();
+    match lock.read() {
+        Ok(guard) => guard.contains(name),
+        Err(_) => false,
+    }
 }
 
 /// Subtyping checker.
@@ -30,30 +83,32 @@ thread_local! {
 pub struct Subtyping {
     /// Cache for subtyping queries (for performance)
     cache: dashmap::DashMap<(Text, Text), bool>,
-    /// Data-driven set of collection type names that support array coercion.
-    /// Array types `[T; N]` are subtypes of any `C<T>` where `C` is in this set.
-    /// Defaults to `{"List"}`. Will be replaced with `FromArray` protocol once available.
-    array_coercible_types: std::collections::HashSet<Text>,
 }
 
 impl Subtyping {
     pub fn new() -> Self {
-        let mut array_coercible_types = std::collections::HashSet::new();
-        array_coercible_types.insert(Text::from(WKT::List.as_str()));
         Self {
             cache: dashmap::DashMap::new(),
-            array_coercible_types,
         }
     }
 
-    /// Register a collection type name that supports array literal coercion.
+    /// Compatibility shim — registers into the global
+    /// `ArrayCoercible` registry.  The historical instance-state
+    /// field was retired (Subtyping is constructed at 7+ sites
+    /// and was never fed by the pipeline); this method now writes
+    /// to the shared `GLOBAL_ARRAY_COERCIBLE` set so the
+    /// registration is visible to every Subtyping instance and
+    /// every test-time caller.
     pub fn register_array_coercible_type(&mut self, type_name: Text) {
-        self.array_coercible_types.insert(type_name);
+        register_global_array_coercible(type_name);
     }
 
-    /// Check whether a type name supports array coercion (data-driven).
+    /// Check whether a type name supports array coercion.
+    /// Reads the global shared registry — see
+    /// [`GLOBAL_ARRAY_COERCIBLE`] doc-comment for the
+    /// architectural rationale.
     fn is_array_coercible(&self, name: &str) -> bool {
-        self.array_coercible_types.contains(name)
+        is_global_array_coercible(name)
     }
 
     /// Helper to check if a path represents an array-coercible collection type.
