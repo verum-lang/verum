@@ -196,3 +196,50 @@ public type RangeLike is protocol {};
 // implement BytewiseFfi for DarwinSockaddrIn {};
 // ```
 public type BytewiseFfi is protocol {};
+
+// =============================================================================
+// SizedNumeric — marker for cross-coercion among sized-numeric types
+// =============================================================================
+//
+
+// Types that implement SizedNumeric are accepted by the unifier
+// where another sized-numeric type is expected — the cross-
+// coercion lattice spans language-primitive integers / floats
+// (`UInt8` ↔ `Int64`, `Float32` ↔ `Float64`, etc.) and stdlib
+// scalar wrappers whose underlying representation is a sized
+// numeric (Duration as nanoseconds-i64, Instant as monotonic-i64,
+// …).
+//
+
+// **Distinct from `Numeric`** (in `core.base.protocols`):
+//   * `Numeric` is a method-bearing protocol for generic
+//     arithmetic (`add`/`sub`/`mul`/`div` via intrinsics) —
+//     types implementing it pay the protocol-conformance bill
+//     of providing those operations.
+//   * `SizedNumeric` is a *marker* for the unifier's coercion
+//     check only.  Two distinct sized-numeric type names unify
+//     when both opt in (USize ↔ Int64, Duration ↔ UInt64).
+//     Implementing it makes no methods available — only flips
+//     the cross-coercion bit in unification.
+//
+
+// **Why two protocols instead of one?**  An arithmetic-bearing
+// `Numeric` for non-primitive types (Duration ↔ Float ↔ Int)
+// would force every implementor to provide methods like
+// `Duration.add(Duration) -> Duration` — already true — but
+// also implicit `Duration.add(Int) -> Duration` etc., which
+// is nonsensical and would force overload tables to grow
+// quadratically.  The marker-only `SizedNumeric` keeps the
+// coercion-lattice axis orthogonal from the arithmetic-method
+// axis.
+//
+
+// # Examples
+//
+
+// ```verum
+// implement SizedNumeric for Duration {};
+// implement SizedNumeric for Instant {};
+// implement SizedNumeric for FrameDuration {};   // user FFI scalar
+// ```
+public type SizedNumeric is protocol {};

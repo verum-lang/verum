@@ -210,11 +210,20 @@ pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
 /// Float64) live in `unify.rs::Unifier::new` and are NOT included
 /// here — those are part of the language definition, not stdlib.
 ///
-
-/// Becomes obsolete once `Numeric` protocol query lands (separate
-/// follow-up — `Numeric` exists at `core/base/protocols.vr` but isn't
-/// queryable from the unifier yet).
-pub const SIZED_NUMERIC_STDLIB_NAMES: &[&str] = &["Duration", "Instant", "Epoch"];
+/// Per-entry status (#101 Step 4 reached):
+///   * `Duration` — REMOVED.  `core/time/duration.vr` declares
+///     `implement SizedNumeric for Duration {}`;
+///     `scan_protocol_implementations` registers the name via
+///     the new `SizedNumeric` marker.
+///   * `Instant` — REMOVED.  `core/time/instant.vr` declares
+///     `implement SizedNumeric for Instant {}`.
+///   * `Epoch` — REMOVED (architecturally wrong).
+///     `core/mem/epoch.vr` declares `Epoch is ()` — a unit
+///     type; cross-coercion with sized numerics is meaningless
+///     for a value-less marker.  The previous hardcode was an
+///     over-permissive carry-over that the protocol-driven
+///     approach correctly excludes.
+pub const SIZED_NUMERIC_STDLIB_NAMES: &[&str] = &[];
 
 /// Register every stdlib type in the four lists above with the
 /// unifier. Single entry point so callers in `pipeline.rs` Pass 5.5
@@ -283,6 +292,7 @@ fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
         "Indexable" => Some("Indexable"),
         "RangeLike" => Some("RangeLike"),
         "BytewiseFfi" => Some("BytewiseFfi"),
+        "SizedNumeric" => Some("SizedNumeric"),
         _ => None,
     }
 }
@@ -351,6 +361,7 @@ where
                 "Indexable" => unifier.register_indexable_type(target_text),
                 "RangeLike" => unifier.register_range_like_type(target_text),
                 "BytewiseFfi" => unifier.register_bytewise_ffi_type(target_text),
+                "SizedNumeric" => unifier.register_sized_numeric_type(target_text),
                 _ => unreachable!("match_coercion_protocol guards this set"),
             }
             registered += 1;
@@ -407,12 +418,15 @@ mod migration_pins {
     /// won't work for that type. The closure of #101 step 3 is
     /// reached when every count below is 0.
     ///
-    /// **Status: 4 of 5 coercion-marker categories are at
-    /// Step 4.** Only `SIZED_NUMERIC_STDLIB_NAMES` retains a
-    /// non-zero baseline because that category follows a
-    /// separate timeline (the `Numeric` protocol query
-    /// in `core/base/protocols.vr` is not yet wired into the
-    /// unifier).
+    /// **Status: ALL 6 coercion-marker categories are at
+    /// Step 4.** Every `*_STDLIB_NAMES` list is now an empty
+    /// slice; protocol-scan via
+    /// `scan_protocol_implementations` (driven by `implement
+    /// <Marker> for X {}` blocks in the .vr source-of-truth)
+    /// is the sole registration path.
+    /// `register_stdlib_coercions` runs all six register loops
+    /// as no-ops — preserved as the safety net /
+    /// re-introduction trip-wire for this test.
     #[test]
     fn migration_progress_pinned() {
         // Tensor family: Step 4 reached. The lone `"Tensor"`
@@ -432,9 +446,13 @@ mod migration_pins {
         // source. List is empty; protocol-scan is the sole
         // registration path.
         assert_eq!(INT_COERCIBLE_STDLIB_NAMES.len(), 0);
-        // SIZED_NUMERIC follows a different timeline (`Numeric`
-        // protocol query landing) — keep its 3-entry baseline.
-        assert_eq!(SIZED_NUMERIC_STDLIB_NAMES.len(), 3);
+        // SIZED_NUMERIC: Step 4 reached.  `Duration` /
+        // `Instant` carry `implement SizedNumeric for X {}`
+        // blocks (registered via the new SizedNumeric marker
+        // entry in `match_coercion_protocol`); `Epoch` was
+        // dropped as architecturally wrong (unit type, not
+        // sized-numeric).
+        assert_eq!(SIZED_NUMERIC_STDLIB_NAMES.len(), 0);
         // BytewiseFfi: Step 4 reached. The `"SockaddrIn"`
         // alias-coverage entry was eliminated by the same
         // alias-aware-lookup change — Darwin's
@@ -457,6 +475,7 @@ mod migration_pins {
             "Indexable",
             "RangeLike",
             "BytewiseFfi",
+            "SizedNumeric",
         ] {
             // Build a dummy single-segment Path holding just the
             // marker name and assert the matcher accepts it.

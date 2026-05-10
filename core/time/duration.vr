@@ -31,7 +31,7 @@
 )
 module core.time.duration;
 mount core.*;
-mount core.base.coercion.{IntCoercible};
+mount core.base.coercion.{IntCoercible, SizedNumeric};
 
 // =============================================================================
 // Constants
@@ -418,6 +418,16 @@ implement Copy for Duration {}
 // protocol with no methods; the implementation block alone signals
 // the intent to the compiler.
 implement IntCoercible for Duration {}
+
+// SizedNumeric (core.base.coercion) — Duration sits in the
+// cross-coercion lattice with the language's sized-numeric
+// primitives: a `Duration` value coerces with `Int64` /
+// `UInt64` / `USize` for nanosecond-bound APIs, and with
+// `Instant` (the other stdlib sized-numeric) for elapsed-time
+// arithmetic.  The marker eliminates the previous hardcoded
+// fallback at `verum_compiler::stdlib_coercion_registry::
+// SIZED_NUMERIC_STDLIB_NAMES`.
+implement SizedNumeric for Duration {}
 
 implement Hash for Duration {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
