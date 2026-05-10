@@ -43,7 +43,6 @@ use crate::types::CbgrTier;
 use verum_common::method_to_protocol;
 use verum_common::well_known_types::{
     WellKnownProtocol as WKP, WellKnownType as WKT, type_names,
-    MAYBE_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT,
     maybe_success_tag, result_success_tag,
     variant_tags,
 };
@@ -788,55 +787,16 @@ impl VbcCodegen {
         Ok(())
     }
 
-    /// Materialize `Maybe::Some(payload)` into `dst`.
-    pub(super) fn emit_make_maybe_some(
-        &mut self,
-        dst: Reg,
-        payload: Reg,
-        usage_context: &str,
-    ) -> CodegenResult<()> {
-        let tag = self.lookup_stdlib_variant_tag(
-            variant_tags::SOME,
-            "Maybe::Some",
-            "Maybe",
-            usage_context,
-        )?;
-        self.emit_make_variant_for_function(
-            dst,
-            tag,
-            1,
-            variant_tags::SOME,
-            Some("Maybe::Some"),
-        );
-        self.ctx.emit(Instruction::SetVariantData {
-            variant: dst,
-            field: 0,
-            value: payload,
-        });
-        Ok(())
-    }
-
-    /// Materialize `Maybe::None` into `dst`. Zero-arity variant.
-    pub(super) fn emit_make_maybe_none(
-        &mut self,
-        dst: Reg,
-        usage_context: &str,
-    ) -> CodegenResult<()> {
-        let tag = self.lookup_stdlib_variant_tag(
-            variant_tags::NONE,
-            "Maybe::None",
-            "Maybe",
-            usage_context,
-        )?;
-        self.emit_make_variant_for_function(
-            dst,
-            tag,
-            0,
-            variant_tags::NONE,
-            Some("Maybe::None"),
-        );
-        Ok(())
-    }
+    // `emit_make_maybe_some` / `emit_make_maybe_none` removed — the
+    // sibling `emit_make_result_ok` / `emit_make_result_err` helpers
+    // are wired up exclusively at exception-recovery desugar sites
+    // (`try-recover`, `@catch`, `@catch_cbgr_violation`).  Maybe has
+    // no analogous codegen sugar today; `Maybe.Some(x)` /
+    // `Maybe.None` flow through the generic variant constructor path
+    // (`compile_variant_constructor_with_tag_named_and_parent`),
+    // and pattern-test sites read the tag directly via
+    // `lookup_function(variant_tags::SOME)`.  Re-add only if a Maybe-
+    // specific desugar site lands.
 
     /// Detects if an expression is an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
     ///
