@@ -17,7 +17,7 @@ use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
 use verum_vbc::types::{StringId, TypeId, TypeParamId, TypeRef};
 
 use super::context::{FunctionContext, ReferenceInfo, ReferenceSource};
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::ffi::{FfiLowering, ffi_subop_to_calling_convention};
 use super::runtime::RuntimeLowering;
 use super::types::RefTier;
@@ -48,9 +48,7 @@ fn checked_malloc_instr<'ctx>(
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("malloc returned void")?
+                    .basic_value_or("malloc returned void")?
         .into_pointer_value();
 
     let current_bb = builder
@@ -2171,9 +2169,7 @@ pub fn lower_instruction<'ctx>(
                     .builder()
                     .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("strcmp: expected return value")?;
+                    .basic_value_or("strcmp: expected return value")?;
 
                 let cmp_int = cmp_result.into_int_value();
                 let zero_i32 = i32_type.const_zero();
@@ -4331,9 +4327,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(tls_get, &[slot_val.into()], "tls_get")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("TlsGet: expected return value")?;
+                    .basic_value_or("TlsGet: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -4859,9 +4853,7 @@ pub fn lower_instruction<'ctx>(
                     .builder()
                     .build_call(new_fn, &[], "set_new")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("Set.new should return value")?;
+                    .basic_value_or("Set.new should return value")?;
                 ctx.set_register(dst.0, result);
             } else {
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
@@ -4950,9 +4942,7 @@ pub fn lower_instruction<'ctx>(
                     .builder()
                     .build_call(new_fn, &[], "deque_new")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("Deque.new should return value")?;
+                    .basic_value_or("Deque.new should return value")?;
                 ctx.set_register(dst.0, result);
             } else {
                 let ptr_type = ctx.types().ptr_type();
@@ -5118,9 +5108,7 @@ pub fn lower_instruction<'ctx>(
                     "make_tensor",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("MakeTensor: expected return value")?;
+                    .basic_value_or("MakeTensor: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -5396,9 +5384,7 @@ pub fn lower_instruction<'ctx>(
                     "gen_create",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("GenCreate: expected return value")?;
+                    .basic_value_or("GenCreate: expected return value")?;
             ctx.set_register(dst.0, result);
             ctx.mark_gen_register(dst.0);
             Ok(())
@@ -5417,9 +5403,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(gen_next_fn, &[gen_val.into()], "gen_next")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("GenNext: expected return value")?;
+                    .basic_value_or("GenNext: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -5437,9 +5421,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(gen_has_next_fn, &[gen_val.into()], "gen_has_next")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("GenHasNext: expected return value")?;
+                    .basic_value_or("GenHasNext: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -5502,9 +5484,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(gen_next_fn, &[iter_val.into()], "async_next")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("AsyncNext: expected return value")?;
+                    .basic_value_or("AsyncNext: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7121,9 +7101,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(rng_fn, &[], "rnd01")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("RandomFloat: expected return value")?
+                    .basic_value_or("RandomFloat: expected return value")?
                 .into_float_value();
             // Convert low/high to f64 if needed
             let lo_f = match low_val {
@@ -7178,9 +7156,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(newid_fn, &[], "new_id")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("MemNewId: expected return value")?;
+                    .basic_value_or("MemNewId: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7225,9 +7201,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(rng_fn, &[], "randu64")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("RandomU64: expected return value")?;
+                    .basic_value_or("RandomU64: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7291,9 +7265,7 @@ pub fn lower_instruction<'ctx>(
                     "fft",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("TensorFft: expected return value")?;
+                    .basic_value_or("TensorFft: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -8435,9 +8407,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[program_i64.into()], "prog_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let args_list_raw = ctx.get_register(args.start.0 + 1)?;
                 let args_list = as_i64(ctx, args_list_raw, "args_i64")?;
@@ -8486,9 +8456,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[program_i64.into()], "prog_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let args_list_raw = ctx.get_register(args.start.0 + 1)?;
                 let args_list = as_i64(ctx, args_list_raw, "args_i64")?;
@@ -8723,9 +8691,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_val.into()], "path_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
 
                 let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
@@ -8744,9 +8710,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "file_text")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_from_cstr: no value")?;
+                    .basic_value_or("text_from_cstr: no value")?;
                 ctx.set_register(dst.0, text_result);
                 ctx.mark_text_register(dst.0);
                 return Ok(());
@@ -8787,9 +8751,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "arg_text")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_from_cstr: no value")?;
+                    .basic_value_or("text_from_cstr: no value")?;
                 ctx.set_register(dst.0, text_result);
                 ctx.mark_text_register(dst.0);
                 return Ok(());
@@ -8804,18 +8766,14 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "wpath_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let content_i64 = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "wcontent_i64")?;
                 let content_ptr = ctx
                     .builder()
                     .build_call(text_get_ptr_fn, &[content_i64.into()], "wcontent_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
 
                 let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
@@ -9570,9 +9528,7 @@ fn lower_call<'ctx>(
                         "fo_cptr",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("no value")?
+                    .basic_value_or("no value")?
                     .into_pointer_value();
                 let flags = if args.count > 1 {
                     as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fo_fl")?
@@ -10510,9 +10466,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fopen_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let mode_val = if args.count > 1 {
                     as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fopen_mode")?
@@ -10542,9 +10496,7 @@ fn lower_call<'ctx>(
                         .builder()
                         .build_call(text_get_ptr_fn, &[path_i64.into()], "fra_cptr")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                         .into_pointer_value();
                     let read_all_fn = { let fn_type = i64_type.fn_type(&[ptr_type.into()], false); super::error::get_or_declare_function(module, "verum_file_read_all", fn_type) };
                     let result = ctx
@@ -10591,9 +10543,7 @@ fn lower_call<'ctx>(
                         .builder()
                         .build_call(text_get_ptr_fn, &[path_i64.into()], "fwa_cptr")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                         .into_pointer_value();
                     let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fwa_data")?;
                     let write_all_fn =
@@ -10643,9 +10593,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fap_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fap_data")?;
                 let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
@@ -10684,9 +10632,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fra_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let read_all_fn = super::error::get_or_declare_function(module, "verum_file_read_all", fn_type);
@@ -10709,9 +10655,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fwa_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fwa_data")?;
                 let write_all_fn =
@@ -10740,9 +10684,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fex_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let exists_fn = super::error::get_or_declare_function(module, "verum_file_exists", fn_type);
@@ -10764,9 +10706,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[path_i64.into()], "fdel_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
         let delete_fn = super::error::get_or_declare_function(module, "verum_file_delete", fn_type);
@@ -10835,9 +10775,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_i64.into()], "tc_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tc_port")?;
                 let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
@@ -10904,9 +10842,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_i64.into()], "tlv2_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tlv2_port")?;
                 let backlog_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tlv2_backlog")?;
@@ -11040,9 +10976,7 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[host_val.into()], "us_hptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 3)?, "us_port")?;
                 let fn_type = i64_type.fn_type(
@@ -11501,9 +11435,7 @@ fn lower_call<'ctx>(
             .builder()
             .build_call(generic_hash_fn, &[recv.into()], "call_generic_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("verum_generic_hash: no return value")?;
+                    .basic_value_or("verum_generic_hash: no return value")?;
         ctx.set_register(dst.0, hash_result);
         return Ok(());
     }
@@ -12781,9 +12713,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[sep_i64.into()], "sep_cptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_get_ptr: no value")?
+                    .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let fn_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
                 let join_fn = module
@@ -12802,9 +12732,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "join_text")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("text_from_cstr: no value")?;
+                    .basic_value_or("text_from_cstr: no value")?;
                 ctx.set_register(dst.0, text_result);
                 ctx.mark_text_register(dst.0);
                 return Ok(());
@@ -14826,9 +14754,7 @@ fn lower_call_method<'ctx>(
             .builder()
             .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("verum_generic_hash: no return value")?;
+                    .basic_value_or("verum_generic_hash: no return value")?;
         ctx.set_register(dst.0, hash_result);
         return Ok(());
     }
@@ -16981,9 +16907,7 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "sat_mul_ovf")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("sat_mul: expected return value")?;
+                    .basic_value_or("sat_mul: expected return value")?;
             let overflow_flag = ctx
                 .builder()
                 .build_extract_value(call_result.into_struct_value(), 1, "sat_mul_flag")
@@ -17562,9 +17486,7 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "remainder")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("remainder: expected return value")?;
+                    .basic_value_or("remainder: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -17952,9 +17874,7 @@ fn lower_text_extended<'ctx>(
                     "parse_int",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("ParseInt: expected return value")?;
+                    .basic_value_or("ParseInt: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -17982,9 +17902,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(strtod_fn, &[ptr_val.into(), null_ptr.into()], "parse_float")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("ParseFloat: expected return value")?;
+                    .basic_value_or("ParseFloat: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -18043,9 +17961,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(from_fn, &[ptr.into(), len.into()], "text_from_static")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("FromStatic: expected return value")?;
+                    .basic_value_or("FromStatic: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -18075,9 +17991,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(to_text_fn, &[coerced.into()], "int_to_text")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("IntToText: expected return value")?;
+                    .basic_value_or("IntToText: expected return value")?;
             // Normalize pointer return to i64
             let normalized = match result {
                 BasicValueEnum::PointerValue(pv) => {
@@ -18123,9 +18037,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(to_text_fn, &[coerced.into()], "float_to_text")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("FloatToText: expected return value")?;
+                    .basic_value_or("FloatToText: expected return value")?;
             // Normalize pointer return to i64
             let normalized = match result {
                 BasicValueEnum::PointerValue(pv) => {
@@ -18158,9 +18070,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(strlen_fn, &[src.into()], "byte_len")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("ByteLen: expected return value")?;
+                    .basic_value_or("ByteLen: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -18186,9 +18096,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(charlen_fn, &[src.into()], "char_len")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("CharLen: expected return value")?;
+                    .basic_value_or("CharLen: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -18209,9 +18117,7 @@ fn lower_text_extended<'ctx>(
                 .builder()
                 .build_call(strlen_fn, &[src.into()], "str_len")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("IsEmpty: expected return value")?;
+                    .basic_value_or("IsEmpty: expected return value")?;
             let is_zero = ctx
                 .builder()
                 .build_int_compare(
@@ -19176,9 +19082,7 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_call(refcount_fn, &[src.into()], "refcount")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("RefCount: expected return value")?;
+                    .basic_value_or("RefCount: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -19510,9 +19414,7 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_call(f, &[size.into()], "alloc")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("Alloc: expected return value")?;
+                    .basic_value_or("Alloc: expected return value")?;
             let ptr_as_i64 = ctx
                 .builder()
                 .build_ptr_to_int(result.into_pointer_value(), i64_ty, "alloc_i64")
@@ -19614,9 +19516,7 @@ fn lower_mem_extended<'ctx>(
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "mem_alloc")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("MemAlloc: expected return value")?;
+                    .basic_value_or("MemAlloc: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -19729,9 +19629,7 @@ fn lower_mem_extended<'ctx>(
                     "mem_realloc",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("MemRealloc: expected return value")?;
+                    .basic_value_or("MemRealloc: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -20549,9 +20447,7 @@ fn lower_simd_extended<'ctx>(
                     ctx.builder()
                         .build_call(func, &[val.into()], "simd_abs")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("fabs returned void")?
+                    .basic_value_or("fabs returned void")?
                 }
                 SimdSubOpcode::Sqrt => {
                     let fn_ty = f64_ty.fn_type(&[f64_ty.into()], false);
@@ -20564,9 +20460,7 @@ fn lower_simd_extended<'ctx>(
                     ctx.builder()
                         .build_call(func, &[val.into()], "simd_sqrt")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("sqrt returned void")?
+                    .basic_value_or("sqrt returned void")?
                 }
                 SimdSubOpcode::Recip => {
                     let one = f64_ty.const_float(1.0);
@@ -20587,9 +20481,7 @@ fn lower_simd_extended<'ctx>(
                         .builder()
                         .build_call(func, &[val.into()], "sqrt_tmp")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("sqrt returned void")?;
+                    .basic_value_or("sqrt returned void")?;
                     let one = f64_ty.const_float(1.0);
                     ctx.builder()
                         .build_float_div(one, sqrt_val.into_float_value(), "simd_rsqrt")
@@ -21142,9 +21034,7 @@ fn lower_log_extended<'ctx>(
                 .builder()
                 .build_call(get_fn, &[], "log_level")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("GetLevel: expected return value")?;
+                    .basic_value_or("GetLevel: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -21759,9 +21649,7 @@ fn build_overflow_intrinsic_pair<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("overflow intrinsic: expected return value")?;
+                    .basic_value_or("overflow intrinsic: expected return value")?;
     let value = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 0, &format!("{}_val", name))
@@ -21905,9 +21793,7 @@ fn build_overflowing_tuple<'ctx>(
             &format!("{}_tuple", name),
         )
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("verum_alloc: expected return value")?
+                    .basic_value_or("verum_alloc: expected return value")?
         .into_pointer_value();
     // Store value at offset 0
     ctx.builder()
@@ -23571,9 +23457,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(rand_fn, &[], "random_u64")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("RandomU64: expected return value")?;
+                    .basic_value_or("RandomU64: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23596,9 +23480,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(rand_fn, &[], "random_float")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("RandomFloat: expected return value")?;
+                    .basic_value_or("RandomFloat: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23953,9 +23835,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(pid_fn, &[], "getpid")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("SysGetpid: expected return value")?;
+                    .basic_value_or("SysGetpid: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23977,9 +23857,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(tid_fn, &[], "gettid")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("SysGettid: expected return value")?;
+                    .basic_value_or("SysGettid: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -24020,9 +23898,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(mmap_fn, &args, "mmap")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("SysMmap: expected return value")?;
+                    .basic_value_or("SysMmap: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -24073,9 +23949,7 @@ fn lower_ffi_extended<'ctx>(
                     "madvise",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("SysMadvise: expected return value")?;
+                    .basic_value_or("SysMadvise: expected return value")?;
             // Store result if there's a destination
             if operands.len() >= 4 {
                 ctx.set_register(op_reg(operands, 3), result);
@@ -24162,9 +24036,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(alloc_fn, &[size_val.into()], "cbgr_alloc_ptr")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("cbgr_alloc returned no value")?;
+                    .basic_value_or("cbgr_alloc returned no value")?;
             // Return the pointer in dst. User Verum code expects a Result
             // tuple `(ptr, gen, epoch)`, but the AOT path currently does
             // not materialise the tuple — the stdlib allocator wrapper
@@ -24671,9 +24543,7 @@ fn lower_float_pow<'ctx>(
         .builder()
         .build_call(pow_fn, &[base.into(), exp.into()], "pow_call")
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("llvm.pow.f64 should return f64")?
+                    .basic_value_or("llvm.pow.f64 should return f64")?
         .into_float_value();
 
     Ok(result)
@@ -24787,9 +24657,7 @@ fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> R
         .builder()
         .build_call(get_fn, &[], "exception_value")
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("exception_get returned void")?;
+                    .basic_value_or("exception_get returned void")?;
 
     // Store in destination register
     ctx.set_register(dst.0, exception_value);
@@ -24833,9 +24701,7 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
             .builder()
             .build_call(bridge_fn, &[slot_val.into()], "ctx_value")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("bridge ctx_get: expected return value")?;
+                    .basic_value_or("bridge ctx_get: expected return value")?;
         ctx.set_register(dst.0, result);
         return Ok(());
     }
@@ -26797,9 +26663,7 @@ fn lower_tensor_extended<'ctx>(
                 .builder()
                 .build_call(f, &[ndim.into(), shape_i64.into(), dtype.into()], "tnew")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("NewFromArgs: expected return value")?;
+                    .basic_value_or("NewFromArgs: expected return value")?;
             ctx.set_register(dst_reg, result);
         }
         Some(TensorSubOpcode::FromSliceArgs) => {
@@ -29130,9 +28994,7 @@ fn lower_cmp_generic<'ctx>(
             .builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("strcmp: expected return value")?;
+                    .basic_value_or("strcmp: expected return value")?;
         let cmp_int = cmp_result.into_int_value();
         let zero_i32 = i32_type.const_zero();
         if eq {
@@ -29197,9 +29059,7 @@ fn lower_cmp_generic<'ctx>(
                     "generic_eq",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("verum_generic_eq: no return value")?
+                    .basic_value_or("verum_generic_eq: no return value")?
                 .into_int_value();
             let zero_i64 = i64_type.const_zero();
             ctx.builder()
@@ -29292,17 +29152,13 @@ fn lower_cmp_generic<'ctx>(
             .builder()
             .build_call(text_get_ptr_fn, &[lhs_i64.into()], "cmpg_ptr_a")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("text_get_ptr: expected return value")?
+                    .basic_value_or("text_get_ptr: expected return value")?
             .into_pointer_value();
         let rhs_ptr = ctx
             .builder()
             .build_call(text_get_ptr_fn, &[rhs_i64.into()], "cmpg_ptr_b")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("text_get_ptr: expected return value")?
+                    .basic_value_or("text_get_ptr: expected return value")?
             .into_pointer_value();
 
         let i32_type = ctx.llvm_context().i32_type();
@@ -29314,9 +29170,7 @@ fn lower_cmp_generic<'ctx>(
             .builder()
             .build_call(strcmp, &[lhs_ptr.into(), rhs_ptr.into()], "strcmp_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("strcmp: expected return value")?;
+                    .basic_value_or("strcmp: expected return value")?;
         let cmp_int = cmp_result.into_int_value();
         let zero_i32 = i32_type.const_zero();
 
@@ -30223,9 +30077,7 @@ fn lower_iter_next<'ctx>(
                 "next_slot",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("__verum_map_iter_next should return i64")?
+                    .basic_value_or("__verum_map_iter_next should return i64")?
             .into_int_value();
 
         // Store updated slot back

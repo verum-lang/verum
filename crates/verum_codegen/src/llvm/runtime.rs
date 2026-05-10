@@ -38,7 +38,7 @@ use verum_llvm::values::{
     BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux};
 
 /// Default initial capacity for lists.
@@ -1269,9 +1269,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let len = builder
                 .build_call(strlen_fn, &[str_ptr.into()], "str_len")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("strlen should return i64")?
+            .basic_value_or("strlen should return i64")?
                 .into_int_value();
 
             // Store str_ptr as data_ptr at iter[1]
@@ -2100,9 +2098,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         // abs(hash): if hash < 0 then -hash else hash
         let is_neg = builder
@@ -2251,9 +2247,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let keys_equal = builder
             .build_int_compare(
@@ -2488,9 +2482,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let is_neg = builder
             .build_int_compare(
@@ -2632,9 +2624,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let keys_equal = builder
             .build_int_compare(
@@ -2856,9 +2846,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let is_neg = builder
             .build_int_compare(
@@ -3004,9 +2992,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let keys_equal = builder
             .build_int_compare(
@@ -3333,9 +3319,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let is_neg = builder
             .build_int_compare(
@@ -3502,9 +3486,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let eq_result = builder
             .build_call(eq_fn, &[s_entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let keys_equal = builder
             .build_int_compare(
@@ -4174,9 +4156,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len = builder
             .build_call(strlen_fn, &[s.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder.build_return(Some(&len)).or_llvm_err()?;
         Ok(())
@@ -4403,9 +4383,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let a_is_text = builder
             .build_call(is_text_fn, &[a.into()], "a_text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder
             .build_conditional_branch(a_is_text, check_b_text, ret_neq)
@@ -4416,9 +4394,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let b_is_text = builder
             .build_call(is_text_fn, &[b.into()], "b_text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder
             .build_conditional_branch(b_is_text, do_strcmp, ret_neq)
@@ -4432,23 +4408,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let a_ptr = builder
             .build_call(text_get_ptr, &[a.into()], "a_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         let b_ptr = builder
             .build_call(text_get_ptr, &[b.into()], "b_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         let cmp = builder
             .build_call(strcmp_fn, &[a_ptr.into(), b_ptr.into()], "cmp")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let is_eq = builder
             .build_int_compare(
@@ -4510,9 +4480,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let is_text = builder
             .build_call(is_text_fn, &[key.into()], "is_text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder
             .build_conditional_branch(is_text, hash_text_bb, hash_int_bb)
@@ -4525,9 +4493,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let str_ptr = builder
             .build_call(text_get_ptr, &[key.into()], "str_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         builder
             .build_unconditional_branch(hash_text_loop)
@@ -4687,9 +4653,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len = builder
             .build_call(to_dec_fn, &[buf.into(), value.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         // Allocate new heap buffer + 1 for trailing NUL (the
@@ -4727,9 +4691,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 "text_obj",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
 
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
@@ -4824,9 +4786,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len = builder
             .build_call(f64_to_dec, &[buf.into(), value.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         // Allocate new buffer: malloc(len + 1) for NUL terminator
@@ -4867,9 +4827,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 "text_obj",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
 
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
@@ -4922,9 +4880,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 "parsed",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
 
         // ret_zero
@@ -4983,9 +4939,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let f64_result = builder
             .build_call(strtod_fn, &[str_ptr.into()], "parsed")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_float_value();
 
         // Bitcast f64 → i64
@@ -5413,9 +5367,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let seed_val = builder
             .build_call(time_fn, &[], "seed")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder
             .build_store(rng_state.as_pointer_value(), seed_val)
@@ -5512,9 +5464,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw = builder
             .build_call(random_u64_fn, &[], "raw")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         // Shift right 11 to get 53-bit mantissa
@@ -5786,9 +5736,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let msg_len = builder
                     .build_call(strlen_fn, &[msg.into()], "msg_len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 self.build_libc_call_void(
                     &builder,
@@ -5834,9 +5782,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ret = builder
             .build_call(func, &adapted, name)
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         // If function returns i32, sign-extend to i64
@@ -6090,9 +6036,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 // Sign-extend i32 result to i64 if needed
                 let fd = if fd.get_type().get_bit_width() < 64 {
@@ -6288,9 +6232,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_ptr = builder
                     .build_call(text_get_ptr_fn, &[text_obj.into()], "data_ptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 builder
                     .build_unconditional_branch(check_data_bb)
@@ -6317,9 +6259,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder
                     .build_unconditional_branch(check_fd_bb)
@@ -6342,9 +6282,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_len = builder
                     .build_call(strlen_fn, &[data_ptr.into()], "data_len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 let written = self.build_libc_call(
                     &builder,
@@ -6402,9 +6340,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_ptr = builder
                     .build_call(text_get_ptr_fn, &[text_obj.into()], "data_ptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 builder
                     .build_unconditional_branch(check_data_bb)
@@ -6429,9 +6365,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder
                     .build_unconditional_branch(check_fd_bb)
@@ -6454,9 +6388,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_len = builder
                     .build_call(strlen_fn, &[data_ptr.into()], "data_len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 let written = self.build_libc_call(
                     &builder,
@@ -6512,9 +6444,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "empty_text",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
@@ -6534,9 +6464,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder
                     .build_unconditional_branch(check_fd_bb)
@@ -6690,9 +6618,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let result = builder
                     .build_call(text_from_cstr_fn, &[buf.into()], "result")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -6752,9 +6678,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "empty_text",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
@@ -6822,9 +6746,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let result = builder
                     .build_call(text_from_cstr_fn, &[buf.into()], "result")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -6875,9 +6797,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_ptr = builder
                     .build_call(text_get_ptr_fn, &[text_obj.into()], "data_ptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 builder
                     .build_unconditional_branch(check_ptr_bb)
@@ -6893,9 +6813,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let data_len = builder
                     .build_call(strlen_fn, &[data_ptr.into()], "data_len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 let written = self.build_libc_call(
                     &builder,
@@ -6952,9 +6870,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder
                     .build_unconditional_branch(check_fd_bb)
@@ -7163,9 +7079,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "fd",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder
                     .build_unconditional_branch(check_fd_bb)
@@ -7188,9 +7102,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let len = builder
                     .build_call(strlen_fn, &[content.into()], "len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 let written = self.build_libc_call(
                     &builder,
@@ -7391,9 +7303,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let result = builder
                     .build_call(mutex_trylock_fn, &[ptr.into()], "result")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -7548,9 +7458,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         "result",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -7679,9 +7587,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     let pid = builder
                         .build_call(getpid_fn, &[], "pid")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                         .into_int_value();
                     let result = builder
                         .build_int_s_extend(pid, i64_type, "ext")
@@ -7772,9 +7678,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     let pid = builder
                         .build_call(getpid_fn, &[], "tid")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                         .into_int_value();
                     let result = builder
                         .build_int_s_extend(pid, i64_type, "ext")
@@ -8024,9 +7928,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let sep_len_raw = builder
             .build_call(strlen_fn, &[sep.into()], "sep_len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let sep_len = builder
             .build_select(
@@ -8082,16 +7984,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let elem_ptr = builder
             .build_call(text_get_ptr_fn, &[elem_i64.into()], "elem_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         let elem_len = builder
             .build_call(strlen_fn, &[elem_ptr.into()], "elem_len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let new_total = builder
             .build_int_add(sum_total_val, elem_len, "new_total")
@@ -8153,16 +8051,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let cp_elem_ptr = builder
             .build_call(text_get_ptr_fn, &[cp_elem_i64.into()], "cp_elem_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         let cp_elem_len = builder
             .build_call(strlen_fn, &[cp_elem_ptr.into()], "cp_elem_len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         // memcpy element
@@ -9413,9 +9307,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_ptr = tmp_builder
             .build_call(os_alloc_fn, &[size_param.into()], "raw")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("verum_os_alloc should return ptr")?
+            .basic_value_or("verum_os_alloc should return ptr")?
             .into_pointer_value();
 
         let is_null = tmp_builder
@@ -9453,9 +9345,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw_ptr = builder
             .build_call(malloc_fn, &[size.into()], name)
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("malloc should return ptr")?
+            .basic_value_or("malloc should return ptr")?
             .into_pointer_value();
 
         let current_bb = builder
@@ -9696,9 +9586,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let result = builder
             .build_call(ctx_get_fn, &[ctx_type_val.into()], "ctx_value")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("verum_ctx_get should return i64")?
+            .basic_value_or("verum_ctx_get should return i64")?
             .into_int_value();
 
         Ok(result)
@@ -11287,9 +11175,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let p = b
                     .build_call(text_get_ptr_fn, &[text.into()], "p")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 let n = b.build_is_null(p, "n").or_llvm_err()?;
                 b.build_conditional_branch(n, null_bb, ok_bb)
@@ -11391,9 +11277,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let et = b
                     .build_call(text_from_cstr_fn, &[empty.as_pointer_value().into()], "et")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_return(Some(&et)).or_llvm_err()?;
 
@@ -11404,9 +11288,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let txt = b
                     .build_call(text_from_cstr_fn, &[buf.into()], "txt")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_call(free_fn, &[buf.into()], "").or_llvm_err()?;
                 b.build_return(Some(&txt)).or_llvm_err()?;
@@ -11550,9 +11432,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let dp = b
                     .build_call(text_get_ptr_fn, &[text.into()], "dp")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 let dn = b.build_is_null(dp, "dn").or_llvm_err()?;
                 let hn = b.build_is_null(host, "hn").or_llvm_err()?;
@@ -11733,9 +11613,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let et = b
                     .build_call(text_from_cstr_fn, &[empty.as_pointer_value().into()], "et")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_return(Some(&et)).or_llvm_err()?;
 
@@ -11746,9 +11624,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let txt = b
                     .build_call(text_from_cstr_fn, &[buf.into()], "txt")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_call(free_fn, &[buf.into()], "").or_llvm_err()?;
                 b.build_return(Some(&txt)).or_llvm_err()?;
@@ -11783,9 +11659,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let p = b
                     .build_call(text_get_ptr_fn, &[data.into()], "p")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_pointer_value();
                 let n = b.build_is_null(p, "n").or_llvm_err()?;
                 b.build_conditional_branch(n, null_bb, ok_bb)
@@ -11896,9 +11770,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let et = b
                     .build_call(text_from_cstr_fn, &[empty.as_pointer_value().into()], "et")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_return(Some(&et)).or_llvm_err()?;
 
@@ -11909,9 +11781,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let txt = b
                     .build_call(text_from_cstr_fn, &[buf.into()], "txt")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
                     .into_int_value();
                 b.build_call(free_fn, &[buf.into()], "").or_llvm_err()?;
                 b.build_return(Some(&txt)).or_llvm_err()?;
@@ -12186,9 +12056,7 @@ fn checked_malloc<'ctx>(
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("malloc should return ptr")?
+            .basic_value_or("malloc should return ptr")?
         .into_pointer_value();
 
     let current_bb = builder
@@ -12289,9 +12157,7 @@ pub fn define_internal_calloc<'ctx>(context: &'ctx Context, module: &Module<'ctx
     let ptr = builder
         .build_call(os_alloc, &[total.into()], "ptr")
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("verum_os_alloc returned void")?
+            .basic_value_or("verum_os_alloc returned void")?
         .into_pointer_value();
     builder.build_return(Some(&ptr)).or_llvm_err()?;
 
@@ -12345,9 +12211,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let len = builder
             .build_call(strlen_fn, &[s.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         builder.build_return(Some(&len)).or_llvm_err()?;
     }
@@ -12534,9 +12398,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "null_text",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&null_result)).or_llvm_err()?;
 
         builder.position_at_end(valid_bb);
@@ -12549,16 +12411,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let len = builder
             .build_call(strlen_fn, &[s.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let result = builder
             .build_call(text_alloc_fn, &[s.into(), len.into(), len.into()], "text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
@@ -12628,9 +12486,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let result = builder
             .build_call(text_alloc_fn, &[buf.into(), len.into(), len.into()], "text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
@@ -12660,16 +12516,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let a_ptr = builder
             .build_call(text_get_ptr_fn, &[a_obj.into()], "a_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         let b_ptr = builder
             .build_call(text_get_ptr_fn, &[b_obj.into()], "b_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
 
         // Get lengths via strlen
@@ -12682,16 +12534,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let a_len = builder
             .build_call(strlen_fn, &[a_ptr.into()], "a_len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
         let b_len = builder
             .build_call(strlen_fn, &[b_ptr.into()], "b_len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_int_value();
 
         let total = builder.build_int_add(a_len, b_len, "total").or_llvm_err()?;
@@ -12767,9 +12615,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "text",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
@@ -12796,9 +12642,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let str_ptr = builder
             .build_call(text_get_ptr_fn, &[text_obj.into()], "str_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         builder.build_unconditional_branch(loop_bb).or_llvm_err()?;
 
@@ -12922,9 +12766,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "text",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?;
+            .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
@@ -13360,9 +13202,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "new_data",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // Load old backing ptr and len
         // SAFETY: GEP into the list object header to access the length field at a fixed offset; the list pointer is non-null and valid
@@ -14325,9 +14165,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "new_list",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // Load src fields
         // SAFETY: GEP at a computed offset within the allocated entries array; index is bounded by capacity
@@ -14396,9 +14234,7 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 "new_data",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // memcpy(new_data, src_data, src_len * 8)
         let src_data = builder
@@ -14591,9 +14427,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
                 "set",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // Header (24 bytes) is zeroed by calloc: type_tag=0, ref_count=0, epoch_caps=0
         // set->len = 0 (at offset 24, already zeroed)
@@ -14623,9 +14457,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
                 "entries",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // SAFETY: GEP into the set object to access the entries pointer at a fixed offset defined by SET_ENTRIES_OFFSET
         let entries_slot = unsafe {
@@ -15038,9 +14870,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
                 "new_entries",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         // Rehash loop: for each old entry with non-zero hash, re-insert
         let rehash_loop = context.append_basic_block(func, "rehash_loop");
@@ -15813,9 +15643,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let raw = builder
             .build_call(alloc_fn, &[total_size.into()], "raw")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
 
         // null check
@@ -16119,9 +15947,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let new_ptr = builder
             .build_call(alloc_fn, &[new_size.into()], "new_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
         builder.build_return(Some(&new_ptr)).or_llvm_err()?;
 
@@ -16187,9 +16013,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let new_alloc = builder
             .build_call(alloc_fn, &[new_size.into()], "new_alloc")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("call returned void")?
+            .basic_value_or("call returned void")?
             .into_pointer_value();
 
         // null check
