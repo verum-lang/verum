@@ -45,6 +45,7 @@ use verum_common::well_known_types::{
     WellKnownProtocol as WKP, WellKnownType as WKT, type_names,
     maybe_success_tag, result_success_tag,
     variant_tags,
+    MAYBE_VARIANT_LAYOUT, RESULT_VARIANT_LAYOUT, ORDERING_VARIANT_LAYOUT,
 };
 
 use verum_ast::pattern::VariantPatternData;
@@ -663,10 +664,59 @@ impl VbcCodegen {
         primary_lookup_name: &str,
         fallback_lookup_name: Option<&str>,
     ) {
-        let parent_name = self
-            .ctx
-            .lookup_function(primary_lookup_name)
-            .and_then(|info| info.parent_type_name.clone())
+        self.emit_make_variant_for_function_hinted(
+            dst,
+            tag,
+            field_count,
+            primary_lookup_name,
+            fallback_lookup_name,
+            None,
+        );
+    }
+
+    /// Sibling of `emit_make_variant_for_function` that accepts a
+    /// caller-supplied **explicit parent hint** (the surrounding
+    /// type-name context at the variant constructor's call site:
+    /// e.g. `Poll` for `Poll.Ready(v)`, or the receiver type in
+    /// `match`/`return` position).
+    ///
+    /// Resolution order (each fallback closes one codegen gap):
+    ///
+    ///   0. `explicit_parent` — the caller's syntactic / inferred
+    ///      hint (e.g. the `type_name` segment of a `TypeName.Variant`
+    ///      access, or `current_return_type_name` /
+    ///      `match_scrutinee_type` already in scope).  Highest
+    ///      priority because the caller has more context than the
+    ///      metadata can carry.
+    ///   1. `info(primary).parent_type_name` — registered metadata.
+    ///   2. `info(fallback).parent_type_name` — qualified-form lookup.
+    ///   3. Syntactic recovery from the primary qualified name.
+    ///   4. Syntactic recovery from the fallback qualified name.
+    ///
+    /// Pre-this method the only routes available were (1)–(4); when
+    /// none of them carried the parent (the most common case for
+    /// freshly-registered user sum types whose `FunctionInfo`'s
+    /// `parent_type_name` had not yet been backfilled), the emission
+    /// silently demoted to legacy `MakeVariant` (synthetic 0x8000+tag
+    /// type_id), and the runtime's
+    /// `format_variant_for_print_depth` mis-rendered the variant as
+    /// the first colliding-tag variant from a different module.
+    pub(super) fn emit_make_variant_for_function_hinted(
+        &mut self,
+        dst: Reg,
+        tag: u32,
+        field_count: u32,
+        primary_lookup_name: &str,
+        fallback_lookup_name: Option<&str>,
+        explicit_parent: Option<&str>,
+    ) {
+        let parent_name = explicit_parent
+            .map(|s| s.to_string())
+            .or_else(|| {
+                self.ctx
+                    .lookup_function(primary_lookup_name)
+                    .and_then(|info| info.parent_type_name.clone())
+            })
             .or_else(|| {
                 fallback_lookup_name.and_then(|n| {
                     self.ctx
@@ -1586,6 +1636,59 @@ impl VbcCodegen {
                             });
                         }
                         return Ok(Some(result));
+                    }
+
+                    // Final canonical-variant fallback.
+                    //
+                    // The function-registry suffix-search above only finds variants
+                    // that have already been registered by `register_builtin_variants`
+                    // / `register_type_constructors`. In the precompile pipeline,
+                    // module-by-module compilation can reach a function body BEFORE
+                    // the carrier type's variants land in the registry — historical
+                    // symptom: 1500+ `[lenient] SKIP X.Y (bug-class): undefined
+                    // variable: None` warnings during `verum stdlib precompile`.
+                    //
+                    // Maybe/Result/Ordering are language-canonical sum types whose
+                    // variant layouts are pinned in `verum_common::well_known_types`
+                    // (single source of truth). For those three carriers the
+                    // resolution is unambiguous regardless of registry state — the
+                    // canonical names (`None`, `Some`, `Ok`, `Err`, `Less`, `Equal`,
+                    // `Greater`) ALWAYS map to their canonical (parent_type, tag).
+                    // Walk those layouts here as a hard fallback before raising
+                    // `undefined variable`.
+                    //
+                    // Drift safety: the canonical layouts are themselves drift-pinned
+                    // by `verum_common::well_known_types::tests::*_variant_layout_pinned`
+                    // against `core/base/{maybe,result,ordering}.vr`. If a future
+                    // refactor renames a variant or reorders tags in either source,
+                    // those tests fail before this fallback can return a wrong tag.
+                    let canonical_layouts: &[(&str, &[verum_common::well_known_types::VariantLayoutEntry])] = &[
+                        ("Maybe",    MAYBE_VARIANT_LAYOUT),
+                        ("Result",   RESULT_VARIANT_LAYOUT),
+                        ("Ordering", ORDERING_VARIANT_LAYOUT),
+                    ];
+                    for (parent, layout) in canonical_layouts.iter() {
+                        if let Some(entry) = layout.iter().find(|e| e.name == name.as_str()) {
+                            let result = self.ctx.alloc_temp();
+                            if entry.arity == 0 {
+                                // Nullary canonical variant — emit MakeVariant with
+                                // the parent-type name attached so the runtime
+                                // disambiguator reaches the canonical TypeId.
+                                self.emit_make_variant(result, entry.tag, 0, Some(*parent));
+                            } else {
+                                // Non-nullary canonical (Some/Ok/Err) — emit the
+                                // sentinel function-id used by `register_type_constructors`
+                                // (and mirrored by `register_builtin_variants`):
+                                // `FunctionId(u32::MAX - tag)`. compile_call's
+                                // variant-call path picks this up and emits the
+                                // proper MakeVariant with the payload register.
+                                self.ctx.emit(Instruction::LoadI {
+                                    dst: result,
+                                    value: (u32::MAX - entry.tag) as i64,
+                                });
+                            }
+                            return Ok(Some(result));
+                        }
                     }
                 }
 
@@ -3595,34 +3698,103 @@ impl VbcCodegen {
             }
         };
 
+        // SAFETY: skip the rsplit fallback when the path is rooted at a
+        // module-path keyword (`super`, `cog`, `.`). Those paths are
+        // *explicitly* cross-module, so if qualified lookup failed, the
+        // last-segment simple-name lookup would resolve to *the current
+        // module's* function of the same name — turning a cross-platform
+        // dispatch call like `super.darwin.tls.ctx_get(slot)` inside
+        // `core/sys/common.vr::ctx_get` into infinite self-recursion.
+        // (This was the root cause of the L0 reference_system / cbgr
+        // stack-overflow failures that masked themselves as "stack limit
+        // too low".)
+        let is_qualified_module_path = has_module_prefix
+            || func_name.starts_with("super::")
+            || func_name.starts_with("cog::")
+            || func_name.starts_with(".::");
+
+        // Suffix-match resolution closure (between direct qualified lookup
+        // and bare-name fallback). When the call site writes
+        // `bitfield.test_bit(args)` (parsed to `func_name = "bitfield::test_bit"`)
+        // and the function table holds the dot-qualified registration
+        // `sys.bitfield.test_bit` (or its `::` twin) — as `register_function`
+        // installs for every stdlib decl — the previous behaviour skipped
+        // both the direct lookup (different separator) and the leaf-only
+        // fallback (which silently raced on duplicated simple names across
+        // modules, producing miscompiled dispatch).
+        //
+        // Suffix-match resolution scans the function table for any
+        // registered name that ends with the call's qualified form (under
+        // either separator). Exactly-one match wins; multiple matches
+        // surface as an ambiguity warning that falls through to the
+        // existing leaf-only fallback (preserving previous behaviour for
+        // the genuinely-ambiguous case while letting unambiguous suffixes
+        // resolve cleanly).
+        let suffix_match_lookup = || -> Option<(String, FunctionInfo)> {
+            if !func_name.contains("::") || is_qualified_module_path {
+                return None;
+            }
+            let func_dotted = func_name.replace("::", ".");
+            let suffix_dot = format!(".{}", func_dotted);
+            let suffix_colon = format!("::{}", func_name);
+            // Two-phase resolve: phase 1 collects every key that
+            // *suffix-matches* either separator form and ends the borrow on
+            // `self.ctx.functions`; phase 2 then filters by arity using the
+            // standalone lookup helper and does the final disambiguation.
+            // Splitting the borrows keeps the closure single-immutable-borrow
+            // per phase, which is what the borrow checker is happiest with
+            // under the surrounding chained `.or_else(...)` plumbing.
+            let mut suffix_keys: Vec<String> = self
+                .ctx
+                .functions
+                .keys()
+                .filter(|k| k.ends_with(&suffix_dot) || k.ends_with(&suffix_colon))
+                .cloned()
+                .collect();
+            suffix_keys.sort();
+            suffix_keys.dedup();
+            let mut candidates: Vec<String> = suffix_keys
+                .into_iter()
+                .filter(|k| {
+                    self.ctx
+                        .lookup_function_with_arity(k, args.len())
+                        .is_some()
+                })
+                .collect();
+            match candidates.len() {
+                0 => None,
+                1 => {
+                    let chosen = candidates.remove(0);
+                    self.ctx
+                        .lookup_function(&chosen)
+                        .map(|info| (chosen, info.clone()))
+                }
+                _ => {
+                    tracing::warn!(
+                        "[ambig-fn] '{}' suffix-matches {} registered names: {:?}",
+                        func_name,
+                        candidates.len(),
+                        &candidates[..candidates.len().min(8)]
+                    );
+                    None
+                }
+            }
+        };
+
         // Look up function - use arity-based disambiguation when available
-        let (resolved_name, func_info) = match module_qualified_lookup.or_else(|| {
-            self.ctx
-                .lookup_function_with_arity(&func_name, args.len())
-                .map(|info| (func_name.clone(), info.clone()))
-        }) {
+        let (resolved_name, func_info) = match module_qualified_lookup
+            .or_else(|| {
+                self.ctx
+                    .lookup_function_with_arity(&func_name, args.len())
+                    .map(|info| (func_name.clone(), info.clone()))
+            })
+            .or_else(suffix_match_lookup)
+        {
             Some(result) => result,
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
                 // registered with their simple names even when called with qualified paths.
-                //
-
-                // SAFETY: skip this fallback when the path is rooted at a
-                // module-path keyword (`super`, `cog`, `.`). Those paths
-                // are *explicitly* cross-module, so if qualified lookup
-                // failed, the last-segment simple-name lookup would
-                // resolve to *the current module's* function of the same
-                // name — turning a cross-platform dispatch call like
-                // `super.darwin.tls.ctx_get(slot)` inside
-                // `core/sys/common.vr::ctx_get` into infinite self-
-                // recursion. (This was the root cause of the
-                // L0 reference_system / cbgr stack-overflow failures
-                // that masked themselves as "stack limit too low".)
-                let is_qualified_module_path = has_module_prefix
-                    || func_name.starts_with("super::")
-                    || func_name.starts_with("cog::")
-                    || func_name.starts_with(".::");
                 let fallback_result = if is_qualified_module_path {
                     None
                 } else if let Some(simple_name) = func_name.rsplit("::").next() {
@@ -5476,6 +5648,33 @@ impl VbcCodegen {
         name: &str,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        self.compile_variant_constructor_hinted(name, args, None)
+    }
+
+    /// Sibling of `compile_variant_constructor` that accepts an
+    /// `explicit_parent: Option<&str>` hint.  Callers reaching this
+    /// helper from a `TypeName.Variant(...)` expression (the static-
+    /// method-call resolution path, the path-resolution variant
+    /// fallthrough, …) already have the parent type name in their
+    /// own scope — passing it down avoids the lossy round-trip
+    /// through `FunctionInfo.parent_type_name`, which can be missing
+    /// when the parent type is freshly registered or originated in
+    /// a cross-module archive.
+    ///
+    /// When `explicit_parent` is `None`, the hint is reconstructed
+    /// from `current_return_type_name` / `match_scrutinee_type`
+    /// (the surrounding contextual type), which is also the
+    /// signal that disambiguates the variant tag choice further
+    /// down.  Using the same hint for both decisions keeps the two
+    /// in lockstep — drift between "tag for which sum?" and
+    /// "TypeId stamped on the heap header" is structurally
+    /// impossible.
+    fn compile_variant_constructor_hinted(
+        &mut self,
+        name: &str,
+        args: &verum_common::List<Expr>,
+        explicit_parent: Option<&str>,
+    ) -> CodegenResult<Option<Reg>> {
         // Heap(x) / Shared(x): transparent wrapper — just pass through inner value.
         // This matches the LLVM lowering behavior where Heap.new(x) is transparent.
         if self.is_allocating_wrapper(name) && args.len() == 1 {
@@ -5495,11 +5694,21 @@ impl VbcCodegen {
         // collapse the simple name onto whichever was registered first, and
         // the wrong constructor's tag flows through to MakeVariant —
         // producing a layout-mismatched payload at runtime. Tracked as #76.
-        let context_type: Option<String> = self
-            .ctx
-            .current_return_type_name
-            .as_ref()
-            .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
+        //
+        // `context_type` here unifies the explicit-parent hint with the
+        // implicit contextual type — they reach the same name lookups
+        // and the same MakeVariantTyped emission, so a caller supplying
+        // `Some("Poll")` at the `Poll.Ready(v)` call site disambiguates
+        // both the tag choice and the TypeId stamped on the heap header
+        // from a single signal.
+        let context_type: Option<String> = explicit_parent
+            .map(|s| s.split('<').next().unwrap_or(s).to_string())
+            .or_else(|| {
+                self.ctx
+                    .current_return_type_name
+                    .as_ref()
+                    .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
+            })
             .or_else(|| {
                 self.ctx
                     .match_scrutinee_type
@@ -5542,7 +5751,22 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
 
-        self.emit_make_variant_for_function(result, tag, args.len() as u32, name, None);
+        // Pass `context_type` as the explicit parent hint so the emit
+        // helper's `MakeVariantTyped` survival check sees the parent's
+        // descriptor before falling through to the synthetic-tag form.
+        // Without this, `Poll.Ready(v)` (and every other
+        // `TypeName.Variant(...)` site where the FunctionInfo lacked
+        // a populated `parent_type_name` field) lost the parent type's
+        // identity and the runtime mis-resolved Debug / variant-name
+        // queries via the global tag-scan fallback.
+        self.emit_make_variant_for_function_hinted(
+            result,
+            tag,
+            args.len() as u32,
+            name,
+            None,
+            context_type.as_deref(),
+        );
 
         // If there are arguments, set the variant data
         if !args.is_empty() {
@@ -7511,7 +7735,20 @@ impl VbcCodegen {
             // Only use if argument count matches to avoid wrong function resolution
             if func_info.param_count == args.len() {
                 if func_info.variant_tag.is_some() {
-                    return Ok(Some(self.compile_variant_constructor(&method_name, args)?));
+                    // `type_name` (the LHS of `TypeName.Variant(...)`)
+                    // is the parent sum type's name in the user's
+                    // syntactic scope.  Forward it as the explicit
+                    // parent hint so the variant emitter doesn't have
+                    // to rediscover it via FunctionInfo metadata
+                    // (which can be missing for freshly-registered
+                    // user types).  Closes the Poll/LocalPair Debug-
+                    // mis-rendering chain pinned by
+                    // core-tests/async/poll/regression_test.vr §A.
+                    return Ok(Some(self.compile_variant_constructor_hinted(
+                        &method_name,
+                        args,
+                        Some(&type_name),
+                    )?));
                 }
                 return Ok(Some(self.compile_static_method_call(&func_info, args)?));
             }
@@ -7600,11 +7837,18 @@ impl VbcCodegen {
 
             // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok).
             // Variant constructors are registered as functions with variant_tag set.
+            // We forward `type_name` as the explicit parent hint here for the
+            // same reason as the typed branch above — the surrounding `TypeName.`
+            // segment is the most authoritative signal for the parent sum type.
             if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
                 && func_info.variant_tag.is_some()
                 && func_info.param_count == args.len()
             {
-                return Ok(Some(self.compile_variant_constructor(&method_name, args)?));
+                return Ok(Some(self.compile_variant_constructor_hinted(
+                    &method_name,
+                    args,
+                    Some(&type_name),
+                )?));
             }
 
             // For primitive types with static methods (e.g., Int.from_le_bytes,
@@ -12642,17 +12886,34 @@ impl VbcCodegen {
                 let qualified_variant = format!("{}.{}", type_name, field);
                 if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned() {
                     if let Some(tag) = fi.variant_tag {
-                        return self
-                            .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                        // The path-resolution branch knows the syntactic
+                        // parent (`type_name`) directly — promote to the
+                        // typed-named-and-parent emission so the heap
+                        // header carries the real TypeId of `type_name`'s
+                        // sum, rather than the synthetic `0x8000+tag`
+                        // sentinel that the bare `_with_tag` form
+                        // produces (and that the Debug formatter then
+                        // misreads via the global tag-scan fallback).
+                        return self.compile_variant_constructor_with_tag_named_and_parent(
+                            Some(field),
+                            tag,
+                            &verum_common::List::new(),
+                            Some(type_name),
+                        );
                     }
-                    return self.compile_variant_constructor(
+                    return self.compile_variant_constructor_hinted(
                         &qualified_variant,
                         &verum_common::List::new(),
+                        Some(type_name),
                     );
                 }
                 // Fallback: try simple name for non-colliding variants
                 if self.ctx.lookup_function(field).is_some() {
-                    return self.compile_variant_constructor(field, &verum_common::List::new());
+                    return self.compile_variant_constructor_hinted(
+                        field,
+                        &verum_common::List::new(),
+                        Some(type_name),
+                    );
                 }
                 // Before treating as variant, check if this is a type static constant
                 // (e.g., Duration.ZERO, Int.MAX where field is uppercase)
@@ -21344,16 +21605,51 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_rdtsc", args, dest)?;
             }
             InlineSequenceId::CatchUnwind => {
-                // catch_unwind(closure) - in interpreter, just call the closure and wrap in Ok
-                if !args.is_empty() {
-                    // Call the closure argument
-                    self.ctx.emit(Instruction::Call {
-                        dst: dest,
-                        func_id: args[0].0 as u32,
+                // catch_unwind(closure) -> Result<T, PanicInfo>.
+                //
+                // Mirrors the `@catch` intrinsic shape: TryBegin
+                // sets up a panic handler, the closure runs inside
+                // the try block, and the destination receives:
+                //   * `Result.Ok(closure_result)` on normal return
+                //   * `Result.Err(panic_info)` on caught panic
+                //
+                // The previous implementation emitted
+                // `Instruction::Call { func_id: args[0].0 as u32 }`
+                // which treated the *register number* of the closure
+                // as a function id — produced nil at runtime, every
+                // `r.is_ok()` panicked with "Result.is_ok not found
+                // on receiver of runtime kind <nil>".
+                if args.is_empty() {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                } else {
+                    let hl = self.ctx.new_label("catch_unwind_h");
+                    let el = self.ctx.new_label("catch_unwind_e");
+                    self.ctx.emit_forward_jump(&hl, |o| {
+                        Instruction::TryBegin { handler_offset: o }
+                    });
+                    self.ctx.try_recover_depth += 1;
+                    let result_reg = self.ctx.alloc_temp();
+                    // CallClosure on the closure register — supports
+                    // both heap closures (with captures) and bare
+                    // FuncRef values via the runtime fallback added
+                    // in commit d2a1cdfe7.
+                    self.ctx.emit(Instruction::CallClosure {
+                        dst: result_reg,
+                        closure: args[0],
                         args: RegRange::new(Reg(0), 0),
                     });
-                } else {
-                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    self.ctx.try_recover_depth -= 1;
+                    self.ctx.emit(Instruction::TryEnd);
+                    self.emit_make_result_ok(dest, result_reg, "catch_unwind")?;
+                    self.ctx.free_temp(result_reg);
+                    self.ctx
+                        .emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
+                    self.ctx.define_label(&hl);
+                    let ex = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::GetException { dst: ex });
+                    self.emit_make_result_err(dest, ex, "catch_unwind")?;
+                    self.ctx.free_temp(ex);
+                    self.ctx.define_label(&el);
                 }
             }
             InlineSequenceId::PtrToRef => {
