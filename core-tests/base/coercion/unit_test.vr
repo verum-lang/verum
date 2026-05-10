@@ -2,11 +2,11 @@
 // core-tests/base/coercion/unit_test.vr
 // =============================================================================
 //
-// Per-marker tests for `core/base/coercion.vr`. The six protocols
+// Per-marker tests for `core/base/coercion.vr`. The seven protocols
 // (IntCoercible, TensorLike, Indexable, RangeLike, BytewiseFfi,
-// SizedNumeric) are MARKER protocols — zero methods. Their *value* is
-// exclusively the implement-block existence: the unifier discovers
-// them and applies the matching coercion rule.
+// SizedNumeric, ArrayCoercible) are MARKER protocols — zero methods.
+// Their *value* is exclusively the implement-block existence: the
+// unifier discovers them and applies the matching coercion rule.
 //
 // What "unit tests" mean for a marker: assert that the protocol can be
 // declared, can be implemented on a user type, and that the unifier
@@ -20,7 +20,7 @@
 mount core.prelude.*;
 mount core.base.coercion.{
     IntCoercible, TensorLike, Indexable, RangeLike,
-    BytewiseFfi, SizedNumeric,
+    BytewiseFfi, SizedNumeric, ArrayCoercible,
 };
 
 // =============================================================================
@@ -132,29 +132,52 @@ fn test_sized_numeric_marker_declared() {
 }
 
 // =============================================================================
-// Section 7: All six markers compose on a single type
+// Section 7: ArrayCoercible — `[T; N]` ↔ `C<T>` literal coercion
+// =============================================================================
+//
+// ArrayCoercible marks one-parameter ordered containers that accept
+// array-literal coercion: an expression of type `[T; N]` is admitted
+// where `C<T>` is expected.  Replaces the previously hardcoded
+// `array_coercible_types = {"List"}` default in the unifier — drift
+// between the .vr source-of-truth and the unifier accept-set is now
+// structurally impossible.
+
+type SmallVec<T> is { items: List<T>, capacity: Int };
+
+implement<T> ArrayCoercible for SmallVec<T> {}
+
+@test
+fn test_array_coercible_marker_declared() {
+    let v: SmallVec<Int> = SmallVec { items: [1, 2, 3], capacity: 4 };
+    assert_eq(v.items.len(), 3);
+    assert_eq(v.capacity, 4);
+}
+
+// =============================================================================
+// Section 8: All seven markers compose on a single type
 // =============================================================================
 // A pathological but valid case: nothing prevents one type from carrying
 // every coercion marker. The tests here confirm the protocols don't
 // conflict at the type-system level.
 
-type MultiMarker is { value: Int };
+type MultiMarker<T> is { value: T };
 
-implement IntCoercible for MultiMarker {}
-implement TensorLike for MultiMarker {}
-implement Indexable for MultiMarker {}
-implement RangeLike for MultiMarker {}
-implement BytewiseFfi for MultiMarker {}
-implement SizedNumeric for MultiMarker {}
+implement<T> IntCoercible for MultiMarker<T> {}
+implement<T> TensorLike for MultiMarker<T> {}
+implement<T> Indexable for MultiMarker<T> {}
+implement<T> RangeLike for MultiMarker<T> {}
+implement<T> BytewiseFfi for MultiMarker<T> {}
+implement<T> SizedNumeric for MultiMarker<T> {}
+implement<T> ArrayCoercible for MultiMarker<T> {}
 
 @test
-fn test_all_six_markers_on_single_type() {
-    let m = MultiMarker { value: 99 };
+fn test_all_seven_markers_on_single_type() {
+    let m: MultiMarker<Int> = MultiMarker { value: 99 };
     assert_eq(m.value, 99);
 }
 
 // =============================================================================
-// Section 8: Generic types implementing markers
+// Section 9: Generic types implementing markers
 // =============================================================================
 
 type DynBox<T> is { inner: T };
@@ -168,7 +191,7 @@ fn test_generic_marker_implementation() {
 }
 
 // =============================================================================
-// Section 9: SizedNumeric vs Numeric — orthogonal axes
+// Section 10: SizedNumeric vs Numeric — orthogonal axes
 // =============================================================================
 //
 // Implementing SizedNumeric does NOT require Numeric (the

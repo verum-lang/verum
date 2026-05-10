@@ -72,9 +72,13 @@ pub struct Unifier {
     type_alias_params: Map<Text, List<Text>>,
     /// Data-driven set of collection type names that support array coercion.
     /// Array literals `[1, 2, 3]` can unify with any `C<T>` where `C` is in this set.
-    /// Defaults to `{"List"}`. Register additional types via `register_array_coercible_type`.
-    /// This replaces hardcoded `name == "List"` checks and will be superseded by a
-    /// `FromArray` protocol check once protocols are available.
+    /// Populated via `register_array_coercible_type` from
+    /// `implement<T> ArrayCoercible for X<T> {}` blocks discovered
+    /// by `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
+    /// during stdlib bootstrap.  Default is empty so a stdlib that
+    /// fails to declare any `ArrayCoercible` impl produces a
+    /// type-mismatch error at array-literal sites rather than
+    /// silently falling back to a hardcoded "List" assumption.
     array_coercible_types: std::collections::HashSet<Text>,
     /// Data-driven set of type names in the "tensor family" that coerce freely with each
     /// other and with scalar primitives (Float, Int, Bool).
@@ -139,10 +143,13 @@ pub const DEFAULT_MAX_UNIFY_DEPTH: u32 = 50;
 
 impl Unifier {
     pub fn new() -> Self {
-        let mut array_coercible_types = std::collections::HashSet::new();
-        // "List" is the default array-coercible collection type.
-        // Additional types can be registered via register_array_coercible_type().
-        array_coercible_types.insert(Text::from("List"));
+        // Array-coercible types — populated dynamically via
+        // `register_array_coercible_type()` from stdlib's
+        // `implement<T> ArrayCoercible for X<T> {}` blocks.
+        // Default is empty; List opts in via its own implement
+        // block in `core/collections/list.vr`.
+        let array_coercible_types: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
 
         // Tensor family: populated via register_tensor_family_type() from
         // stdlib declarations (types implementing TensorLike protocol).
@@ -163,10 +170,16 @@ impl Unifier {
         .map(|s| Text::from(*s))
         .collect();
 
-        // Collection types that support integer indexing — populated
-        // dynamically via register_indexable_type() from stdlib.
+        // Collection types that support integer indexing —
+        // populated dynamically via `register_indexable_type` from
+        // stdlib `implement<T> Indexable for X<T> {}` blocks
+        // (e.g. `core/collections/list.vr` for List, plus Range /
+        // Vector / DynTensor / GPUBuffer in their respective
+        // modules).  Default empty: a stdlib that declares no
+        // Indexable impls produces a type-mismatch at indexing
+        // sites rather than a silent hardcoded-List fallback.
         let indexable_collection_types: std::collections::HashSet<Text> =
-            ["List"].iter().map(|s| Text::from(*s)).collect();
+            std::collections::HashSet::new();
 
         // Range-like types — populated via register_range_like_type() from stdlib.
         let range_like_types: std::collections::HashSet<Text> = std::collections::HashSet::new();

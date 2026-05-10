@@ -18,7 +18,7 @@
 mount core.prelude.*;
 mount core.base.coercion.{
     IntCoercible, TensorLike, Indexable, RangeLike,
-    BytewiseFfi, SizedNumeric,
+    BytewiseFfi, SizedNumeric, ArrayCoercible,
 };
 mount core.collections.list.List;
 
@@ -190,6 +190,42 @@ fn law_sized_numeric_round_trip_preserves_underlying_scalar() {
 fn prop_sized_numeric_round_trip_int64(n: Int64) {
     let d = FrameDuration { nanos: n };
     assert_eq(d.nanos, n);
+}
+
+// =============================================================================
+// §F-quat ArrayCoercible: `[T; N]` literal-coerces to a marked
+//          container; the law the unifier gates is "wrap then read
+//          preserves element order".
+// =============================================================================
+//
+// ArrayCoercible eliminates the previously hardcoded
+// `array_coercible_types = {"List"}` default in the unifier — the
+// rule is now declared structurally on each container.
+
+type SmallVec<T> is { items: List<T>, capacity: Int };
+
+implement<T> ArrayCoercible for SmallVec<T> {}
+
+@test
+fn law_array_coercible_preserves_order() {
+    let v: SmallVec<Int> = SmallVec { items: [10, 20, 30, 40, 50], capacity: 8 };
+    assert_eq(v.items.len(), 5);
+    assert_eq(v.items[0], 10);
+    assert_eq(v.items[4], 50);
+}
+
+@property
+fn prop_array_coercible_length_matches_literal(n: Int) {
+    if n >= 0 && n < 32 {
+        let mut acc = [];
+        let mut i = 0;
+        while i < n {
+            acc.push(i);
+            i = i + 1;
+        }
+        let v: SmallVec<Int> = SmallVec { items: acc, capacity: n + 1 };
+        assert_eq(v.items.len(), n);
+    }
 }
 
 // =============================================================================
