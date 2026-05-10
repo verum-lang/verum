@@ -1985,9 +1985,23 @@ fn register_module_filtered(
                 ctx.register_function(w.clone(), info.clone());
             }
         }
-        if ctx.lookup_function(&simple_name).is_none() {
-            ctx.register_function(simple_name, info);
-        }
+        // **Arity-disambiguation contract.** Always go through
+        // `register_function` for the simple-name registration so its
+        // `name#arity` collision branch fires when this is the second-
+        // (or third-, …) registration with the same simple name but
+        // different param count.  The previous `lookup_function(...)
+        // .is_none()` gate dropped multi-arity simple-name entries on
+        // the floor before they could be assigned an arity-qualified
+        // alternate key — surfaced as the snowflake/uuid/ulid suite
+        // failures where user code calls `parse(id, epoch_ms)` (2-arg
+        // form from `core.base.snowflake`) but the dispatcher routes
+        // to a sibling stdlib's 1-arg `parse` because `parse#2` was
+        // never registered.  `register_function`'s own arity branch
+        // does the right thing here: same-arity → first-wins (matches
+        // the prior gate's behaviour); different-arity → store under
+        // `name#arity` so `lookup_function_with_arity` can pick the
+        // right one.
+        ctx.register_function(simple_name, info);
     }
 
     // Pass 4: register every sum-type's variant constructors from
