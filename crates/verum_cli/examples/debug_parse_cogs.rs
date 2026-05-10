@@ -1,6 +1,6 @@
 use verum_ast::FileId;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 fn main() {
     let path = std::env::args().nth(1).expect("Please provide a file path");

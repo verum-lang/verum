@@ -31,36 +31,24 @@ fn create_var(name: &str) -> Expr {
     let span = create_span("demo.vr", 1);
     let ident = Ident::new(name, span);
     let path = Path::single(ident);
-    Expr {
-        kind: ExprKind::Path(path),
-        span,
-        ref_kind: None,
-        check_eliminated: false,
-    }
+    Expr::new(ExprKind::Path(path), span)
 }
 
 fn create_int(value: i64) -> Expr {
     let span = create_span("demo.vr", 1);
     let literal = Literal::int(value as i128, span);
-    Expr {
-        kind: ExprKind::Literal(literal),
-        span,
-        ref_kind: None,
-        check_eliminated: false,
-    }
+    Expr::new(ExprKind::Literal(literal), span)
 }
 
 fn create_binary(op: BinOp, left: Expr, right: Expr) -> Expr {
-    Expr {
-        kind: ExprKind::Binary {
+    Expr::new(
+        ExprKind::Binary {
             op,
             left: Box::new(left),
             right: Box::new(right),
         },
-        span: create_span("demo.vr", 1),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+        create_span("demo.vr", 1),
+    )
 }
 
 fn main() {
