@@ -15,7 +15,7 @@
 //!  Windows x64: kernel32/ntdll FFI
 //!  Embedded: no runtime, bare LLVM IR
 
-use super::error::{BuildExt, OptionExt};
+use super::error::{BuildExt, CallSiteExt, OptionExt};
 use super::target_triple::{
     target_is_aarch64, target_is_darwin, target_is_linux, target_is_windows,
 };
@@ -779,9 +779,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "fd",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Sign-extend i32 fd to i64 (preserves -1 for errors)
@@ -948,9 +946,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let large_block = builder
             .build_call(os_alloc_for_large, &[large_page_size.into()], "large_block")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let large_block_i64 = builder
             .build_ptr_to_int(large_block, i64_type, "large_blk_i64")
@@ -989,9 +985,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ctlz",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // shift = 64 - ctlz
         let shift = builder
@@ -1159,9 +1153,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let new_block = builder
             .build_call(os_alloc, &[arena_size_const.into()], "new_block")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let block_not_null = builder
             .build_int_compare(
@@ -1221,9 +1213,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let az_result = builder
             .build_call(alloc_fn, &[az_size.into()], "az_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&az_result)).or_llvm_err()?;
 
         // ---- verum_dealloc(ptr, size): push to size-class freelist ----
@@ -1317,9 +1307,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "d_ctlz",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let d_shift = builder
             .build_int_sub(i64_type.const_int(64, false), d_ctlz, "d_shift")
@@ -1467,9 +1455,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     "va_result",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
 
             let result_ptr = match result {
                 BasicValueEnum::PointerValue(p) => p,
@@ -1527,9 +1513,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     "mmap_result",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
 
             let result = match call_result {
                 BasicValueEnum::PointerValue(p) => p,
@@ -1723,9 +1707,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let handle = builder
                 .build_call(get_std_handle, &[neg_handle.into()], "handle")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
 
             // GUI-subsystem degradation: when the process has no
             // console (Win32 app launched with `/SUBSYSTEM:WINDOWS`),
@@ -1847,9 +1829,7 @@ impl<'ctx> PlatformIR<'ctx> {
                     "written",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
@@ -3271,9 +3251,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let result = builder
                     .build_call(validate_fn, &[user_ptr.into(), packed.into()], "valid")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("validate_ref: expected return value")?
+            .basic_value_or("validate_ref: expected return value")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -3380,9 +3358,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ref_valid = builder
                     .build_call(validate_fn, &[user_ptr.into(), packed.into()], "ref_valid")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("validate_ref: expected return value")?
+            .basic_value_or("validate_ref: expected return value")?
                     .into_int_value();
 
                 // Result = ref_valid AND has_write
@@ -3471,9 +3447,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let result = builder
                     .build_call(validate_fn, &[user_ptr.into(), packed.into()], "valid")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("validate_ref: expected return value")?
+            .basic_value_or("validate_ref: expected return value")?
                     .into_int_value();
                 builder.build_return(Some(&result)).or_llvm_err()?;
             }
@@ -4170,9 +4144,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(open_fn, &[path.into(), flags.into(), perm.into()], "fd")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -4203,9 +4175,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&result)).or_llvm_err()?; // i64 Verum ABI — no extension needed
         Ok(())
@@ -4238,9 +4208,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(access_fn, &[path.into(), i32_type.const_zero().into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // return (access(path, F_OK) == 0) ? 1 : 0
         let is_zero = builder
@@ -4283,9 +4251,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(unlink_fn, &[path.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&result)).or_llvm_err()?; // i64 Verum ABI — no extension needed
         Ok(())
@@ -4359,9 +4325,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let buf = builder
             .build_call(alloc_fn, &[buf_size.into()], "buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let buf_null = builder.build_is_null(buf, "buf_null").or_llvm_err()?;
         builder
@@ -4378,9 +4342,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "et",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
         // read_ok: n = read(fd, buf, buf_size)
@@ -4389,9 +4351,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let n = builder
             .build_call(read_fn, &[fd32.into(), buf.into(), buf_size.into()], "n")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let read_positive = builder
             .build_int_compare(IntPredicate::SGT, n, i64_type.const_zero(), "rp")
@@ -4416,9 +4376,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "et2",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text2)).or_llvm_err()?;
 
         // read_done: null-terminate, create Text, free buf
@@ -4451,9 +4409,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let text = builder
             .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder
             .build_call(dealloc_fn, &[buf.into(), buf_size.into()], "")
             .or_llvm_err()?;
@@ -4507,9 +4463,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let txt_ptr = builder
             .build_call(text_get_ptr_fn, &[data.into()], "ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let ptr_null = builder.build_is_null(txt_ptr, "pn").or_llvm_err()?;
         builder
@@ -4525,17 +4479,13 @@ impl<'ctx> PlatformIR<'ctx> {
         let len = builder
             .build_call(strlen_fn, &[txt_ptr.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd32 = fd; // i64 Verum ABI — no truncation needed
         let n = builder
             .build_call(write_fn, &[fd32.into(), txt_ptr.into(), len.into()], "n")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // return n >= 0 ? n : -1
         let is_ok = builder
@@ -4625,9 +4575,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "fd",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd_ok = builder
             .build_int_compare(IntPredicate::SGE, fd_result, i64_type.const_zero(), "fd_ok")
@@ -4646,9 +4594,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "et",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
         // open_ok: allocate initial buffer
@@ -4657,9 +4603,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let init_buf = builder
             .build_call(alloc_fn, &[init_cap.into()], "buf0")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_unconditional_branch(read_loop)
@@ -4695,9 +4639,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let new_buf = builder
             .build_call(alloc_fn, &[new_cap.into()], "nb")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         // memcpy(new_buf, cur_buf, cur_len)
         builder
@@ -4741,9 +4683,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "n",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder
             .build_unconditional_branch(check_read)
@@ -4796,9 +4736,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "text",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder
             .build_call(dealloc_fn, &[rd_buf_val.into(), rd_cap_val.into()], "")
             .or_llvm_err()?;
@@ -4870,9 +4808,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "fd",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd_good = builder
             .build_int_compare(IntPredicate::SGE, fd_result, i64_type.const_zero(), "ok")
@@ -4890,16 +4826,12 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr = builder
             .build_call(text_get_ptr_fn, &[data.into()], "ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let len = builder
             .build_call(strlen_fn, &[ptr.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd32 = builder
             .build_int_truncate(fd_result, i32_type, "fd32")
@@ -4907,9 +4839,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let n = builder
             .build_call(write_fn, &[fd32.into(), ptr.into(), len.into()], "n")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder
             .build_call(close_fn, &[fd32.into()], "")
@@ -4988,9 +4918,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "fd",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd_good = builder
             .build_int_compare(IntPredicate::SGE, fd_result, i64_type.const_zero(), "ok")
@@ -5008,16 +4936,12 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr = builder
             .build_call(text_get_ptr_fn, &[data.into()], "ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let len = builder
             .build_call(strlen_fn, &[ptr.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let fd32 = builder
             .build_int_truncate(fd_result, i32_type, "fd32")
@@ -5025,9 +4949,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let n = builder
             .build_call(write_fn, &[fd32.into(), ptr.into(), len.into()], "n")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder
             .build_call(close_fn, &[fd32.into()], "")
@@ -5891,9 +5813,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr = builder
             .build_call(text_get_ptr_fn, &[data.into()], "ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let ptr_null = builder.build_is_null(ptr, "pn").or_llvm_err()?;
         builder
@@ -5909,9 +5829,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let len = builder
             .build_call(strlen_fn, &[ptr.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let n = self.call_native_i64(
             &builder,
@@ -6000,9 +5918,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let buf = builder
             .build_call(alloc_fn, &[alloc_size.into()], "buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         let n = self.call_native_i64(
@@ -6035,9 +5951,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "et",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
         builder.position_at_end(recv_ok);
@@ -6050,9 +5964,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let text = builder
             .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder
             .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
             .or_llvm_err()?;
@@ -6204,9 +6116,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(recv_text_fn, &[fd.into(), max_len.into()], "rt")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -6254,9 +6164,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(send_text_fn, &[fd.into(), data.into()], "st")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -6301,9 +6209,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(accept_fn, &[listen_fd.into()], "at")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -6349,9 +6255,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(connect_fn, &[host.into(), port.into()], "ct")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -6396,9 +6300,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(udp_recv_fn, &[fd.into(), max_len.into()], "ur")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -6600,9 +6502,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let r = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&r)).or_llvm_err()?; // i64 Verum ABI — no extension needed
         Ok(())
@@ -6744,9 +6644,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let txt_ptr = builder
             .build_call(text_get_ptr_fn, &[data.into()], "ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let ptr_null = builder.build_is_null(txt_ptr, "pn").or_llvm_err()?;
         builder
@@ -6762,9 +6660,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let len = builder
             .build_call(strlen_fn, &[txt_ptr.into()], "len")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Build destination sockaddr_in (localhost for now).
@@ -6862,9 +6758,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let buf = builder
             .build_call(alloc_fn, &[alloc_size.into()], "buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         let n = self.call_native_i64(
@@ -6899,9 +6793,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "et",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text)).or_llvm_err()?;
 
         builder.position_at_end(recv_ok);
@@ -6913,9 +6805,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let text = builder
             .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder
             .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
             .or_llvm_err()?;
@@ -6947,9 +6837,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let r = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&r)).or_llvm_err()?; // i64 Verum ABI — no extension needed
         Ok(())
@@ -7014,9 +6902,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "wr",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let failed = builder
@@ -7087,9 +6973,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let init_buf = builder
             .build_call(alloc_fn, &[init_cap.into()], "buf0")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let buf_null = builder.build_is_null(init_buf, "bn").or_llvm_err()?;
         builder
@@ -7127,9 +7011,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let new_buf = builder
             .build_call(alloc_fn, &[new_cap.into()], "nb")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_call(
@@ -7168,9 +7050,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "n",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder
             .build_unconditional_branch(check_read)
@@ -7195,9 +7075,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let hdr = builder
             .build_call(alloc_fn, &[hdr_size.into()], "hdr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         // Store len at hdr[0]
         let hdr_0 = hdr;
@@ -7646,9 +7524,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ep = builder
             .build_call(errno_fn, &[], "ep")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let ev = builder
             .build_load(i32_type, ep, "ev")
@@ -7811,9 +7687,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let hdr_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(64, false).into()], "hdr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -7840,9 +7714,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let data_ptr = builder
             .build_call(alloc_fn, &[data_sz.into()], "data")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(data_ptr, 1, i8_type.const_zero(), data_sz)
@@ -9080,9 +8952,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let nurs_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(56, false).into()], "nurs")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -9117,9 +8987,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let handles_ptr = builder
             .build_call(alloc_fn, &[handles_sz.into()], "hdl")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(handles_ptr, 1, i8_type.const_zero(), handles_sz)
@@ -9256,9 +9124,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let handle = builder
             .build_call(pool_global_submit, &[fn_ptr.into(), arg.into()], "handle")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Store handle at handles[count]
@@ -9539,9 +9405,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_call(pool_await_fn, &[handle.into()], "res")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder
             .build_unconditional_branch(check_result)
@@ -9870,9 +9734,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let wg_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(32, false).into()], "wg")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -10513,18 +10375,14 @@ impl<'ctx> PlatformIR<'ctx> {
         let kq_fd = builder
             .build_call(kqueue_fn, &[], "kq")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Alloc 8 bytes for struct
         let eng_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(8, false).into()], "eng")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -10700,9 +10558,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret_r",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // Return 0 on success, -1 on failure
         let ok_r = builder
@@ -10764,9 +10620,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret_w",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ok_w = builder
             .build_int_compare(IntPredicate::SGE, ret_w, i64_type.const_zero(), "ok_w")
@@ -10899,9 +10753,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret_to",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&ret_to)).or_llvm_err()?;
 
@@ -10921,9 +10773,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret_nt",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&ret_nt)).or_llvm_err()?;
         Ok(())
@@ -11012,9 +10862,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ok = builder
             .build_int_compare(IntPredicate::SGE, ret, i64_type.const_zero(), "ok")
@@ -11066,9 +10914,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ret = builder
             .build_call(submit_fn, &[engine.into(), fd.into(), events.into()], "ret")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&ret)).or_llvm_err()?;
         Ok(())
@@ -11284,9 +11130,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ok = builder
             .build_int_compare(IntPredicate::SGE, ret, i64_type.const_zero(), "ok")
@@ -11577,9 +11421,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_indirect_call(fn_type, fn_ptr, &[arg_val.into()], "result")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Store result at result_ptr
@@ -11666,9 +11508,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let pool_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(80, false).into()], "pool")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -11684,9 +11524,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let queue_ptr = builder
             .build_call(alloc_fn, &[queue_sz.into()], "queue")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(queue_ptr, 1, i8_type.const_zero(), queue_sz)
@@ -11719,9 +11557,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let threads_ptr = builder
             .build_call(alloc_fn, &[threads_sz.into()], "threads")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(threads_ptr, 1, i8_type.const_zero(), threads_sz)
@@ -11790,9 +11626,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let tid = builder
             .build_call(spawn_fn, &[worker_ptr.into(), pool_i64.into()], "tid")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // Store thread handle: threads_ptr[i] = tid
         let off = builder
@@ -11909,9 +11743,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let handle_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(16, false).into()], "handle")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -12482,9 +12314,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ncpu = builder
                 .build_call(sysconf_fn, &[sc_nproc.into()], "ncpu")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_int_value();
             // Clamp: min 2, max 64
             let min_2 = builder
@@ -12511,9 +12341,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let new_pool = builder
             .build_call(create_fn, &[num_cpus.into()], "new_pool")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // CAS: if still 0, store new_pool
         let cas = builder
@@ -12599,9 +12427,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let pool = builder
             .build_call(global_fn, &[], "pool")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let handle = builder
             .build_call(
@@ -12610,9 +12436,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "handle",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&handle)).or_llvm_err()?;
         Ok(())
@@ -12711,9 +12535,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result_buf = builder
             .build_call(alloc_fn, &[i64_type.const_int(32, false).into()], "rbuf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result_i64 = builder
             .build_ptr_to_int(result_buf, i64_type, "ri64")
@@ -12732,9 +12554,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "count",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ready = builder
             .build_int_compare(IntPredicate::SGT, count, i64_type.const_zero(), "ready")
@@ -12872,9 +12692,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result_buf = builder
             .build_call(alloc_fn, &[i64_type.const_int(32, false).into()], "rbuf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result_i64 = builder
             .build_ptr_to_int(result_buf, i64_type, "ri64")
@@ -12893,9 +12711,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "count",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ready = builder
             .build_int_compare(IntPredicate::SGT, count, i64_type.const_zero(), "ready")
@@ -13026,9 +12842,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result_buf = builder
             .build_call(alloc_fn, &[i64_type.const_int(32, false).into()], "rbuf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result_i64 = builder
             .build_ptr_to_int(result_buf, i64_type, "ri64")
@@ -13047,9 +12861,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "count",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let ready = builder
             .build_int_compare(IntPredicate::SGT, count, i64_type.const_zero(), "ready")
@@ -13192,9 +13004,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let gen_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(64, false).into()], "gen")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -13267,9 +13077,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let args_copy = builder
             .build_call(alloc_fn, &[args_sz.into()], "acpy")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_call(
@@ -13619,9 +13427,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let hn = builder
             .build_call(has_next_fn, &[handle.into()], "hn")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let has = builder
             .build_int_compare(IntPredicate::NE, hn, i64_type.const_zero(), "has")
@@ -13635,9 +13441,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let val = builder
             .build_call(next_fn, &[handle.into()], "val")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         // After next(), check if the generator completed (status==3 means
         // the value is the completion sentinel, not a real yield)
@@ -13946,9 +13750,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let th_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(40, false).into()], "th")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder
             .build_memset(
@@ -14443,9 +14245,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let pid = builder
             .build_call(fork_fn, &[], "pid")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let is_error = builder
             .build_int_compare(IntPredicate::SLT, pid, i64_type.const_zero(), "is_error")
@@ -14805,9 +14605,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "pid",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let pid_ok = builder
@@ -14831,9 +14629,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let stdout_data = builder
             .build_call(fd_read_all_fn, &[stdout_fd.into()], "so_data")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_store(out_stdout, stdout_data).or_llvm_err()?;
         builder
@@ -14848,9 +14644,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let stderr_data = builder
             .build_call(fd_read_all_fn, &[stderr_fd.into()], "se_data")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_store(out_stderr, stderr_data).or_llvm_err()?;
         builder
@@ -14861,9 +14655,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let status = builder
             .build_call(wait_fn, &[pid.into()], "status")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_store(out_status, status).or_llvm_err()?;
 
@@ -14991,9 +14783,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let argv_buf = builder
             .build_call(alloc_fn, &[argv_size.into()], "argv")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // argv[0] = program
@@ -15026,9 +14816,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let cstr = builder
             .build_call(text_get_ptr_fn, &[text_val.into()], "cs")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // argv[i+1] = cstr
@@ -15100,9 +14888,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "pid",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Allocate result struct: [pid, stdout_fd, stderr_fd] (3 × i64 = 24 bytes)
@@ -15114,9 +14900,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(24, false).into()], "rp")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         // Store pid at [0]
         builder.build_store(result_ptr, pid).or_llvm_err()?;
@@ -15247,9 +15031,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let argv_buf = builder
             .build_call(alloc_fn, &[argv_size.into()], "argv")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         builder.build_store(argv_buf, program).or_llvm_err()?;
 
@@ -15278,9 +15060,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let cstr = builder
             .build_call(text_get_ptr_fn, &[text_val.into()], "cs")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let ip1 = builder
             .build_int_add(i_val, i64_type.const_int(1, false), "ip1")
@@ -15350,9 +15130,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "rc",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let ok = builder
@@ -15548,9 +15326,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         "ret",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_int_value();
 
                 // Return 0 on success (ret >= 0), -1 on error
@@ -15694,9 +15470,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             let i8_type = ctx.i8_type();
             // SAFETY: GEP into the execution context at offset 2048 (context bindings count)
@@ -15790,9 +15564,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             let i8_type = ctx.i8_type();
             // SAFETY: GEP into the execution context at offset 2048 (context bindings count)
@@ -15841,9 +15613,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             let i8_type = ctx.i8_type();
             // SAFETY: GEP into the execution context at offset 2048 (context bindings count) for ctx_end
@@ -16253,9 +16023,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let existing_val = builder
                     .build_call(pthread_getspecific_fn, &[key.into()], "existing")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
                 // Handle both ptr and i64 return types (depends on VBC FFI declaration order)
                 let existing = match existing_val {
                     verum_llvm::values::BasicValueEnum::PointerValue(p) => p,
@@ -16278,9 +16046,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         "new_ctx",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // Zero-init (verum_alloc already zeroes via memset)
                 // Set execution_tier = 3
@@ -16349,9 +16115,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             // offset = EC_TLS_SLOTS + slot*8
             let slot_offset = builder
@@ -16402,9 +16166,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             let slot_offset = builder
                 .build_int_mul(slot, i64_type.const_int(8, false), "so")
@@ -16479,9 +16241,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
             let depth_ptr = unsafe {
@@ -16583,9 +16343,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let ec = builder
                 .build_call(get_ctx_fn, &[], "ctx")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_pointer_value();
             // SAFETY: GEP into the execution context at the stack_depth offset for pop_stack_frame
             let depth_ptr = unsafe {
@@ -16792,9 +16550,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // Load handler count
                 // SAFETY: GEP into the execution context at EC_EXCEPTION_HANDLER_COUNT to read the handler stack depth
@@ -16880,9 +16636,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP into the execution context at EC_EXCEPTION_HANDLER_COUNT to read/decrement the handler count
                 let cnt_ptr = unsafe {
@@ -16945,9 +16699,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
                 let cnt_ptr = unsafe {
@@ -17060,9 +16812,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // Read from handlers[count] (the just-popped entry)
                 // SAFETY: GEP into the execution context at EC_EXCEPTION_HANDLER_COUNT to find the current handler
@@ -17137,9 +16887,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP into the execution context at EC_DEFER_COUNT to read the current defer stack depth
                 let cnt_ptr = unsafe {
@@ -17206,9 +16954,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP into the execution context at EC_DEFER_COUNT to read/decrement the defer stack depth
                 let cnt_ptr = unsafe {
@@ -17258,9 +17004,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
                 let cnt_ptr = unsafe {
@@ -17351,9 +17095,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP at a known offset within an allocated object; the pointer is valid and the offset does not exceed the allocation size
                 let cnt_ptr = unsafe {
@@ -17405,9 +17147,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP into the execution context at EC_CONTEXT_COUNT to read the context binding stack depth
                 let cnt_ptr = unsafe {
@@ -17502,9 +17242,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let ec = builder
                     .build_call(get_ctx_fn, &[], "ctx")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                     .into_pointer_value();
                 // SAFETY: GEP into the execution context at EC_CONTEXT_COUNT to read the context binding count
                 let cnt_ptr = unsafe {
@@ -17696,9 +17434,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let list_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(48, false).into()], "list")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         // Alloc backing array: argc * 8 bytes
         let arr_sz = builder
@@ -17707,9 +17443,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let arr_ptr = builder
             .build_call(alloc_fn, &[arr_sz.into()], "arr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         // Store ptr at offset 24 (LIST_PTR_IDX=3, 3*8=24)
         // SAFETY: GEP into the 48-byte list header at offset 24 (data pointer field)
@@ -17767,9 +17501,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let text = builder
             .build_call(text_from_cstr_fn, &[cstr.into()], "txt")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         // Store in arr[i]
         // SAFETY: GEP into the backing i64 array at index i to store the converted Text value
         let arr_elem = unsafe {
@@ -18133,9 +17865,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 let len = builder
                     .build_call(strlen_fn, &[s.into()], "len")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
                 let write_stderr_fn = module
                     .get_function("write_stderr")
                     .or_missing_fn("write_stderr")?;
@@ -18176,9 +17906,7 @@ impl<'ctx> PlatformIR<'ctx> {
                         "len",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
                 let write_stderr_fn = module
                     .get_function("write_stderr")
                     .or_missing_fn("write_stderr")?;
@@ -18825,9 +18553,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let result = builder
             .build_indirect_call(user_fn_ty, fn_as_ptr, &[arg_val.into()], "res")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         // Store result at offset 8
         // SAFETY: GEP into the 40-byte thread struct at offset 8 (result field) to store the return value
         let result_field = unsafe {
@@ -18944,9 +18670,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let r1 = builder
             .build_indirect_call(fn1, fn_as_ptr, &[a0.into()], "r1")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(call2plus_bb);
@@ -18975,9 +18699,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let r2 = builder
             .build_indirect_call(fn2, fn_as_ptr, &[a0.into(), a1.into()], "r2")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(call3plus_bb);
@@ -19006,9 +18728,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let r3 = builder
             .build_indirect_call(fn3, fn_as_ptr, &[a0.into(), a1.into(), a2.into()], "r3")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         // 4+ args: load a3 and call with 4 args (covers 4-6 captured vars)
@@ -19045,9 +18765,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "r4",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(call5plus_bb);
@@ -19081,9 +18799,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "r5",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(call6_bb);
@@ -19109,9 +18825,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "r6",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_unconditional_branch(ret_bb).or_llvm_err()?;
 
         builder.position_at_end(ret_bb);
@@ -19434,9 +19148,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 "ret",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder
             .build_call(mutex_lock_fn, &[m.into()], "")
             .or_llvm_err()?;
@@ -19741,9 +19453,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let old_pages = builder
             .build_call(grow_fn, &[pages_i32.into()], "old")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Convert old pages to byte address: old_pages * 65536

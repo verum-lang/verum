@@ -56,7 +56,7 @@ use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::SystemSubOpcode;
 
 use super::context::FunctionContext;
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::types::TypeLowering;
 
 /// LLVM calling convention constants.
@@ -277,9 +277,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let result = builder
             .build_call(memcmp_fn, &args, "memcmp")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("memcmp should return i32")?
+            .basic_value_or("memcmp should return i32")?
             .into_int_value();
 
         Ok(result)
@@ -304,9 +302,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let raw_ptr = builder
             .build_call(malloc_fn, &args, "malloc")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("malloc should return ptr")?
+            .basic_value_or("malloc should return ptr")?
             .into_pointer_value();
 
         // Null check: OOM → _exit(1)
@@ -383,9 +379,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let result = builder
             .build_call(realloc_fn, &args, "realloc")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("realloc should return ptr")?
+            .basic_value_or("realloc should return ptr")?
             .into_pointer_value();
 
         Ok(result)
@@ -699,9 +693,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let errno_ptr = builder
             .build_call(errno_fn, &empty_args, "errno_loc")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("__errno_location should return ptr")?
+            .basic_value_or("__errno_location should return ptr")?
             .into_pointer_value();
 
         // Load errno value
@@ -729,9 +721,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let errno_ptr = builder
             .build_call(errno_fn, &empty_args, "errno_loc")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("__errno_location should return ptr")?
+            .basic_value_or("__errno_location should return ptr")?
             .into_pointer_value();
 
         // Store the new value
@@ -956,9 +946,7 @@ impl<'ctx> FfiLowering<'ctx> {
         let new_ptr = builder
             .build_call(os_alloc, &[new_size.into()], "new_ptr")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("verum_os_alloc returned void")?
+            .basic_value_or("verum_os_alloc returned void")?
             .into_pointer_value();
         builder
             .build_return(Some(&new_ptr))

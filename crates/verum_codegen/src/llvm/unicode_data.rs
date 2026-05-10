@@ -12,7 +12,7 @@ use verum_llvm::values::{FunctionValue, GlobalValue, IntValue, PointerValue};
 use verum_llvm::{AddressSpace, IntPredicate};
 
 use super::context::FunctionContext;
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 
 // ---------------------------------------------------------------------------
 // Table data — Unicode character classification tables
@@ -732,9 +732,7 @@ pub fn emit_range_table_lookup<'ctx>(
             "unicode_lookup",
         )
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("unicode range lookup: expected return value")?
+            .basic_value_or("unicode range lookup: expected return value")?
         .into_int_value();
 
     Ok(call_result)
@@ -912,9 +910,7 @@ pub fn emit_case_conversion<'ctx>(
         .builder()
         .build_call(convert_fn, &[ch.into(), dir_val.into()], "case_conv")
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("case conversion: expected return value")?
+            .basic_value_or("case conversion: expected return value")?
         .into_int_value();
 
     Ok(call_result)
