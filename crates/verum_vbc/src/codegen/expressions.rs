@@ -486,6 +486,12 @@ impl VbcCodegen {
             }
         });
         if let Some(tid) = typed_ok {
+            if std::env::var("VBC_VARIANT_TRACE").is_ok() {
+                eprintln!(
+                    "[VBC_VARIANT_TRACE] emit MakeVariantTyped parent={:?} tid={} tag={} fc={}",
+                    parent_type_name, tid.0, tag, field_count
+                );
+            }
             self.ctx.emit(Instruction::MakeVariantTyped {
                 dst,
                 type_id: tid.0,
@@ -493,6 +499,21 @@ impl VbcCodegen {
                 field_count,
             });
         } else {
+            if std::env::var("VBC_VARIANT_TRACE").is_ok() {
+                let probe_tid = parent_type_name
+                    .and_then(|n| self.type_name_to_id.get(n).copied());
+                let probe_desc = parent_type_name
+                    .and_then(|n| self.type_name_to_id.get(n).copied())
+                    .and_then(|tid| self.types.iter().find(|d| d.id == tid));
+                eprintln!(
+                    "[VBC_VARIANT_TRACE] FALLBACK MakeVariant parent={:?} tid={:?} desc_variants={:?} tag={} fc={}",
+                    parent_type_name,
+                    probe_tid.map(|t| t.0),
+                    probe_desc.map(|d| d.variants.len()),
+                    tag,
+                    field_count,
+                );
+            }
             // Untyped emission — runtime falls back to the global
             // tag-scan in `format_variant_for_print_depth`, which can
             // mis-resolve when sum types share variant tags.  Trace
@@ -6190,6 +6211,19 @@ impl VbcCodegen {
         // Generic static-method dispatch on a typed receiver: route `Foo.method` or
         // `Foo<T>.method` through the qualified-function registry. This unifies the
         // bare-Path and TypeExpr forms — type arguments are layout-irrelevant in VBC.
+        //
+        // For variant constructors (`TypeName.Variant(args)`), forward the
+        // syntactic parent (`static_receiver_type`) directly to the
+        // typed-named-and-parent variant emitter — the variant emitter then
+        // emits `MakeVariantTyped { type_id: TypeOf(TypeName), tag, ... }`
+        // instead of the legacy synthetic-id `MakeVariant`. Without this
+        // promotion, the heap header carries `SYNTHETIC_VARIANT_TYPE_ID_BASE
+        // + tag` and the runtime's variant-name formatter falls back to a
+        // global tag scan that picks the first registered sum's variant of
+        // matching tag — mis-rendering user-defined sum types as e.g.
+        // `Productive(payload)` / `NonProductive` (the first two-variant
+        // sum to load: `core/base/coinductive.vr::ProductivityResult`).
+        // Pinned by `core-tests/async/poll/regression_test.vr` §A.
         if let Some(ref type_name) = static_receiver_type {
             let qualified_rust = format!("{}::{}", type_name, method.name);
             let qualified_verum = format!("{}.{}", type_name, method.name);
@@ -6198,7 +6232,12 @@ impl VbcCodegen {
                     && func_info.param_count == args.len()
                 {
                     if let Some(tag) = func_info.variant_tag {
-                        return self.compile_variant_constructor_with_tag(tag, args);
+                        return self.compile_variant_constructor_with_tag_named_and_parent(
+                            Some(method.name.as_str()),
+                            tag,
+                            args,
+                            Some(type_name),
+                        );
                     }
                     return self.compile_static_method_call(&func_info, args);
                 }
@@ -6206,7 +6245,12 @@ impl VbcCodegen {
                     && func_info.param_count == args.len()
                 {
                     if let Some(tag) = func_info.variant_tag {
-                        return self.compile_variant_constructor_with_tag(tag, args);
+                        return self.compile_variant_constructor_with_tag_named_and_parent(
+                            Some(method.name.as_str()),
+                            tag,
+                            args,
+                            Some(type_name),
+                        );
                     }
                     return self.compile_static_method_call(&func_info, args);
                 }

@@ -6419,23 +6419,55 @@ impl VbcCodegen {
                 let qualified_verum = full_path.join(".");
                 let qualified_rust = full_path.join("::");
 
-                // Helper to check if we should register the alias
-                // Don't overwrite existing registrations with MORE params (e.g., FFI functions)
-                // This prevents safe wrappers from overwriting raw FFI functions
-                let should_register = |alias: &str, new_info: &FunctionInfo| -> bool {
+                // Helper to check if we should register the alias.
+                //
+                // Architectural rule: an explicit `mount X.Y.{name}` /
+                // `mount X.Y.name as alias` is an authoritative binding —
+                // the user named the function they want, so it MUST win
+                // over any passive archive-load that previously registered
+                // the same simple name. The pre-fix arity check
+                // (`new_info.param_count >= existing.param_count`) was a
+                // defence against accidental safe-wrapper-shadows-FFI-raw
+                // registration ordering, but it gave the WRONG answer for
+                // explicit user mounts: when a workspace has multiple
+                // free functions of the same simple name (e.g.
+                // `core.sys.test_bit` (USize) vs
+                // `core.net.tls13.handshake.test_bit` (&Bucket)), the
+                // bare-name slot was claimed by whichever passive load
+                // ran first, and the user's `mount core.sys.{test_bit}`
+                // could not override — the bare-name call dispatched to
+                // the wrong implementation, surfacing at runtime as
+                // Unit/nil from the non-matching argument types.
+                //
+                // The fix:
+                //   * `Path` mounts (caller of this closure) always pass
+                //     `force_override = true` — the user wrote the name
+                //     explicitly, that's the binding they want.
+                //   * `Glob` mounts (`mount X.*`) keep first-wins
+                //     semantics so they can't accidentally clobber
+                //     FFI-raw registrations.
+                let should_register = |alias: &str,
+                                       new_info: &FunctionInfo,
+                                       force_override: bool|
+                 -> bool {
+                    if force_override {
+                        return true;
+                    }
                     match self.ctx.lookup_function(alias) {
                         Some(existing) => {
-                            // Only overwrite if new registration has same or more params
-                            // This preserves FFI functions (more params) over safe wrappers (fewer params)
+                            // Passive-load preserve-FFI rule.
                             new_info.param_count >= existing.param_count
                         }
-                        None => true, // No existing registration, always register
+                        None => true,
                     }
                 };
+                // Path-form mounts (the only branch reachable here in
+                // the explicit-import case) are authoritative.
+                let force_override = true;
 
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
-                    if should_register(&alias_name, &func_info) {
+                    if should_register(&alias_name, &func_info, force_override) {
                         self.ctx.register_function(alias_name.clone(), func_info);
                     }
                     return Ok(());
@@ -6443,7 +6475,7 @@ impl VbcCodegen {
 
                 // Try Rust-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_rust).cloned() {
-                    if should_register(&alias_name, &func_info) {
+                    if should_register(&alias_name, &func_info, force_override) {
                         self.ctx.register_function(alias_name.clone(), func_info);
                     }
                     return Ok(());
@@ -6458,7 +6490,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&simplified_qualified).cloned()
                     {
-                        if should_register(&alias_name, &func_info) {
+                        if should_register(&alias_name, &func_info, force_override) {
                             self.ctx.register_function(alias_name.clone(), func_info);
                         }
                         return Ok(());
@@ -6481,7 +6513,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&stripped_qualified).cloned()
                     {
-                        if should_register(&alias_name, &func_info) {
+                        if should_register(&alias_name, &func_info, force_override) {
                             self.ctx.register_function(alias_name.clone(), func_info);
                         }
                         return Ok(());
@@ -6501,7 +6533,7 @@ impl VbcCodegen {
                     }
                     let core_qualified = core_path.join(".");
                     if let Some(func_info) = self.ctx.lookup_function(&core_qualified).cloned() {
-                        if should_register(&alias_name, &func_info) {
+                        if should_register(&alias_name, &func_info, force_override) {
                             self.ctx.register_function(alias_name.clone(), func_info);
                         }
                         return Ok(());
@@ -6510,7 +6542,7 @@ impl VbcCodegen {
                     if core_path.len() >= 3 {
                         let simplified = format!("core.{}.{}", core_path[1], func_name);
                         if let Some(func_info) = self.ctx.lookup_function(&simplified).cloned() {
-                            if should_register(&alias_name, &func_info) {
+                            if should_register(&alias_name, &func_info, force_override) {
                                 self.ctx.register_function(alias_name.clone(), func_info);
                             }
                             return Ok(());
@@ -6520,7 +6552,7 @@ impl VbcCodegen {
 
                 // Try just the function name (it might be already registered without qualification)
                 if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
-                    if should_register(&alias_name, &func_info) {
+                    if should_register(&alias_name, &func_info, force_override) {
                         self.ctx.register_function(alias_name, func_info);
                     }
                     return Ok(());
@@ -6691,18 +6723,20 @@ impl VbcCodegen {
                 None => continue,
             };
 
-            // Helper to check if we should register the alias
-            // Don't overwrite existing registrations with FEWER params (e.g., FFI functions)
-            // This prevents safe wrappers (fewer params) from overwriting raw FFI functions (more params)
+            // Helper to check if we should register the alias.
+            //
+            // The deferred-resolution path executes for every previously-
+            // pending mount that the import-tree pass couldn't resolve
+            // synchronously (typically because the target wasn't loaded
+            // from the archive yet). By the time we reach this point the
+            // archive has finished loading, so we can re-attempt with
+            // full visibility. As with `register_import_aliases`, the
+            // user wrote the binding name explicitly — explicit mount
+            // imports are authoritative and override any passively-
+            // registered first-wins entry.
             let should_register =
-                |ctx: &CodegenContext, alias: &str, new_info: &FunctionInfo| -> bool {
-                    match ctx.lookup_function(alias) {
-                        Some(existing) => {
-                            // Only overwrite if new registration has same or more params
-                            new_info.param_count >= existing.param_count
-                        }
-                        None => true, // No existing registration, always register
-                    }
+                |_ctx: &CodegenContext, _alias: &str, _new_info: &FunctionInfo| -> bool {
+                    true
                 };
 
             // Try to look up the function in the registry with various qualified names
@@ -9394,12 +9428,39 @@ impl VbcCodegen {
         // Register with simple name for local access
         self.ctx.register_function(name.to_string(), info.clone());
 
-        // Also register with qualified name for cross-module imports
-        // e.g., "sys.intrinsics.ORDERING_ACQUIRE" for import sys.intrinsics.{ORDERING_ACQUIRE}
-        let module_name = &self.config.module_name;
-        if !module_name.is_empty() && module_name != "main" {
-            let qualified_name = format!("{}.{}", module_name, name);
-            self.ctx.register_function(qualified_name, info.clone());
+        // Also register with qualified names for cross-module imports.
+        // Mirror `register_function`'s qualified-name strategy: register
+        // under both the dot-form (`sys.bitfield.USIZE_BITS`) and the
+        // colon-form (`sys::bitfield::USIZE_BITS`), and prefer the
+        // *source module* (from the file's `module X.Y.Z;` declaration)
+        // over `config.module_name`. The latter is fixed per-codegen-
+        // session (`"main"` for a single-file user run) but a session
+        // processes many imported stdlib modules, each with its own path
+        // — without using `current_source_module`, every imported file's
+        // consts collapse onto the session's outer module name, so
+        // `mount core.sys.bitfield.{USIZE_BITS}` cannot find
+        // `core.sys.bitfield.USIZE_BITS` at the import-resolution site
+        // (it lands under `core.USIZE_BITS` instead). The matching
+        // change in `register_function` is at line ~5996 — keep these
+        // two paths in step.
+        let effective_module = self
+            .ctx
+            .current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        if !effective_module.is_empty()
+            && effective_module != "main"
+            && !name.contains('.')
+            && !name.contains("::")
+        {
+            let dot_qualified = format!("{}.{}", effective_module, name);
+            let colon_qualified = effective_module.replace('.', "::") + "::" + name;
+            if self.ctx.lookup_function(&dot_qualified).is_none() {
+                self.ctx.register_function(dot_qualified, info.clone());
+            }
+            if self.ctx.lookup_function(&colon_qualified).is_none() {
+                self.ctx.register_function(colon_qualified, info.clone());
+            }
         }
 
         // Register the constant's type for correct instruction selection.
