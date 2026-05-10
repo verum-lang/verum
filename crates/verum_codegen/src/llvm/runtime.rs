@@ -279,10 +279,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
 
         // Conditionally call verum_list_grow when capacity is exhausted
-        let grow_fn = module.get_function("verum_list_grow").unwrap_or_else(|| {
-            let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-            module.add_function("verum_list_grow", fn_type, None)
-        });
+        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
+            let grow_fn = super::error::get_or_declare_function(module, "verum_list_grow", fn_type);
 
         // Get the current function for block creation
         let current_fn = builder
@@ -2097,12 +2095,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // compute_hash: hash = abs(verum_generic_hash(key)); if hash <= 1: hash += 2
         builder.position_at_end(compute_hash);
-        let hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_generic_hash", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let hash_fn = super::error::get_or_declare_function(module, "verum_generic_hash", fn_type);
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
@@ -2252,10 +2246,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        let eq_fn = module.get_function("verum_generic_eq").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_generic_eq", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let eq_fn = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
@@ -2491,12 +2483,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // compute_hash
         builder.position_at_end(compute_hash);
-        let hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_generic_hash", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let hash_fn = super::error::get_or_declare_function(module, "verum_generic_hash", fn_type);
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
@@ -2639,10 +2627,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        let eq_fn = module.get_function("verum_generic_eq").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_generic_eq", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let eq_fn = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
@@ -2865,12 +2851,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // compute_hash: hash = abs(verum_generic_hash(key)); if hash <= 1: hash += 2
         builder.position_at_end(compute_hash);
-        let hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_generic_hash", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let hash_fn = super::error::get_or_declare_function(module, "verum_generic_hash", fn_type);
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
@@ -3017,10 +2999,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        let eq_fn = module.get_function("verum_generic_eq").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_generic_eq", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let eq_fn = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
         let eq_result = builder
             .build_call(eq_fn, &[entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
@@ -3348,12 +3328,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // compute_hash: hash = abs(verum_generic_hash(key)); if hash <= 1: hash += 2
         builder.position_at_end(compute_hash);
-        let hash_fn = module
-            .get_function("verum_generic_hash")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_generic_hash", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let hash_fn = super::error::get_or_declare_function(module, "verum_generic_hash", fn_type);
         let raw_hash = builder
             .build_call(hash_fn, &[key_i64.into()], "raw_hash")
             .or_llvm_err()?
@@ -3521,10 +3497,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        let eq_fn = module.get_function("verum_generic_eq").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_generic_eq", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+            let eq_fn = super::error::get_or_declare_function(module, "verum_generic_eq", fn_type);
         let eq_result = builder
             .build_call(eq_fn, &[s_entry_key.into(), key_i64.into()], "eq_result")
             .or_llvm_err()?
@@ -12364,10 +12338,8 @@ fn checked_malloc<'ctx>(
 ) -> Result<PointerValue<'ctx>> {
     let i64_type = context.i64_type();
     let ptr_type = context.ptr_type(AddressSpace::default());
-    let malloc_fn = module.get_function("verum_alloc").unwrap_or_else(|| {
-        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        module.add_function("verum_alloc", fn_type, None)
-    });
+    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let malloc_fn = super::error::get_or_declare_function(module, "verum_alloc", fn_type);
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
         .or_llvm_err()?
