@@ -50,7 +50,10 @@ fn test_is_builtin() {
     assert!(TypeId::TEXT.is_builtin());
     assert!(TypeId::NEVER.is_builtin());
     assert!(TypeId::PTR.is_builtin());
-    assert!(!TypeId(16).is_builtin()); // First user type
+    // Derive the boundary from the constant — pinning a literal here
+    // (the original 16) drifted silently when CHAR was admitted as
+    // a primitive at TypeId(16) and `FIRST_USER` advanced to 17.
+    assert!(!TypeId(TypeId::FIRST_USER).is_builtin());
     assert!(!TypeId::LIST.is_builtin());
 }
 
@@ -144,8 +147,13 @@ fn test_semantic_type_id_ranges() {
 
 #[test]
 fn test_first_user_type_id() {
-    assert_eq!(TypeId::FIRST_USER, 16);
+    // `FIRST_USER` advances each time a new primitive TypeId is
+    // admitted (e.g. CHAR landed at 16, pushing FIRST_USER to 17).
+    // Pin the structural invariant — the boundary sits past every
+    // primitive — rather than the raw integer value, which drifts.
     assert!(TypeId::RESERVED.0 < TypeId::FIRST_USER);
+    assert!(TypeId::CHAR.0 < TypeId::FIRST_USER);
+    assert!(TypeId::FIRST_USER < TypeId::FIRST_SEMANTIC);
 }
 
 #[test]
