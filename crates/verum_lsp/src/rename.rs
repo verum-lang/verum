@@ -70,6 +70,130 @@ impl std::fmt::Display for RenameError {
     }
 }
 
+/// Discriminator for [`RenameError`] — zero-sized projection
+/// classifying the failure modes of LSP rename operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RenameErrorKind {
+    CannotRenameKeyword,
+    InvalidIdentifier,
+    NameConflict,
+    SymbolNotFound,
+    ReadOnlySymbol,
+    WorkspaceRequired,
+}
+
+/// Per-variant projection for [`RenameErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenameErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The error rejects the *new name* (it's a keyword,
+    /// invalid identifier, or collides with an existing
+    /// symbol).  Distinguishes "the new name is bad" from
+    /// "the rename target is unreachable".
+    pub is_new_name_failure: bool,
+    /// The error rejects the *target symbol* (no symbol
+    /// found, or read-only).  Distinguishes from new-name
+    /// rejection and capability gaps.
+    pub is_target_failure: bool,
+    /// The error reports a *capability gap* — the LSP server
+    /// would need workspace-wide indexing to satisfy the
+    /// request.  WorkspaceRequired singleton.
+    pub is_capability_gap: bool,
+    /// The variant carries a *Text* payload — every variant
+    /// except SymbolNotFound + WorkspaceRequired (the two
+    /// nullary cases).
+    pub carries_text: bool,
+    /// The variant is *user-actionable* — the user can
+    /// resolve it by changing the new name or rename target.
+    /// CannotRenameKeyword + InvalidIdentifier + NameConflict
+    /// are user-actionable; ReadOnlySymbol may be (rename a
+    /// local copy); SymbolNotFound + WorkspaceRequired are
+    /// not (move cursor / configure workspace, but those are
+    /// indirect).
+    pub is_user_actionable: bool,
+}
+
+impl RenameErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::CannotRenameKeyword,
+        Self::InvalidIdentifier,
+        Self::NameConflict,
+        Self::SymbolNotFound,
+        Self::ReadOnlySymbol,
+        Self::WorkspaceRequired,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> RenameErrorKindMeta {
+        match self {
+            RenameErrorKind::CannotRenameKeyword => RenameErrorKindMeta {
+                name: "cannot_rename_keyword",
+                is_new_name_failure: false,
+                is_target_failure: true,
+                is_capability_gap: false,
+                carries_text: true,
+                is_user_actionable: true,
+            },
+            RenameErrorKind::InvalidIdentifier => RenameErrorKindMeta {
+                name: "invalid_identifier",
+                is_new_name_failure: true,
+                is_target_failure: false,
+                is_capability_gap: false,
+                carries_text: true,
+                is_user_actionable: true,
+            },
+            RenameErrorKind::NameConflict => RenameErrorKindMeta {
+                name: "name_conflict",
+                is_new_name_failure: true,
+                is_target_failure: false,
+                is_capability_gap: false,
+                carries_text: true,
+                is_user_actionable: true,
+            },
+            RenameErrorKind::SymbolNotFound => RenameErrorKindMeta {
+                name: "symbol_not_found",
+                is_new_name_failure: false,
+                is_target_failure: true,
+                is_capability_gap: false,
+                carries_text: false,
+                is_user_actionable: false,
+            },
+            RenameErrorKind::ReadOnlySymbol => RenameErrorKindMeta {
+                name: "read_only_symbol",
+                is_new_name_failure: false,
+                is_target_failure: true,
+                is_capability_gap: false,
+                carries_text: true,
+                is_user_actionable: false,
+            },
+            RenameErrorKind::WorkspaceRequired => RenameErrorKindMeta {
+                name: "workspace_required",
+                is_new_name_failure: false,
+                is_target_failure: false,
+                is_capability_gap: true,
+                carries_text: false,
+                is_user_actionable: false,
+            },
+        }
+    }
+}
+
+impl RenameError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> RenameErrorKind {
+        match self {
+            RenameError::CannotRenameKeyword(_) => RenameErrorKind::CannotRenameKeyword,
+            RenameError::InvalidIdentifier(_) => RenameErrorKind::InvalidIdentifier,
+            RenameError::NameConflict { .. } => RenameErrorKind::NameConflict,
+            RenameError::SymbolNotFound => RenameErrorKind::SymbolNotFound,
+            RenameError::ReadOnlySymbol(_) => RenameErrorKind::ReadOnlySymbol,
+            RenameError::WorkspaceRequired => RenameErrorKind::WorkspaceRequired,
+        }
+    }
+}
+
 // ==================== Symbol Resolution ====================
 
 /// Resolved symbol information for renaming
@@ -839,6 +963,98 @@ impl LineIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `RenameErrorKind` discriminator projection.
+    /// Pins variant count, perfect-partition over the three
+    /// failure-surface classifiers (new-name / target /
+    /// capability-gap), payload-bearing partition, plus the
+    /// user-actionability classifier.
+    #[test]
+    fn meta_pin_rename_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(RenameErrorKind::ALL.len(), 6);
+        let mut seen = std::collections::HashSet::new();
+        for k in RenameErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. Perfect partition over the three failure-surface
+        //    classifiers (new-name / target / capability-gap)
+        //    — every variant flips exactly one.
+        for k in RenameErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_new_name_failure as u32)
+                + (m.is_target_failure as u32)
+                + (m.is_capability_gap as u32);
+            assert_eq!(
+                count, 1,
+                "{:?}: must flip exactly one failure surface",
+                k
+            );
+        }
+
+        // 3. is_new_name_failure: InvalidIdentifier +
+        //    NameConflict.
+        let nn: Vec<_> = RenameErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_new_name_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            nn,
+            vec![RenameErrorKind::InvalidIdentifier, RenameErrorKind::NameConflict],
+        );
+
+        // 4. is_target_failure: CannotRenameKeyword (target
+        //    is the keyword) + SymbolNotFound + ReadOnlySymbol.
+        let tg: Vec<_> = RenameErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_target_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            tg,
+            vec![
+                RenameErrorKind::CannotRenameKeyword,
+                RenameErrorKind::SymbolNotFound,
+                RenameErrorKind::ReadOnlySymbol,
+            ],
+        );
+
+        // 5. is_capability_gap: WorkspaceRequired singleton.
+        let cap: Vec<_> = RenameErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_capability_gap)
+            .copied()
+            .collect();
+        assert_eq!(cap, vec![RenameErrorKind::WorkspaceRequired]);
+
+        // 6. carries_text: 4/6 (every variant except
+        //    SymbolNotFound + WorkspaceRequired which are
+        //    nullary).
+        let with_text: Vec<_> = RenameErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_text)
+            .copied()
+            .collect();
+        assert_eq!(with_text.len(), 4);
+
+        // 7. Live-payload kind() projection.
+        let kw = RenameError::CannotRenameKeyword(Text::from("fn"));
+        assert_eq!(kw.kind(), RenameErrorKind::CannotRenameKeyword);
+
+        let nf = RenameError::SymbolNotFound;
+        assert_eq!(nf.kind(), RenameErrorKind::SymbolNotFound);
+
+        let wr = RenameError::WorkspaceRequired;
+        assert_eq!(wr.kind(), RenameErrorKind::WorkspaceRequired);
+    }
 
     #[test]
     fn test_is_keyword() {

@@ -42,6 +42,91 @@ pub enum RecoveryResult {
     Failed { message: Text, help: Text },
 }
 
+/// Discriminator for [`RecoveryResult`] — zero-sized projection
+/// classifying the three recovery outcomes for script-mode
+/// parse errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RecoveryResultKind {
+    Recovered,
+    Incomplete,
+    Failed,
+}
+
+/// Per-variant projection for [`RecoveryResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecoveryResultKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Recovery succeeded (Recovered singleton).  The IDE
+    /// should apply the suggestion (or surface it as a
+    /// quick-fix).
+    pub is_success: bool,
+    /// The input is *partial* (Incomplete singleton).  The
+    /// IDE should keep the buffer open and prompt the user
+    /// to continue typing — pinned because the REPL/script
+    /// surfaces hold off emitting an error here.
+    pub is_partial: bool,
+    /// Recovery *gave up* (Failed singleton).  The IDE
+    /// should surface the message + help text as a hard
+    /// diagnostic.
+    pub is_terminal_failure: bool,
+    /// The variant carries an actionable *recovered_node*
+    /// payload — Recovered singleton.  IDE applies the node
+    /// directly when present.
+    pub carries_recovered_node: bool,
+    /// The variant carries an *expectations list* —
+    /// Incomplete singleton.  IDE renders the expected-token
+    /// hints in the completion popup.
+    pub carries_expectations: bool,
+}
+
+impl RecoveryResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] =
+        &[Self::Recovered, Self::Incomplete, Self::Failed];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> RecoveryResultKindMeta {
+        match self {
+            RecoveryResultKind::Recovered => RecoveryResultKindMeta {
+                name: "recovered",
+                is_success: true,
+                is_partial: false,
+                is_terminal_failure: false,
+                carries_recovered_node: true,
+                carries_expectations: false,
+            },
+            RecoveryResultKind::Incomplete => RecoveryResultKindMeta {
+                name: "incomplete",
+                is_success: false,
+                is_partial: true,
+                is_terminal_failure: false,
+                carries_recovered_node: false,
+                carries_expectations: true,
+            },
+            RecoveryResultKind::Failed => RecoveryResultKindMeta {
+                name: "failed",
+                is_success: false,
+                is_partial: false,
+                is_terminal_failure: true,
+                carries_recovered_node: false,
+                carries_expectations: false,
+            },
+        }
+    }
+}
+
+impl RecoveryResult {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> RecoveryResultKind {
+        match self {
+            RecoveryResult::Recovered { .. } => RecoveryResultKind::Recovered,
+            RecoveryResult::Incomplete { .. } => RecoveryResultKind::Incomplete,
+            RecoveryResult::Failed { .. } => RecoveryResultKind::Failed,
+        }
+    }
+}
+
 /// Script-specific error recovery engine
 pub struct ScriptRecovery {
     /// Threshold for fuzzy matching (0.0-1.0)
@@ -349,6 +434,56 @@ pub fn explain_error(error: &ParseError, context: &ScriptContext) -> Text {
 mod tests {
     use super::*;
     use verum_ast::{FileId, Span};
+
+    /// Drift-pin: `RecoveryResultKind` discriminator
+    /// projection.  Perfect partition over the three outcomes
+    /// (success / partial / terminal-failure).
+    #[test]
+    fn meta_pin_recovery_result_kind_round_trip_and_partitions() {
+        assert_eq!(RecoveryResultKind::ALL.len(), 3);
+
+        // Perfect partition: every variant flips exactly one
+        // of {is_success, is_partial, is_terminal_failure}.
+        for k in RecoveryResultKind::ALL {
+            let m = k.meta();
+            let count = (m.is_success as u32)
+                + (m.is_partial as u32)
+                + (m.is_terminal_failure as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one outcome", k);
+        }
+
+        // carries_recovered_node = is_success (Recovered
+        // singleton).
+        for k in RecoveryResultKind::ALL {
+            let m = k.meta();
+            assert_eq!(m.carries_recovered_node, m.is_success);
+        }
+
+        // carries_expectations = is_partial (Incomplete
+        // singleton).
+        for k in RecoveryResultKind::ALL {
+            let m = k.meta();
+            assert_eq!(m.carries_expectations, m.is_partial);
+        }
+
+        // Live-payload kind() projection.
+        let r = RecoveryResult::Recovered {
+            suggestion: Text::from("did you mean foo?"),
+            recovered_node: None,
+        };
+        assert_eq!(r.kind(), RecoveryResultKind::Recovered);
+
+        let i = RecoveryResult::Incomplete {
+            expected: List::from(vec![Text::from(")")]),
+        };
+        assert_eq!(i.kind(), RecoveryResultKind::Incomplete);
+
+        let f = RecoveryResult::Failed {
+            message: Text::from("unrecoverable"),
+            help: Text::from("try X"),
+        };
+        assert_eq!(f.kind(), RecoveryResultKind::Failed);
+    }
 
     /// Test file ID used for unit tests
     fn test_file_id() -> FileId {
