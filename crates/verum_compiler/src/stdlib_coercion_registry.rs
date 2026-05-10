@@ -70,6 +70,7 @@ fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
         "RangeLike" => Some("RangeLike"),
         "BytewiseFfi" => Some("BytewiseFfi"),
         "SizedNumeric" => Some("SizedNumeric"),
+        "ArrayCoercible" => Some("ArrayCoercible"),
         _ => None,
     }
 }
@@ -148,6 +149,7 @@ where
                 "RangeLike" => unifier.register_range_like_type(target_text),
                 "BytewiseFfi" => unifier.register_bytewise_ffi_type(target_text),
                 "SizedNumeric" => unifier.register_sized_numeric_type(target_text),
+                "ArrayCoercible" => unifier.register_array_coercible_type(target_text),
                 _ => unreachable!("match_coercion_protocol guards this set"),
             }
             registered += 1;
@@ -162,7 +164,7 @@ mod migration_pins {
     //! migration.
     use super::*;
 
-    /// `match_coercion_protocol` accepts exactly the six
+    /// `match_coercion_protocol` accepts exactly the seven
     /// canonical marker names declared in
     /// `core/base/coercion.vr` and rejects everything else.
     /// Adding a new coercion-marker protocol must update both
@@ -176,6 +178,7 @@ mod migration_pins {
             "RangeLike",
             "BytewiseFfi",
             "SizedNumeric",
+            "ArrayCoercible",
         ] {
             // Build a dummy single-segment Path holding just the
             // marker name and assert the matcher accepts it.

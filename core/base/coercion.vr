@@ -243,3 +243,40 @@ public type BytewiseFfi is protocol {};
 // implement SizedNumeric for FrameDuration {};   // user FFI scalar
 // ```
 public type SizedNumeric is protocol {};
+
+// =============================================================================
+// ArrayCoercible — marker for `[T; N]` ↔ `C<T>` coercion
+// =============================================================================
+//
+
+// Types that implement ArrayCoercible accept array-literal
+// coercion: an expression of type `[T; N]` (fixed-size array) is
+// admitted by the unifier where `C<T>` is expected, for every
+// `C` carrying this marker.  Pre-fix the unifier defaulted to a
+// hardcoded `array_coercible_types = {"List"}` set; the marker
+// makes the rule data-driven so user-defined collections can opt
+// in without a compiler-side patch.
+//
+
+// Implement when:
+//   * The type is a one-parameter container that accepts an
+//     ordered sequence of `T` values.
+//   * Constructing it from a literal `[v0, v1, ...]` is
+//     semantically meaningful.
+//
+// Do NOT implement for:
+//   * Unordered containers (`Set<T>`, `Map<K,V>`) — array
+//     literals' element ORDER is meaningful and a Set would
+//     discard it.
+//   * Wrappers around a single value (`Heap<T>`, `Maybe<T>`).
+//
+
+// # Examples
+//
+
+// ```verum
+// implement<T> ArrayCoercible for List<T> {};
+// implement<T> ArrayCoercible for Deque<T> {};   // FIFO element order
+// implement<T> ArrayCoercible for SmallVec<T> {};
+// ```
+public type ArrayCoercible is protocol {};

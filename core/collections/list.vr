@@ -30,7 +30,7 @@
 )
 module core.collections.list;
 mount core.*;
-mount core.base.coercion.{IntCoercible, Indexable};
+mount core.base.coercion.{IntCoercible, Indexable, ArrayCoercible};
 // Allocator primitives for typed-OOM (#65, #68). `mount core.*`
 // alone doesn't surface these because the glob expansion currently
 // doesn't chase through the `public mount` re-export chain in
@@ -77,8 +77,13 @@ public type List<T> is {
 
 // IntCoercible: `list.len() == 0` and similar contexts unify Int ↔
 // List<USize> via the index-coercion path. Indexable: `list[i: Int]`.
+// ArrayCoercible: array literals `[1, 2, 3]` unify with `List<T>`
+// at use sites — replaces the previously hardcoded
+// `array_coercible_types = {"List"}` default in the unifier and
+// subtyping checker (single source of truth: this implement block).
 implement<T> IntCoercible for List<T> {}
 implement<T> Indexable for List<T> {}
+implement<T> ArrayCoercible for List<T> {}
 
 // Maximum allowed `List<T>` length / capacity given an element size.
 //
