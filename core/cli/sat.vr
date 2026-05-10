@@ -184,7 +184,7 @@ public fn evaluate(f: &BoolFormula, assignment: &Map<Text, Bool>) -> EvalResult 
     match f {
         BoolFormula.True => EvalResult.Definite(true),
         BoolFormula.False => EvalResult.Definite(false),
-        BoolFormula.Var(name) => match assignment.get_optional(name.clone()) {
+        BoolFormula.Var(name) => match assignment.get(name.clone()) {
             Some(b) => EvalResult.Definite(b),
             None => EvalResult.Unknown,
         },
@@ -331,7 +331,7 @@ public fn render_assignment(assignment: &Map<Text, Bool>) -> Text {
     while i < keys.len() {
         let k = &keys[i];
         if !first { out.push_str(", "); }
-        match assignment.get_optional(k.clone()) {
+        match assignment.get(k.clone()) {
             Some(true) => out.push_str(k),
             Some(false) => {
                 out.push_str("¬");

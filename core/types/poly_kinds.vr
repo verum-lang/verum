@@ -81,7 +81,7 @@ public fn subst_single(name: Text, kind: Kind) -> KindSubst {
 
 /// Look up a binding for `var_name`.
 public fn subst_lookup(s: &KindSubst, var_name: Text) -> Maybe<Kind> {
-    s.entries.get_optional(var_name)
+    s.entries.get(var_name)
 }
 
 /// Number of bindings in the substitution.

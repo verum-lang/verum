@@ -135,7 +135,7 @@ implement HandlerRegistry {
     }
 
     public fn lookup(&self, name: &Text) -> Maybe<Handler> {
-        self.handlers.get_optional(name.clone())
+        self.handlers.get(name.clone())
     }
 }
 

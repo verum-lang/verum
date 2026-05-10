@@ -109,7 +109,7 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         let exp = now.add_duration(ttl);
 
         // Evict LRU if full (unless overwriting an existing key).
-        let already_present = self.store.contains_key(&key);
+        let already_present = self.store.contains_key(key.clone());
         if !already_present && self.store.len() >= self.config.capacity {
             self.evict_lru();
         }
@@ -154,12 +154,12 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         let mut i: Int = 0;
         while i < self.order.len() {
             let key = self.order[i].clone();
-            let expired = match self.store.get(&key) {
+            let expired = match self.store.get(key.clone()) {
                 Some(entry) => now >= entry.expires_at.clone(),
                 None        => true,
             };
             if expired {
-                let _ = self.store.remove(&key);
+                let _ = self.store.remove(key.clone());
                 let _ = self.order.remove(i);
                 removed = removed + 1;
             } else {
@@ -213,7 +213,7 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         if self.order.len() == 0 { return; }
         let victim = self.order[0].clone();
         let _ = self.order.remove(0);
-        let _ = self.store.remove(&victim);
+        let _ = self.store.remove(victim.clone());
         self.evicted = self.evicted + 1_u64;
     }
 }

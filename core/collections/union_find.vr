@@ -180,7 +180,7 @@ implement<T: Hash + Eq> UnionFind<T> {
     /// Ensure `x` is known to the structure. New elements start as
     /// their own singleton component.
     public fn make(&mut self, x: T) {
-        if self.parent.contains_key(&x) { return; }
+        if self.parent.contains_key(x.clone()) { return; }
         self.parent.insert(x.clone(), x.clone());
         self.rank.insert(x.clone(), 0);
         self.size.insert(x, 1);
@@ -188,7 +188,7 @@ implement<T: Hash + Eq> UnionFind<T> {
     }
 
     public fn find(&mut self, x: &T) -> T {
-        let parent = match self.parent.get(x) {
+        let parent = match self.parent.get(x.clone()) {
             Some(p) => p.clone(),
             None    => return x.clone(),   // unregistered = own root
         };
@@ -204,17 +204,17 @@ implement<T: Hash + Eq> UnionFind<T> {
         let ra = self.find(&a);
         let rb = self.find(&b);
         if ra == rb { return false; }
-        let ra_rank = match self.rank.get(&ra) { Some(n) => *n, None => 0 };
-        let rb_rank = match self.rank.get(&rb) { Some(n) => *n, None => 0 };
+        let ra_rank = match self.rank.get(ra.clone()) { Some(n) => n, None => 0 };
+        let rb_rank = match self.rank.get(rb.clone()) { Some(n) => n, None => 0 };
         let (big, small) = if ra_rank < rb_rank { (rb, ra) } else { (ra, rb) };
         self.parent.insert(small.clone(), big.clone());
 
-        let big_size = match self.size.get(&big) { Some(n) => *n, None => 1 };
-        let small_size = match self.size.get(&small) { Some(n) => *n, None => 1 };
+        let big_size = match self.size.get(big.clone()) { Some(n) => n, None => 1 };
+        let small_size = match self.size.get(small.clone()) { Some(n) => n, None => 1 };
         self.size.insert(big.clone(), big_size + small_size);
 
         if ra_rank == rb_rank {
-            let br = match self.rank.get(&big) { Some(n) => *n, None => 0 };
+            let br = match self.rank.get(big.clone()) { Some(n) => n, None => 0 };
             self.rank.insert(big, br + 1);
         }
         self.components = self.components - 1;
@@ -227,7 +227,7 @@ implement<T: Hash + Eq> UnionFind<T> {
 
     public fn component_size(&mut self, x: &T) -> Int {
         let r = self.find(x);
-        match self.size.get(&r) { Some(n) => *n, None => 1 }
+        match self.size.get(r) { Some(n) => n, None => 1 }
     }
 
     public fn component_count(&self) -> Int { self.components }

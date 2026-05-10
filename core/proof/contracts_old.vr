@@ -105,7 +105,7 @@ public fn snapshot_record(s: ContractsSnapshot, loc: Text, value: Text) -> Contr
 /// for any postcondition that legitimately compares `old(loc) ==
 /// "")`.
 public fn snapshot_lookup(s: &ContractsSnapshot, loc: Text) -> Maybe<Text> {
-    s.entries.get_optional(loc)
+    s.entries.get(loc)
 }
 
 /// Number of distinct locations recorded. O(1).

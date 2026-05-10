@@ -109,7 +109,7 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
     /// Insert or overwrite. Returns the prior value if the key was
     /// already present (useful for refcount bookkeeping).
     public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
-        let prior = self.store.remove(&key);
+        let prior = self.store.remove(key.clone());
         match &prior {
             Some(_) => self.remove_from_order(&key),
             None    => {},
@@ -126,26 +126,30 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
 
     /// Read-through. Touches the order (LRU semantics). Returns
     /// `None` on miss.
-    public fn get(&mut self, key: &K) -> Maybe<&V> {
-        let present = self.store.contains_key(key);
+    public fn get(&mut self, key: &K) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        let present = self.store.contains_key(key.clone());
         if !present {
             self.misses = self.misses + 1_u64;
             return None;
         }
         self.hits = self.hits + 1_u64;
         self.touch(key);
-        self.store.get(key)
+        self.store.get(key.clone())
     }
 
     /// Peek without affecting LRU order. For debugging / metrics
     /// flows that shouldn't skew eviction.
-    public fn peek(&self, key: &K) -> Maybe<&V> {
-        self.store.get(key)
+    public fn peek(&self, key: &K) -> Maybe<V>
+    where K: Clone, V: Clone
+    {
+        self.store.get(key.clone())
     }
 
     /// Remove a specific key. Returns the value when it was present.
     public fn remove(&mut self, key: &K) -> Maybe<V> {
-        let v = self.store.remove(key);
+        let v = self.store.remove(key.clone());
         match &v {
             Some(_) => self.remove_from_order(key),
             None    => {},
@@ -162,7 +166,7 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
     public fn len(&self) -> Int { self.store.len() }
     public fn capacity(&self) -> Int { self.capacity }
     public fn is_empty(&self) -> Bool { self.store.len() == 0 }
-    public fn contains(&self, key: &K) -> Bool { self.store.contains_key(key) }
+    public fn contains(&self, key: &K) -> Bool { self.store.contains_key(key.clone()) }
 
     public fn stats(&self) -> LruStats {
         LruStats {
@@ -197,7 +201,7 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
         if self.order.len() == 0 { return; }
         let victim = self.order[0].clone();
         let _ = self.order.remove(0);
-        let _ = self.store.remove(&victim);
+        let _ = self.store.remove(victim.clone());
         self.evicted = self.evicted + 1_u64;
     }
 }

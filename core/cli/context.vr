@@ -125,7 +125,7 @@ implement GlobalFlags {
 
     /// True iff a switch named `long` was set anywhere along the path.
     public fn switch_set(&self, long: &Text) -> Bool {
-        match self.flags.get_optional(long.clone()) {
+        match self.flags.get(long.clone()) {
             Some(c) => c.occurrences > 0,
             None => false,
         }
@@ -133,7 +133,7 @@ implement GlobalFlags {
 
     /// First value for `long`, or None if absent.
     public fn value(&self, long: &Text) -> Maybe<Text> {
-        match self.flags.get_optional(long.clone()) {
+        match self.flags.get(long.clone()) {
             Some(c) => if c.values.len() > 0 { Some(c.values[0].clone()) } else { None },
             None => None,
         }
@@ -150,7 +150,7 @@ fn absorb_persistent(
         let f = &cmd.flags[i];
         if f.persistent {
             match &f.long {
-                Some(l) => match outcome.flags.get_optional(l.clone()) {
+                Some(l) => match outcome.flags.get(l.clone()) {
                     Some(c) => { g.flags.insert(l.clone(), c); },
                     None => {},
                 },

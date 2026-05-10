@@ -108,7 +108,7 @@ implement<V: Clone> Trie<V> {
         let mut i: Int = 0;
         while i < key.len() {
             let b = key[i];
-            if !node.children.contains_key(&b) {
+            if !node.children.contains_key(b.clone()) {
                 node.children.insert(b, Heap(empty_node<V>()));
             }
             // Descend — we need the &mut inside the Heap.
@@ -175,7 +175,7 @@ implement<V: Clone> Trie<V> {
         let mut i: Int = 0;
         while i < key.len() {
             let b = key[i];
-            match node.children.get(&b) {
+            match node.children.get(b.clone()) {
                 Some(child) => {
                     node = &**child;
                     match &node.value {
@@ -225,7 +225,7 @@ implement<V: Clone> Trie<V> {
         let mut i: Int = 0;
         while i < key.len() {
             let b = key[i];
-            match node.children.get(&b) {
+            match node.children.get(b.clone()) {
                 Some(child) => { node = &**child; },
                 None        => return None,
             }

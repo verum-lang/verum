@@ -115,7 +115,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
     /// Register a node. Idempotent — re-adding an existing node
     /// is a no-op.
     public fn add_node(&mut self, node: N) {
-        if self.in_deg.contains_key(&node) { return; }
+        if self.in_deg.contains_key(node.clone()) { return; }
         self.nodes.push(node.clone());
         self.in_deg.insert(node, 0);
     }
@@ -128,7 +128,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
         self.add_node(dependent.clone());
 
         // Append to dep's list of forward edges.
-        let mut list = match self.edges.remove(&dep) {
+        let mut list = match self.edges.remove(dep.clone()) {
             Some(l) => l,
             None    => [],
         };
@@ -143,7 +143,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
             list.push(dependent.clone());
             self.edges.insert(dep, list);
             // Bump in_degree.
-            let cur = match self.in_deg.get(&dependent) { Some(n) => *n, None => 0 };
+            let cur = match self.in_deg.get(dependent.clone()) { Some(n) => n, None => 0 };
             self.in_deg.insert(dependent, cur + 1);
         } else {
             self.edges.insert(dep, list);
@@ -151,7 +151,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
     }
 
     public fn node_count(&self) -> Int { self.nodes.len() }
-    public fn contains(&self, node: &N) -> Bool { self.in_deg.contains_key(node) }
+    public fn contains(&self, node: &N) -> Bool { self.in_deg.contains_key(node.clone()) }
 }
 
 // =============================================================================
@@ -168,7 +168,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
         let mut i: Int = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
-            let d = match self.in_deg.get(n) { Some(v) => *v, None => 0 };
+            let d = match self.in_deg.get(n.clone()) { Some(v) => v, None => 0 };
             in_deg_local.insert(n.clone(), d);
             i = i + 1;
         }
@@ -178,8 +178,8 @@ implement<N: Hash + Eq> TopoGraph<N> {
         let mut j: Int = 0;
         while j < self.nodes.len() {
             let n = &self.nodes[j];
-            match in_deg_local.get(n) {
-                Some(d) => if *d == 0 { queue.push(n.clone()); },
+            match in_deg_local.get(n.clone()) {
+                Some(d) => if d == 0 { queue.push(n.clone()); },
                 None    => {},
             }
             j = j + 1;
@@ -192,12 +192,12 @@ implement<N: Hash + Eq> TopoGraph<N> {
             cursor = cursor + 1;
             out.push(node.clone());
             // Decrement every dependent's in_deg.
-            match self.edges.get(&node) {
+            match self.edges.get(node.clone()) {
                 Some(dependents) => {
                     let mut k: Int = 0;
                     while k < dependents.len() {
                         let d = &dependents[k];
-                        let cur = match in_deg_local.get(d) { Some(v) => *v, None => 0 };
+                        let cur = match in_deg_local.get(d.clone()) { Some(v) => v, None => 0 };
                         let next = cur - 1;
                         in_deg_local.insert(d.clone(), next);
                         if next == 0 { queue.push(d.clone()); }
@@ -214,7 +214,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
             let mut m: Int = 0;
             while m < self.nodes.len() {
                 let n = &self.nodes[m];
-                let d = match in_deg_local.get(n) { Some(v) => *v, None => 0 };
+                let d = match in_deg_local.get(n.clone()) { Some(v) => v, None => 0 };
                 if d > 0 {
                     // Render each node through its Debug textual form.
                     residual.push(node_label(n));

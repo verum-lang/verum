@@ -385,7 +385,7 @@ fn name_eq_under_env(
     env_a: &Map<Text, Int>,
     env_b: &Map<Text, Int>,
 ) -> Bool {
-    match (env_a.get_optional(a.clone()), env_b.get_optional(b.clone())) {
+    match (env_a.get(a.clone()), env_b.get(b.clone())) {
         (Some(la), Some(lb)) => la == lb,
         (None, None)         => a == b,
         _                    => false,
