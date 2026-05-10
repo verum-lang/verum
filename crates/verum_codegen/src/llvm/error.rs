@@ -272,6 +272,47 @@ pub fn get_or_declare_function<'ctx>(
         .unwrap_or_else(|| module.add_function(name, fn_type, None))
 }
 
+/// Get-or-declare a `__verum_libsys_*` shim and tag it with the
+/// `verum.libsys` attribute carrying the libc-call name (e.g.
+/// `"open"`, `"close"`, `"read"`, `"unlink"`, `"lseek"`,
+/// `"access"`).  The libsys layer in Verum's no-libc architecture
+/// uses these tags to retarget calls during the dyld-rebinding
+/// pass that maps `__verum_libsys_*` to the actual libc symbols
+/// at link time.
+///
+/// Idempotent on the attribute (same first-write-wins semantics as
+/// `get_or_declare_noreturn_function`).
+///
+/// Centralises the verbose pattern repeated for ~7 libsys shim
+/// declarations in `runtime.rs`:
+///
+///     let libsys = module.get_function(NAME).unwrap_or_else(|| {
+///         let f = module.add_function(NAME, fn_type, None);
+///         f.add_attribute(
+///             AttributeLoc::Function,
+///             ctx.create_string_attribute("verum.libsys", LIBC_NAME),
+///         );
+///         f
+///     });
+#[inline]
+pub fn get_or_declare_libsys_function<'ctx>(
+    module: &verum_llvm::module::Module<'ctx>,
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    name: &str,
+    fn_type: verum_llvm::types::FunctionType<'ctx>,
+    libc_name: &str,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    if let Some(existing) = module.get_function(name) {
+        return existing;
+    }
+    let f = module.add_function(name, fn_type, None);
+    f.add_attribute(
+        verum_llvm::attributes::AttributeLoc::Function,
+        llvm_ctx.create_string_attribute("verum.libsys", libc_name),
+    );
+    f
+}
+
 /// Get-or-declare an LLVM function and tag it with `noreturn` on
 /// the first declaration.  Idempotent on subsequent calls — when the
 /// function already exists the attribute is *not* re-applied (LLVM
