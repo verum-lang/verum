@@ -87,6 +87,19 @@ implement<T: Clone> Cell<T> {
         let old = self.get();
         self.set(f(old));
     }
+
+    /// Swap the contents of two cells.
+    ///
+    /// After `a.swap(&b)`, `a` holds what `b` held and vice versa.
+    /// Self-swap (`a.swap(&a)`) is a no-op by construction — both
+    /// `self.get()` and `other.get()` produce the same value.
+    @inline(always)
+    public fn swap(&self, other: &Cell<T>) {
+        let a = self.get();
+        let b = other.get();
+        self.set(b);
+        other.set(a);
+    }
 }
 
 implement<T: Clone + Eq> Eq for Cell<T> {
