@@ -60,8 +60,9 @@ pub use gat_types::{
     AssociatedTypeGAT, AssociatedTypeKind, GATError, GATTypeParam, GATWhereClause, Kind, Variance,
 };
 pub use protocol_base::{
-    AssociatedConst, AssociatedType, MethodResolution, MethodSource, ObjectSafetyError, Protocol,
-    ProtocolBound, ProtocolImpl, ProtocolMethod, TypeParam, WhereClause,
+    AssociatedConst, AssociatedType, MethodResolution, MethodSource, MethodSourceKind,
+    MethodSourceKindMeta, ObjectSafetyError, Protocol, ProtocolBound, ProtocolImpl,
+    ProtocolMethod, TypeParam, WhereClause,
 };
 // Re-export ConstValue from verum_common for protocol constants
 pub use specialization::{
