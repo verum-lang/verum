@@ -9393,13 +9393,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // _exit syscall on Linux, libSystem _exit on macOS.
         let void_type = self.context.void_type();
         let i32_type = self.context.i32_type();
-        let exit_fn = module.get_function("verum_os_exit").unwrap_or_else(|| {
-            module.add_function(
-                "verum_os_exit",
-                void_type.fn_type(&[i32_type.into()], false),
-                None,
-            )
-        });
+        let fn_type = void_type.fn_type(&[i32_type.into()], false);
+        let exit_fn = super::error::get_or_declare_function(module, "verum_os_exit", fn_type);
 
         // Wrapper: ptr verum_checked_malloc(i64 size) {
         //  ptr p = verum_os_alloc(size);
@@ -9525,15 +9520,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
         );
 
         // Underlying libc-free exit.
-        let os_exit = module.get_function("verum_os_exit").unwrap_or_else(|| {
-            let ft = void_type.fn_type(&[i32_type.into()], false);
-            let f = module.add_function("verum_os_exit", ft, None);
-            f.add_attribute(
-                verum_llvm::attributes::AttributeLoc::Function,
-                self.context.create_string_attribute("noreturn", ""),
-            );
-            f
-        });
+        let ft = void_type.fn_type(&[i32_type.into()], false);
+        let os_exit = super::error::get_or_declare_noreturn_function(
+            module,
+            self.context,
+            "verum_os_exit",
+            ft,
+        );
 
         let entry = self.context.append_basic_block(wrapper, "entry");
         let builder = self.context.create_builder();
@@ -12284,13 +12277,8 @@ pub fn define_internal_calloc<'ctx>(context: &'ctx Context, module: &Module<'ctx
     func.set_linkage(verum_llvm::module::Linkage::Internal);
 
     // Underlying allocator.
-    let os_alloc = module.get_function("verum_os_alloc").unwrap_or_else(|| {
-        module.add_function(
-            "verum_os_alloc",
-            ptr_type.fn_type(&[i64_type.into()], false),
-            None,
-        )
-    });
+    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+    let os_alloc = super::error::get_or_declare_function(module, "verum_os_alloc", fn_type);
 
     let entry = context.append_basic_block(func, "entry");
     let builder = context.create_builder();
