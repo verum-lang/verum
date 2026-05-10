@@ -405,6 +405,43 @@ impl Quantity {
             _ => Quantity::Omega,
         }
     }
+
+    /// Subsumption ordering on the QTT lattice — `self <: other`
+    /// returns true when a binding annotated `self` may be
+    /// supplied where one annotated `other` is expected.  Read
+    /// at the *type-side* convention: `q` denotes the maximum
+    /// number of uses allowed; `0` is the smallest set, `Omega`
+    /// the largest.  Lattice shape: `0 <: 1 <: AtMost(n) <: Omega`
+    /// + `Graded(a) <: Graded(b)` when `a <= b`.  Omega is top,
+    /// Zero is bottom.
+    ///
+    /// This was previously a 3-variant method on the verum_smt
+    /// `dependent::Quantity` duplicate (`0 <: 1 <: ω`); lifted
+    /// here as part of the canonical-home consolidation so the
+    /// `AtMost` / `Graded` bands also have a defined subsumption
+    /// answer.  The 3-variant smt semantics are preserved
+    /// bit-exact for the (Zero, One, Omega) cells.
+    pub fn subsumed_by(&self, other: &Self) -> bool {
+        match (self, other) {
+            // Top element: anything subsumed by Omega.
+            (_, Quantity::Omega) => true,
+            // Bottom element: Zero subsumed by anything — a
+            // binding that allows 0 uses is satisfied wherever a
+            // larger allowance is offered.  Mirrors the smt
+            // 3-variant convention.
+            (Quantity::Zero, _) => true,
+            // Reflexivity for the basic cells.
+            (Quantity::One, Quantity::One) => true,
+            // 1 fits in AtMost(n) for any n >= 1.
+            (Quantity::One, Quantity::AtMost(n)) => *n >= 1,
+            // AtMost(a) fits in AtMost(b) when a <= b.
+            (Quantity::AtMost(a), Quantity::AtMost(b)) => a <= b,
+            // Graded subsumption is monotone in the grade.
+            (Quantity::Graded(a), Quantity::Graded(b)) => a <= b,
+            // No other comparable pairs.
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Quantity {

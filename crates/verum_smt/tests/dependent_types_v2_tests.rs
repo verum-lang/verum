@@ -281,11 +281,11 @@ fn test_quantity_zero() {
     let one = Quantity::One;
 
     // 0 * x = 0
-    assert_eq!(zero.mul(one), Quantity::Zero);
-    assert_eq!(one.mul(zero), Quantity::Zero);
+    assert_eq!(zero.mul(&one), Quantity::Zero);
+    assert_eq!(one.mul(&zero), Quantity::Zero);
 
     // 0 + x = x
-    assert_eq!(zero.add(one), Quantity::One);
+    assert_eq!(zero.add(&one), Quantity::One);
 }
 
 #[test]
@@ -295,10 +295,15 @@ fn test_quantity_linear() {
     let one = Quantity::One;
 
     // 1 * 1 = 1 (linear composition)
-    assert_eq!(one.mul(one), Quantity::One);
+    assert_eq!(one.mul(&one), Quantity::One);
 
-    // 1 + 1 = ω (used in both branches)
-    assert_eq!(one.add(one), Quantity::Omega);
+    // 1 + 1 = AtMost(2) — the canonical 5-variant lattice keeps
+    // the precise upper bound rather than collapsing to Omega.
+    // Pre-collapse the smt 3-variant duplicate returned Omega
+    // here; consumers downstream treat AtMost(2) as a strict
+    // refinement of Omega via `subsumed_by(&Omega) == true`.
+    assert_eq!(one.add(&one), Quantity::AtMost(2));
+    assert!(Quantity::AtMost(2).subsumed_by(&Quantity::Omega));
 }
 
 #[test]
@@ -309,11 +314,11 @@ fn test_quantity_omega() {
     let omega = Quantity::Omega;
 
     // ω * x = ω for x ≠ 0
-    assert_eq!(omega.mul(one), Quantity::Omega);
-    assert_eq!(one.mul(omega), Quantity::Omega);
+    assert_eq!(omega.mul(&one), Quantity::Omega);
+    assert_eq!(one.mul(&omega), Quantity::Omega);
 
     // ω + x = ω
-    assert_eq!(omega.add(one), Quantity::Omega);
+    assert_eq!(omega.add(&one), Quantity::Omega);
 }
 
 #[test]
@@ -325,13 +330,25 @@ fn test_quantity_subsumption() {
     let omega = Quantity::Omega;
 
     // 0 <: 1 <: ω
-    assert!(zero.subsumed_by(one));
-    assert!(zero.subsumed_by(omega));
-    assert!(one.subsumed_by(omega));
+    assert!(zero.subsumed_by(&one));
+    assert!(zero.subsumed_by(&omega));
+    assert!(one.subsumed_by(&omega));
 
     // 1 is not subsumed by 0
-    assert!(!one.subsumed_by(zero));
-    assert!(!omega.subsumed_by(one));
+    assert!(!one.subsumed_by(&zero));
+    assert!(!omega.subsumed_by(&one));
+
+    // The 5-variant lattice extends the 3-variant smt
+    // semantics: AtMost(n) carries a precise upper-use bound
+    // and Graded(a) is monotone in the grade.  Pinned here so
+    // the canonical-home consolidation can't silently drift
+    // these cells.
+    assert!(Quantity::AtMost(3).subsumed_by(&Quantity::AtMost(5)));
+    assert!(!Quantity::AtMost(5).subsumed_by(&Quantity::AtMost(3)));
+    assert!(Quantity::Graded(2).subsumed_by(&Quantity::Graded(7)));
+    assert!(!Quantity::Graded(7).subsumed_by(&Quantity::Graded(2)));
+    assert!(Quantity::AtMost(99).subsumed_by(&Quantity::Omega));
+    assert!(Quantity::Graded(99).subsumed_by(&Quantity::Omega));
 }
 
 #[test]

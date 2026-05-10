@@ -1216,6 +1216,66 @@ fn test_type_level_quantitative() {
     assert!(!linear.allows(2));
 }
 
+/// Drift-pin: `Quantity::subsumed_by` lattice ordering covers
+/// all 5 variants.  Lifted from a 3-variant duplicate that lived
+/// in `verum_smt::dependent::Quantity`; this test pins the
+/// extension to the AtMost / Graded bands to ensure the
+/// canonical-home consolidation hasn't silently degraded the
+/// 3-variant smt subset behaviour.
+#[test]
+fn meta_pin_quantity_subsumed_by_lattice() {
+    use verum_types::ty::Quantity;
+
+    // Top: anything <: Omega.
+    for q in [
+        Quantity::Zero,
+        Quantity::One,
+        Quantity::Omega,
+        Quantity::AtMost(2),
+        Quantity::Graded(7),
+    ] {
+        assert!(q.subsumed_by(&Quantity::Omega), "{:?} <: Omega", q);
+    }
+
+    // Bottom: Zero <: anything (the smt 3-variant convention).
+    for q in [
+        Quantity::Zero,
+        Quantity::One,
+        Quantity::Omega,
+        Quantity::AtMost(0),
+        Quantity::Graded(0),
+    ] {
+        assert!(Quantity::Zero.subsumed_by(&q), "Zero <: {:?}", q);
+    }
+
+    // 1 fits AtMost(n) when n >= 1.
+    assert!(Quantity::One.subsumed_by(&Quantity::AtMost(1)));
+    assert!(Quantity::One.subsumed_by(&Quantity::AtMost(5)));
+    assert!(!Quantity::One.subsumed_by(&Quantity::AtMost(0)));
+
+    // AtMost monotonicity.
+    assert!(Quantity::AtMost(2).subsumed_by(&Quantity::AtMost(5)));
+    assert!(Quantity::AtMost(5).subsumed_by(&Quantity::AtMost(5)));
+    assert!(!Quantity::AtMost(5).subsumed_by(&Quantity::AtMost(2)));
+
+    // Graded monotonicity.
+    assert!(Quantity::Graded(2).subsumed_by(&Quantity::Graded(7)));
+    assert!(!Quantity::Graded(7).subsumed_by(&Quantity::Graded(2)));
+
+    // Cross-band: AtMost and Graded are incomparable except
+    // through Omega.
+    assert!(!Quantity::AtMost(5).subsumed_by(&Quantity::Graded(5)));
+    assert!(!Quantity::Graded(5).subsumed_by(&Quantity::AtMost(5)));
+
+    // 1 + 1 = AtMost(2) (the precise lattice answer; pre-collapse
+    // the smt 3-variant duplicate returned Omega here, losing
+    // precision).  AtMost(2) ⊂ Omega.
+    let sum = Quantity::One.add(&Quantity::One);
+    assert_eq!(sum, Quantity::AtMost(2));
+    assert!(sum.subsumed_by(&Quantity::Omega));
+}
+
+
 #[test]
 fn test_type_level_higher_inductive() {
     // Test Higher Inductive Type (Circle with loop)
