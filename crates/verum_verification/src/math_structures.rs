@@ -298,6 +298,141 @@ pub enum ProofMethod {
     Manual { proof_term: Heap<Expr> },
 }
 
+/// Discriminator-only kind for [`ProofMethod`].
+///
+/// The five non-SMT variants carry rich payloads (induction
+/// witnesses, calculation steps, theorem names, tactic scripts,
+/// proof terms); the kind enum is zero-sized so callers iterating
+/// the proof-method surface (telemetry / docs / catalog dispatch)
+/// don't supply payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProofMethodKind {
+    Smt,
+    Induction,
+    Calculation,
+    Apply,
+    Tactic,
+    Manual,
+}
+
+/// Per-kind projection for [`ProofMethodKind`].
+///
+/// `name` is the canonical kebab-case identifier (matches the
+/// telemetry / docs label). `is_smt` is the unique automated-
+/// solver method; `is_user_proof` flags the five user-supplied
+/// methods (everything except Smt). `is_inductive` is unique to
+/// `Induction` (the only method that carries a structural
+/// induction principle and requires base + inductive cases).
+/// Cross-cutting: `is_smt ⊕ is_user_proof` is exhaustive and
+/// disjoint.
+#[derive(Debug, Clone, Copy)]
+pub struct ProofMethodKindMeta {
+    pub name: &'static str,
+    pub is_smt: bool,
+    pub is_user_proof: bool,
+    pub is_inductive: bool,
+}
+
+impl ProofMethodKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Smt,
+        Self::Induction,
+        Self::Calculation,
+        Self::Apply,
+        Self::Tactic,
+        Self::Manual,
+    ];
+
+    pub const fn meta(self) -> ProofMethodKindMeta {
+        match self {
+            Self::Smt => ProofMethodKindMeta {
+                name: "smt",
+                is_smt: true,
+                is_user_proof: false,
+                is_inductive: false,
+            },
+            Self::Induction => ProofMethodKindMeta {
+                name: "induction",
+                is_smt: false,
+                is_user_proof: true,
+                is_inductive: true,
+            },
+            Self::Calculation => ProofMethodKindMeta {
+                name: "calculation",
+                is_smt: false,
+                is_user_proof: true,
+                is_inductive: false,
+            },
+            Self::Apply => ProofMethodKindMeta {
+                name: "apply",
+                is_smt: false,
+                is_user_proof: true,
+                is_inductive: false,
+            },
+            Self::Tactic => ProofMethodKindMeta {
+                name: "tactic",
+                is_smt: false,
+                is_user_proof: true,
+                is_inductive: false,
+            },
+            Self::Manual => ProofMethodKindMeta {
+                name: "manual",
+                is_smt: false,
+                is_user_proof: true,
+                is_inductive: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Smt` — the unique automated-solver method.
+    #[inline]
+    pub const fn is_smt(&self) -> bool {
+        self.meta().is_smt
+    }
+
+    /// True for the five user-supplied methods (everything except
+    /// `Smt`). Exact complement of `is_smt`.
+    #[inline]
+    pub const fn is_user_proof(&self) -> bool {
+        self.meta().is_user_proof
+    }
+
+    /// True for `Induction` — the unique method that carries a
+    /// structural induction principle (base + inductive cases).
+    #[inline]
+    pub const fn is_inductive(&self) -> bool {
+        self.meta().is_inductive
+    }
+}
+
+impl ProofMethod {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> ProofMethodKind {
+        match self {
+            Self::Smt => ProofMethodKind::Smt,
+            Self::Induction { .. } => ProofMethodKind::Induction,
+            Self::Calculation { .. } => ProofMethodKind::Calculation,
+            Self::Apply { .. } => ProofMethodKind::Apply,
+            Self::Tactic { .. } => ProofMethodKind::Tactic,
+            Self::Manual { .. } => ProofMethodKind::Manual,
+        }
+    }
+}
+
 // ==================== Abstract Algebra ====================
 
 /// Group structure builder
@@ -2373,5 +2508,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn dummy_expr() -> Expr {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::{Literal, LiteralKind};
+        use verum_ast::span::Span;
+        Expr::new(
+            ExprKind::Literal(Literal {
+                kind: LiteralKind::Bool(true),
+                span: Span::dummy(),
+            }),
+            Span::dummy(),
+        )
+    }
+
+    #[test]
+    fn meta_pin_proof_method_kind_round_trip_and_partitions() {
+        assert_eq!(ProofMethodKind::ALL.len(), 6);
+        for k in ProofMethodKind::ALL {
+            let s = k.name();
+            assert_eq!(ProofMethodKind::from_str(s), Some(*k));
+        }
+        // is_smt: 1 (Smt only).
+        let smt_count = ProofMethodKind::ALL
+            .iter()
+            .filter(|k| k.is_smt())
+            .count();
+        assert_eq!(smt_count, 1);
+        assert!(ProofMethodKind::Smt.is_smt());
+        // is_user_proof: 5 (everything except Smt). Exact complement.
+        let user_count = ProofMethodKind::ALL
+            .iter()
+            .filter(|k| k.is_user_proof())
+            .count();
+        assert_eq!(user_count, 5);
+        for k in ProofMethodKind::ALL {
+            assert_eq!(
+                k.is_smt(),
+                !k.is_user_proof(),
+                "ProofMethodKind::{:?}: is_smt ⊕ is_user_proof must be exact complements",
+                k
+            );
+        }
+        // is_inductive: 1 (Induction only).
+        let ind_count = ProofMethodKind::ALL
+            .iter()
+            .filter(|k| k.is_inductive())
+            .count();
+        assert_eq!(ind_count, 1);
+        assert!(ProofMethodKind::Induction.is_inductive());
+        // Cross-pin: payload-bearing ProofMethod::kind() agreement
+        // for all 6 variants.
+        assert_eq!(ProofMethod::Smt.kind(), ProofMethodKind::Smt);
+        let ind = ProofMethod::Induction {
+            variable: Text::from("n"),
+            base_case: Heap::new(dummy_expr()),
+            inductive_case: Heap::new(dummy_expr()),
+        };
+        assert_eq!(ind.kind(), ProofMethodKind::Induction);
+        let calc = ProofMethod::Calculation {
+            steps: List::new(),
+        };
+        assert_eq!(calc.kind(), ProofMethodKind::Calculation);
+        let app = ProofMethod::Apply {
+            theorem_name: Text::from("foo"),
+        };
+        assert_eq!(app.kind(), ProofMethodKind::Apply);
+        let tac = ProofMethod::Tactic {
+            tactics: List::new(),
+        };
+        assert_eq!(tac.kind(), ProofMethodKind::Tactic);
+        let manual = ProofMethod::Manual {
+            proof_term: Heap::new(dummy_expr()),
+        };
+        assert_eq!(manual.kind(), ProofMethodKind::Manual);
     }
 }

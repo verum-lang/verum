@@ -674,6 +674,135 @@ pub enum InputFile {
     Library(String),
 }
 
+/// Discriminator-only kind for [`InputFile`].
+///
+/// `Object` / `Archive` / `Bitcode` / `LlvmIr` carry `PathBuf`
+/// payloads (a fully-qualified path the linker reads from disk);
+/// `Library` carries a `String` (a library *name* the linker
+/// resolves through `-L` search paths). The kind enum is zero-
+/// sized so callers iterating the link-input surface (for telemetry
+/// / docs / dispatch) don't supply path / name data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputFileKind {
+    Object,
+    Archive,
+    Bitcode,
+    LlvmIr,
+    Library,
+}
+
+/// Per-kind projection for [`InputFileKind`].
+///
+/// `name` is the canonical short identifier; `extension` is the
+/// conventional file-suffix the input typically carries (without
+/// the leading dot — empty for `Library` which is name-resolved
+/// rather than path-resolved). `is_path_based` flags the four
+/// path-carrying kinds (Object/Archive/Bitcode/LlvmIr); `Library`
+/// is the unique name-based variant. `is_lto_input` flags
+/// `Bitcode` and `LlvmIr` — both LLVM intermediate representations
+/// the LTO pipeline can re-codegen from.
+#[derive(Debug, Clone, Copy)]
+pub struct InputFileKindMeta {
+    pub name: &'static str,
+    pub extension: &'static str,
+    pub is_path_based: bool,
+    pub is_lto_input: bool,
+}
+
+impl InputFileKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Object,
+        Self::Archive,
+        Self::Bitcode,
+        Self::LlvmIr,
+        Self::Library,
+    ];
+
+    pub const fn meta(self) -> InputFileKindMeta {
+        match self {
+            Self::Object => InputFileKindMeta {
+                name: "object",
+                extension: "o",
+                is_path_based: true,
+                is_lto_input: false,
+            },
+            Self::Archive => InputFileKindMeta {
+                name: "archive",
+                extension: "a",
+                is_path_based: true,
+                is_lto_input: false,
+            },
+            Self::Bitcode => InputFileKindMeta {
+                name: "bitcode",
+                extension: "bc",
+                is_path_based: true,
+                is_lto_input: true,
+            },
+            Self::LlvmIr => InputFileKindMeta {
+                name: "llvm-ir",
+                extension: "ll",
+                is_path_based: true,
+                is_lto_input: true,
+            },
+            Self::Library => InputFileKindMeta {
+                name: "library",
+                extension: "",
+                is_path_based: false,
+                is_lto_input: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// Conventional file extension (without leading dot). Empty
+    /// for `Library` — that variant carries a name, not a path.
+    #[inline]
+    pub const fn extension(&self) -> &'static str {
+        self.meta().extension
+    }
+
+    /// True for the four path-carrying kinds (Object / Archive /
+    /// Bitcode / LlvmIr). `Library` is the unique name-based
+    /// variant — exact complement.
+    #[inline]
+    pub const fn is_path_based(&self) -> bool {
+        self.meta().is_path_based
+    }
+
+    /// True for `Bitcode` and `LlvmIr` — the two LLVM intermediate
+    /// representations the LTO pipeline can re-codegen from.
+    #[inline]
+    pub const fn is_lto_input(&self) -> bool {
+        self.meta().is_lto_input
+    }
+}
+
+impl InputFile {
+    /// Discriminator-only kind for telemetry / dispatch.
+    pub fn kind(&self) -> InputFileKind {
+        match self {
+            Self::Object(_) => InputFileKind::Object,
+            Self::Archive(_) => InputFileKind::Archive,
+            Self::Bitcode(_) => InputFileKind::Bitcode,
+            Self::LlvmIr(_) => InputFileKind::LlvmIr,
+            Self::Library(_) => InputFileKind::Library,
+        }
+    }
+}
+
 impl InputFile {
     pub fn object(path: impl AsRef<Path>) -> Self {
         Self::Object(path.as_ref().to_path_buf())
@@ -1543,5 +1672,65 @@ mod tests {
         assert!(!OutputFormat::Executable.is_linkable());
         assert!(!OutputFormat::SharedLibrary.is_linkable());
         assert!(!OutputFormat::Wasm.is_linkable());
+    }
+
+    #[test]
+    fn meta_pin_input_file_kind_round_trip_and_classification_partitions() {
+        assert_eq!(InputFileKind::ALL.len(), 5);
+        for k in InputFileKind::ALL {
+            let s = k.name();
+            assert_eq!(InputFileKind::from_str(s), Some(*k));
+        }
+        // Wire form / extension table.
+        let pairs: &[(InputFileKind, &str, &str)] = &[
+            (InputFileKind::Object, "object", "o"),
+            (InputFileKind::Archive, "archive", "a"),
+            (InputFileKind::Bitcode, "bitcode", "bc"),
+            (InputFileKind::LlvmIr, "llvm-ir", "ll"),
+            (InputFileKind::Library, "library", ""),
+        ];
+        for (k, name, ext) in pairs {
+            assert_eq!(k.name(), *name);
+            assert_eq!(k.extension(), *ext);
+        }
+        // is_path_based: 4 (Object/Archive/Bitcode/LlvmIr); Library
+        // is unique non-path. Exact complement.
+        let path_count = InputFileKind::ALL
+            .iter()
+            .filter(|k| k.is_path_based())
+            .count();
+        assert_eq!(path_count, 4);
+        assert!(!InputFileKind::Library.is_path_based());
+        for k in InputFileKind::ALL {
+            assert_eq!(
+                !k.is_path_based(),
+                *k == InputFileKind::Library,
+                "Library is the unique name-based variant"
+            );
+        }
+        // is_lto_input: 2 (Bitcode + LlvmIr) — both LLVM
+        // intermediate representations.
+        let lto_count = InputFileKind::ALL
+            .iter()
+            .filter(|k| k.is_lto_input())
+            .count();
+        assert_eq!(lto_count, 2);
+        assert!(InputFileKind::Bitcode.is_lto_input());
+        assert!(InputFileKind::LlvmIr.is_lto_input());
+        // Cross-pin: lto_input ⇒ path_based (every LTO input is
+        // path-resolved).
+        for k in InputFileKind::ALL {
+            if k.is_lto_input() {
+                assert!(k.is_path_based());
+            }
+        }
+        // Payload variant kind() agreement.
+        use std::path::PathBuf;
+        let f = InputFile::Object(PathBuf::from("a.o"));
+        assert_eq!(f.kind(), InputFileKind::Object);
+        let f = InputFile::Archive(PathBuf::from("libfoo.a"));
+        assert_eq!(f.kind(), InputFileKind::Archive);
+        let f = InputFile::Library("m".to_string());
+        assert_eq!(f.kind(), InputFileKind::Library);
     }
 }
