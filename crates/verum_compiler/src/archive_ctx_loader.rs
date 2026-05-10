@@ -814,6 +814,58 @@ impl ArchiveCtxCache {
                 to_add.push("Result");
             }
         }
+        // **Transitive Maybe/Result for higher-level stdlib types.**
+        //
+        // Stdlib types like `OnceCell<T>` / `LazyCell<T>` /
+        // `RefCell<T>` carry `Maybe<T>` / `Result<T,E>` payloads and
+        // their methods (`is_initialized`, `borrow`, `borrow_mut`,
+        // `get_or_init`, …) call `Maybe.is_some` / `Maybe.is_none` /
+        // `Result.unwrap` from their bytecode bodies.  When user code
+        // only mounts `OnceCell`, the wanted-prefix walker above sees
+        // `OnceCell` but not `Maybe` / `Result`, so the
+        // `core.base.maybe` archive entry never decodes — runtime
+        // panics with `method 'Maybe.is_some' not found on receiver
+        // of runtime kind Object`.
+        //
+        // Surgical fix: detect names of stdlib carriers known to
+        // transitively need Maybe/Result, and force-load both.  The
+        // hardcoded set lives here (the single force-load
+        // architectural seam already documented above for
+        // variant-tag-collision); each entry is justified by an
+        // observed test failure where the type's body references
+        // Maybe/Result methods and the wanted-prefix walker can't
+        // see the dependency.
+        const MAYBE_RESULT_TRANSITIVE_CARRIERS: &[&str] = &[
+            // core.base.cell — value: Maybe<T> / Result<T,E>
+            "OnceCell",
+            "LazyCell",
+            "RefCell",
+            // core.base.iterator — Maybe<Item> in next/peek
+            "Iter",
+            "IterMut",
+            // core.base.error — Result-returning everywhere
+            "Error",
+            "ErrorChain",
+            // core.collections.* — get/find/etc. return Maybe
+            "List",
+            "Map",
+            "Set",
+            "Deque",
+        ];
+        let needs_maybe_result = wanted
+            .iter()
+            .any(|n| MAYBE_RESULT_TRANSITIVE_CARRIERS.iter().any(|c| *c == n));
+        if needs_maybe_result {
+            wanted_module_prefixes.insert("core.base.maybe".to_string());
+            wanted_module_prefixes.insert("core.base.result".to_string());
+            wanted_module_prefixes.insert("core.base".to_string());
+            if !wanted.contains("Maybe") {
+                to_add.push("Maybe");
+            }
+            if !wanted.contains("Result") {
+                to_add.push("Result");
+            }
+        }
         for name in to_add {
             wanted.insert(name.to_string());
         }
