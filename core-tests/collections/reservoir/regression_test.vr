@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/collections/reservoir/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the reservoir conformance
+// suite. Each `@ignore`d test reproduces a specific stdlib / language-
+// level defect in the minimum form possible.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.reservoir.Reservoir;
+
+// =============================================================================
+// §A  CSPRNG intrinsic missing from VBC dispatch table.
+//
+//   `Reservoir.offer` calls `random_u64()` once `len == capacity`, which
+//   in turn delegates to `core.sys.common.random_bytes`.  That intrinsic
+//   is not registered in the interpreter dispatch table — every call
+//   panics with `FunctionNotFound(FunctionId(919))`.
+//
+//   Cascade: every test that pushes more than `capacity` items into a
+//   reservoir crashes the test binary.  The fill-phase API is fully
+//   exercised by the non-ignored tests; the replacement-phase laws
+//   (uniform sampling, len ceiling under overflow, seen counter past
+//   capacity, take after overflow) are pinned below.
+//
+//   Tracking task: "Wire core.sys.common.random_bytes into the VBC
+//   interpreter dispatch table".  Same defect blocks Bloom (HMAC key
+//   generation), HyperLogLog (sketch key), and any future
+//   `core.base.random.*` use site.
+// =============================================================================
+
+@ignore
+@test
+fn regression_reservoir_seen_increments_past_capacity() {
+    let mut r: Reservoir<Int> = Reservoir.new(3);
+    let mut i = 0;
+    while i < 50 {
+        let _ = r.offer(i);
+        i = i + 1;
+    }
+    // Currently panics on the 4th offer with FunctionNotFound on
+    // sys_random_bytes.  Expected behaviour: seen counter advances
+    // exactly once per offer, regardless of phase.
+    assert_eq(r.seen(), 50_u64);
+}
+
+@ignore
+@test
+fn regression_reservoir_len_ceiling_under_overflow() {
+    let mut r: Reservoir<Int> = Reservoir.new(4);
+    let mut i = 0;
+    while i < 100 {
+        let _ = r.offer(i);
+        i = i + 1;
+    }
+    // Currently panics.  Expected: len stabilises at capacity.
+    assert_eq(r.len(), 4);
+    assert(r.len() <= r.capacity());
+}
+
+@ignore
+@test
+fn regression_reservoir_take_returns_capacity_after_overflow() {
+    let mut r: Reservoir<Int> = Reservoir.new(5);
+    let mut i = 0;
+    while i < 100 {
+        let _ = r.offer(i);
+        i = i + 1;
+    }
+    let s = r.take();
+    // Currently panics.  Expected: exactly `capacity` samples returned.
+    assert_eq(s.len(), 5);
+}
+
+@ignore
+@test
+fn regression_reservoir_offer_returns_false_on_unsampled_overflow_item() {
+    let mut r: Reservoir<Int> = Reservoir.new(2);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    // After this point, offer's return value depends on whether the
+    // CSPRNG-sampled slot lands inside [0, capacity).  We can't assert
+    // the specific outcome of any individual offer (that would couple
+    // to randomness), but offering 1000 items into a cap-2 reservoir
+    // must produce *at least one* false return.  Currently panics
+    // before the loop completes a single iteration past the fill phase.
+    let mut saw_false = false;
+    let mut i = 3;
+    while i < 1003 {
+        if !r.offer(i) {
+            saw_false = true;
+        }
+        i = i + 1;
+    }
+    assert(saw_false);
+}
+
+fn main() {}

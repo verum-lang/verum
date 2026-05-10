@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/collections/reservoir/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for Reservoir<T>.
+//
+// Laws verified (within the fill-phase domain — the replacement-phase
+// laws are pinned in regression_test.vr until the CSPRNG intrinsic
+// `core.sys.common.random_bytes` is registered in the VBC dispatch
+// table):
+//
+//   §1  capacity-clamping    new(n) preserves n when n ≥ 1, clamps to 1 when n ≤ 0
+//   §2  seen-counter         after k offers, seen() == k
+//   §3  fill-phase retention every offer returns true while seen ≤ capacity
+//   §4  len-ceiling          len() ≤ capacity() always
+//   §5  reset-roundtrip      reset() ⇒ len = 0 ∧ seen = 0 ∧ capacity unchanged
+//   §6  capacity-invariance  no operation observable through the public API
+//                            mutates capacity besides construction
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.reservoir.Reservoir;
+
+// =============================================================================
+// §1  capacity-clamping
+// =============================================================================
+
+@test
+fn property_reservoir_capacity_clamping_exhaustive_small() {
+    // Domain {-3, -1, 0, 1, 3, 10, 100} — covers negative, zero,
+    // boundary 1, and a representative positive sample.
+    let inputs: List<Int> = [-3, -1, 0, 1, 3, 10, 100];
+    for n in inputs.iter() {
+        let r: Reservoir<Int> = Reservoir.new(*n);
+        let expected = if *n < 1 { 1 } else { *n };
+        assert_eq(r.capacity(), expected);
+    }
+}
+
+// =============================================================================
+// §2  seen-counter advances exactly once per offer
+// =============================================================================
+
+@test
+fn property_reservoir_seen_advances_exactly_once_per_offer_fill_phase() {
+    let mut r: Reservoir<Int> = Reservoir.new(20);
+    let mut k = 0;
+    while k < 10 {
+        let _ = r.offer(k);
+        k = k + 1;
+        let expected = k as UInt64;
+        assert_eq(r.seen(), expected);
+    }
+}
+
+// =============================================================================
+// §3  fill-phase retention: every offer returns true while seen ≤ capacity
+// =============================================================================
+
+@test
+fn property_reservoir_fill_phase_always_retains() {
+    let cap = 8;
+    let mut r: Reservoir<Int> = Reservoir.new(cap);
+    let mut k = 0;
+    while k < cap {
+        let kept = r.offer(k * 100);
+        assert(kept);
+        k = k + 1;
+    }
+    assert_eq(r.len(), cap);
+}
+
+// =============================================================================
+// §4  len ≤ capacity always (within the fill phase exercised here)
+// =============================================================================
+
+@test
+fn property_reservoir_len_never_exceeds_capacity_fill_phase() {
+    let cap = 5;
+    let mut r: Reservoir<Int> = Reservoir.new(cap);
+    let mut k = 0;
+    while k < cap {
+        let _ = r.offer(k);
+        assert(r.len() <= r.capacity());
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// §5  reset round-trip: len/seen reset, capacity preserved
+// =============================================================================
+
+@test
+fn property_reservoir_reset_roundtrip_invariants() {
+    let cap = 6;
+    let mut r: Reservoir<Int> = Reservoir.new(cap);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    let cap_before = r.capacity();
+    r.reset();
+    assert_eq(r.len(), 0);
+    assert_eq(r.seen(), 0_u64);
+    assert_eq(r.capacity(), cap_before);
+    // Refill behaves identically to a freshly-constructed reservoir.
+    let kept = r.offer(99);
+    assert(kept);
+    assert_eq(r.len(), 1);
+    assert_eq(r.seen(), 1_u64);
+}
+
+@test
+fn property_reservoir_reset_idempotent() {
+    let mut r: Reservoir<Int> = Reservoir.new(4);
+    let _ = r.offer(1);
+    r.reset();
+    r.reset();
+    r.reset();
+    assert_eq(r.len(), 0);
+    assert_eq(r.seen(), 0_u64);
+    assert_eq(r.capacity(), 4);
+}
+
+// =============================================================================
+// §6  capacity-invariance through the public API
+// =============================================================================
+
+@test
+fn property_reservoir_capacity_invariant_through_offer_and_reset() {
+    let mut r: Reservoir<Int> = Reservoir.new(13);
+    assert_eq(r.capacity(), 13);
+    let _ = r.offer(1);
+    assert_eq(r.capacity(), 13);
+    let _ = r.offer(2);
+    assert_eq(r.capacity(), 13);
+    r.reset();
+    assert_eq(r.capacity(), 13);
+}
+
+fn main() {}

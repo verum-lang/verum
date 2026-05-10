@@ -1,0 +1,176 @@
+// =============================================================================
+// core-tests/collections/reservoir/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.reservoir` — Reservoir<T>, the Algorithm R
+// (Vitter 1985) uniform sampling primitive.
+//
+// One axis of behaviour per `@test`. Section banners group tests by method.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.reservoir.Reservoir;
+
+// =============================================================================
+// Section 1: Reservoir.new — construction
+// =============================================================================
+
+@test
+fn test_reservoir_new_with_capacity_zero_clamps_to_one() {
+    // Capacity < 1 is clamped to 1 — never zero, otherwise offer becomes
+    // a divide-by-zero on the modulo step.
+    let r: Reservoir<Int> = Reservoir.new(0);
+    assert_eq(r.capacity(), 1);
+    assert_eq(r.len(), 0);
+    assert_eq(r.seen(), 0_u64);
+}
+
+@test
+fn test_reservoir_new_with_negative_capacity_clamps_to_one() {
+    let r: Reservoir<Int> = Reservoir.new(-5);
+    assert_eq(r.capacity(), 1);
+}
+
+@test
+fn test_reservoir_new_with_positive_capacity_preserves_value() {
+    let r: Reservoir<Int> = Reservoir.new(100);
+    assert_eq(r.capacity(), 100);
+    assert_eq(r.len(), 0);
+    assert_eq(r.seen(), 0_u64);
+}
+
+// =============================================================================
+// Section 2: offer — fill phase (len < capacity)
+// =============================================================================
+
+@test
+fn test_reservoir_offer_first_item_retained() {
+    let mut r: Reservoir<Int> = Reservoir.new(3);
+    let kept = r.offer(42);
+    assert(kept);
+    assert_eq(r.len(), 1);
+    assert_eq(r.seen(), 1_u64);
+}
+
+@test
+fn test_reservoir_offer_until_capacity_all_retained() {
+    let mut r: Reservoir<Int> = Reservoir.new(5);
+    let mut i = 0;
+    while i < 5 {
+        let kept = r.offer(i);
+        assert(kept);
+        i = i + 1;
+    }
+    assert_eq(r.len(), 5);
+    assert_eq(r.seen(), 5_u64);
+}
+
+// =============================================================================
+// Section 3: offer — replacement phase (len == capacity)
+//
+// The replacement path crosses into `random_u64()` which calls
+// `core.sys.common.random_bytes`. That intrinsic is currently absent
+// from the VBC interpreter dispatch table — calls to it panic with
+// `FunctionNotFound(FunctionId(919))`. The replacement-phase axis is
+// pinned in regression_test.vr.
+// =============================================================================
+
+@test
+fn test_reservoir_seen_increments_within_fill_phase() {
+    let mut r: Reservoir<Int> = Reservoir.new(5);
+    let _ = r.offer(10);
+    let _ = r.offer(20);
+    let _ = r.offer(30);
+    assert_eq(r.seen(), 3_u64);
+}
+
+// =============================================================================
+// Section 4: take — consume samples
+// =============================================================================
+
+@test
+fn test_reservoir_take_returns_filled_samples_when_under_capacity() {
+    let mut r: Reservoir<Int> = Reservoir.new(10);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    let s = r.take();
+    assert_eq(s.len(), 3);
+}
+
+// Post-overflow take is pinned in regression_test.vr (CSPRNG path).
+
+// =============================================================================
+// Section 5: reset — drop samples, zero counter, preserve capacity
+// =============================================================================
+
+@test
+fn test_reservoir_reset_clears_samples() {
+    let mut r: Reservoir<Int> = Reservoir.new(4);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    assert_eq(r.len(), 2);
+    r.reset();
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn test_reservoir_reset_zeroes_seen_counter() {
+    let mut r: Reservoir<Int> = Reservoir.new(5);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    assert_eq(r.seen(), 3_u64);
+    r.reset();
+    assert_eq(r.seen(), 0_u64);
+}
+
+@test
+fn test_reservoir_reset_preserves_capacity() {
+    let mut r: Reservoir<Int> = Reservoir.new(7);
+    let _ = r.offer(1);
+    r.reset();
+    assert_eq(r.capacity(), 7);
+}
+
+@test
+fn test_reservoir_reset_then_refill_works_normally() {
+    let mut r: Reservoir<Int> = Reservoir.new(3);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    r.reset();
+    let kept_a = r.offer(10);
+    let kept_b = r.offer(20);
+    assert(kept_a);
+    assert(kept_b);
+    assert_eq(r.len(), 2);
+    assert_eq(r.seen(), 2_u64);
+}
+
+// =============================================================================
+// Section 6: accessors — len / capacity / seen
+// =============================================================================
+
+@test
+fn test_reservoir_len_is_zero_at_construction() {
+    let r: Reservoir<Int> = Reservoir.new(10);
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn test_reservoir_capacity_unchanged_by_offer() {
+    let mut r: Reservoir<Int> = Reservoir.new(8);
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    assert_eq(r.capacity(), 8);
+}
+
+@test
+fn test_reservoir_seen_is_zero_at_construction() {
+    let r: Reservoir<Int> = Reservoir.new(1);
+    assert_eq(r.seen(), 0_u64);
+}
+
+fn main() {}
