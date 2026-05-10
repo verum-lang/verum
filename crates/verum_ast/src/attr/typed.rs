@@ -1136,6 +1136,83 @@ pub enum UnrollMode {
     Never,
 }
 
+/// Discriminator-only kind for [`UnrollMode`].
+///
+/// `Count(u32)` carries a payload; the kind enum is zero-sized so
+/// callers (telemetry / docs / diagnostic-bucket headers) can iterate
+/// the surface without supplying the loop-iteration count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnrollModeKind {
+    Count,
+    Full,
+    Never,
+}
+
+/// Per-kind projection for [`UnrollModeKind`].
+///
+/// `name` is the canonical short identifier (matches the legacy
+/// CLI/manifest wire form). `is_unrolling` flags `Count` and `Full`
+/// — both directives request loop unrolling; `Never` is the unique
+/// disable directive. Cross-pin: `is_unrolling ⊕ (variant == Never)`.
+#[derive(Debug, Clone, Copy)]
+pub struct UnrollModeKindMeta {
+    pub name: &'static str,
+    pub is_unrolling: bool,
+}
+
+impl UnrollModeKind {
+    pub const ALL: &'static [Self] = &[Self::Count, Self::Full, Self::Never];
+
+    pub const fn meta(self) -> UnrollModeKindMeta {
+        match self {
+            Self::Count => UnrollModeKindMeta {
+                name: "count",
+                is_unrolling: true,
+            },
+            Self::Full => UnrollModeKindMeta {
+                name: "full",
+                is_unrolling: true,
+            },
+            Self::Never => UnrollModeKindMeta {
+                name: "never",
+                is_unrolling: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Count` / `Full` (both directive requests for
+    /// unrolling). `Never` is the unique disable-unrolling kind.
+    #[inline]
+    pub const fn is_unrolling(&self) -> bool {
+        self.meta().is_unrolling
+    }
+}
+
+impl UnrollMode {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> UnrollModeKind {
+        match self {
+            Self::Count(_) => UnrollModeKind::Count,
+            Self::Full => UnrollModeKind::Full,
+            Self::Never => UnrollModeKind::Never,
+        }
+    }
+}
+
 /// Unroll attribute: @unroll(N), @unroll(full), @no_unroll
 ///
 
@@ -2493,6 +2570,101 @@ pub enum PgoAttr {
     Frequency { calls_per_sec: u64, span: Span },
     /// @branch_probability(P) - branch taken probability (0.0-1.0)
     BranchProbability { probability: f64, span: Span },
+}
+
+/// Discriminator-only kind for [`PgoAttr`].
+///
+/// `PgoAttr` carries rich payloads (optional name / counts /
+/// probability values); the kind enum is zero-sized so callers
+/// iterating the PGO-attribute surface (for diagnostics / docs /
+/// telemetry) don't supply payload data. `name` matches the
+/// `@<attr>` keyword the parser accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PgoAttrKind {
+    Profile,
+    Frequency,
+    BranchProbability,
+}
+
+/// Per-kind projection for [`PgoAttrKind`].
+///
+/// `attribute_name` is the bare keyword used at the `@<keyword>(…)`
+/// parse site — `Profile` ↔ `"profile"`, `Frequency` ↔
+/// `"frequency"`, `BranchProbability` ↔ `"branch_probability"`.
+/// `is_instrumentation` flags `Profile` (the only kind that
+/// instructs PGO instrumentation); the other two are
+/// expectation-providing (the user supplies a known value rather
+/// than asking the compiler to measure).
+#[derive(Debug, Clone, Copy)]
+pub struct PgoAttrKindMeta {
+    pub attribute_name: &'static str,
+    pub is_instrumentation: bool,
+}
+
+impl PgoAttrKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Profile,
+        Self::Frequency,
+        Self::BranchProbability,
+    ];
+
+    pub const fn meta(self) -> PgoAttrKindMeta {
+        match self {
+            Self::Profile => PgoAttrKindMeta {
+                attribute_name: "profile",
+                is_instrumentation: true,
+            },
+            Self::Frequency => PgoAttrKindMeta {
+                attribute_name: "frequency",
+                is_instrumentation: false,
+            },
+            Self::BranchProbability => PgoAttrKindMeta {
+                attribute_name: "branch_probability",
+                is_instrumentation: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn attribute_name(&self) -> &'static str {
+        self.meta().attribute_name
+    }
+
+    pub fn from_attribute_name(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().attribute_name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Profile` — the only kind that requests PGO
+    /// instrumentation. `Frequency` / `BranchProbability` provide
+    /// user-supplied expectations instead.
+    #[inline]
+    pub const fn is_instrumentation(&self) -> bool {
+        self.meta().is_instrumentation
+    }
+}
+
+impl PgoAttr {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> PgoAttrKind {
+        match self {
+            Self::Profile { .. } => PgoAttrKind::Profile,
+            Self::Frequency { .. } => PgoAttrKind::Frequency,
+            Self::BranchProbability { .. } => PgoAttrKind::BranchProbability,
+        }
+    }
+
+    /// Bare attribute keyword (`profile` / `frequency` /
+    /// `branch_probability`) — matches the `@<keyword>(…)` parse
+    /// form.
+    #[inline]
+    pub fn attribute_name(&self) -> &'static str {
+        self.kind().attribute_name()
+    }
 }
 
 impl Default for PgoAttr {
@@ -9025,5 +9197,77 @@ mod meta_drift_pins {
                 "duplicate as_str {:?} on variant {:?}", n, m);
             seen.push(n);
         }
+    }
+
+    #[test]
+    fn meta_pin_unroll_mode_kind_round_trip_and_unrolling_partition() {
+        assert_eq!(UnrollModeKind::ALL.len(), 3);
+        for k in UnrollModeKind::ALL {
+            let s = k.name();
+            assert_eq!(UnrollModeKind::from_str(s), Some(*k));
+        }
+        // is_unrolling partition: Count + Full = 2; Never = 1.
+        let unrolling_count = UnrollModeKind::ALL
+            .iter()
+            .filter(|k| k.is_unrolling())
+            .count();
+        assert_eq!(unrolling_count, 2);
+        assert!(UnrollModeKind::Count.is_unrolling());
+        assert!(UnrollModeKind::Full.is_unrolling());
+        assert!(!UnrollModeKind::Never.is_unrolling());
+        // Cross-pin: is_unrolling ⊕ (kind == Never) is exhaustive.
+        for k in UnrollModeKind::ALL {
+            assert_eq!(
+                !k.is_unrolling(),
+                *k == UnrollModeKind::Never,
+                "Never is the unique disable-unrolling kind"
+            );
+        }
+        // Payload variant kind() agreement.
+        assert_eq!(UnrollMode::Count(4).kind(), UnrollModeKind::Count);
+        assert_eq!(UnrollMode::Full.kind(), UnrollModeKind::Full);
+        assert_eq!(UnrollMode::Never.kind(), UnrollModeKind::Never);
+    }
+
+    #[test]
+    fn meta_pin_pgo_attr_kind_round_trip_and_instrumentation_partition() {
+        assert_eq!(PgoAttrKind::ALL.len(), 3);
+        for k in PgoAttrKind::ALL {
+            let s = k.attribute_name();
+            assert_eq!(PgoAttrKind::from_attribute_name(s), Some(*k));
+        }
+        // Wire form (matches @<keyword>(…) parse form).
+        assert_eq!(PgoAttrKind::Profile.attribute_name(), "profile");
+        assert_eq!(PgoAttrKind::Frequency.attribute_name(), "frequency");
+        assert_eq!(
+            PgoAttrKind::BranchProbability.attribute_name(),
+            "branch_probability"
+        );
+        // is_instrumentation partition: Profile only (1).
+        let instr_count = PgoAttrKind::ALL
+            .iter()
+            .filter(|k| k.is_instrumentation())
+            .count();
+        assert_eq!(instr_count, 1);
+        assert!(PgoAttrKind::Profile.is_instrumentation());
+        assert!(!PgoAttrKind::Frequency.is_instrumentation());
+        assert!(!PgoAttrKind::BranchProbability.is_instrumentation());
+        // Payload variant kind() agreement.
+        let p = PgoAttr::Profile {
+            name: Maybe::None,
+            span: Span::default(),
+        };
+        assert_eq!(p.kind(), PgoAttrKind::Profile);
+        assert_eq!(p.attribute_name(), "profile");
+        let f = PgoAttr::Frequency {
+            calls_per_sec: 1000,
+            span: Span::default(),
+        };
+        assert_eq!(f.kind(), PgoAttrKind::Frequency);
+        let b = PgoAttr::BranchProbability {
+            probability: 0.95,
+            span: Span::default(),
+        };
+        assert_eq!(b.kind(), PgoAttrKind::BranchProbability);
     }
 }
