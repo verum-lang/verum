@@ -12,6 +12,7 @@ default green-suite gate.
 |---|---:|---:|---:|---:|---|
 | `collections/union_find` | 358 | 371 | 147 | 197 | 5 (Map.get → Maybe<V>; Map.contains_key(&K); lenient-skip on Map.get_optional/get_key_value; Text.from_utf8_unchecked zero-length as_bytes; Text.eq method dispatch) |
 | `collections/reservoir`  | 176 | 140 | 104 |  99 | 1 (core.sys.common.random_bytes intrinsic missing from VBC dispatch table — gates the replacement-phase API) |
+| `collections/toposort`   |  76 |   0 |   0 | 100 | 4 (Map.contains_key(&amp;K) gates contains/idempotent add_node; Map.get → Maybe&lt;V&gt; gates the toposort algorithm itself; Text.from gates the Cycle-variant payload). regression-only outside of new()/add_node-distinct/empty-toposort. |
 
 ## Status legend
 

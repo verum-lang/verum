@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/collections/toposort/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.toposort` — Kahn's algorithm topological
+// sort over `TopoGraph<N: Hash + Eq>`.
+//
+// Coverage focus: the construction surface (new, contains, node_count)
+// and the toposort algorithm itself for distinct-node graphs.  The
+// idempotency axis of `add_node` is currently blocked by the
+// upstream `Map.contains_key(&K)` defect (regression_test.vr §A);
+// add_edge silently re-adds endpoints into `nodes` because of the
+// same defect, so any test that depends on `node_count() == N` after
+// `add_edge` calls is gated and pinned in regression_test.vr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.toposort.{TopoGraph, TopoError};
+
+// =============================================================================
+// Section 1: TopoGraph.new — construction
+// =============================================================================
+
+@test
+fn test_toposort_new_is_empty() {
+    let g: TopoGraph<Int> = TopoGraph.new();
+    assert_eq(g.node_count(), 0);
+}
+
+@test
+fn test_toposort_new_does_not_contain_anything() {
+    let g: TopoGraph<Int> = TopoGraph.new();
+    assert(!g.contains(&1));
+    assert(!g.contains(&42));
+    assert(!g.contains(&-7));
+}
+
+// =============================================================================
+// Section 2: add_node — distinct-key path
+// =============================================================================
+
+@test
+fn test_toposort_add_node_distinct_grows_count() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(1);
+    g.add_node(2);
+    g.add_node(3);
+    assert_eq(g.node_count(), 3);
+}
+
+// `contains(&N)` is gated on `Map.contains_key(&K)` (always-false defect).
+// Pinned in regression_test.vr.
+
+// =============================================================================
+// Section 3: toposort on the empty graph
+// =============================================================================
+
+@test
+fn test_toposort_empty_graph_yields_empty_order() {
+    let g: TopoGraph<Int> = TopoGraph.new();
+    let r = g.toposort();
+    match r {
+        Ok(out) => assert_eq(out.len(), 0),
+        Err(_)  => panic("empty graph must topo-sort to empty list"),
+    }
+}
+
+// =============================================================================
+// Section 4: toposort on isolated nodes — pinned in regression_test.vr.
+//      The `match self.in_deg.get(n) { Some/None }` pattern inside
+//      toposort returns Err(Cycle) for graphs that have no cycles,
+//      because Map.get returns V (not Maybe<V>) and the match never
+//      sees a `Some(0)` branch — so `in_deg_local` is never populated
+//      with the correct in-degree, no node ever has in_deg == 0,
+//      and the queue stays empty.
+// =============================================================================
+
+// =============================================================================
+// Section 5: TopoError equality (Display / Debug exercised separately).
+//      Pinned in regression_test.vr — the variant-construction path
+//      requires `Text.from(...)` literal-list construction which the
+//      VBC codegen currently rejects with `UndefinedFunction("Text.from")`.
+// =============================================================================
+
+fn main() {}
