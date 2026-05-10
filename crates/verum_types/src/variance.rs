@@ -224,6 +224,14 @@ pub const DEFAULT_CONSTRUCTOR_VARIANCES: &[(&str, &[Variance])] = &[
     ("Ref", &[Variance::Invariant]),
     ("RefMut", &[Variance::Invariant]),
 
+    // ---- Lock-mediated interior mutability (invariant) ----
+    // `Mutex<T>` and `RwLock<T>` lend `&mut T` through their
+    // lock guards, so they must be invariant in T — same
+    // architectural reason as `Cell` / `RefCell`.  Source-of-truth:
+    // `core/sync/mutex.vr` and `core/sync/rwlock.vr`.
+    ("Mutex", &[Variance::Invariant]),
+    ("RwLock", &[Variance::Invariant]),
+
     // ---- Tensor family (covariant in element) ----
     ("Tensor", &[Variance::Covariant]),
     ("Matrix", &[Variance::Covariant]),
@@ -833,10 +841,11 @@ mod default_constructor_variances_pins {
             "DEFAULT_CONSTRUCTOR_VARIANCES has duplicate names",
         );
         // 5 Verum semantic + 8 Rust aliases + 2 tree/graph
-        // + 5 smart pointers + 5 cell-likes + 3 tensor-family = 28.
+        // + 5 smart pointers + 5 cell-likes + 2 lock-mediated
+        // + 3 tensor-family = 30.
         assert_eq!(
             DEFAULT_CONSTRUCTOR_VARIANCES.len(),
-            28,
+            30,
             "DEFAULT_CONSTRUCTOR_VARIANCES entry count drifted — \
              update both the table and this pin together",
         );
@@ -881,6 +890,17 @@ mod default_constructor_variances_pins {
                 Some(&[Variance::Invariant][..]),
                 "cell-like `{}` must be invariant",
                 cell,
+            );
+        }
+
+        // Lock-mediated containers — invariant because their lock
+        // guards expose `&mut T`.
+        for lock in ["Mutex", "RwLock"] {
+            assert_eq!(
+                table.get(lock).copied(),
+                Some(&[Variance::Invariant][..]),
+                "lock-mediated `{}` must be invariant",
+                lock,
             );
         }
 
@@ -955,5 +975,37 @@ mod default_constructor_variances_pins {
         // falls back to Invariant.
         let unknown = checker.infer_constructor_variances(&name_path("__no_such_type__"));
         assert!(unknown.as_slice().is_empty());
+    }
+
+    /// Cross-consistency pin: every name in
+    /// [`DEFAULT_CONSTRUCTOR_VARIANCES`] produces an identical
+    /// variance list whether queried via `VarianceChecker`
+    /// (through the `infer_constructor_variances` path) or via
+    /// the sibling `crate::subtype::Subtyping` checker (through
+    /// `variances_for_type_name`).
+    ///
+    /// Pre-fix Subtyping carried its own hardcoded variance match
+    /// that contradicted this table on `Shared` (Subtyping said
+    /// Invariant; canonical says Covariant — `Shared<T>` is a
+    /// reference-counted shared pointer with no interior
+    /// mutability) and was missing entirely for `Mutex` /
+    /// `RwLock`.  Both gaps are now closed: Subtyping delegates
+    /// to `DEFAULT_CONSTRUCTOR_VARIANCES`, so the table is the
+    /// single source of truth for both consumers — drift between
+    /// the two surfaces is structurally impossible.
+    #[test]
+    fn subtyping_and_variance_checker_agree_on_canonical_table() {
+        for (name, expected) in DEFAULT_CONSTRUCTOR_VARIANCES {
+            let arg_count = expected.len();
+            let from_subtyping = crate::subtype::Subtyping::variances_for_type_name_for_test(
+                name, arg_count,
+            );
+            assert_eq!(
+                from_subtyping.as_slice(),
+                *expected,
+                "Subtyping disagrees with DEFAULT_CONSTRUCTOR_VARIANCES on `{}`",
+                name,
+            );
+        }
     }
 }

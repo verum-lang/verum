@@ -12,7 +12,7 @@
 //! Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 - Subtyping Algorithm
 
 use crate::ty::{Type, TypeVar};
-use crate::variance::Variance;
+use crate::variance::{DEFAULT_CONSTRUCTOR_VARIANCES, Variance};
 
 use std::cell::Cell;
 use verum_common::well_known_types::WellKnownType as WKT;
@@ -83,26 +83,52 @@ impl Subtyping {
         Self::variances_for_type_name(name, arg_count)
     }
 
+    /// Test-only re-export of [`Self::variances_for_type_name`]
+    /// so the cross-consistency pin in `crate::variance` can
+    /// observe Subtyping's variance projection without exposing
+    /// the private associated function as part of the public
+    /// API.
+    #[cfg(test)]
+    pub(crate) fn variances_for_type_name_for_test(
+        name: &str,
+        arg_count: usize,
+    ) -> List<Variance> {
+        Self::variances_for_type_name(name, arg_count)
+    }
+
     /// Determine variance for type parameters by type name.
-    /// Well-known types get their correct variance; unknown types default to covariant.
+    /// Well-known types get their correct variance from the
+    /// canonical [`DEFAULT_CONSTRUCTOR_VARIANCES`] table in the
+    /// sibling [`crate::variance`] module — single source of truth.
+    /// Unknown types default to covariant for `arg_count`.
+    ///
+    /// Pre-fix this function carried its own hardcoded match arm
+    /// that contradicted the canonical table on `Shared`
+    /// (Subtyping said Invariant; canonical says Covariant —
+    /// `Shared<T>` has no interior mutability, only a shared
+    /// reference-counted T).  The standalone match also missed
+    /// `Mutex` / `RwLock` lock-mediated invariance from the
+    /// canonical surface.  Both gaps are closed by this
+    /// delegation: variance assignments are now consistent across
+    /// the type-checker (Subtyping + VarianceChecker consult the
+    /// same table).
     fn variances_for_type_name(name: &str, arg_count: usize) -> List<Variance> {
-        use verum_common::well_known_types::type_names as wkt;
-        match name {
-            // Invariant types (mutable interior)
-            "Cell" | "RefCell" | "Atomic" | "Shared" | "Mutex" | "RwLock" => {
-                vec![Variance::Invariant; arg_count].into()
-            }
-            // Map: keys invariant, values covariant
-            n if n == wkt::MAP || n == "HashMap" || n == "TreeMap" => {
-                if arg_count >= 2 {
-                    vec![Variance::Invariant, Variance::Covariant].into()
-                } else {
-                    vec![Variance::Invariant; arg_count].into()
+        for (entry_name, entry_variances) in DEFAULT_CONSTRUCTOR_VARIANCES {
+            if *entry_name == name {
+                // The table's slice may be shorter or longer than
+                // the caller's `arg_count` (e.g. a generic type
+                // declaration with stale arity); pad with the
+                // last variance (or covariant default) and clamp.
+                let mut out: Vec<Variance> = entry_variances.iter().copied().collect();
+                while out.len() < arg_count {
+                    out.push(Variance::Covariant);
                 }
+                out.truncate(arg_count);
+                return out.into();
             }
-            // Everything else: covariant (List, Set, Maybe, Result, Heap, etc.)
-            _ => vec![Variance::Covariant; arg_count].into(),
         }
+        // Unknown name → covariant default for every arg.
+        vec![Variance::Covariant; arg_count].into()
     }
 
     fn path_is_array_coercible(&self, path: &verum_ast::ty::Path) -> bool {
