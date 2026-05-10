@@ -509,13 +509,40 @@ mod tests {
         assert_eq!(first_count, second_count, "no new directories on re-install");
     }
 
+    /// Cargo's default test-runner runs tests in parallel — and
+    /// every `EnvGuard::set("HOME", ...)` mutates **process-wide**
+    /// env state.  Without serialisation, two `_tests` running
+    /// concurrently see each other's HOME mutation and read the
+    /// other test's TempDir as their `~/.verum/...` install root.
+    /// The static lock below pins all HOME-touching tests to a
+    /// single critical section so each test gets a clean
+    /// installation slate.  The `MutexGuard` is held by the
+    /// `EnvGuard` for its full lifetime, so the lock is released
+    /// only when the guard drops (i.e., the test's HOME mutation
+    /// is fully reverted).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// RAII guard for env var.  Restores prior value on drop.
+    /// Holds the global ENV_LOCK for its lifetime so concurrent
+    /// HOME-mutating tests serialise.
     struct EnvGuard {
         key: String,
         prior: Option<String>,
+        // Held for the guard's lifetime; serialises HOME mutations
+        // across parallel-running tests.  Field order matters
+        // (drop order is declaration order in Rust): the env
+        // restore in `Drop for EnvGuard` runs before this lock
+        // releases, so a sibling test cannot observe the restored
+        // env mid-mutation.
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
     impl EnvGuard {
         fn set(key: &str, value: &str) -> Self {
+            // Recover from prior-test panics that left the lock
+            // poisoned — the env-var guarantees we care about are
+            // about ordering, not data integrity, so a poisoned
+            // lock is recoverable.
+            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let prior = std::env::var(key).ok();
             unsafe {
                 std::env::set_var(key, value);
@@ -523,6 +550,7 @@ mod tests {
             Self {
                 key: key.to_string(),
                 prior,
+                _lock: lock,
             }
         }
     }

@@ -561,9 +561,22 @@ pub fn extract(source: &str) -> Result<Option<Extracted>, FrontmatterError> {
     };
 
     // Strip `// ` prefix from each interior line and assemble TOML body.
+    //
+    // Truly-empty interior lines (no `//` prefix at all, just `\n` or
+    // blank whitespace) are tolerated as TOML section separators —
+    // PEP 723 / Cargo's `# ///` script-frontmatter convention admits
+    // blank lines between TOML sections.  Pre-fix the parser rejected
+    // them as `NonCommentLineInBlock`, breaking idiomatic
+    // `// [profile]` ... blank-line ... `// [run]` blocks.
     let mut toml_body = String::new();
     for (line_no, (_, raw)) in lines[(open_idx + 1)..close_idx].iter().enumerate() {
         let logical_line = open_idx + 2 + line_no; // 1-indexed user-visible
+        let raw_trimmed = raw.trim_end_matches('\n');
+        if raw_trimmed.trim().is_empty() {
+            // Empty separator line — emit a blank TOML line.
+            toml_body.push('\n');
+            continue;
+        }
         let trimmed =
             strip_comment_prefix(raw).ok_or_else(|| FrontmatterError::NonCommentLineInBlock {
                 line: logical_line,
