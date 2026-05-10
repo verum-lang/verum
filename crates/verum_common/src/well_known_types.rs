@@ -401,20 +401,67 @@ pub mod variant_tags {
     }
 }
 
+/// A canonical entry in a `*_VARIANT_LAYOUT` slice — the
+/// single source of truth for one variant of one well-known sum
+/// type.
+///
+/// `name` is the constructor name as it appears in the `.vr`
+/// source declaration (e.g. `"None"`, `"Some"`, `"Ok"`,
+/// `"Err"`, `"Less"`, …); `tag` is the discriminator value the
+/// runtime stores in the variant header; `arity` is the number
+/// of payload fields the constructor takes (0 for unit variants
+/// like `None` / `Less` / `Greater` / `Null` / `NotPresent`, 1
+/// for single-payload variants like `Some(T)` / `Ok(T)` /
+/// `Err(E)` / `Continue(C)` / `Break(B)` / `NotUnicode(bytes)`,
+/// and N for N-tuple variants — none currently exist in the
+/// well-known set but the type admits them).
+///
+/// **Why arity here?** Pre-fix the layout encoded only
+/// `(name, tag)`; arity lived in *each consumer* as a parallel
+/// hardcoded set of per-type rules — `register_builtin_variants`
+/// in VBC codegen had three ad-hoc loops (a `if name == "Some"`
+/// branch for Maybe, a uniform arity-1 hardcode for Result, a
+/// uniform arity-0 hardcode for Ordering). Adding a new variant
+/// carrier (e.g. `Either<L,R>`) needed both a layout constant
+/// AND a new ad-hoc loop with type-specific arity logic.
+/// Lifting arity into the layout itself eliminates the
+/// parallel-rules drift surface — every consumer derives arity
+/// from the same canonical declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariantLayoutEntry {
+    /// Constructor name as written in the `.vr` source.
+    pub name: &'static str,
+    /// Runtime discriminator value (0-based, declaration order).
+    pub tag: u32,
+    /// Number of payload fields the constructor takes.
+    pub arity: u32,
+}
+
+impl VariantLayoutEntry {
+    /// Construct a layout entry. `const fn` so it can be used in
+    /// `*_VARIANT_LAYOUT` slice literals at module scope.
+    #[inline]
+    pub const fn new(name: &'static str, tag: u32, arity: u32) -> Self {
+        Self { name, tag, arity }
+    }
+}
+
 /// Canonical layout of the variants of `core::base::maybe::Maybe<T>`.
 ///
 /// Source-of-truth: `core/base/maybe.vr`:
 /// ```text
 ///     public type Maybe<T> is None | Some(T);
 /// ```
-/// Tags follow declaration order: `None = 0`, `Some = 1`.
+/// Tags follow declaration order: `None = 0` (arity 0), `Some = 1`
+/// (arity 1 — the `T` payload).
 ///
-/// **Drift contract:** any reorder in the .vr file MUST be reflected here,
-/// and the matrix-pinning test in `tests::maybe_variant_layout_pinned`
-/// catches the divergence at test time.
-pub const MAYBE_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("None", 0),
-    ("Some", 1),
+/// **Drift contract:** any reorder or arity change in the .vr file
+/// MUST be reflected here, and the matrix-pinning test in
+/// `tests::maybe_variant_layout_pinned` catches the divergence at
+/// test time.
+pub const MAYBE_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("None", 0, 0),
+    VariantLayoutEntry::new("Some", 1, 1),
 ];
 
 /// Canonical layout of the variants of `core::base::result::Result<T, E>`.
@@ -423,10 +470,11 @@ pub const MAYBE_VARIANT_LAYOUT: &[(&str, u32)] = &[
 /// ```text
 ///     public type Result<T, E> is Ok(T) | Err(E);
 /// ```
-/// Tags follow declaration order: `Ok = 0`, `Err = 1`.
-pub const RESULT_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("Ok", 0),
-    ("Err", 1),
+/// Tags follow declaration order: `Ok = 0` (arity 1 — the `T`
+/// payload), `Err = 1` (arity 1 — the `E` payload).
+pub const RESULT_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("Ok", 0, 1),
+    VariantLayoutEntry::new("Err", 1, 1),
 ];
 
 /// Canonical layout of the variants of `core::base::ordering::Ordering`.
@@ -446,10 +494,10 @@ pub const RESULT_VARIANT_LAYOUT: &[(&str, u32)] = &[
 ///     public type Ordering is Less | Equal | Greater;
 /// ```
 /// — which produces variant tags 0, 1, 2 in declaration order.
-pub const ORDERING_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("Less", 0),
-    ("Equal", 1),
-    ("Greater", 2),
+pub const ORDERING_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("Less", 0, 0),
+    VariantLayoutEntry::new("Equal", 1, 0),
+    VariantLayoutEntry::new("Greater", 2, 0),
 ];
 
 /// Canonical layout of the variants of `core::base::data::Data`.
@@ -470,14 +518,14 @@ pub const ORDERING_VARIANT_LAYOUT: &[(&str, u32)] = &[
 ///         | Object(Map<Text, Data>);
 /// ```
 /// — which produces tags 0–6 in declaration order.
-pub const DATA_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("Null", 0),
-    ("Bool", 1),
-    ("Int", 2),
-    ("Float", 3),
-    ("Text", 4),
-    ("Array", 5),
-    ("Object", 6),
+pub const DATA_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("Null", 0, 0),
+    VariantLayoutEntry::new("Bool", 1, 1),
+    VariantLayoutEntry::new("Int", 2, 1),
+    VariantLayoutEntry::new("Float", 3, 1),
+    VariantLayoutEntry::new("Text", 4, 1),
+    VariantLayoutEntry::new("Array", 5, 1),
+    VariantLayoutEntry::new("Object", 6, 1),
 ];
 
 /// Canonical layout of the variants of `core::base::ops::ControlFlow<B, C>`.
@@ -490,9 +538,9 @@ pub const DATA_VARIANT_LAYOUT: &[(&str, u32)] = &[
 ///     public type ControlFlow<B, C> is Continue(C) | Break(B);
 /// ```
 /// — `Continue = 0`, `Break = 1` in declaration order.
-pub const CONTROLFLOW_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("Continue", 0),
-    ("Break", 1),
+pub const CONTROLFLOW_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("Continue", 0, 1),
+    VariantLayoutEntry::new("Break", 1, 1),
 ];
 
 /// Canonical layout of the variants of `core::base::env::VarError`.
@@ -509,9 +557,9 @@ pub const CONTROLFLOW_VARIANT_LAYOUT: &[(&str, u32)] = &[
 ///         | NotUnicode(List<Byte>);
 /// ```
 /// — `NotPresent = 0`, `NotUnicode = 1` in declaration order.
-pub const VARERROR_VARIANT_LAYOUT: &[(&str, u32)] = &[
-    ("NotPresent", 0),
-    ("NotUnicode", 1),
+pub const VARERROR_VARIANT_LAYOUT: &[VariantLayoutEntry] = &[
+    VariantLayoutEntry::new("NotPresent", 0, 0),
+    VariantLayoutEntry::new("NotUnicode", 1, 1),
 ];
 
 /// Returns the canonical tag for `VarError::NotPresent`.
@@ -557,10 +605,21 @@ pub const MARKER_PROTOCOL_NAMES: &[&str] = &["Sized", "Send", "Sync", "Unpin"];
 /// layout) should prefer [`tag_of_or_drift`] which panics with a
 /// structured drift message instead of silently producing `None`.
 #[inline]
-pub fn tag_of(layout: &[(&str, u32)], name: &str) -> Option<u32> {
+pub fn tag_of(layout: &[VariantLayoutEntry], name: &str) -> Option<u32> {
     layout
         .iter()
-        .find_map(|&(n, t)| (n == name).then_some(t))
+        .find_map(|e| (e.name == name).then_some(e.tag))
+}
+
+/// Look up a variant's payload arity by name. Mirrors [`tag_of`] for
+/// the third axis of the canonical layout — used by the VBC
+/// codegen's `register_builtin_variants` so the per-type ad-hoc
+/// arity rules collapse into a single uniform layout-driven loop.
+#[inline]
+pub fn arity_of(layout: &[VariantLayoutEntry], name: &str) -> Option<u32> {
+    layout
+        .iter()
+        .find_map(|e| (e.name == name).then_some(e.arity))
 }
 
 /// Like [`tag_of`] but panics with a structured drift message when
@@ -573,7 +632,11 @@ pub fn tag_of(layout: &[(&str, u32)], name: &str) -> Option<u32> {
 /// included in the panic message so the operator can locate the
 /// canonical-source-of-truth definition without grep.
 #[inline]
-pub fn tag_of_or_drift(layout: &[(&str, u32)], name: &str, layout_name: &str) -> u32 {
+pub fn tag_of_or_drift(
+    layout: &[VariantLayoutEntry],
+    name: &str,
+    layout_name: &str,
+) -> u32 {
     tag_of(layout, name).unwrap_or_else(|| {
         panic!(
             "{} is missing variant `{}` — drift between caller and the \
@@ -637,10 +700,11 @@ mod ordering_layout_tests {
         // Three variants, in canonical order. If this asserts, either the .vr
         // file changed and the constant must follow, or vice versa — but the
         // load-time validator will already have refused to load.
+        // Ordering variants are all unit (arity 0).
         assert_eq!(ORDERING_VARIANT_LAYOUT.len(), 3);
-        assert_eq!(ORDERING_VARIANT_LAYOUT[0], ("Less", 0));
-        assert_eq!(ORDERING_VARIANT_LAYOUT[1], ("Equal", 1));
-        assert_eq!(ORDERING_VARIANT_LAYOUT[2], ("Greater", 2));
+        assert_eq!(ORDERING_VARIANT_LAYOUT[0], VariantLayoutEntry::new("Less", 0, 0));
+        assert_eq!(ORDERING_VARIANT_LAYOUT[1], VariantLayoutEntry::new("Equal", 1, 0));
+        assert_eq!(ORDERING_VARIANT_LAYOUT[2], VariantLayoutEntry::new("Greater", 2, 0));
     }
 
     #[test]
@@ -651,43 +715,50 @@ mod ordering_layout_tests {
     }
 
     /// Pins the canonical layout of `Maybe<T>`. Mirrors the
-    /// Ordering pattern: any change to the variant order in
-    /// `core/base/maybe.vr` must be reflected here, and vice versa.
-    /// Codegen builtin variant registration consults this constant.
+    /// Ordering pattern: any change to the variant order or arity
+    /// in `core/base/maybe.vr` must be reflected here, and vice
+    /// versa. Codegen builtin variant registration consults this
+    /// constant for both tag AND arity.
     #[test]
     fn maybe_variant_layout_pinned() {
         assert_eq!(MAYBE_VARIANT_LAYOUT.len(), 2);
-        assert_eq!(MAYBE_VARIANT_LAYOUT[0], ("None", 0));
-        assert_eq!(MAYBE_VARIANT_LAYOUT[1], ("Some", 1));
+        // None is unit (arity 0); Some carries a single payload.
+        assert_eq!(MAYBE_VARIANT_LAYOUT[0], VariantLayoutEntry::new("None", 0, 0));
+        assert_eq!(MAYBE_VARIANT_LAYOUT[1], VariantLayoutEntry::new("Some", 1, 1));
     }
 
-    /// Pins the canonical layout of `Result<T, E>`.
+    /// Pins the canonical layout of `Result<T, E>` — both
+    /// constructors carry a single payload (`Ok(T)` / `Err(E)`).
     #[test]
     fn result_variant_layout_pinned() {
         assert_eq!(RESULT_VARIANT_LAYOUT.len(), 2);
-        assert_eq!(RESULT_VARIANT_LAYOUT[0], ("Ok", 0));
-        assert_eq!(RESULT_VARIANT_LAYOUT[1], ("Err", 1));
+        assert_eq!(RESULT_VARIANT_LAYOUT[0], VariantLayoutEntry::new("Ok", 0, 1));
+        assert_eq!(RESULT_VARIANT_LAYOUT[1], VariantLayoutEntry::new("Err", 1, 1));
     }
 
-    /// Pins `Data` variant order: Null=0, Bool=1, Int=2, Float=3, Text=4, Array=5, Object=6.
+    /// Pins `Data` variant order + arity: Null is unit; the other
+    /// six variants each carry a single payload (Bool/Int/Float/
+    /// Text/Array(List)/Object(Map)).
     #[test]
     fn data_variant_layout_pinned() {
         assert_eq!(DATA_VARIANT_LAYOUT.len(), 7);
-        assert_eq!(DATA_VARIANT_LAYOUT[0], ("Null", 0));
-        assert_eq!(DATA_VARIANT_LAYOUT[1], ("Bool", 1));
-        assert_eq!(DATA_VARIANT_LAYOUT[2], ("Int", 2));
-        assert_eq!(DATA_VARIANT_LAYOUT[3], ("Float", 3));
-        assert_eq!(DATA_VARIANT_LAYOUT[4], ("Text", 4));
-        assert_eq!(DATA_VARIANT_LAYOUT[5], ("Array", 5));
-        assert_eq!(DATA_VARIANT_LAYOUT[6], ("Object", 6));
+        assert_eq!(DATA_VARIANT_LAYOUT[0], VariantLayoutEntry::new("Null", 0, 0));
+        assert_eq!(DATA_VARIANT_LAYOUT[1], VariantLayoutEntry::new("Bool", 1, 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[2], VariantLayoutEntry::new("Int", 2, 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[3], VariantLayoutEntry::new("Float", 3, 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[4], VariantLayoutEntry::new("Text", 4, 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[5], VariantLayoutEntry::new("Array", 5, 1));
+        assert_eq!(DATA_VARIANT_LAYOUT[6], VariantLayoutEntry::new("Object", 6, 1));
     }
 
-    /// Pins `ControlFlow<B,C>` variant order: Continue=0, Break=1.
+    /// Pins `ControlFlow<B,C>` variant order + arity: both
+    /// constructors carry a single payload (`Continue(C)` /
+    /// `Break(B)`).
     #[test]
     fn controlflow_variant_layout_pinned() {
         assert_eq!(CONTROLFLOW_VARIANT_LAYOUT.len(), 2);
-        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[0], ("Continue", 0));
-        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[1], ("Break", 1));
+        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[0], VariantLayoutEntry::new("Continue", 0, 1));
+        assert_eq!(CONTROLFLOW_VARIANT_LAYOUT[1], VariantLayoutEntry::new("Break", 1, 1));
     }
 
     /// `maybe_success_tag()` must return the tag for `Some` (not `None`).
@@ -707,13 +778,13 @@ mod ordering_layout_tests {
     fn success_tags_consistent_with_layouts() {
         let maybe_some_tag = MAYBE_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "Some" { Some(t) } else { None })
+            .find_map(|e| (e.name == "Some").then_some(e.tag))
             .unwrap();
         assert_eq!(maybe_success_tag(), maybe_some_tag);
 
         let result_ok_tag = RESULT_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "Ok" { Some(t) } else { None })
+            .find_map(|e| (e.name == "Ok").then_some(e.tag))
             .unwrap();
         assert_eq!(result_success_tag(), result_ok_tag);
     }
@@ -741,11 +812,11 @@ mod ordering_layout_tests {
     fn operator_fastpath_drift_controlflow_tags_distinct() {
         let continue_tag = CONTROLFLOW_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "Continue" { Some(t) } else { None })
+            .find_map(|e| (e.name == "Continue").then_some(e.tag))
             .expect("CONTROLFLOW_VARIANT_LAYOUT must contain 'Continue'");
         let break_tag = CONTROLFLOW_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "Break" { Some(t) } else { None })
+            .find_map(|e| (e.name == "Break").then_some(e.tag))
             .expect("CONTROLFLOW_VARIANT_LAYOUT must contain 'Break'");
         assert_ne!(
             continue_tag, break_tag,
@@ -760,7 +831,7 @@ mod ordering_layout_tests {
     fn operator_fastpath_drift_maybe_tags_distinct() {
         let none_tag = MAYBE_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "None" { Some(t) } else { None })
+            .find_map(|e| (e.name == "None").then_some(e.tag))
             .expect("MAYBE_VARIANT_LAYOUT must contain 'None'");
         assert_ne!(
             maybe_success_tag(),
@@ -774,7 +845,7 @@ mod ordering_layout_tests {
     fn operator_fastpath_drift_result_tags_distinct() {
         let err_tag = RESULT_VARIANT_LAYOUT
             .iter()
-            .find_map(|&(n, t)| if n == "Err" { Some(t) } else { None })
+            .find_map(|e| (e.name == "Err").then_some(e.tag))
             .expect("RESULT_VARIANT_LAYOUT must contain 'Err'");
         assert_ne!(
             result_success_tag(),
@@ -787,31 +858,75 @@ mod ordering_layout_tests {
     /// and unique variant names within each constant.
     #[test]
     fn operator_fastpath_drift_all_layouts_well_formed() {
-        let two_variant = &[
-            (MAYBE_VARIANT_LAYOUT, "MAYBE", 2usize),
+        let layouts: &[(&[VariantLayoutEntry], &str, usize)] = &[
+            (MAYBE_VARIANT_LAYOUT, "MAYBE", 2),
             (RESULT_VARIANT_LAYOUT, "RESULT", 2),
             (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW", 2),
             (VARERROR_VARIANT_LAYOUT, "VARERROR", 2),
+            (DATA_VARIANT_LAYOUT, "DATA", 7),
+            (ORDERING_VARIANT_LAYOUT, "ORDERING", 3),
         ];
-        let n_variant: &[(&[(&str, u32)], &str, usize)] =
-            &[(DATA_VARIANT_LAYOUT, "DATA", 7)];
 
-        for &(layout, name, expected_len) in two_variant.iter().chain(n_variant.iter()) {
+        for &(layout, name, expected_len) in layouts {
             assert_eq!(layout.len(), expected_len, "{} layout must have {} variants", name, expected_len);
-            let tags: std::collections::HashSet<u32> = layout.iter().map(|&(_, t)| t).collect();
+            let tags: std::collections::HashSet<u32> = layout.iter().map(|e| e.tag).collect();
             assert_eq!(tags.len(), expected_len, "{} layout must have unique tags", name);
-            let names: std::collections::HashSet<&str> = layout.iter().map(|&(n, _)| n).collect();
+            let names: std::collections::HashSet<&str> = layout.iter().map(|e| e.name).collect();
             assert_eq!(names.len(), expected_len, "{} layout must have unique variant names", name);
         }
     }
 
-    /// Pins `VarError` variant order: NotPresent=0, NotUnicode=1.
-    /// The runtime env intercept (`env_runtime.rs`) must use these tags.
+    /// Pins `VarError` variant order + arity: NotPresent=0 (unit),
+    /// NotUnicode=1 (carries a `List<Byte>` payload). The runtime
+    /// env intercept (`env_runtime.rs`) must use these tags.
     #[test]
     fn varerror_variant_layout_pinned() {
         assert_eq!(VARERROR_VARIANT_LAYOUT.len(), 2);
-        assert_eq!(VARERROR_VARIANT_LAYOUT[0], ("NotPresent", 0));
-        assert_eq!(VARERROR_VARIANT_LAYOUT[1], ("NotUnicode", 1));
+        assert_eq!(VARERROR_VARIANT_LAYOUT[0], VariantLayoutEntry::new("NotPresent", 0, 0));
+        assert_eq!(VARERROR_VARIANT_LAYOUT[1], VariantLayoutEntry::new("NotUnicode", 1, 1));
+    }
+
+    /// Cross-cutting pin: every variant in every well-known layout
+    /// has the arity stated by its `.vr` source declaration. Adding
+    /// a new layout constant or new variant entry **MUST** include
+    /// the right `arity` value — the canonical-layout type
+    /// statically refuses to compile without it, and this test
+    /// verifies the value matches the .vr-declared shape.
+    #[test]
+    fn arity_matches_canonical_declarations() {
+        // (layout, layout-name, expected (variant-name, expected-arity) pairs)
+        let cases: &[(&[VariantLayoutEntry], &str, &[(&str, u32)])] = &[
+            (MAYBE_VARIANT_LAYOUT, "MAYBE", &[("None", 0), ("Some", 1)]),
+            (RESULT_VARIANT_LAYOUT, "RESULT", &[("Ok", 1), ("Err", 1)]),
+            (ORDERING_VARIANT_LAYOUT, "ORDERING", &[("Less", 0), ("Equal", 0), ("Greater", 0)]),
+            (
+                DATA_VARIANT_LAYOUT,
+                "DATA",
+                &[
+                    ("Null", 0),
+                    ("Bool", 1),
+                    ("Int", 1),
+                    ("Float", 1),
+                    ("Text", 1),
+                    ("Array", 1),
+                    ("Object", 1),
+                ],
+            ),
+            (CONTROLFLOW_VARIANT_LAYOUT, "CONTROLFLOW", &[("Continue", 1), ("Break", 1)]),
+            (VARERROR_VARIANT_LAYOUT, "VARERROR", &[("NotPresent", 0), ("NotUnicode", 1)]),
+        ];
+        for (layout, layout_name, expected_pairs) in cases {
+            for (variant_name, expected_arity) in *expected_pairs {
+                assert_eq!(
+                    arity_of(layout, variant_name),
+                    Some(*expected_arity),
+                    "{} layout: arity_of({:?}) should be {}",
+                    layout_name,
+                    variant_name,
+                    expected_arity,
+                );
+            }
+        }
     }
 
     #[test]
@@ -834,7 +949,7 @@ mod ordering_layout_tests {
     /// `tag_of` returns the right tag for every name in a layout.
     #[test]
     fn tag_of_resolves_every_canonical_layout_entry() {
-        let layouts: &[(&[(&str, u32)], &str)] = &[
+        let layouts: &[(&[VariantLayoutEntry], &str)] = &[
             (MAYBE_VARIANT_LAYOUT, "MAYBE"),
             (RESULT_VARIANT_LAYOUT, "RESULT"),
             (ORDERING_VARIANT_LAYOUT, "ORDERING"),
@@ -843,14 +958,14 @@ mod ordering_layout_tests {
             (VARERROR_VARIANT_LAYOUT, "VARERROR"),
         ];
         for (layout, layout_name) in layouts {
-            for &(name, expected_tag) in *layout {
+            for entry in *layout {
                 assert_eq!(
-                    tag_of(layout, name),
-                    Some(expected_tag),
+                    tag_of(layout, entry.name),
+                    Some(entry.tag),
                     "{} layout: tag_of({:?}) should return Some({})",
                     layout_name,
-                    name,
-                    expected_tag,
+                    entry.name,
+                    entry.tag,
                 );
             }
         }
@@ -1095,11 +1210,11 @@ mod ordering_layout_tests {
     #[test]
     fn classifier_consistent_with_canonical_layouts() {
         let maybe_names: Vec<&'static str> =
-            MAYBE_VARIANT_LAYOUT.iter().map(|&(n, _)| n).collect();
+            MAYBE_VARIANT_LAYOUT.iter().map(|e| e.name).collect();
         assert!(is_maybe_shape(maybe_names.iter().copied()));
 
         let result_names: Vec<&'static str> =
-            RESULT_VARIANT_LAYOUT.iter().map(|&(n, _)| n).collect();
+            RESULT_VARIANT_LAYOUT.iter().map(|e| e.name).collect();
         assert!(is_result_shape(result_names.iter().copied()));
     }
 }
