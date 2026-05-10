@@ -736,11 +736,8 @@ impl<'ctx> PlatformIR<'ctx> {
         // VBC FFI's 2-arg open() declaration conflict.
         // macOS arm64: SYS_open = 5 (0x2000005 with Unix flag)
         // Linux x86_64: SYS_open = 2
-        let syscall_fn = module.get_function("syscall").unwrap_or_else(|| {
-            // syscall is variadic: i64(i64, ...)
-            let ft = i64_type.fn_type(&[i64_type.into()], true);
-            module.add_function("syscall", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into()], true);
+        let syscall_fn = super::error::get_or_declare_function(module, "syscall", ft);
 
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_raw_open3", fn_type);
@@ -883,10 +880,8 @@ impl<'ctx> PlatformIR<'ctx> {
         freelist_heads.set_linkage(verum_llvm::module::Linkage::Internal);
 
         // ---- ctlz intrinsic declaration ----
-        let ctlz_fn = module.get_function("llvm.ctlz.i64").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into(), i1_type.into()], false);
-            module.add_function("llvm.ctlz.i64", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i1_type.into()], false);
+        let ctlz_fn = super::error::get_or_declare_function(module, "llvm.ctlz.i64", fn_type);
 
         // ---- verum_alloc(size: i64) -> ptr ----
         let alloc_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
@@ -2702,10 +2697,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let m_as_i64 = builder
             .build_ptr_to_int(m, i64_type, "m_i64")
             .or_llvm_err()?;
-        let futex_wait = module.get_function("verum_futex_wait").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_futex_wait", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let futex_wait = super::error::get_or_declare_function(module, "verum_futex_wait", ft);
         builder
             .build_call(
                 futex_wait,
@@ -2788,10 +2781,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let m_as_i64 = builder
             .build_ptr_to_int(m, i64_type, "m_i64")
             .or_llvm_err()?;
-        let futex_wake = module.get_function("verum_futex_wake").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_futex_wake", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let futex_wake = super::error::get_or_declare_function(module, "verum_futex_wake", ft);
         builder
             .build_call(
                 futex_wake,
@@ -2842,10 +2833,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let cv_i64 = builder
             .build_ptr_to_int(cv, i64_type, "cv_i64")
             .or_llvm_err()?;
-        let futex_wake = module.get_function("verum_futex_wake").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_futex_wake", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let futex_wake = super::error::get_or_declare_function(module, "verum_futex_wake", ft);
         builder
             .build_call(
                 futex_wake,
@@ -2890,10 +2879,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let cv_i64 = builder
             .build_ptr_to_int(cv, i64_type, "cv_i64")
             .or_llvm_err()?;
-        let futex_wake = module.get_function("verum_futex_wake").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-            module.add_function("verum_futex_wake", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let futex_wake = super::error::get_or_declare_function(module, "verum_futex_wake", ft);
         // Wake all waiters (INT_MAX)
         builder
             .build_call(
@@ -15924,14 +15911,10 @@ impl<'ctx> PlatformIR<'ctx> {
         let void_type = ctx.void_type();
 
         // Ensure clock_gettime and nanosleep are declared with i64 Verum ABI
-        let clock_fn = module.get_function("clock_gettime").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-            module.add_function("clock_gettime", ft, None)
-        });
-        let nanosleep_fn = module.get_function("nanosleep").unwrap_or_else(|| {
-            let ft = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-            module.add_function("nanosleep", ft, None)
-        });
+        let ft = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let clock_fn = super::error::get_or_declare_function(module, "clock_gettime", ft);
+        let ft = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        let nanosleep_fn = super::error::get_or_declare_function(module, "nanosleep", ft);
 
         // verum_time_monotonic_nanos() → i64
         // Calls clock_gettime(CLOCK_MONOTONIC=6 on macOS, 1 on Linux)
