@@ -78,6 +78,107 @@ pub enum DependentVerdict {
     Undetermined,
 }
 
+/// Discriminator for [`DependentVerdict`] — zero-sized
+/// projection.  Sibling of `subsumption::SubsumptionResultKind`,
+/// `vcgen::VCResultKind`, and
+/// `tensor_shapes::ConstraintCheckResultKind` covering the
+/// dependent-type-orchestrator side of the same Yes / No /
+/// Timeout / Unknown verification verdict taxonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DependentVerdictKind {
+    Verified,
+    Refuted,
+    Timeout,
+    Undetermined,
+}
+
+/// Per-variant projection for [`DependentVerdictKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DependentVerdictKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// The verdict is *definite* (Verified + Refuted — the
+    /// orchestrator reached a conclusion).
+    pub is_definite: bool,
+    /// The verdict is the *positive* answer (Verified
+    /// singleton).
+    pub is_positive: bool,
+    /// The variant carries a *counterexample-or-reason* text
+    /// payload — Refuted singleton.
+    pub carries_explanation: bool,
+    /// The variant indicates a *time-bound* failure (Timeout
+    /// singleton) — distinct from `Undetermined` which means
+    /// the goal is outside the orchestrator's decision-procedure
+    /// scope.
+    pub is_time_bound_failure: bool,
+}
+
+impl DependentVerdictKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Verified,
+        Self::Refuted,
+        Self::Timeout,
+        Self::Undetermined,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> DependentVerdictKindMeta {
+        match self {
+            DependentVerdictKind::Verified => DependentVerdictKindMeta {
+                name: "verified",
+                is_definite: true,
+                is_positive: true,
+                carries_explanation: false,
+                is_time_bound_failure: false,
+            },
+            DependentVerdictKind::Refuted => DependentVerdictKindMeta {
+                name: "refuted",
+                is_definite: true,
+                is_positive: false,
+                carries_explanation: true,
+                is_time_bound_failure: false,
+            },
+            DependentVerdictKind::Timeout => DependentVerdictKindMeta {
+                name: "timeout",
+                is_definite: false,
+                is_positive: false,
+                carries_explanation: false,
+                is_time_bound_failure: true,
+            },
+            DependentVerdictKind::Undetermined => DependentVerdictKindMeta {
+                name: "undetermined",
+                is_definite: false,
+                is_positive: false,
+                carries_explanation: false,
+                is_time_bound_failure: false,
+            },
+        }
+    }
+}
+
+impl DependentVerdict {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> DependentVerdictKind {
+        match self {
+            DependentVerdict::Verified => DependentVerdictKind::Verified,
+            DependentVerdict::Refuted(_) => DependentVerdictKind::Refuted,
+            DependentVerdict::Timeout => DependentVerdictKind::Timeout,
+            DependentVerdict::Undetermined => DependentVerdictKind::Undetermined,
+        }
+    }
+
+    /// Returns the refutation-reason text for the `Refuted`
+    /// band.  Decoupled from per-variant matching via
+    /// `meta().carries_explanation`.
+    pub fn refutation_reason(&self) -> Option<&Text> {
+        match self {
+            DependentVerdict::Refuted(reason) => Some(reason),
+            _ => None,
+        }
+    }
+}
+
 impl DependentVerdict {
     pub fn is_verified(&self) -> bool {
         matches!(self, DependentVerdict::Verified)
@@ -241,6 +342,88 @@ mod tests {
     use verum_types::cubical::{CubicalTerm, IntervalEndpoint};
     use verum_types::instance_search::{InstanceCandidate, InstanceRegistry};
     use verum_types::universe_solver::UniverseLevel;
+
+    /// Drift-pin: `DependentVerdictKind` discriminator
+    /// projection.  Sibling of SubsumptionResultKind /
+    /// VCResultKind / ConstraintCheckResultKind covering the
+    /// dependent-orchestrator side of the same Yes / No /
+    /// Timeout / Unknown verdict taxonomy.
+    #[test]
+    fn meta_pin_dependent_verdict_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(DependentVerdictKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in DependentVerdictKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_definite — Verified + Refuted.
+        let definite: Vec<_> = DependentVerdictKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![DependentVerdictKind::Verified, DependentVerdictKind::Refuted],
+        );
+
+        // 3. is_positive — Verified singleton.
+        let positive: Vec<_> = DependentVerdictKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_positive)
+            .copied()
+            .collect();
+        assert_eq!(positive, vec![DependentVerdictKind::Verified]);
+
+        // 4. carries_explanation — Refuted singleton.
+        let expl: Vec<_> = DependentVerdictKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_explanation)
+            .copied()
+            .collect();
+        assert_eq!(expl, vec![DependentVerdictKind::Refuted]);
+
+        // 5. is_time_bound_failure — Timeout singleton.
+        let tb: Vec<_> = DependentVerdictKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_time_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(tb, vec![DependentVerdictKind::Timeout]);
+
+        // 6. Cross-cutting invariants (mirror of
+        //    SubsumptionResultKind/VCResultKind):
+        //      positive ⇒ definite
+        //      explanation ⇒ ¬positive
+        //      timeout ⇒ ¬definite
+        for k in DependentVerdictKind::ALL {
+            let m = k.meta();
+            assert!(!m.is_positive || m.is_definite);
+            assert!(!m.carries_explanation || !m.is_positive);
+            assert!(!m.is_time_bound_failure || !m.is_definite);
+        }
+
+        // 7. Live-payload kind() + refutation_reason().
+        assert_eq!(DependentVerdict::Verified.kind(), DependentVerdictKind::Verified);
+        assert!(DependentVerdict::Verified.refutation_reason().is_none());
+
+        let r = DependentVerdict::Refuted(Text::from("counterexample x=0"));
+        assert_eq!(r.kind(), DependentVerdictKind::Refuted);
+        assert_eq!(r.refutation_reason().unwrap().as_str(), "counterexample x=0");
+
+        assert_eq!(DependentVerdict::Timeout.kind(), DependentVerdictKind::Timeout);
+        assert_eq!(
+            DependentVerdict::Undetermined.kind(),
+            DependentVerdictKind::Undetermined
+        );
+    }
 
     #[test]
     fn empty_verifier() {

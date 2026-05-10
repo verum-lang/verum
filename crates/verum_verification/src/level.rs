@@ -293,24 +293,140 @@ pub enum VerificationOutcome {
     HardFail(Text),
 }
 
+/// Discriminator for [`VerificationOutcome`] — zero-sized
+/// projection.  Unlike the sibling verdict-band kinds
+/// (`SubsumptionResultKind`, `VCResultKind`, …) this is a
+/// *compiler-instruction* band: each variant tells the consumer
+/// *what to do* with the obligation (elide / emit-check /
+/// warn / hard-fail) rather than reporting a verification
+/// answer.  Classifier flags partition the four instructions by
+/// emit-side effect (runtime-check emission, diagnostic surface
+/// touched, build-halting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VerificationOutcomeKind {
+    ElideCheck,
+    EmitRuntimeCheck,
+    FallbackWithWarning,
+    HardFail,
+}
+
+/// Per-variant projection for [`VerificationOutcomeKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerificationOutcomeKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// Whether the consumer must *emit a runtime check* into
+    /// the generated VBC.  EmitRuntimeCheck + FallbackWithWarning.
+    pub requires_runtime_check: bool,
+    /// Whether the consumer must *emit a diagnostic* —
+    /// warning (FallbackWithWarning) or error (HardFail).
+    pub emits_diagnostic: bool,
+    /// Whether the diagnostic is a *warning* —
+    /// FallbackWithWarning singleton.  Used to gate the
+    /// W501 emit-site.
+    pub emits_warning: bool,
+    /// Whether the diagnostic is a *hard error* — HardFail
+    /// singleton.  Used to gate the E502 emit-site + halt
+    /// compilation.
+    pub is_hard_failure: bool,
+    /// Whether the variant carries an *explanation text*
+    /// payload — FallbackWithWarning + HardFail.
+    pub carries_explanation: bool,
+}
+
+impl VerificationOutcomeKind {
+    /// All variants in declaration order — increasing severity
+    /// (proven → emit-only → warn → hard-fail).
+    pub const ALL: &'static [Self] = &[
+        Self::ElideCheck,
+        Self::EmitRuntimeCheck,
+        Self::FallbackWithWarning,
+        Self::HardFail,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> VerificationOutcomeKindMeta {
+        match self {
+            VerificationOutcomeKind::ElideCheck => VerificationOutcomeKindMeta {
+                name: "elide_check",
+                requires_runtime_check: false,
+                emits_diagnostic: false,
+                emits_warning: false,
+                is_hard_failure: false,
+                carries_explanation: false,
+            },
+            VerificationOutcomeKind::EmitRuntimeCheck => VerificationOutcomeKindMeta {
+                name: "emit_runtime_check",
+                requires_runtime_check: true,
+                emits_diagnostic: false,
+                emits_warning: false,
+                is_hard_failure: false,
+                carries_explanation: false,
+            },
+            VerificationOutcomeKind::FallbackWithWarning => VerificationOutcomeKindMeta {
+                name: "fallback_with_warning",
+                requires_runtime_check: true,
+                emits_diagnostic: true,
+                emits_warning: true,
+                is_hard_failure: false,
+                carries_explanation: true,
+            },
+            VerificationOutcomeKind::HardFail => VerificationOutcomeKindMeta {
+                name: "hard_fail",
+                requires_runtime_check: false,
+                emits_diagnostic: true,
+                emits_warning: false,
+                is_hard_failure: true,
+                carries_explanation: true,
+            },
+        }
+    }
+}
+
 impl VerificationOutcome {
-    /// Whether this outcome requires the compiler to emit a runtime
-    /// check into the generated VBC.
-    pub fn requires_runtime_check(&self) -> bool {
-        matches!(
-            self,
-            VerificationOutcome::EmitRuntimeCheck | VerificationOutcome::FallbackWithWarning(_)
-        )
+    /// Discriminator projection — strip the explanation
+    /// payload, keep the instruction tag.
+    pub const fn kind(&self) -> VerificationOutcomeKind {
+        match self {
+            VerificationOutcome::ElideCheck => VerificationOutcomeKind::ElideCheck,
+            VerificationOutcome::EmitRuntimeCheck => {
+                VerificationOutcomeKind::EmitRuntimeCheck
+            }
+            VerificationOutcome::FallbackWithWarning(_) => {
+                VerificationOutcomeKind::FallbackWithWarning
+            }
+            VerificationOutcome::HardFail(_) => VerificationOutcomeKind::HardFail,
+        }
     }
 
-    /// Whether this outcome should halt compilation.
+    /// Returns the explanation text for the diagnostic-bearing
+    /// variants (FallbackWithWarning + HardFail).  Decoupled
+    /// from per-variant matching via `meta().carries_explanation`.
+    pub fn explanation(&self) -> Option<&Text> {
+        match self {
+            VerificationOutcome::FallbackWithWarning(t) => Some(t),
+            VerificationOutcome::HardFail(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Whether this outcome requires the compiler to emit a runtime
+    /// check into the generated VBC.  Routes through
+    /// `meta().requires_runtime_check` — single source of truth.
+    pub fn requires_runtime_check(&self) -> bool {
+        self.kind().meta().requires_runtime_check
+    }
+
+    /// Whether this outcome should halt compilation.  Routes
+    /// through `meta().is_hard_failure`.
     pub fn is_hard_failure(&self) -> bool {
-        matches!(self, VerificationOutcome::HardFail(_))
+        self.kind().meta().is_hard_failure
     }
 
     /// Whether this outcome should emit a warning diagnostic.
+    /// Routes through `meta().emits_warning`.
     pub fn is_warning(&self) -> bool {
-        matches!(self, VerificationOutcome::FallbackWithWarning(_))
+        self.kind().meta().emits_warning
     }
 }
 
@@ -629,6 +745,157 @@ pub trait ProofLevel {
 impl RuntimeLevel for VerificationLevel {}
 impl StaticLevel for VerificationLevel {}
 impl ProofLevel for VerificationLevel {}
+
+#[cfg(test)]
+mod outcome_kind_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `VerificationOutcomeKind` is the
+    /// compiler-instruction discriminator projection — distinct
+    /// from the verdict-band kinds in subsumption/vcgen/
+    /// dependent_verification (those report "what's true",
+    /// this reports "what to do").  Pins variant count, name
+    /// uniqueness, five classifier partitions, and the cross-
+    /// cutting invariants binding them.
+    #[test]
+    fn meta_pin_verification_outcome_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(VerificationOutcomeKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in VerificationOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. requires_runtime_check — EmitRuntimeCheck +
+        //    FallbackWithWarning (the latter falls back to
+        //    runtime when static proof failed).
+        let rt: Vec<_> = VerificationOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().requires_runtime_check)
+            .copied()
+            .collect();
+        assert_eq!(
+            rt,
+            vec![
+                VerificationOutcomeKind::EmitRuntimeCheck,
+                VerificationOutcomeKind::FallbackWithWarning,
+            ],
+        );
+
+        // 3. emits_diagnostic — FallbackWithWarning + HardFail.
+        let diag: Vec<_> = VerificationOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().emits_diagnostic)
+            .copied()
+            .collect();
+        assert_eq!(
+            diag,
+            vec![
+                VerificationOutcomeKind::FallbackWithWarning,
+                VerificationOutcomeKind::HardFail,
+            ],
+        );
+
+        // 4. emits_warning — FallbackWithWarning singleton.
+        let warn: Vec<_> = VerificationOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().emits_warning)
+            .copied()
+            .collect();
+        assert_eq!(warn, vec![VerificationOutcomeKind::FallbackWithWarning]);
+
+        // 5. is_hard_failure — HardFail singleton.
+        let hf: Vec<_> = VerificationOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_hard_failure)
+            .copied()
+            .collect();
+        assert_eq!(hf, vec![VerificationOutcomeKind::HardFail]);
+
+        // 6. carries_explanation = emits_diagnostic
+        //    (the two variants that touch the diagnostic
+        //    surface are exactly the two that carry text
+        //    payload).
+        for k in VerificationOutcomeKind::ALL {
+            let m = k.meta();
+            assert_eq!(
+                m.carries_explanation, m.emits_diagnostic,
+                "{:?}: carries_explanation = emits_diagnostic",
+                k
+            );
+        }
+
+        // 7. emits_warning ⊕ is_hard_failure (a single
+        //    diagnostic outcome is either warn or hard-fail,
+        //    never both).
+        for k in VerificationOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.emits_warning && m.is_hard_failure),
+                "{:?}: cannot both warn and hard-fail",
+                k
+            );
+        }
+
+        // 8. is_hard_failure ⇒ ¬requires_runtime_check
+        //    (a hard failure halts the build — no runtime
+        //    check is emitted because compilation aborts).
+        for k in VerificationOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_hard_failure || !m.requires_runtime_check,
+                "{:?}: hard-fail ⇒ ¬runtime-check",
+                k
+            );
+        }
+
+        // 9. ElideCheck is the unique "do nothing" outcome
+        //    — the proof discharged the obligation, no emit, no
+        //    diagnostic.
+        let do_nothing: Vec<_> = VerificationOutcomeKind::ALL
+            .iter()
+            .filter(|k| {
+                let m = k.meta();
+                !m.requires_runtime_check && !m.emits_diagnostic
+            })
+            .copied()
+            .collect();
+        assert_eq!(do_nothing, vec![VerificationOutcomeKind::ElideCheck]);
+
+        // 10. Live-payload kind() + accessor projection +
+        //     historical predicate routing pins.
+        let elide = VerificationOutcome::ElideCheck;
+        assert_eq!(elide.kind(), VerificationOutcomeKind::ElideCheck);
+        assert!(!elide.requires_runtime_check());
+        assert!(!elide.is_hard_failure());
+        assert!(!elide.is_warning());
+        assert!(elide.explanation().is_none());
+
+        let emit = VerificationOutcome::EmitRuntimeCheck;
+        assert_eq!(emit.kind(), VerificationOutcomeKind::EmitRuntimeCheck);
+        assert!(emit.requires_runtime_check());
+
+        let fb = VerificationOutcome::FallbackWithWarning(Text::from("smt timeout"));
+        assert_eq!(fb.kind(), VerificationOutcomeKind::FallbackWithWarning);
+        assert!(fb.requires_runtime_check());
+        assert!(fb.is_warning());
+        assert!(!fb.is_hard_failure());
+        assert_eq!(fb.explanation().unwrap().as_str(), "smt timeout");
+
+        let hf2 = VerificationOutcome::HardFail(Text::from("proof failed"));
+        assert_eq!(hf2.kind(), VerificationOutcomeKind::HardFail);
+        assert!(hf2.is_hard_failure());
+        assert!(!hf2.is_warning());
+        assert!(!hf2.requires_runtime_check());
+        assert_eq!(hf2.explanation().unwrap().as_str(), "proof failed");
+    }
+}
 
 #[cfg(test)]
 mod attempt_tests {
